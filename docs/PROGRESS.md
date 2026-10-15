@@ -11,8 +11,8 @@
 | **Product step 1**: client dashboard + AI brain | **Built, tested, on GitHub `main`** |
 | **Owner Console** (operator dashboard) | **Built, tested, merged into `main`** |
 | Azure account (personal) | Created, $25 budget alert set |
-| Microsoft 365 test org "Sidekick Labs" (Business Basic trial) | Created but **cancelled by mistake** (turning off recurring billing on a *trial* cancels it). Needs Reactivate (may take 15–30 min), Microsoft support, or a fresh trial. **Leave recurring billing ON**; cancel before Nov 14, 2026 if not keeping it (worst case $8.40 for one month) |
-| Teams custom-app upload | Not done yet; needs the M365 subscription active first |
+| Microsoft 365 test org "Sidekick Labs" (Business Basic trial) | **Active again** (new free trial started Oct 15, 2026 in the same org; the first trial was cancelled by turning off recurring billing and could not be reactivated). Trial ends **Nov 14, 2026**; then $8.40 + tax per month (1 license, monthly) on the Visa unless the subscription is cancelled before Nov 15. **Never turn off recurring billing on a trial** (it cancels it) |
+| Teams custom-app upload | Not done yet; the M365 subscription is active again, so this is unblocked (README “Sidekick in real Teams”) |
 | **Product step 2**: Sidekick in Teams | **Bot built and tested locally in Agents Playground** (branch `feat/teams-bot`). Next: Azure Bot registration, manifest, dev tunnel, real Teams |
 | Product step 3: live voice in meetings | Later |
 

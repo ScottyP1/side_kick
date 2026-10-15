@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:05.000 --> 00:00:11.000
+<v Priya Raman>Quick standup. Maria, go.</v>
+
+00:00:13.000 --> 00:00:19.000
+<v Maria Chen>Yesterday I fixed the price table ordering. Today I'm on the runbook. No blockers.</v>
+
+00:00:21.000 --> 00:00:29.000
+<v Dev Patel>I'm writing the regression tests for offline mode. I need a test store with the network switched off.</v>
+
+00:00:31.000 --> 00:00:41.000
+<v Sam Okafor>I'll ask Lena for a lab store. Today I'm on the Cosmos DB indexing policy, request costs were higher than expected last month.</v>
+
+00:00:43.000 --> 00:00:49.000
+<v Priya Raman>How much higher?</v>
+
+00:00:51.000 --> 00:00:59.000
+<v Sam Okafor>About 18 percent over the estimate. Mostly the inventory lookups. An index change should fix most of it.</v>
+
+00:01:01.000 --> 00:01:07.000
+<v Priya Raman>Okay. Dev, you're blocked on the lab store, Sam will chase it.</v>

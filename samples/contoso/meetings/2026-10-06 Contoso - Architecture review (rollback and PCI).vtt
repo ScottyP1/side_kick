@@ -1,0 +1,40 @@
+WEBVTT
+
+00:00:05.000 --> 00:00:11.000
+<v Sam Okafor>This is internal, no client today. Main topic is the wave 2 rollback plan.</v>
+
+00:00:13.000 --> 00:00:22.000
+<v Sam Okafor>Proposal: if a store can't take payments within 30 minutes of cutover, we roll that store back to the legacy POS.</v>
+
+00:00:24.000 --> 00:00:31.000
+<v Dev Patel>In wave 1 testing a rollback took us about 40 minutes end to end. So 30 minutes is tight.</v>
+
+00:00:33.000 --> 00:00:40.000
+<v Sam Okafor>Fair. Let's say the decision point is 30 minutes, and the rollback itself can take up to 45.</v>
+
+00:00:42.000 --> 00:00:48.000
+<v Priya Raman>So decision at 30 minutes, rollback within 45. I'm fine with that.</v>
+
+00:00:50.000 --> 00:00:56.000
+<v Maria Chen>Who actually runs the rollback at 2 a.m.? We still don't have a named owner.</v>
+
+00:00:58.000 --> 00:01:06.000
+<v Priya Raman>Honestly I don't know yet. It should be someone on the night shift rota. Let's leave it open for now.</v>
+
+00:01:08.000 --> 00:01:16.000
+<v Sam Okafor>Second topic, PCI. Contoso security owns the assessment, but our POS change touches the card reader driver.</v>
+
+00:01:18.000 --> 00:01:24.000
+<v Dev Patel>Do we know which reader model the wave 2 stores have?</v>
+
+00:01:26.000 --> 00:01:32.000
+<v Sam Okafor>No, Tom hasn't sent the list. That's a risk for us, I'll log it in the RAID log.</v>
+
+00:01:34.000 --> 00:01:40.000
+<v Priya Raman>Third topic, cost. Sam, the Cosmos DB index change?</v>
+
+00:01:42.000 --> 00:01:48.000
+<v Sam Okafor>Deployed Friday. Request costs are back to within 5 percent of the estimate.</v>
+
+00:01:50.000 --> 00:02:03.000
+<v Priya Raman>Great. Internal note: we're about 6 percent over budget on hours this month, mostly from the wave 1 price feed issue. Let's not share that with the client yet.</v>

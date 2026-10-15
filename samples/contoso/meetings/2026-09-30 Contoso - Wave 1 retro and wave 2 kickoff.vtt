@@ -1,0 +1,46 @@
+WEBVTT
+
+00:00:05.000 --> 00:00:12.000
+<v Priya Raman>Thanks everyone. Wave 1 is done: 36 stores went live on September 29 with no lost sales.</v>
+
+00:00:14.000 --> 00:00:20.000
+<v Jordan Alvarez>Good result. Our store managers noticed checkout was faster too.</v>
+
+00:00:22.000 --> 00:00:30.000
+<v Lena Ortiz>One complaint: two stores in the Northeast region lost the price feed for about an hour after cutover.</v>
+
+00:00:32.000 --> 00:00:41.000
+<v Sam Okafor>That was the SKU sync job. It ran before the new price tables were ready. We'll change the order for wave 2.</v>
+
+00:00:43.000 --> 00:00:49.000
+<v Priya Raman>Let's agree the order now: price tables first, then SKU sync, then open the tills.</v>
+
+00:00:51.000 --> 00:00:57.000
+<v Jordan Alvarez>Agreed. For wave 2 we're planning 48 stores, cutover on November 5.</v>
+
+00:00:59.000 --> 00:01:05.000
+<v Priya Raman>Okay, November 5 for wave 2, 48 stores. Maria, can you update the cutover runbook?</v>
+
+00:01:07.000 --> 00:01:13.000
+<v Maria Chen>Yes, I'll have runbook version 0.3 out by October 3.</v>
+
+00:01:15.000 --> 00:01:23.000
+<v Lena Ortiz>Please include a store manager checklist in the runbook. Last time they didn't know when to open the tills.</v>
+
+00:01:25.000 --> 00:01:31.000
+<v Maria Chen>Will do, I'll add a one-page checklist.</v>
+
+00:01:33.000 --> 00:01:42.000
+<v Tom Becker>From security: the new card readers in wave 2 stores are a PCI question. That's on our side, but we need your timeline.</v>
+
+00:01:44.000 --> 00:01:52.000
+<v Priya Raman>Understood. PCI stays with Contoso security as in the SOW. We'll share the store list by October 10.</v>
+
+00:01:54.000 --> 00:02:00.000
+<v Jordan Alvarez>One more: what happens if a cutover goes wrong at night? Who decides to roll back?</v>
+
+00:02:02.000 --> 00:02:10.000
+<v Sam Okafor>We'll write a rollback plan. I'd like the decision to sit with the delivery lead, with Jordan informed.</v>
+
+00:02:12.000 --> 00:02:18.000
+<v Priya Raman>Let's take that to the architecture review next week.</v>

@@ -1,0 +1,19 @@
+WEBVTT
+
+00:00:05.000 --> 00:00:13.000
+<v Maria Chen>Bad news, the SKU sync job failed again overnight. Second time in a week. Timeouts from the store API.</v>
+
+00:00:15.000 --> 00:00:21.000
+<v Sam Okafor>Same pattern as before. The store API is slow at 2 a.m. when backups run.</v>
+
+00:00:23.000 --> 00:00:29.000
+<v Priya Raman>Let's bring it to sprint planning tomorrow.</v>
+
+00:00:31.000 --> 00:00:37.000
+<v Dev Patel>Six-hour offline test passed. I'll write it up.</v>
+
+00:00:39.000 --> 00:00:45.000
+<v Sam Okafor>Still no card reader list from Tom. That was due October 10.</v>
+
+00:00:47.000 --> 00:00:53.000
+<v Priya Raman>I'll chase Tom today.</v>

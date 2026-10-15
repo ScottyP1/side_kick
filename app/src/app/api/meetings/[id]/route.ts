@@ -33,7 +33,7 @@ export const POST = handle(async (_req: Request, { params }: Ctx) => {
   if (!canEdit(user)) throw new HttpError(403, "Your role can't reprocess meetings.");
   run("DELETE FROM items WHERE meeting_id = ?", m.id);
   run("DELETE FROM action_items WHERE meeting_id = ?", m.id);
-  removeIndexed(m.id);
+  await removeIndexed(m.id);
   run("UPDATE meetings SET status = 'Processing', error = NULL WHERE id = ?", m.id);
   await processMeeting(user, m.id);
   after(() => postMeetingNotes(user.org_id, m.id).catch((e) => console.error("Teams notes post failed", e)));
@@ -43,7 +43,7 @@ export const POST = handle(async (_req: Request, { params }: Ctx) => {
 export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
   const { user, m } = await load((await params).id);
   if (!canEdit(user)) throw new HttpError(403, "Your role can't delete meetings.");
-  removeIndexed(m.id);
+  await removeIndexed(m.id);
   run("DELETE FROM meetings WHERE id = ?", m.id);
   audit(user, `Deleted meeting “${m.title}”, its notes and transcript`, "Data", m.workspace_id);
   return { ok: true };

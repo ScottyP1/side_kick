@@ -23,14 +23,14 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   const { audience } = await readJson<{ audience?: string }>(req);
   if (audience !== "internal" && audience !== "shareable") throw new HttpError(400, "Audience must be internal or shareable.");
   run("UPDATE documents SET audience = ? WHERE id = ?", audience, doc.id);
-  setAudience(doc.id, audience);
+  await setAudience(doc.id, audience);
   audit(user, `Marked “${doc.name}” as ${audience}`, "Data", doc.workspace_id);
   return { ok: true };
 });
 
 export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
   const { user, doc } = await load((await params).id);
-  removeIndexed(doc.id);
+  await removeIndexed(doc.id);
   run("DELETE FROM documents WHERE id = ?", doc.id);
   audit(user, `Deleted “${doc.name}” and removed it from search`, "Data", doc.workspace_id);
   return { ok: true };

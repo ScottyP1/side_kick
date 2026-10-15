@@ -12,12 +12,15 @@
  * - **Audience**: `internal` passages are team-only; `shareable` ones may be used when client guests are
  *   present (a guest meeting, or a Teams channel marked as having client guests).
  *
- * Today this is keyword search. Production swaps in Azure AI Search (keyword + meaning-based "vector"
- * search) behind these same functions, so callers don't change.
+ * - **Two engines, one door**: passages always go into the local SQLite index (the source of truth). When
+ *   Azure AI Search is configured (see azure-search.ts), a copy also goes to Azure, and questions are
+ *   answered with Azure's hybrid keyword + meaning search. If Azure is not configured or a call fails,
+ *   search falls back to local keyword search, so answers keep working.
  */
 import "server-only";
 import { all, run } from "./db";
 import { chunk } from "./extract";
+import { azureCount, azureIndex, azureRemove, azureSearch, azureSearchConfigured, azureSetAudience } from "./azure-search";
 
 /** One searchable piece of a document or transcript. `loc` is where it came from, like "Page 3" or "00:12:40". */
 export type Passage = {
@@ -31,10 +34,11 @@ export type Passage = {
 };
 
 /**
- * Splits text into passages and adds them to the search index. Returns how many passages were stored.
- * Call `removeIndexed` first when re-indexing the same source.
+ * Splits text into passages and adds them to the search index (local, plus Azure when configured).
+ * Returns how many passages were stored. Call `removeIndexed` first when re-indexing the same source.
+ * An Azure failure is logged, not thrown: the local copy is enough to keep answering.
  */
-export function indexText(opts: {
+export async function indexText(opts: {
   orgId: string;
   workspaceId: string;
   sourceType: "document" | "meeting";
@@ -42,21 +46,61 @@ export function indexText(opts: {
   title: string;
   audience: "internal" | "shareable";
   text: string;
-}): number {
+}): Promise<number> {
   const pieces = chunk(opts.text);
   const stmt = `INSERT INTO passages (text, title, loc, source_type, source_id, workspace_id, org_id, audience) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
   for (const p of pieces) run(stmt, p.text, opts.title, p.loc, opts.sourceType, opts.sourceId, opts.workspaceId, opts.orgId, opts.audience);
+  if (azureSearchConfigured()) await azureIndex({ ...opts, pieces }).catch((e) => console.error("Azure AI Search: indexing failed (local index still updated)", e));
   return pieces.length;
 }
 
 /** Removes every passage of one document or meeting from the index (on delete or reprocess). */
-export function removeIndexed(sourceId: string) {
+export async function removeIndexed(sourceId: string) {
   run("DELETE FROM passages WHERE source_id = ?", sourceId);
+  if (azureSearchConfigured()) await azureRemove(sourceId).catch((e) => console.error("Azure AI Search: delete failed", e));
 }
 
 /** Changes whether a source's passages are internal or shareable (when a document is re-tagged). */
-export function setAudience(sourceId: string, audience: string) {
+export async function setAudience(sourceId: string, audience: string) {
   run("UPDATE passages SET audience = ? WHERE source_id = ?", audience, sourceId);
+  if (azureSearchConfigured()) await azureSetAudience(sourceId, audience).catch((e) => console.error("Azure AI Search: audience update failed", e));
+}
+
+/**
+ * Copies every local passage into Azure, grouped by source. Runs automatically the first time Azure is
+ * used with an empty index (so switching Azure on just works), and can be run again to rebuild it.
+ * Returns how many sources were copied.
+ */
+export async function reindexAzure(): Promise<number> {
+  const rows = all<{ text: string; title: string; loc: string; source_type: string; source_id: string; workspace_id: string; org_id: string; audience: string }>(
+    "SELECT text, title, loc, source_type, source_id, workspace_id, org_id, audience FROM passages ORDER BY source_id, rowid",
+  );
+  const bySource = new Map<string, typeof rows>();
+  for (const r of rows) bySource.set(r.source_id, [...(bySource.get(r.source_id) ?? []), r]);
+  for (const [sourceId, ps] of bySource) {
+    const f = ps[0];
+    await azureIndex({ orgId: f.org_id, workspaceId: f.workspace_id, sourceType: f.source_type, sourceId, title: f.title, audience: f.audience, pieces: ps.map((p) => ({ text: p.text, loc: p.loc })) });
+  }
+  return bySource.size;
+}
+
+declare global {
+  var __sidekickAzureBackfill: Promise<void> | undefined;
+}
+
+/** Backfills the Azure index once per server start if it's empty but local passages exist. */
+function ensureBackfilled() {
+  globalThis.__sidekickAzureBackfill ??= (async () => {
+    const local = all<{ n: number }>("SELECT COUNT(*) AS n FROM passages")[0]?.n ?? 0;
+    if (local && (await azureCount()) === 0) {
+      const n = await reindexAzure();
+      console.log(`Azure AI Search: copied ${n} documents/meetings from the local index`);
+    }
+  })().catch((e) => {
+    globalThis.__sidekickAzureBackfill = undefined; // try again next time
+    throw e;
+  });
+  return globalThis.__sidekickAzureBackfill;
 }
 
 // Common words that say nothing about the topic ("what", "the", ...). Dropped from questions before searching.
@@ -75,14 +119,28 @@ function toQuery(question: string): string | null {
 }
 
 /**
- * Keyword (BM25) search scoped to one workspace in one org: the core of every answer.
+ * Finds the passages that best answer a question, scoped to one workspace in one org: the core of every
+ * answer. Uses Azure hybrid search when configured, otherwise (or if Azure fails) local keyword search.
  *
  * @param orgId       always filtered on, so results never cross organizations
  * @param workspaceId always filtered on, so results never cross workspaces (callers check access first)
  * @param opts.guests when true, only `shareable` passages are returned (client guests are present)
  * @param opts.limit  maximum passages to return (default 12)
  */
-export function searchPassages(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit?: number } = {}): Passage[] {
+export async function searchPassages(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit?: number } = {}): Promise<Passage[]> {
+  if (azureSearchConfigured() && question.trim()) {
+    try {
+      await ensureBackfilled();
+      return await azureSearch(orgId, workspaceId, question, { guests: opts.guests, limit: opts.limit ?? 12 });
+    } catch (e) {
+      console.error("Azure AI Search failed; falling back to local keyword search", e);
+    }
+  }
+  return keywordSearch(orgId, workspaceId, question, opts);
+}
+
+/** Local keyword (BM25) search in SQLite: the fallback, and the only engine when Azure is not configured. */
+function keywordSearch(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit?: number }): Passage[] {
   const q = toQuery(question);
   if (!q) return [];
   const audienceClause = opts.guests ? "AND audience = 'shareable'" : "";

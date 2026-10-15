@@ -53,7 +53,7 @@ Rules:
  */
 export async function ask(user: User, workspaceId: string, question: string, guests: boolean) {
   assertEnabled("ask");
-  const passages = searchPassages(user.org_id, workspaceId, question, { guests, limit: 12 });
+  const passages = await searchPassages(user.org_id, workspaceId, question, { guests, limit: 12 });
   const sources = passages.map((p, i) => ({ id: `S${i + 1}`, ...p }));
   let result: z.infer<typeof AnswerSchema>;
   if (!sources.length) {
@@ -157,7 +157,7 @@ export async function processMeeting(user: User, meetingId: string) {
         );
       }
     });
-    indexText({
+    await indexText({
       orgId: user.org_id,
       workspaceId: m.workspace_id,
       sourceType: "meeting",

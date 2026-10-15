@@ -43,7 +43,7 @@ export const POST = handle(async (req: Request) => {
       if (file.size > MAX_UPLOAD_BYTES) throw new HttpError(413, "File is larger than 25 MB.");
       const text = await fileToText(file.name, Buffer.from(await file.arrayBuffer()));
       if (!text.trim()) throw new HttpError(422, "No readable text found. If it's a scan, export it with text (OCR) first.");
-      const n = indexText({ orgId: user.org_id, workspaceId: ws, sourceType: "document", sourceId: id, title: file.name, audience, text });
+      const n = await indexText({ orgId: user.org_id, workspaceId: ws, sourceType: "document", sourceId: id, title: file.name, audience, text });
       run("UPDATE documents SET status = 'Ready', chunk_count = ? WHERE id = ?", n, id);
       results.push({ name: file.name, ok: true });
     } catch (e) {

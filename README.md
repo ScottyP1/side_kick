@@ -7,6 +7,7 @@ An AI teammate for Microsoft Teams. This folder holds the step 1 build: a workin
 - `docs/ARCHITECTURE.md` – how the code fits together, and the rules every change keeps
 - `docs/BLUEPRINT.md` – the full product blueprint (steps 1–3, architecture, security)
 - `docs/sidekick-dashboard*.html` – the original clickable mockups
+- `docs/sidekick-architecture.html` – architecture diagram for the pitch (today + production target; PNGs alongside)
 - `samples/` – a sample Teams transcript and documents for demos
 - `teams/` – the Teams app package (manifest template + icons)
 

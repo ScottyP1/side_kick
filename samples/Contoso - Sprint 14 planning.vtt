@@ -1,0 +1,46 @@
+WEBVTT
+
+00:00:05.000 --> 00:00:14.000
+<v Priya Raman>Morning everyone. Let's lock sprint 14. The main thing is the SKU sync job failing on the overnight run twice last week.</v>
+
+00:00:15.000 --> 00:00:27.000
+<v Jordan Alvarez>From our side the priority is wave 2. We need the 48 stores live and stable before Black Friday.</v>
+
+00:00:28.000 --> 00:00:41.000
+<v Priya Raman>Agreed. Quick reminder, cutover moved. We're doing wave 2 on November 12, not November 5. Jordan confirmed that last week.</v>
+
+00:00:42.000 --> 00:00:51.000
+<v Jordan Alvarez>Yes, November 12 is final. Actually, it might be 52 stores now, two regions asked to join.</v>
+
+00:00:52.000 --> 00:01:08.000
+<v Sam Okafor>On the sync failures: they're timeouts when the store API is slow. I'd add retries with exponential backoff, max five attempts, then alert.</v>
+
+00:01:09.000 --> 00:01:15.000
+<v Priya Raman>Good, let's go with that. Five attempts then page the on-call.</v>
+
+00:01:16.000 --> 00:01:24.000
+<v Maria Chen>I'll take the retry logic. I can have it in by October 21.</v>
+
+00:01:25.000 --> 00:01:36.000
+<v Sam Okafor>I also want a load test at three times peak before cutover. I'll own that, target October 24.</v>
+
+00:01:37.000 --> 00:01:44.000
+<v Jordan Alvarez>Who owns the rollback plan for wave 2? We never closed that.</v>
+
+00:01:45.000 --> 00:01:52.000
+<v Priya Raman>Good question. Let's come back to it. Next item, the store manager comms.</v>
+
+00:01:53.000 --> 00:02:05.000
+<v Priya Raman>I'll send the updated cutover date to all store managers by tomorrow.</v>
+
+00:02:06.000 --> 00:02:16.000
+<v Jordan Alvarez>One more thing. Stores must keep selling for at least four hours if they lose connection. That's non-negotiable for us.</v>
+
+00:02:17.000 --> 00:02:25.000
+<v Sam Okafor>That's covered by the offline mode on Cosmos DB. That's why we picked it back in April.</v>
+
+00:02:26.000 --> 00:02:33.000
+<v Jordan Alvarez>What's the PCI scope for the new card readers in wave 2 stores?</v>
+
+00:02:34.000 --> 00:02:40.000
+<v Priya Raman>I don't know offhand. Let's find out.</v>

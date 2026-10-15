@@ -1,0 +1,1022 @@
+<meta charset="utf-8">
+<title>Sidekick Client Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: fixed left rail (nav) + scrolling work area; stacks to top bar + content under 860px. */
+:root{
+  --accent-default:#0f6b5c;
+  --bg:#f5f6f4; --surface:#ffffff; --sunken:#eef0ec; --line:#dfe3dd; --fg:#172126; --muted:#5d6a6f; --faint:#8a969a;
+  --accent:#0f6b5c; --accent-soft:#dcefe9; --accent-fg:#ffffff;
+  --hand:#b86a00; --hand-soft:#fbeed6;
+  --good:#1d7a3e; --good-soft:#dff1e5; --warn:#9a6200; --warn-soft:#fbefd4; --bad:#b3261e; --bad-soft:#f9e0de; --info:#2a5ba8; --info-soft:#e0e9f7;
+  --rail:#14201f; --rail-fg:#c9d6d2; --rail-active:#22332f;
+  --f-display:"Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r:10px; --shadow:0 1px 2px rgba(20,32,31,.06), 0 4px 16px rgba(20,32,31,.05);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1514; --surface:#161e1d; --sunken:#1c2625; --line:#2a3634; --fg:#e4ebe8; --muted:#9aa9a5; --faint:#6f7e7a;
+  --accent:#4fbfa8; --accent-soft:#18332e; --accent-fg:#06201b;
+  --hand:#f0a43a; --hand-soft:#3a2a12;
+  --good:#5cc684; --good-soft:#16301f; --warn:#e7b04f; --warn-soft:#34290f; --bad:#f08a80; --bad-soft:#3a1a18; --info:#82a8ec; --info-soft:#18243a;
+  --rail:#0a100f; --rail-fg:#a9b8b4; --rail-active:#1a2523; --shadow:0 1px 2px rgba(0,0,0,.3);
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1514; --surface:#161e1d; --sunken:#1c2625; --line:#2a3634; --fg:#e4ebe8; --muted:#9aa9a5; --faint:#6f7e7a;
+  --accent:#4fbfa8; --accent-soft:#18332e; --accent-fg:#06201b;
+  --hand:#f0a43a; --hand-soft:#3a2a12;
+  --good:#5cc684; --good-soft:#16301f; --warn:#e7b04f; --warn-soft:#34290f; --bad:#f08a80; --bad-soft:#3a1a18; --info:#82a8ec; --info-soft:#18243a;
+  --rail:#0a100f; --rail-fg:#a9b8b4; --rail-active:#1a2523; --shadow:0 1px 2px rgba(0,0,0,.3);
+  color-scheme:dark}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.5}
+*{box-sizing:border-box}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:24px;font-weight:700}
+h2{font-size:16px;font-weight:600}
+h3{font-size:14px;font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:12.5px}
+.muted{color:var(--muted)}
+.faint{color:var(--faint)}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+
+.app{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100%}
+.rail{background:var(--rail);color:var(--rail-fg);padding:18px 12px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px;color:#fff}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:var(--accent-fg);font-family:var(--f-display);font-weight:700}
+.brand b{font-family:var(--f-display);font-size:16px;color:#f2f6f5}
+.brand small{display:block;font-size:11px;color:var(--rail-fg);opacity:.75}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav-group{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;opacity:.55;padding:12px 10px 4px}
+.nav button{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;font-size:13.5px}
+.nav button:hover{background:var(--rail-active);color:#fff}
+.nav button[aria-current="page"]{background:var(--rail-active);color:#fff;box-shadow:inset 3px 0 0 var(--accent)}
+.nav button:focus-visible{outline:2px solid var(--accent)}
+.nav .count{margin-left:auto;font-size:11px;background:var(--hand);color:#1a1205;border-radius:99px;padding:0 7px;font-weight:600}
+.ico{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.rail-foot{margin-top:auto;font-size:12px;padding:10px;border-top:1px solid #ffffff14;display:flex;flex-direction:column;gap:6px}
+.rail-foot select{background:var(--rail-active);border:1px solid #ffffff1f;border-radius:6px;padding:4px 6px;color:#e8efed}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:12px;padding:12px 28px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:env(safe-area-inset-top,0px);z-index:5;flex-wrap:wrap}
+.search{flex:1;min-width:180px;max-width:420px;display:flex;align-items:center;gap:8px;background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--muted)}
+.search input{border:0;background:transparent;outline:0;width:100%}
+.topbar .spacer{flex:1}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:600;font-size:12px;flex:none}
+.content{padding:24px 28px 48px;display:flex;flex-direction:column;gap:20px;max-width:1280px;width:100%}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.page-head p{margin:4px 0 0;color:var(--muted);max-width:640px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}
+.btn.danger.solid{background:var(--bad);color:#fff;border-color:var(--bad)}
+.btn.small{padding:4px 9px;font-size:12.5px}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);min-width:0}
+.panel-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.panel-b{padding:16px}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.g-main{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
+
+.kpi{padding:14px 16px;display:flex;flex-direction:column;gap:4px;cursor:pointer;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);box-shadow:var(--shadow)}
+.kpi:hover{border-color:var(--accent)}
+.kpi .v{font-family:var(--f-display);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi .d{font-size:12px}
+.up{color:var(--good)} .down{color:var(--bad)}
+
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:1px 8px;border-radius:99px;white-space:nowrap;background:var(--sunken);color:var(--muted)}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.nodot::before{display:none}
+.pill.good{background:var(--good-soft);color:var(--good)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.info{background:var(--info-soft);color:var(--info)}
+.pill.hand{background:var(--hand-soft);color:var(--hand)}
+.pill.accent{background:var(--accent-soft);color:var(--accent)}
+.tag{font-size:11.5px;border:1px solid var(--line);border-radius:5px;padding:0 6px;color:var(--muted);white-space:nowrap}
+
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:9px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--sunken)}
+td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr.clickable{cursor:pointer}
+tbody tr.clickable:hover td{background:var(--sunken)}
+td.r,th.r{text-align:right}
+
+.meter{height:10px;background:var(--sunken);border-radius:99px;overflow:hidden;position:relative}
+.meter > span{display:block;height:100%;background:var(--accent);border-radius:99px}
+.meter > i{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--fg);opacity:.5}
+.meter.over > span{background:linear-gradient(90deg,var(--accent) 0 var(--cut),var(--warn) var(--cut))}
+.bar-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) 64px;gap:12px;align-items:center;padding:6px 0}
+.bar{height:8px;background:var(--sunken);border-radius:99px;overflow:hidden}
+.bar > span{display:block;height:100%;background:var(--accent)}
+
+.list{display:flex;flex-direction:column}
+.li{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--line)}
+.li:last-child{border-bottom:0}
+.li .grow{flex:1;min-width:0}
+.dot-live{width:8px;height:8px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 0 var(--bad);animation:pulse 1.8s infinite;margin-top:6px;flex:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--bad) 60%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion: reduce){.dot-live{animation:none}}
+
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-weight:500;font-size:13px}
+.field .hint{font-size:12px;color:var(--muted)}
+.input,select.input,textarea.input{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 10px;width:100%}
+textarea.input{min-height:80px;resize:vertical}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{border:0;background:var(--surface);padding:6px 12px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.switch{position:relative;width:36px;height:20px;flex:none;border-radius:99px;background:var(--line);border:0;cursor:pointer;transition:background .15s}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.switch[aria-checked="true"]{background:var(--accent)}
+.switch[aria-checked="true"]::after{transform:translateX(16px)}
+.row{display:flex;align-items:center;gap:12px;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row .grow{flex:1;min-width:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--sunken);border:1px solid var(--line);border-radius:99px;padding:2px 4px 2px 10px;font-size:12.5px}
+.chip button{border:0;background:transparent;cursor:pointer;color:var(--muted);padding:0 4px;font-size:14px;line-height:1}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tabs button{border:0;background:transparent;padding:9px 12px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;font-weight:500}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+
+.drop{border:1.5px dashed var(--faint);border-radius:var(--r);padding:22px;text-align:center;background:var(--sunken);display:flex;flex-direction:column;gap:6px;align-items:center}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+
+.callout{display:flex;gap:10px;padding:12px 14px;border-radius:8px;background:var(--hand-soft);color:var(--fg);border:1px solid color-mix(in srgb,var(--hand) 30%,transparent)}
+.callout.info{background:var(--info-soft);border-color:color-mix(in srgb,var(--info) 30%,transparent)}
+.callout.bad{background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 30%,transparent)}
+
+.model{display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.model .name{font-family:var(--f-mono);font-size:13px}
+.stat-line{display:flex;justify-content:space-between;gap:8px;font-size:13px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.stat-line:last-child{border-bottom:0}
+
+.flow{display:flex;align-items:stretch;gap:8px;overflow-x:auto;padding-bottom:4px}
+.flow-step{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--sunken);min-width:150px;flex:1;font-size:13px}
+.flow-arrow{align-self:center;color:var(--faint);flex:none}
+.app-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.app-tile{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:20px 12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;aspect-ratio:1/1;justify-content:center;min-width:0;transition:border-color .15s, transform .15s, box-shadow .15s}
+.app-tile:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
+.app-tile b{font-size:14px}
+.app-tile .muted{font-size:12px;line-height:1.3}
+.app-tile:not(.on) .app-ico{filter:saturate(.35);opacity:.75}
+.app-tile:not(.on):hover .app-ico{filter:none;opacity:1}
+.app-ico{display:grid;place-items:center;border-radius:12px;font-family:var(--f-display);font-weight:700;flex:none;letter-spacing:-.02em}
+.app-status{position:absolute;top:10px;right:10px}
+.dot{display:block;width:9px;height:9px;border-radius:50%}
+.dot.good{background:var(--good)} .dot.warn{background:var(--warn)}
+.app-cta{margin-top:4px;font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:99px;padding:2px 10px}
+.app-cta.warn{color:var(--warn);background:var(--warn-soft)}
+@media (prefers-reduced-motion: reduce){.app-tile{transition:none}.app-tile:hover{transform:none}}
+@media (max-width: 480px){.app-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.app-tile{aspect-ratio:auto}}
+.logo-slot{width:150px;height:56px;border:1px dashed var(--faint);border-radius:8px;display:grid;place-items:center;background:var(--surface);padding:6px}
+.logo-slot img{max-width:100%;max-height:100%;object-fit:contain}
+.swatch-btn{width:28px;height:28px;border-radius:50%;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--line);cursor:pointer}
+.swatch-btn[aria-pressed="true"]{box-shadow:0 0 0 2px var(--fg)}
+.brand-logo{flex-direction:column;align-items:flex-start;gap:6px}
+.brand-logo img{max-width:180px;max-height:40px;object-fit:contain;background:#fff;border-radius:6px;padding:4px 8px}
+.ws-card{display:flex;flex-direction:column;gap:10px;padding:16px;text-align:left;cursor:pointer;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.ws-card:hover{border-color:var(--accent)}
+.swatch{width:10px;height:10px;border-radius:3px;flex:none;display:inline-block}
+
+.transcript{display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;padding-right:6px}
+.utt{display:grid;grid-template-columns:72px minmax(0,1fr);gap:10px;font-size:13.5px}
+.utt .who{font-weight:600}
+.utt.sk .who{color:var(--accent)}
+.utt.hand{background:var(--hand-soft);border-radius:8px;padding:8px}
+.ts{font-family:var(--f-mono);font-size:11.5px;color:var(--faint)}
+
+.modal-bg{position:fixed;inset:0;background:rgba(10,16,15,.45);display:grid;place-items:center;padding:16px;z-index:50}
+.modal{background:var(--surface);border-radius:12px;border:1px solid var(--line);width:min(560px,100%);max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.modal .panel-h{position:sticky;top:0;background:var(--surface)}
+.modal-f{display:flex;justify-content:flex-end;gap:8px;padding:14px 16px;border-top:1px solid var(--line)}
+.steps{display:flex;gap:6px;flex-wrap:wrap}
+.steps span{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--sunken);color:var(--muted)}
+.steps span.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+
+.toasts{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;z-index:60}
+.toast{background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);font-size:13.5px;max-width:340px}
+
+.chart text{fill:var(--muted);font-size:11px;font-family:var(--f-body)}
+.chart .grid-l{stroke:var(--line)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+.mobile-nav{display:none}
+@media (max-width: 1100px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(2,minmax(0,1fr))}.g-main{grid-template-columns:minmax(0,1fr)}}
+@media (max-width: 860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .rail{display:none}
+  .mobile-nav{display:flex;gap:8px;align-items:center;width:100%}
+  .mobile-nav select{flex:1;min-width:0}
+  .topbar{padding:10px 16px}
+  .content{padding:18px 16px 40px}
+  .g2,.g3{grid-template-columns:minmax(0,1fr)}
+  .bar-row{grid-template-columns:minmax(0,1fr) 56px}
+  .bar-row .bar{grid-column:1 / -1;grid-row:2}
+  .search{max-width:none}
+}
+@media (max-width: 480px){.g4{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.kpi .v{font-size:22px}}
+</style>
+
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+<script>
+const { useState, useMemo, useRef, useEffect, createContext, useContext } = React;
+const html = htm.bind(React.createElement);
+
+/* ---------- Example data (mockup only) ---------- */
+const BRAND_DEFAULT = { logo: null, accent: null };
+const ORG = { name: "Harbor & Pine Consulting", plan: "Pilot", period: "Oct 1 – Oct 31, 2026", day: 14, days: 31 };
+const WS = [
+  { id: "contoso", name: "Contoso Retail – Cloud Migration", code: "ENG-2041", color: "#0f6b5c", members: 9, docs: 214, last: "Today, 10:30", hours: 18.5, status: "Active", tools: ["Azure DevOps", "SharePoint", "Confluence"] },
+  { id: "fabrikam", name: "Fabrikam Payments API", code: "ENG-2057", color: "#2a5ba8", members: 6, docs: 128, last: "Yesterday", hours: 12.2, status: "Active", tools: ["Jira", "GitHub", "Confluence"] },
+  { id: "internal", name: "Internal – Delivery & Ops", code: "INT-0001", color: "#7a5a2a", members: 31, docs: 342, last: "Today, 09:00", hours: 22.1, status: "Active", tools: ["SharePoint", "Planner"] },
+  { id: "tailspin", name: "Tailspin Mobile App", code: "ENG-2063", color: "#8b3f6b", members: 5, docs: 76, last: "Oct 10", hours: 7.8, status: "Active", tools: ["Azure DevOps", "GitHub"] },
+  { id: "woodgrove", name: "Woodgrove Bank – Data Platform", code: "ENG-2070", color: "#5a6b1f", members: 4, docs: 51, last: "Oct 8", hours: 4.4, status: "Onboarding", tools: ["Jira"] },
+];
+const wsById = Object.fromEntries(WS.map(w => [w.id, w]));
+const DAILY = [3.1,4.8,5.2,0.4,0.2,6.1,5.8,4.9,6.4,5.0,0.6,0.3,7.2,8.6]; // meeting hours, Oct 1–14
+const USERS = [
+  { id:1, name:"Dana Whitfield", email:"dana.whitfield@harborpine.example", role:"Org Owner", ws:["All"], last:"Today", status:"Active" },
+  { id:2, name:"Marcus Bell", email:"marcus.bell@harborpine.example", role:"Org Admin", ws:["All"], last:"Today", status:"Active" },
+  { id:3, name:"Priya Raman", email:"priya.raman@harborpine.example", role:"Workspace Admin", ws:["contoso","tailspin"], last:"Today", status:"Active" },
+  { id:4, name:"Luis Ortega", email:"luis.ortega@harborpine.example", role:"Workspace Admin", ws:["fabrikam"], last:"Yesterday", status:"Active" },
+  { id:5, name:"Maria Chen", email:"maria.chen@harborpine.example", role:"Member", ws:["contoso","fabrikam"], last:"Today", status:"Active" },
+  { id:6, name:"Sam Okafor", email:"sam.okafor@harborpine.example", role:"Member", ws:["contoso"], last:"Oct 12", status:"Active" },
+  { id:7, name:"Jenna Park", email:"jenna.park@harborpine.example", role:"Billing Admin", ws:["—"], last:"Oct 9", status:"Active" },
+  { id:8, name:"Tom Reyes", email:"tom.reyes@harborpine.example", role:"Member", ws:["tailspin"], last:"Oct 13", status:"Active" },
+  { id:9, name:"Alex Novak", email:"alex.novak@harborpine.example", role:"Viewer", ws:["woodgrove"], last:"—", status:"Invited" },
+  { id:10, name:"Ruth Adeyemi", email:"ruth.adeyemi@harborpine.example", role:"Auditor", ws:["All"], last:"Oct 2", status:"Active" },
+];
+const ROLES = ["Org Owner","Org Admin","Billing Admin","Workspace Admin","Member","Viewer","Auditor"];
+const MEETINGS = [
+  { id:"m1", title:"Contoso – Sprint 14 planning", ws:"contoso", date:"Today, 10:30", dur:"52 min", people:8, external:true, q:6, hands:2, accepted:2, stories:4, live:true },
+  { id:"m2", title:"Internal – Delivery leads sync", ws:"internal", date:"Today, 09:00", dur:"34 min", people:11, external:false, q:3, hands:1, accepted:1, stories:0, live:true },
+  { id:"m3", title:"Fabrikam – Webhook retry design review", ws:"fabrikam", date:"Yesterday, 15:00", dur:"61 min", people:6, external:true, q:9, hands:3, accepted:2, stories:5 },
+  { id:"m4", title:"Contoso – Data migration cutover dry run", ws:"contoso", date:"Yesterday, 11:00", dur:"45 min", people:7, external:true, q:4, hands:1, accepted:1, stories:2 },
+  { id:"m5", title:"Tailspin – Release 2.3 go/no-go", ws:"tailspin", date:"Oct 10, 14:00", dur:"28 min", people:5, external:true, q:5, hands:2, accepted:1, stories:1 },
+  { id:"m6", title:"Woodgrove – Kickoff & requirements", ws:"woodgrove", date:"Oct 8, 10:00", dur:"88 min", people:9, external:true, q:12, hands:2, accepted:2, stories:11 },
+  { id:"m7", title:"Internal – Bench & staffing review", ws:"internal", date:"Oct 7, 16:00", dur:"—", people:4, external:false, q:0, hands:0, accepted:0, stories:0, skipped:"Never-record rule: staffing" },
+];
+const DOCS = [
+  { id:1, name:"Contoso_SOW_v3_signed.pdf", type:"PDF", size:"1.2 MB", by:"Priya Raman", when:"Sep 18", status:"Ready", aud:"Internal", ws:"contoso" },
+  { id:2, name:"Target-state architecture.vsdx", type:"Visio", size:"3.8 MB", by:"Sam Okafor", when:"Oct 2", status:"Ready", aud:"Shareable", ws:"contoso" },
+  { id:3, name:"Migration runbook – wave 2.docx", type:"Word", size:"640 KB", by:"Maria Chen", when:"Oct 11", status:"Ready", aud:"Shareable", ws:"contoso" },
+  { id:4, name:"ADR-007 Cosmos DB vs Postgres.md", type:"Markdown", size:"18 KB", by:"Sam Okafor", when:"Apr 3", status:"Ready", aud:"Shareable", ws:"contoso" },
+  { id:5, name:"Rate card FY27.xlsx", type:"Excel", size:"92 KB", by:"Dana Whitfield", when:"Oct 1", status:"Ready", aud:"Internal", ws:"contoso" },
+  { id:6, name:"Cutover checklist (scan).pdf", type:"PDF", size:"7.1 MB", by:"Maria Chen", when:"Today", status:"Indexing", aud:"Shareable", ws:"contoso" },
+  { id:7, name:"Legacy POS API notes.pages", type:"Pages", size:"2.2 MB", by:"Sam Okafor", when:"Oct 13", status:"Failed", aud:"Shareable", ws:"contoso", err:"File type not supported. Export it as PDF or DOCX and upload again." },
+];
+const CONNECTORS = [
+  { id:"m365", name:"Microsoft 365 (SharePoint, OneDrive, Outlook, Planner)", cat:"Included with Teams", status:"Connected", sync:"4 min ago", level:"Draft", ws:5 },
+  { id:"ado", name:"Azure DevOps (Boards, Repos, Pipelines)", cat:"Engineering", status:"Connected", sync:"2 min ago", level:"Draft", ws:2 },
+  { id:"gh", name:"GitHub (Issues, PRs, Actions)", cat:"Engineering", status:"Connected", sync:"6 min ago", level:"Read-only", ws:2 },
+  { id:"jira", name:"Jira", cat:"Work tracking", status:"Needs attention", sync:"Token expired 3 h ago", level:"Draft", ws:2 },
+  { id:"conf", name:"Confluence", cat:"Docs", status:"Connected", sync:"18 min ago", level:"Read-only", ws:2 },
+  { id:"web", name:"Web research", cat:"Built in", status:"Connected", sync:"—", level:"Read-only", ws:4 },
+  { id:"snow", name:"ServiceNow", cat:"IT service", status:"Available", sync:"—", level:"Read-only", ws:0 },
+  { id:"sf", name:"Salesforce", cat:"CRM", status:"Available", sync:"—", level:"Read-only", ws:0 },
+  { id:"lucid", name:"Lucidchart", cat:"Diagrams", status:"Available", sync:"—", level:"Read-only", ws:0 },
+];
+const AUDIT = [
+  { t:"Today 10:41", who:"Sidekick", what:"Created Azure DevOps story CON-1182 “Retry failed SKU sync”", where:"Contoso", kind:"Agent action" },
+  { t:"Today 10:38", who:"Sidekick", what:"Declined a question about salaries (restricted topic)", where:"Contoso", kind:"Restriction" },
+  { t:"Today 09:12", who:"Marcus Bell", what:"Changed Jira permission level from Read-only to Draft", where:"Org", kind:"Policy change" },
+  { t:"Today 08:55", who:"Priya Raman", what:"Uploaded 3 documents", where:"Contoso", kind:"Data" },
+  { t:"Yesterday 17:20", who:"Dana Whitfield", what:"Invited Alex Novak as Viewer", where:"Woodgrove", kind:"Access" },
+  { t:"Yesterday 16:02", who:"Luis Ortega", what:"Deleted memory item “Go-live Nov 5” (superseded)", where:"Fabrikam", kind:"Data" },
+  { t:"Oct 12 11:47", who:"Marcus Bell", what:"Signed in from new device (Edge, Windows)", where:"Org", kind:"Sign-in" },
+  { t:"Oct 7 16:00", who:"Sidekick", what:"Skipped meeting “Bench & staffing review” (never-record rule)", where:"Internal", kind:"Restriction" },
+];
+
+/* ---------- Small helpers ---------- */
+const ToastCtx = createContext(() => {});
+const BrandCtx = createContext({ logo:null, setLogo:()=>{}, accent:null, setAccent:()=>{} });
+const ACCENTS = [["Default",null],["Cobalt","#2457c5"],["Crimson","#b4233c"],["Violet","#7a3fd1"],["Graphite","#3d4a52"]];
+const useToast = () => useContext(ToastCtx);
+const icons = {
+  home:"M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
+  chart:"M4 20V10M10 20V4M16 20v-7M22 20H2",
+  cpu:"M7 7h10v10H7zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3",
+  users:"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8",
+  folder:"M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
+  doc:"M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6",
+  brain:"M12 5a3 3 0 0 0-5.6-1.5A3 3 0 0 0 4 8a3 3 0 0 0 0 6 3 3 0 0 0 3 5 3 3 0 0 0 5-1zM12 5a3 3 0 0 1 5.6-1.5A3 3 0 0 1 20 8a3 3 0 0 1 0 6 3 3 0 0 1-3 5 3 3 0 0 1-5-1zM12 5v13",
+  video:"M15 10l5-3v10l-5-3zM3 7h12v10H3z",
+  plug:"M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5",
+  shield:"M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
+  lock:"M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4",
+  gear:"M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
+  search:"M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3",
+  hand:"M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8a8 8 0 0 0 16 0v-3a2 2 0 0 0-4 0",
+  plus:"M12 5v14M5 12h14", x:"M18 6L6 18M6 6l12 12", bell:"M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
+  upload:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12", download:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
+  back:"M15 18l-6-6 6-6", alert:"M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
+};
+const Icon = ({ n }) => html`<svg className="ico" viewBox="0 0 24 24" aria-hidden="true"><path d=${icons[n]} /></svg>`;
+const Pill = ({ kind, children, nodot }) => html`<span className=${"pill " + (kind || "") + (nodot ? " nodot" : "")}>${children}</span>`;
+const Switch = ({ on, onChange, label }) => html`<button className="switch" role="switch" aria-checked=${on ? "true" : "false"} aria-label=${label} onClick=${() => onChange(!on)}></button>`;
+const statusKind = s => ({ Ready:"good", Connected:"good", Active:"good", Indexing:"info", Onboarding:"info", Invited:"info", Failed:"bad", "Needs attention":"warn", Available:"" }[s] || "");
+const initials = n => n.split(" ").map(p => p[0]).join("").slice(0,2);
+
+function Modal({ title, onClose, children, footer }) {
+  useEffect(() => { const k = e => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
+  return html`<div className="modal-bg" onClick=${e => e.target === e.currentTarget && onClose()}>
+    <div className="modal" role="dialog" aria-modal="true" aria-label=${title}>
+      <div className="panel-h"><h2>${title}</h2><button className="btn ghost small" onClick=${onClose} aria-label="Close"><${Icon} n="x" /></button></div>
+      <div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"14px"}}>${children}</div>
+      ${footer && html`<div className="modal-f">${footer}</div>`}
+    </div></div>`;
+}
+
+/* ---------- Charts ---------- */
+function AreaChart({ data, height = 190 }) {
+  const W = 640, H = height, pl = 34, pr = 10, pt = 12, pb = 26;
+  const max = 10, x = i => pl + i * (W - pl - pr) / (data.length - 1), y = v => pt + (H - pt - pb) * (1 - v / max);
+  const line = data.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+  const area = line + ` L${x(data.length - 1)} ${y(0)} L${x(0)} ${y(0)} Z`;
+  const last = data.length - 1;
+  return html`<svg className="chart" viewBox=${`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Meeting hours per day, Oct 1 to Oct 14">
+    ${[0, 2.5, 5, 7.5, 10].map(t => html`<g key=${t}><line className="grid-l" x1=${pl} x2=${W - pr} y1=${y(t)} y2=${y(t)} /><text x=${pl - 6} y=${y(t) + 4} textAnchor="end">${t}</text></g>`)}
+    <path d=${area} fill="var(--accent)" fillOpacity="0.14" />
+    <path d=${line} fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinejoin="round" />
+    ${data.map((v, i) => ((i % 3 === 0 && last - i >= 2) || i === last) && html`<text key=${"l" + i} x=${x(i)} y=${H - 6} textAnchor="middle">Oct ${i + 1}</text>`)}
+    <circle cx=${x(last)} cy=${y(data[last])} r="4.5" fill="var(--accent)" stroke="var(--surface)" strokeWidth="2" />
+    <text x=${x(last) - 8} y=${y(data[last]) - 10} textAnchor="end" style=${{fill:"var(--fg)",fontWeight:600}}>${data[last]} h today</text>
+  </svg>`;
+}
+function StackBar({ parts }) {
+  const total = parts.reduce((a, p) => a + p.v, 0);
+  return html`<div>
+    <div style=${{display:"flex",height:"14px",borderRadius:"99px",overflow:"hidden",background:"var(--sunken)"}}>
+      ${parts.map(p => html`<span key=${p.k} title=${p.k + ": " + p.v} style=${{width: (p.v / total * 100) + "%", background: p.c}}></span>`)}
+    </div>
+    <div className="legend" style=${{marginTop:"10px"}}>${parts.map(p => html`<span key=${p.k}><i style=${{background:p.c}}></i>${p.k} <b className="num" style=${{color:"var(--fg)"}}>${p.label || p.v}</b></span>`)}</div>
+  </div>`;
+}
+
+/* ---------- Pages ---------- */
+function Overview({ go, openMeeting }) {
+  const toast = useToast();
+  const [live, setLive] = useState(MEETINGS.filter(m => m.live));
+  const used = 65.0, incl = 120, proj = used / ORG.day * ORG.days;
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">${ORG.name} · Billing period ${ORG.period}</div><h1>Good morning, Marcus</h1><p>Sidekick sat in 31 meetings this period and answered 142 questions. Two things need your attention.</p></div>
+      <div className="actions"><button className="btn" onClick=${() => go("users")}><${Icon} n="plus" />Invite people</button><button className="btn primary" onClick=${() => go("workspaces")}><${Icon} n="folder" />New workspace</button></div></div>
+
+    <div className="grid g4">
+      ${[
+        ["Meeting hours", "65.0", "+18% vs. Sep (same day)", "up", "billing"],
+        ["Questions answered", "142", "96% answered with a source", "", "meetings"],
+        ["Hand-raises accepted", "74%", "23 of 31 called on", "up", "meetings"],
+        ["Stories & tasks created", "38", "Azure DevOps 26 · Jira 12", "", "connectors"],
+      ].map(([l, v, d, c, p]) => html`<button key=${l} className="kpi" onClick=${() => go(p)}><span className="eyebrow">${l}</span><span className="v">${v}</span><span className=${"d " + (c || "muted")}>${d}</span></button>`)}
+    </div>
+
+    <div className="grid g-main">
+      <div className="panel"><div className="panel-h"><h2>Meeting hours per day</h2><span className="muted">Oct 1 – 14</span></div><div className="panel-b"><${AreaChart} data=${DAILY} /></div></div>
+      <div className="panel"><div className="panel-h"><h2>This billing period</h2><button className="btn small" onClick=${() => go("billing")}>Details</button></div>
+        <div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"14px"}}>
+          <div><div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}><span><b className="num" style=${{fontSize:"20px",fontFamily:"var(--f-display)"}}>${used.toFixed(1)}</b> <span className="muted">of ${incl} meeting hours</span></span><span className="muted num">Day ${ORG.day} of ${ORG.days}</span></div>
+            <div className="meter" style=${{marginTop:"8px"}}><span style=${{width: (used / incl * 100) + "%"}}></span><i style=${{left: (ORG.day / ORG.days * 100) + "%"}} title="Today"></i></div></div>
+          <div className="callout"><span style=${{color:"var(--hand)"}}><${Icon} n="alert" /></span><div><b>On pace for ${proj.toFixed(0)} hours</b>, about ${(proj - incl).toFixed(0)} over the included ${incl}. Raise the budget or limit auto-join rules.</div></div>
+          <div className="stat-line"><span className="muted">Budget alert at</span><span className="num">80% (96 h)</span></div>
+          <div className="stat-line"><span className="muted">Resets</span><span>Nov 1, 2026</span></div>
+        </div></div>
+    </div>
+
+    <div className="grid g2">
+      <div className="panel"><div className="panel-h"><h2>Sidekick is in ${live.length} meeting${live.length === 1 ? "" : "s"} now</h2></div>
+        <div className="list">${live.length === 0 ? html`<div className="li muted">Not in any meetings right now.</div>` : live.map(m => html`<div key=${m.id} className="li"><span className="dot-live"></span>
+          <div className="grow"><b>${m.title}</b><div className="muted">${wsById[m.ws].name} · ${m.people} people${m.external ? " · external guests present" : ""}</div>
+          <div style=${{marginTop:"6px",display:"flex",gap:"6px",flexWrap:"wrap"}}><${Pill} kind="accent" nodot>${m.q} answers</${Pill}><${Pill} kind="hand" nodot>✋ ${m.hands} hand-raises</${Pill}>${m.stories > 0 && html`<${Pill} kind="info" nodot>${m.stories} draft stories</${Pill}>`}</div></div>
+          <div className="actions"><button className="btn small" onClick=${() => openMeeting(m.id)}>Open</button><button className="btn small danger" onClick=${() => { setLive(live.filter(x => x.id !== m.id)); toast("Sidekick left “" + m.title + "”"); }}>Remove</button></div></div>`)}</div></div>
+      <div className="panel"><div className="panel-h"><h2>Needs attention</h2><${Pill} kind="warn">5</${Pill}></div>
+        <div className="list">
+          ${[
+            ["warn","Jira connection expired","Reconnect so Sidekick can create stories for Fabrikam.","Reconnect","connectors"],
+            ["bad","1 document failed to index","Legacy POS API notes.pages — unsupported file type.","View","knowledge"],
+            ["info","Access request","Tom Reyes asked to join Contoso Retail – Cloud Migration.","Review","users"],
+            ["hand","11 draft stories waiting","From the Woodgrove kickoff on Oct 8.","Review","meetings"],
+            ["bad","Question asked 3 times, no answer","“What's the PCI scope for the new card readers?” Contoso has no document on it.","See gaps","memory"],
+          ].map(([k, t, d, b, p]) => html`<div key=${t} className="li"><${Pill} kind=${k}>${k === "bad" ? "Error" : k === "warn" ? "Warning" : k === "hand" ? "Approval" : "Request"}</${Pill}><div className="grow"><b>${t}</b><div className="muted">${d}</div></div><button className="btn small" onClick=${() => go(p)}>${b}</button></div>`)}
+        </div></div>
+    </div>
+  </${React.Fragment}>`;
+}
+
+function Billing() {
+  const toast = useToast();
+  const [budget, setBudget] = useState(150);
+  const [stop, setStop] = useState(false);
+  const maxH = Math.max(...WS.map(w => w.hours));
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Usage & billing</div><h1>${ORG.period}</h1><p>Plan: ${ORG.plan} · 120 meeting hours included · usage is measured per meeting minute Sidekick attends, plus AI, speech and storage usage.</p></div>
+      <div className="actions"><button className="btn" onClick=${() => toast("Usage export started. You'll get a CSV by email.")}><${Icon} n="download" />Export CSV</button></div></div>
+    <div className="grid g4">
+      ${[["Meeting hours","65.0 h","of 120 included"],["AI requests","4,812","Haiku 3,960 · Sonnet 806 · Opus 46"],["Speech minutes","3,904","transcription + spoken answers"],["Storage","2.4 GB","811 documents · 31 transcripts"]].map(([l,v,d]) => html`<div key=${l} className="kpi" style=${{cursor:"default"}}><span className="eyebrow">${l}</span><span className="v">${v}</span><span className="d muted">${d}</span></div>`)}
+    </div>
+    <div className="grid g-main">
+      <div className="panel"><div className="panel-h"><h2>Meeting hours by workspace</h2><span className="muted">This period</span></div><div className="panel-b">
+        ${WS.slice().sort((a,b) => b.hours - a.hours).map(w => html`<div key=${w.id} className="bar-row"><span style=${{display:"flex",gap:"8px",alignItems:"center",minWidth:0}}><span className="swatch" style=${{background:w.color}}></span><span style=${{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${w.name}</span></span><div className="bar"><span style=${{width:(w.hours/maxH*100)+"%",background:w.color}}></span></div><span className="num" style=${{textAlign:"right"}}>${w.hours} h</span></div>`)}
+      </div></div>
+      <div className="panel"><div className="panel-h"><h2>Where the usage goes</h2></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"18px"}}>
+        <div><div className="eyebrow" style=${{marginBottom:"8px"}}>AI requests by model</div><${StackBar} parts=${[{k:"Haiku 5.5",v:3960,c:"var(--accent)",label:"3,960"},{k:"Sonnet 5.5",v:806,c:"var(--info)",label:"806"},{k:"Opus 5.5",v:46,c:"var(--hand)",label:"46"}]} /></div>
+        <div><div className="eyebrow" style=${{marginBottom:"8px"}}>What Sidekick did</div><${StackBar} parts=${[{k:"Answers",v:142,c:"var(--accent)"},{k:"Hand-raises",v:31,c:"var(--hand)"},{k:"Actions",v:38,c:"var(--info)"},{k:"Notes",v:29,c:"var(--faint)"}]} /></div>
+      </div></div>
+    </div>
+    <div className="grid g2">
+      <div className="panel"><div className="panel-h"><h2>Budget & alerts</h2></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"14px"}}>
+        <div className="field"><label htmlFor="budget">Monthly meeting-hour budget</label><div style=${{display:"flex",gap:"10px",alignItems:"center"}}><input id="budget" type="range" min="60" max="300" step="10" value=${budget} onInput=${e => setBudget(+e.target.value)} style=${{flex:1}} /><b className="num" style=${{width:"60px",textAlign:"right"}}>${budget} h</b></div><span className="hint">Projected use this period: 144 h ${144 > budget ? "· over budget" : "· within budget"}</span></div>
+        <div className="row"><div className="grow"><b>Email alerts</b><div className="muted">At 50%, 80% and 100% of budget, to Org Admins and Billing Admins.</div></div><${Pill} kind="good">On</${Pill}></div>
+        <div className="row"><div className="grow"><b>Hard stop at budget</b><div className="muted">Sidekick switches to notes-only mode (no voice, no actions) until the period resets.</div></div><${Switch} on=${stop} onChange=${setStop} label="Hard stop at budget" /></div>
+        <div><button className="btn primary" onClick=${() => toast("Budget saved: " + budget + " h per month")}>Save budget</button></div>
+      </div></div>
+      <div className="panel"><div className="panel-h"><h2>Invoices</h2></div><div className="table-wrap"><table><thead><tr><th>Period</th><th>Status</th><th className="r">Amount</th><th></th></tr></thead><tbody>
+        ${[["Sep 2026","Paid","Pilot (no charge)"],["Aug 2026","Paid","Pilot (no charge)"]].map(([p,s,a]) => html`<tr key=${p}><td>${p}</td><td><${Pill} kind="good">${s}</${Pill}></td><td className="r muted">${a}</td><td className="r"><button className="btn small" onClick=${() => toast(p + " invoice sent to your email")}>PDF</button></td></tr>`)}
+      </tbody></table></div><div className="panel-b muted" style=${{borderTop:"1px solid var(--line)"}}>Pricing is not final. Invoices show usage only during the pilot.</div></div>
+    </div>
+  </${React.Fragment}>`;
+}
+
+function Models() {
+  const toast = useToast();
+  const [mode, setMode] = useState("Hand-raise");
+  const [voice, setVoice] = useState("Ava (US English, warm)");
+  const [name, setName] = useState("Sidekick");
+  const [style, setStyle] = useState("Brief");
+  const [freq, setFreq] = useState(8);
+  const [conf, setConf] = useState(80);
+  const [trig, setTrig] = useState({ "Memory gap":true, "Unanswered question":true, "Prior history on the topic":true, "Missing owner or date":true, "Changed decision (asked as a question)":true, "Suggestion (risk or dependency)":false, "Precedent from earlier work":true });
+  const models = [
+    { n:"claude-haiku-5-5", role:"Listening & quick reactions", d:"Classifies every sentence in real time and decides when Sidekick has something useful.", req:"3,960", lat:"0.4 s", c:"var(--accent)" },
+    { n:"claude-sonnet-5-5", role:"Answers, actions & notes", d:"Answers questions, drafts stories, writes meeting notes and pre-meeting briefs.", req:"806", lat:"1.3 s", c:"var(--info)" },
+    { n:"claude-opus-5-5", role:"Deep project analysis", d:"Long documents, architecture questions, cross-meeting analysis on request.", req:"46", lat:"3.9 s", c:"var(--hand)" },
+  ];
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">AI models & agent</div><h1>How Sidekick thinks and behaves</h1><p>Models run on Microsoft Azure in the US data zone. Your data is never used to train any model.</p></div>
+      <div className="actions"><${Pill} kind="good">Azure-hosted · US data zone</${Pill}></div></div>
+    <div className="grid g3">${models.map(m => html`<div key=${m.n} className="model">
+      <div style=${{display:"flex",justifyContent:"space-between",gap:"8px",alignItems:"center"}}><span className="eyebrow" style=${{color:m.c}}>${m.role}</span><${Pill} kind="good">In use</${Pill}></div>
+      <span className="name">${m.n}</span><span className="muted">${m.d}</span>
+      <div><div className="stat-line"><span className="muted">Requests this period</span><span className="num">${m.req}</span></div><div className="stat-line"><span className="muted">Typical response time</span><span className="num">${m.lat}</span></div><div className="stat-line"><span className="muted">Provider</span><span>Anthropic via Microsoft Foundry</span></div></div></div>`)}</div>
+    <div className="panel"><div className="panel-h"><h2>Model updates</h2><span className="muted">Sidekick upgrades models after testing them on recorded meetings</span></div><div className="list">
+      ${[["Oct 3, 2026","Answers & actions moved to Claude Sonnet 5.5","Faster story drafts; better acceptance criteria."],["Sep 12, 2026","Pre-meeting briefs added","Posted 15 minutes before each linked meeting."],["Aug 20, 2026","Pilot started","Haiku for listening, Sonnet for answers."]].map(([d,t,x]) => html`<div key=${d} className="li"><span className="mono faint" style=${{width:"92px",flex:"none"}}>${d}</span><div className="grow"><b>${t}</b><div className="muted">${x}</div></div></div>`)}
+    </div></div>
+    <div className="grid g2">
+      <div className="panel"><div className="panel-h"><h2>Persona</h2></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"14px"}}>
+        <div className="field"><label htmlFor="aname">Name in meetings</label><input id="aname" className="input" value=${name} onInput=${e => setName(e.target.value)} /><span className="hint">Shown as “${name || "Sidekick"} (AI)”. People can also say this name to ask a question.</span></div>
+        <div className="field"><label htmlFor="voice">Voice</label><div style=${{display:"flex",gap:"8px"}}><select id="voice" className="input" value=${voice} onChange=${e => setVoice(e.target.value)}>${["Ava (US English, warm)","Andrew (US English, calm)","Emma (US English, bright)","Ryan (UK English, crisp)","Custom branded voice (enterprise)"].map(v => html`<option key=${v}>${v}</option>`)}</select><button className="btn" onClick=${() => toast("Playing a sample: “Quick note: that was decided on March 4. The link is in chat.”")}>Play sample</button></div></div>
+        <div className="field"><label>Speaking style</label><div className="seg">${["Brief","Balanced","Detailed"].map(s => html`<button key=${s} aria-pressed=${style === s ? "true" : "false"} onClick=${() => setStyle(s)}>${s}</button>`)}</div><span className="hint">Spoken answers stay under ${style === "Brief" ? "15" : style === "Balanced" ? "25" : "40"} seconds. Details always go to the meeting chat.</span></div>
+        <div className="field"><label htmlFor="langs">Meeting languages</label><select id="langs" className="input"><option>English (auto-translate others)</option><option>English + Spanish</option><option>English + Portuguese</option></select></div>
+      </div></div>
+      <div className="panel"><div className="panel-h"><h2>Participation</h2></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"14px"}}>
+        <div className="field"><label>Default mode</label><div className="seg">${["Silent scribe","On-call","Hand-raise"].map(s => html`<button key=${s} aria-pressed=${mode === s ? "true" : "false"} onClick=${() => setMode(s)}>${s}</button>`)}</div>
+          <span className="hint">${mode === "Silent scribe" ? "Listens and writes notes. Never speaks." : mode === "On-call" ? "Speaks only when someone says its name or @mentions it." : "Also raises its hand when it has an answer or a useful question. Never interrupts."}</span></div>
+        ${mode === "Hand-raise" && html`<div><div className="eyebrow" style=${{marginBottom:"4px"}}>Raise a hand for</div>${Object.keys(trig).map(k => html`<div key=${k} className="row" style=${{padding:"8px 0"}}><span>${k}</span><${Switch} on=${trig[k]} onChange=${v => setTrig({ ...trig, [k]: v })} label=${k} /></div>`)}</div>
+        <div className="field"><label htmlFor="freq">At most one hand-raise every</label><div style=${{display:"flex",gap:"10px",alignItems:"center"}}><input id="freq" type="range" min="3" max="20" value=${freq} onInput=${e => setFreq(+e.target.value)} style=${{flex:1}} /><b className="num" style=${{width:"60px",textAlign:"right"}}>${freq} min</b></div></div>
+        <div className="field"><label htmlFor="conf">Only when it's at least this confident</label><div style=${{display:"flex",gap:"10px",alignItems:"center"}}><input id="conf" type="range" min="50" max="95" step="5" value=${conf} onInput=${e => setConf(+e.target.value)} style=${{flex:1}} /><b className="num" style=${{width:"60px",textAlign:"right"}}>${conf}%</b></div></div>`}
+        <div><button className="btn primary" onClick=${() => toast("Agent settings saved. They apply from the next meeting.")}>Save settings</button></div>
+      </div></div>
+    </div>
+  </${React.Fragment}>`;
+}
+
+function Users() {
+  const toast = useToast();
+  const [users, setUsers] = useState(USERS);
+  const [q, setQ] = useState("");
+  const [roleF, setRoleF] = useState("All roles");
+  const [invite, setInvite] = useState(false);
+  const [form, setForm] = useState({ email:"", role:"Member", ws:["contoso"] });
+  const [reqs, setReqs] = useState([{ who:"Tom Reyes", ws:"contoso", why:"Covering for Sam during cutover week." }]);
+  const shown = users.filter(u => (roleF === "All roles" || u.role === roleF) && (u.name + u.email).toLowerCase().includes(q.toLowerCase()));
+  const send = () => {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) { toast("Enter a valid email address, like name@harborpine.example"); return; }
+    const name = form.email.split("@")[0].split(/[._]/).map(s => s[0].toUpperCase() + s.slice(1)).join(" ");
+    setUsers([...users, { id: Date.now(), name, email: form.email, role: form.role, ws: form.ws, last: "—", status: "Invited" }]);
+    setInvite(false); setForm({ email:"", role:"Member", ws:["contoso"] }); toast("Invitation sent to " + form.email);
+  };
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Users & access</div><h1>${users.length} people</h1><p>People sign in with their Microsoft work account. Roles can come from Entra ID groups so IT manages access in one place.</p></div>
+      <div className="actions"><button className="btn" onClick=${() => toast("CSV template downloaded")}><${Icon} n="upload" />Bulk import</button><button className="btn primary" onClick=${() => setInvite(true)}><${Icon} n="plus" />Invite people</button></div></div>
+    ${reqs.length > 0 && html`<div className="callout info"><${Icon} n="users" /><div style=${{flex:1}}>${reqs.map(r => html`<div key=${r.who} style=${{display:"flex",gap:"10px",alignItems:"center",flexWrap:"wrap"}}><span style=${{flex:1,minWidth:"200px"}}><b>${r.who}</b> asked to join <b>${wsById[r.ws].name}</b> · “${r.why}”</span>
+      <button className="btn small primary" onClick=${() => { setReqs([]); setUsers(users.map(u => u.name === r.who ? { ...u, ws: [...u.ws, r.ws] } : u)); toast(r.who + " added to " + wsById[r.ws].name); }}>Approve</button><button className="btn small" onClick=${() => { setReqs([]); toast("Request declined. " + r.who + " was notified."); }}>Decline</button></div>`)}</div></div>`}
+    <div className="panel"><div className="panel-h"><div style=${{display:"flex",gap:"8px",flexWrap:"wrap",flex:1}}><div className="search" style=${{maxWidth:"300px"}}><${Icon} n="search" /><input placeholder="Search people" value=${q} onInput=${e => setQ(e.target.value)} aria-label="Search people" /></div>
+      <select className="input" style=${{width:"auto"}} value=${roleF} onChange=${e => setRoleF(e.target.value)} aria-label="Filter by role"><option>All roles</option>${ROLES.map(r => html`<option key=${r}>${r}</option>`)}</select></div></div>
+      <div className="table-wrap"><table><thead><tr><th>Person</th><th>Role</th><th>Workspaces</th><th>Last active</th><th>Status</th><th></th></tr></thead><tbody>
+        ${shown.map(u => html`<tr key=${u.id}><td><div style=${{display:"flex",gap:"10px",alignItems:"center"}}><span className="avatar">${initials(u.name)}</span><div style=${{minWidth:0}}><b>${u.name}</b><div className="muted" style=${{fontSize:"12.5px"}}>${u.email}</div></div></div></td>
+          <td><select className="input" style=${{width:"auto",padding:"4px 8px"}} value=${u.role} aria-label=${"Role for " + u.name} disabled=${u.role === "Org Owner"} onChange=${e => { setUsers(users.map(x => x.id === u.id ? { ...x, role: e.target.value } : x)); toast(u.name + " is now " + e.target.value); }}>${ROLES.map(r => html`<option key=${r}>${r}</option>`)}</select></td>
+          <td><div className="chips">${u.ws.map(w => html`<span key=${w} className="tag">${wsById[w] ? wsById[w].name.split(" – ")[0] : w}</span>`)}</div></td>
+          <td className="muted">${u.last}</td><td><${Pill} kind=${statusKind(u.status)}>${u.status}</${Pill}></td>
+          <td className="r">${u.role !== "Org Owner" && html`<button className="btn small ghost" onClick=${() => { setUsers(users.filter(x => x.id !== u.id)); toast(u.name + " was removed. Their meeting notes stay in each workspace."); }}>Remove</button>`}</td></tr>`)}
+      </tbody></table></div></div>
+    <div className="panel"><div className="panel-h"><h2>Entra ID group mappings</h2><button className="btn small" onClick=${() => toast("Pick an Entra ID group to map")}>Add mapping</button></div><div className="table-wrap"><table><thead><tr><th>Entra ID group</th><th>Gets role</th><th>In workspaces</th><th className="r">Members</th></tr></thead><tbody>
+      ${[["SG-Sidekick-Admins","Org Admin","All",3],["SG-Contoso-Delivery","Member","Contoso Retail",12],["SG-Fabrikam-Team","Member","Fabrikam Payments",7],["SG-Finance","Billing Admin","—",2]].map(r => html`<tr key=${r[0]}><td className="mono">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td className="r num">${r[3]}</td></tr>`)}
+    </tbody></table></div></div>
+    <div className="panel"><div className="panel-h"><h2>What each role can do</h2></div><div className="table-wrap"><table><thead><tr><th>Role</th><th>Scope</th><th>Can do</th></tr></thead><tbody>
+      ${[["Org Owner","Whole organization","Everything, including billing, security and deleting all data"],["Org Admin","Whole organization","People, workspaces, connectors, org-wide restrictions, all usage"],["Billing Admin","Whole organization","Usage, invoices and budgets only"],["Workspace Admin","Chosen workspaces","Members, documents, connectors, agent rules for those workspaces"],["Member","Chosen workspaces","Meetings, notes, memory, upload documents, approve draft stories"],["Viewer","Chosen workspaces","Read notes and meetings"],["Auditor","Whole organization","Read audit log and policies"]].map(r => html`<tr key=${r[0]}><td><b>${r[0]}</b></td><td className="muted">${r[1]}</td><td>${r[2]}</td></tr>`)}
+    </tbody></table></div></div>
+    ${invite && html`<${Modal} title="Invite people" onClose=${() => setInvite(false)} footer=${html`<button className="btn" onClick=${() => setInvite(false)}>Cancel</button><button className="btn primary" onClick=${send}>Send invitation</button>`}>
+      <div className="field"><label htmlFor="iemail">Work email</label><input id="iemail" className="input" placeholder="name@harborpine.example" value=${form.email} onInput=${e => setForm({ ...form, email: e.target.value })} /><span className="hint">They'll sign in with their Microsoft account. No new password.</span></div>
+      <div className="field"><label htmlFor="irole">Role</label><select id="irole" className="input" value=${form.role} onChange=${e => setForm({ ...form, role: e.target.value })}>${ROLES.filter(r => r !== "Org Owner").map(r => html`<option key=${r}>${r}</option>`)}</select></div>
+      <div className="field"><label>Workspaces</label>${WS.map(w => html`<label key=${w.id} style=${{display:"flex",gap:"8px",alignItems:"center",fontWeight:400}}><input type="checkbox" checked=${form.ws.includes(w.id)} onChange=${e => setForm({ ...form, ws: e.target.checked ? [...form.ws, w.id] : form.ws.filter(x => x !== w.id) })} />${w.name}</label>`)}</div>
+    </${Modal}>`}
+  </${React.Fragment}>`;
+}
+
+function Workspaces({ go }) {
+  const toast = useToast();
+  const [wiz, setWiz] = useState(false);
+  const [step, setStep] = useState(0);
+  const [nw, setNw] = useState({ name:"", code:"", channel:"", tools:[] });
+  const steps = ["Name", "Teams channel", "Tools", "Review"];
+  const finish = () => { setWiz(false); setStep(0); toast("Workspace “" + (nw.name || "New workspace") + "” created. Add documents next."); setNw({ name:"", code:"", channel:"", tools:[] }); };
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Workspaces</div><h1>One workspace per client engagement</h1><p>Each workspace has its own documents, memory, tools, members and rules. In a meeting, Sidekick only sees the workspace linked to that meeting.</p></div>
+      <div className="actions"><button className="btn primary" onClick=${() => setWiz(true)}><${Icon} n="plus" />New workspace</button></div></div>
+    <div className="grid g3">${WS.map(w => html`<button key=${w.id} className="ws-card" onClick=${() => go("knowledge", w.id)}>
+      <div style=${{display:"flex",justifyContent:"space-between",gap:"8px",alignItems:"center"}}><span className="mono faint">${w.code}</span><${Pill} kind=${statusKind(w.status)}>${w.status}</${Pill}></div>
+      <h3 style=${{display:"flex",gap:"8px",alignItems:"center"}}><span className="swatch" style=${{background:w.color}}></span>${w.name}</h3>
+      <div className="grid" style=${{gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:"8px",width:"100%"}}>${[["Members",w.members],["Documents",w.docs],["Hours",w.hours]].map(([l,v]) => html`<div key=${l}><div className="eyebrow">${l}</div><b className="num">${v}</b></div>`)}</div>
+      <div className="chips">${w.tools.map(t => html`<span key=${t} className="tag">${t}</span>`)}</div>
+      <span className="muted" style=${{fontSize:"12.5px"}}>Last meeting: ${w.last}</span></button>`)}
+      <div className="ws-card" style=${{cursor:"default",borderStyle:"dashed",background:"var(--sunken)"}}><span className="eyebrow">Shared with every workspace</span><h3>Org knowledge</h3><span className="muted">Company policies, delivery standards, org chart. Readable in all workspaces; never mixes client data.</span><div><button className="btn small" onClick=${() => go("knowledge", "org")}>Manage</button></div></div>
+    </div>
+    ${wiz && html`<${Modal} title="New workspace" onClose=${() => { setWiz(false); setStep(0); }} footer=${html`${step > 0 && html`<button className="btn" onClick=${() => setStep(step - 1)}>Back</button>`}${step < 3 ? html`<button className="btn primary" disabled=${step === 0 && !nw.name.trim()} onClick=${() => setStep(step + 1)}>Next</button>` : html`<button className="btn primary" onClick=${finish}>Create workspace</button>`}`}>
+      <div className="steps">${steps.map((s, i) => html`<span key=${s} className=${i === step ? "on" : ""}>${i + 1}. ${s}</span>`)}</div>
+      ${step === 0 && html`<div className="field"><label htmlFor="wname">Workspace name</label><input id="wname" className="input" placeholder="e.g. Northwind – ERP Upgrade" value=${nw.name} onInput=${e => setNw({ ...nw, name: e.target.value })} /></div><div className="field"><label htmlFor="wcode">Engagement code (optional)</label><input id="wcode" className="input mono" placeholder="ENG-2081" value=${nw.code} onInput=${e => setNw({ ...nw, code: e.target.value })} /></div>`}
+      ${step === 1 && html`<div className="field"><label htmlFor="wch">Linked Teams channel</label><select id="wch" className="input" value=${nw.channel} onChange=${e => setNw({ ...nw, channel: e.target.value })}><option value="">Choose a channel…</option><option>Delivery › Northwind ERP</option><option>Delivery › General</option><option>Create a new channel</option></select><span className="hint">Meetings scheduled in this channel are linked to the workspace automatically. Notes are posted here.</span></div>`}
+      ${step === 2 && html`<div className="field"><label>Connect tools</label>${["Azure DevOps","GitHub","Jira","Confluence","SharePoint"].map(t => html`<label key=${t} style=${{display:"flex",gap:"8px",alignItems:"center",fontWeight:400}}><input type="checkbox" checked=${nw.tools.includes(t)} onChange=${e => setNw({ ...nw, tools: e.target.checked ? [...nw.tools, t] : nw.tools.filter(x => x !== t) })} />${t}</label>`)}<span className="hint">You'll sign in to each tool after the workspace is created. Access is read-only until you change it.</span></div>`}
+      ${step === 3 && html`<div className="stat-line"><span className="muted">Name</span><b>${nw.name}</b></div><div className="stat-line"><span className="muted">Code</span><span className="mono">${nw.code || "—"}</span></div><div className="stat-line"><span className="muted">Channel</span><span>${nw.channel || "None yet"}</span></div><div className="stat-line"><span className="muted">Tools</span><span>${nw.tools.join(", ") || "None yet"}</span></div><div className="stat-line"><span className="muted">Agent rules</span><span>Org defaults</span></div>`}
+    </${Modal}>`}
+  </${React.Fragment}>`;
+}
+
+function Knowledge({ wsId, setWs }) {
+  const toast = useToast();
+  const [docs, setDocs] = useState(DOCS);
+  const [over, setOver] = useState(false);
+  const [ask, setAsk] = useState("Why did we choose Cosmos DB?");
+  const [ans, setAns] = useState(null);
+  const fileRef = useRef();
+  const ws = wsById[wsId] || { name: "Org knowledge", code: "ORG" };
+  const add = files => {
+    const rows = Array.from(files).map((f, i) => ({ id: Date.now() + i, name: f.name, type: (f.name.split(".").pop() || "").toUpperCase(), size: (f.size / 1024 > 1024 ? (f.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(f.size / 1024)) + " KB"), by: "Marcus Bell", when: "Just now", status: "Indexing", aud: "Internal", ws: wsId }));
+    setDocs([...rows, ...docs]); toast(rows.length + " file" + (rows.length > 1 ? "s" : "") + " uploaded. Indexing usually takes under a minute.");
+    setTimeout(() => setDocs(d => d.map(x => rows.some(r => r.id === x.id) ? { ...x, status: "Ready" } : x)), 2500);
+  };
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Knowledge & documents</div><h1>${ws.name}</h1><p>Everything Sidekick can reference in this workspace's meetings. Tag documents “Internal” to keep them from being spoken when client guests are present.</p></div>
+      <div className="actions"><select className="input" style=${{width:"auto"}} value=${wsId} onChange=${e => setWs(e.target.value)} aria-label="Workspace">${WS.map(w => html`<option key=${w.id} value=${w.id}>${w.name}</option>`)}<option value="org">Org knowledge (shared)</option></select></div></div>
+    <div className="grid g-main">
+      <div className=${"drop" + (over ? " over" : "")} onDragOver=${e => { e.preventDefault(); setOver(true); }} onDragLeave=${() => setOver(false)} onDrop=${e => { e.preventDefault(); setOver(false); add(e.dataTransfer.files); }}>
+        <span style=${{color:"var(--accent)"}}><${Icon} n="upload" /></span><b>Drop files or folders here</b><span className="muted">PDF, Word, PowerPoint, Excel, Visio, Markdown, images · up to 200 MB each · scanned for malware</span>
+        <div className="actions" style=${{justifyContent:"center"}}><button className="btn" onClick=${() => fileRef.current.click()}>Choose files</button><button className="btn" onClick=${() => toast("SharePoint folder picker would open here")}>Add SharePoint folder</button><button className="btn" onClick=${() => toast("Add a URL and how often to re-read it")}>Add a web link</button></div>
+        <input ref=${fileRef} type="file" multiple hidden onChange=${e => add(e.target.files)} />
+      </div>
+      <div className="panel"><div className="panel-h"><h2>Test what Sidekick knows</h2></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"10px"}}>
+        <div style=${{display:"flex",gap:"8px"}}><input className="input" value=${ask} onInput=${e => setAsk(e.target.value)} aria-label="Question" /><button className="btn primary" onClick=${() => setAns(true)}>Ask</button></div>
+        ${ans && html`<div style=${{fontSize:"13.5px"}}><p style=${{margin:"0 0 8px"}}>The team chose <b>Cosmos DB</b> because the retail stores need multi-region writes for offline-first POS sync. Postgres was the runner-up but would have needed a custom replication layer.</p><div className="muted" style=${{fontSize:"12.5px"}}>Sources: <span className="tag">ADR-007 Cosmos DB vs Postgres.md</span> <span className="tag">Meeting · Apr 3 architecture review</span></div></div>`}
+      </div></div>
+    </div>
+    <div className="panel"><div className="panel-h"><h2>Search index (RAG)</h2><${Pill} kind="good">Healthy</${Pill}></div><div className="panel-b grid g4">
+      ${[["Passages indexed","5,212","from 214 documents + 41 meeting transcripts"],["Search type","Hybrid","keyword + meaning, re-ranked for relevance"],["Answered from sources","96%","of 142 questions this period cited a source"],["Last full re-index","Today 06:00","new uploads index within a minute"]].map(([l,v,d]) => html`<div key=${l}><div className="eyebrow">${l}</div><div style=${{fontFamily:"var(--f-display)",fontSize:"20px",fontWeight:600}} className="num">${v}</div><div className="muted" style=${{fontSize:"12.5px"}}>${d}</div></div>`)}
+    </div></div>
+    <div className="panel"><div className="panel-h"><h2>${docs.length} documents</h2><span className="muted">Last change ${docs[0].when}</span></div><div className="table-wrap"><table><thead><tr><th>Document</th><th>Status</th><th>Audience</th><th>Added by</th><th>Updated</th><th className="r">Size</th><th></th></tr></thead><tbody>
+      ${docs.map(d => html`<tr key=${d.id}><td><div style=${{display:"flex",gap:"8px",alignItems:"center"}}><span className="faint"><${Icon} n="doc" /></span><div style=${{minWidth:0}}><b style=${{wordBreak:"break-word"}}>${d.name}</b>${d.err && html`<div style=${{color:"var(--bad)",fontSize:"12.5px"}}>${d.err}</div>`}</div></div></td>
+        <td><${Pill} kind=${statusKind(d.status)}>${d.status}</${Pill}></td>
+        <td><div className="seg" style=${{fontSize:"12px"}}>${["Internal","Shareable"].map(a => html`<button key=${a} style=${{padding:"3px 8px"}} aria-pressed=${d.aud === a ? "true" : "false"} onClick=${() => setDocs(docs.map(x => x.id === d.id ? { ...x, aud: a } : x))}>${a}</button>`)}</div></td>
+        <td className="muted">${d.by}</td><td className="muted">${d.when}</td><td className="r num muted">${d.size}</td>
+        <td className="r"><button className="btn small ghost" onClick=${() => { setDocs(docs.filter(x => x.id !== d.id)); toast("“" + d.name + "” deleted and removed from Sidekick's index"); }}>Delete</button></td></tr>`)}
+    </tbody></table></div></div>
+  </${React.Fragment}>`;
+}
+
+function Memory({ go }) {
+  const toast = useToast();
+  const [tab, setTab] = useState("Topics");
+  const [topic, setTopic] = useState("Inventory & SKU sync");
+  const topics = [
+    { n:"Inventory & SKU sync", cov:92, docs:38, mtg:14, upd:"Today", sum:"How inventory moves from HQ to 600+ stores. Nightly bulk sync plus on-change pushes; retries being hardened in sprint 14.", facts:["SKU sync latency target: under 60 s at peak","Retries: exponential backoff, max 5 attempts (Oct 14)","Owner: Maria Chen"], aud:"Shareable" },
+    { n:"Data migration (legacy POS)", cov:85, docs:31, mtg:7, upd:"Oct 11", sum:"Moving 9 years of transaction history from the legacy POS database to Cosmos DB and the finance warehouse.", facts:["Wave 1 complete: 36 stores (Sep 29)","History older than 7 years is archived, not migrated"], aud:"Shareable" },
+    { n:"Wave 2 cutover", cov:78, docs:22, mtg:9, upd:"Yesterday", sum:"48-store cutover weekend. Date moved from Nov 5 to Nov 12 at the client's request.", facts:["Cutover: Nov 12 (changed from Nov 5 on Oct 13)","Go/no-go call: Nov 10, 16:00"], aud:"Shareable" },
+    { n:"Store comms & training", cov:58, docs:6, mtg:3, upd:"Oct 6", sum:"Store manager communications, training videos and the cutover-day help desk.", facts:["Help desk staffed 6 AM – midnight on cutover day"], aud:"Shareable" },
+    { n:"POS offline mode", cov:55, docs:9, mtg:4, upd:"Oct 2", sum:"Stores must keep selling for 4 hours with no connection; drives the Cosmos DB choice.", facts:["Requirement: 4 hours offline selling (SOW 2.4)","Decision: Cosmos DB multi-region writes (ADR-007)"], aud:"Shareable" },
+    { n:"Budget & change requests", cov:52, docs:5, mtg:3, upd:"Oct 1", sum:"Fixed-fee SOW with two approved change requests.", facts:["CR-02 approved: +$48k for wave 2 extension"], aud:"Internal" },
+    { n:"Performance & load testing", cov:31, docs:3, mtg:6, upd:"Jul 14", sum:"Load test plan exists but predates the new SKU sync design.", facts:["Last full load test: Jul 14 (old design)"], aud:"Shareable" },
+    { n:"Rollback & recovery", cov:22, docs:1, mtg:2, upd:"Sep 18", sum:"Discussed twice, no agreed rollback plan or owner yet.", facts:["No owner assigned"], aud:"Shareable" },
+    { n:"Security & PCI compliance", cov:14, docs:2, mtg:5, upd:"Aug 28", sum:"New card readers in wave 2 stores. Comes up often; little written down.", facts:["PCI scope for new readers: unknown"], aud:"Internal" },
+  ];
+  const [gaps, setGaps] = useState([
+    { id:1, kind:"Couldn't find an answer", sev:"bad", t:"What's the PCI scope for the new card readers?", where:"Asked 3 times: Oct 2, Oct 9, today", fix:"Upload the PCI assessment or ask the client's security lead.", topic:"Security & PCI compliance" },
+    { id:2, kind:"Unanswered in meeting", sev:"hand", t:"Who owns the rollback plan for wave 2?", where:"Sprint 14 planning, today 10:52", fix:"Assign an owner; Sidekick will add it to the next pre-meeting brief.", topic:"Rollback & recovery" },
+    { id:3, kind:"Conflicting information", sev:"warn", t:"Wave 2 store count: the runbook says 48, the Oct 13 meeting said 52.", where:"Runbook wave 2 · Oct 13 cutover dry run", fix:"Confirm with the client and update the runbook.", topic:"Wave 2 cutover" },
+    { id:4, kind:"Out of date", sev:"warn", t:"Load test plan last updated Jul 14; the SKU sync design changed since.", where:"Load-test-plan.docx · 6 related meetings since", fix:"Ask Sam Okafor to refresh the plan.", topic:"Performance & load testing" },
+    { id:5, kind:"Thin coverage", sev:"info", t:"Security & PCI compliance comes up in 5 meetings but has only 2 documents.", where:"Topic coverage 14%", fix:"Add the security architecture and PCI documents.", topic:"Security & PCI compliance" },
+    { id:6, kind:"Only in a meeting", sev:"info", t:"“Retry with backoff, max 5 attempts” was decided in a meeting but isn't in any design document.", where:"Sprint 14 planning, today", fix:"Add it to the SKU sync ADR so it isn't lost.", topic:"Inventory & SKU sync" },
+  ]);
+  const [items, setItems] = useState([
+    { id:1, t:"Retry logic for SKU sync", who:"Maria Chen", due:"Oct 21", st:"In progress", from:"Sprint 14 planning", ticket:"CON-1182" },
+    { id:2, t:"Load test SKU sync at 3x peak", who:"Sam Okafor", due:"Oct 24", st:"Open", from:"Sprint 14 planning", ticket:"CON-1184" },
+    { id:3, t:"Rollback runbook for wave 2", who:"", due:"—", st:"Open", from:"Sprint 14 planning", ticket:"" },
+    { id:4, t:"Send updated cutover date to store managers", who:"Priya Raman", due:"Oct 15", st:"Open", from:"Cutover dry run", ticket:"" },
+    { id:5, t:"Confirm wave 2 store list with client", who:"Priya Raman", due:"Oct 11", st:"Overdue", from:"Cutover dry run", ticket:"" },
+    { id:6, t:"Share PCI assessment for new card readers", who:"J. Alvarez (client)", due:"Oct 9", st:"Overdue", from:"Weekly status, Oct 2", ticket:"" },
+    { id:7, t:"Archive POS history older than 7 years", who:"Sam Okafor", due:"Oct 3", st:"Done", from:"Migration review, Sep 26", ticket:"CON-1131" },
+    { id:8, t:"Book training room for store managers", who:"Priya Raman", due:"Oct 30", st:"Open", from:"Comms planning, Oct 6", ticket:"" },
+  ]);
+  const [aiF, setAiF] = useState("Open");
+  const [facts, setFacts] = useState({
+    Decisions: [
+      { t:"Use Cosmos DB for store inventory; Postgres stays for finance reporting", src:"Apr 3 architecture review", who:"Priya Raman", pinned:true },
+      { t:"Wave 2 cutover moved from Nov 5 to Nov 12", src:"Oct 13 cutover dry run", who:"Client: J. Alvarez", hist:"Was Nov 5 (decided Sep 22)" },
+      { t:"Feature flags required for all POS changes", src:"Sep 30 sprint review", who:"Sam Okafor" },
+    ],
+    Requirements: [
+      { t:"Stores must keep selling for 4 hours with no connection", src:"SOW v3, section 2.4", who:"Document" },
+      { t:"SKU sync latency under 60 seconds at peak", src:"Sep 9 kickoff", who:"Client: J. Alvarez" },
+    ],
+    Glossary: [
+      { t:"SKU sync: nightly + on-change inventory push from HQ to stores", src:"Runbook wave 2", who:"Document" },
+      { t:"Wave: a batch of stores migrated together (wave 2 = 48 stores)", src:"Sep 9 kickoff", who:"Meeting" },
+    ],
+  });
+  const [fTab, setFTab] = useState("Decisions");
+  const sel = topics.find(t => t.n === topic);
+  const covKind = c => c >= 70 ? "good" : c >= 40 ? "warn" : "bad";
+  const covWord = c => c >= 70 ? "Well covered" : c >= 40 ? "Partial" : "Gap";
+  const openItems = items.filter(i => i.st !== "Done");
+  const shownItems = items.filter(i => aiF === "All" || (aiF === "Open" ? i.st !== "Done" : aiF === "Overdue" ? i.st === "Overdue" : aiF === "No owner" ? !i.who : i.st === "Done"));
+  const tabs = [["Topics", topics.length], ["Gaps", gaps.length], ["Action items", openItems.length], ["Decisions & facts", 42]];
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Memory · Contoso Retail – Cloud Migration</div><h1>What Sidekick knows, and what it doesn't</h1><p>Built from every meeting and document in this workspace. Topics show how well each area is covered, gaps show what's missing, and action items are collected from every meeting.</p></div>
+      <div className="actions"><button className="btn" onClick=${() => toast("Project profile exported as Word document")}><${Icon} n="download" />Export profile</button></div></div>
+    <div className="grid g4">
+      ${[["Topics", topics.length, "9 areas found in meetings and docs", "Topics"],["Coverage", "64%", "3 topics well covered, 3 gaps", "Topics"],["Open gaps", gaps.length, "1 question asked 3 times", "Gaps"],["Action items", openItems.length + " open", items.filter(i => i.st === "Overdue").length + " overdue · " + items.filter(i => !i.who).length + " without an owner", "Action items"]].map(([l,v,d,t]) => html`<button key=${l} className="kpi" onClick=${() => setTab(t)}><span className="eyebrow">${l}</span><span className="v">${v}</span><span className="d muted">${d}</span></button>`)}
+    </div>
+    <div className="panel"><div className="tabs" role="tablist">${tabs.map(([k, c]) => html`<button key=${k} role="tab" aria-selected=${tab === k ? "true" : "false"} onClick=${() => setTab(k)}>${k} <span className="faint num">${c}</span></button>`)}</div>
+
+      ${tab === "Topics" && html`<div className="panel-b grid g-main">
+        <div className="grid g2" style=${{gap:"10px",alignContent:"start"}}>${topics.map(t => html`<button key=${t.n} className="ws-card" style=${{gap:"8px",padding:"12px",borderColor: topic === t.n ? "var(--accent)" : undefined, boxShadow: topic === t.n ? "inset 0 0 0 1px var(--accent)" : undefined}} onClick=${() => setTopic(t.n)}>
+          <div style=${{display:"flex",justifyContent:"space-between",gap:"8px",alignItems:"center",width:"100%"}}><b style=${{fontSize:"13.5px"}}>${t.n}</b><${Pill} kind=${covKind(t.cov)}>${covWord(t.cov)}</${Pill}></div>
+          <div className="meter" style=${{height:"6px",width:"100%"}}><span style=${{width:t.cov + "%",background:`var(--${covKind(t.cov)})`}}></span></div>
+          <span className="muted" style=${{fontSize:"12px"}}>${t.docs} docs · ${t.mtg} meetings · updated ${t.upd}</span></button>`)}</div>
+        <div className="model" style=${{alignSelf:"start"}}>
+          <div style=${{display:"flex",justifyContent:"space-between",gap:"8px",alignItems:"center"}}><span className="eyebrow">Topic</span><span className="tag">${sel.aud}</span></div>
+          <h2>${sel.n}</h2>
+          <div><div style=${{display:"flex",justifyContent:"space-between"}}><span className="muted">Coverage</span><b className="num">${sel.cov}%</b></div><div className="meter" style=${{marginTop:"6px"}}><span style=${{width:sel.cov + "%",background:`var(--${covKind(sel.cov)})`}}></span></div></div>
+          <p style=${{margin:0}}>${sel.sum}</p>
+          <div><div className="eyebrow" style=${{marginBottom:"4px"}}>Key facts</div><ul style=${{margin:0,paddingLeft:"18px"}}>${sel.facts.map(f => html`<li key=${f}>${f}</li>`)}</ul></div>
+          <div className="stat-line"><span className="muted">Sources</span><span className="num">${sel.docs} documents · ${sel.mtg} meetings</span></div>
+          <div className="stat-line"><span className="muted">Open gaps</span><span className="num">${gaps.filter(g => g.topic === sel.n).length}</span></div>
+          <div className="actions"><button className="btn small" onClick=${() => go("knowledge")}>Add documents</button><button className="btn small" onClick=${() => toast("Sidekick is writing a one-page brief on “" + sel.n + "”. It will appear in the channel.")}>Write a brief</button>${gaps.some(g => g.topic === sel.n) && html`<button className="btn small" onClick=${() => setTab("Gaps")}>See gaps</button>`}</div>
+        </div></div>`}
+
+      ${tab === "Gaps" && html`<div className="list">${gaps.length === 0 ? html`<div className="li muted">No open gaps. Sidekick will list questions it can't answer here.</div>` : gaps.map(g => html`<div key=${g.id} className="li" style=${{flexWrap:"wrap"}}>
+        <${Pill} kind=${g.sev}>${g.kind}</${Pill}>
+        <div className="grow" style=${{minWidth:"220px"}}><b>${g.t}</b><div className="muted" style=${{fontSize:"12.5px"}}>${g.where} · Topic: ${g.topic}</div><div style=${{fontSize:"13px",marginTop:"4px"}}><span className="faint">Suggested: </span>${g.fix}</div></div>
+        <div className="actions"><select className="input" style=${{width:"auto",padding:"4px 8px",fontSize:"12.5px"}} aria-label="Assign gap" defaultValue="" onChange=${e => e.target.value && toast("Assigned to " + e.target.value + ". They'll get a Teams message.")}><option value="">Assign…</option>${["Priya Raman","Maria Chen","Sam Okafor"].map(p => html`<option key=${p}>${p}</option>`)}</select>
+          <button className="btn small" onClick=${() => go("knowledge")}>Upload doc</button>
+          <button className="btn small ghost" onClick=${() => { setGaps(gaps.filter(x => x.id !== g.id)); toast("Marked resolved"); }}>Resolve</button></div></div>`)}</div>`}
+
+      ${tab === "Action items" && html`<${React.Fragment}><div className="panel-h" style=${{borderBottom:"1px solid var(--line)"}}><div className="seg">${["Open","Overdue","No owner","Done","All"].map(f => html`<button key=${f} aria-pressed=${aiF === f ? "true" : "false"} onClick=${() => setAiF(f)}>${f}</button>`)}</div><span className="muted">Collected from meetings automatically</span></div>
+        <div className="table-wrap"><table><thead><tr><th style=${{width:"36px"}}></th><th>Action item</th><th>Owner</th><th>Due</th><th>Status</th><th>From meeting</th><th>Ticket</th></tr></thead><tbody>
+        ${shownItems.map(i => html`<tr key=${i.id}><td><input type="checkbox" aria-label=${"Done: " + i.t} checked=${i.st === "Done"} onChange=${e => { setItems(items.map(x => x.id === i.id ? { ...x, st: e.target.checked ? "Done" : "Open" } : x)); toast(e.target.checked ? "Marked done" : "Reopened"); }} /></td>
+          <td style=${i.st === "Done" ? {textDecoration:"line-through",color:"var(--muted)"} : null}><b>${i.t}</b></td>
+          <td>${i.who ? i.who : html`<select className="input" style=${{width:"auto",padding:"3px 6px",fontSize:"12.5px",borderColor:"var(--hand)"}} aria-label="Assign owner" defaultValue="" onChange=${e => { setItems(items.map(x => x.id === i.id ? { ...x, who: e.target.value } : x)); toast(e.target.value + " now owns “" + i.t + "”"); }}><option value="">Assign owner…</option>${["Priya Raman","Maria Chen","Sam Okafor","Luis Ortega"].map(p => html`<option key=${p}>${p}</option>`)}</select>`}</td>
+          <td className="num" style=${i.st === "Overdue" ? {color:"var(--bad)",fontWeight:600} : null}>${i.due}</td>
+          <td><${Pill} kind=${{Open:"info","In progress":"accent",Overdue:"bad",Done:"good"}[i.st]}>${i.st}</${Pill}></td>
+          <td className="muted">${i.from}</td>
+          <td>${i.ticket ? html`<span className="mono">${i.ticket}</span>` : i.st !== "Done" ? html`<button className="btn small" onClick=${() => { const k = "CON-" + (1190 + i.id); setItems(items.map(x => x.id === i.id ? { ...x, ticket: k } : x)); toast("Created " + k + " in Azure DevOps"); }}>Create ticket</button>` : ""}</td></tr>`)}
+        </tbody></table></div></${React.Fragment}>`}
+
+      ${tab === "Decisions & facts" && html`<${React.Fragment}><div className="panel-h" style=${{borderBottom:"1px solid var(--line)"}}><div className="seg">${Object.keys(facts).map(k => html`<button key=${k} aria-pressed=${fTab === k ? "true" : "false"} onClick=${() => setFTab(k)}>${k}</button>`)}</div><span className="muted">Edit anything that's wrong. Sidekick uses your edits right away.</span></div>
+        <div className="list">${facts[fTab].map((it, i) => html`<div key=${it.t} className="li"><div className="grow"><b>${it.pinned ? "📌 " : ""}${it.t}</b><div className="muted" style=${{fontSize:"12.5px"}}>${it.src} · ${it.who}${it.hist ? html` · <span style=${{color:"var(--hand)"}}>${it.hist}</span>` : ""}</div></div>
+          <div className="actions"><button className="btn small" onClick=${() => toast("Edit mode would open here")}>Edit</button><button className="btn small ghost" onClick=${() => { setFacts({ ...facts, [fTab]: facts[fTab].filter((_, j) => j !== i) }); toast("Forgotten. Sidekick won't use this again. The change is in the audit log."); }}>Forget</button></div></div>`)}</div></${React.Fragment}>`}
+    </div>
+  </${React.Fragment}>`;
+}
+
+function Meetings({ openId, setOpenId }) {
+  const toast = useToast();
+  const [wsF, setWsF] = useState("all");
+  const [tab, setTab] = useState("Notes");
+  const [stories, setStories] = useState([
+    { id:"s1", t:"Retry failed SKU sync jobs with exponential backoff", a:"Maria Chen", tool:"Azure DevOps", st:"Created", key:"CON-1182" },
+    { id:"s2", t:"Rollback runbook for wave 2 cutover", a:"Unassigned", tool:"Azure DevOps", st:"Draft" },
+    { id:"s3", t:"Load test SKU sync at 3x peak", a:"Sam Okafor", tool:"Azure DevOps", st:"Draft" },
+    { id:"s4", t:"Update store comms template for Nov 12 date", a:"Priya Raman", tool:"Planner", st:"Draft" },
+  ]);
+  const m = MEETINGS.find(x => x.id === openId);
+  if (m) return html`<${React.Fragment}>
+    <div><button className="btn small ghost" onClick=${() => setOpenId(null)}><${Icon} n="back" />All meetings</button></div>
+    <div className="page-head"><div><div className="eyebrow">${wsById[m.ws].name} · ${m.date} · ${m.dur}</div><h1>${m.title}</h1><p>${m.people} attendees${m.external ? ", including client guests (internal-only documents were not spoken)" : ", internal only"}. Recording notice shown at join.</p></div>
+      <div className="actions"><button className="btn" onClick=${() => toast("Notes exported as Word document")}><${Icon} n="download" />Export</button><button className="btn primary" onClick=${() => toast("Notes re-posted to the Teams channel")}>Re-post notes to Teams</button></div></div>
+    <div className="grid g4">${[["Answers",m.q],["Hand-raises",m.hands + " (" + m.accepted + " called on)"],["Stories",stories.length],["Languages","English"]].map(([l,v]) => html`<div key=${l} className="kpi" style=${{cursor:"default"}}><span className="eyebrow">${l}</span><span className="v" style=${{fontSize:"20px"}}>${v}</span></div>`)}</div>
+    <div className="panel"><div className="tabs" role="tablist">${["Notes","Transcript","Draft stories","Hand-raise log"].map(k => html`<button key=${k} role="tab" aria-selected=${tab === k ? "true" : "false"} onClick=${() => setTab(k)}>${k}</button>`)}</div>
+      <div className="panel-b">
+        ${tab === "Notes" && html`<div style=${{display:"flex",flexDirection:"column",gap:"14px",maxWidth:"760px"}}>
+          <div><h3>Summary</h3><p style=${{margin:"4px 0 0"}}>Sprint 14 scope agreed: SKU sync hardening and wave 2 prep. Cutover confirmed for Nov 12. Rollback ownership still open.</p></div>
+          <div><h3>Decisions</h3><ul style=${{margin:"4px 0 0",paddingLeft:"18px"}}><li>Wave 2 cutover stays on <b>Nov 12</b>.</li><li>SKU sync retries use exponential backoff, max 5 attempts.</li></ul></div>
+          <div><h3>Action items</h3><ul style=${{margin:"4px 0 0",paddingLeft:"18px"}}><li>Maria Chen: retry logic for SKU sync, due Oct 21 (CON-1182)</li><li>Sam Okafor: load test at 3x peak, due Oct 24</li><li><span style=${{color:"var(--hand)"}}>No owner yet:</span> rollback runbook for wave 2</li></ul></div>
+          <div><h3>Sidekick looked up</h3><ul style=${{margin:"4px 0 0",paddingLeft:"18px"}}><li>For Sam: why Cosmos DB was chosen (ADR-007, Apr 3)</li><li>For J. Alvarez: last night's staging deploy, passed at 11:42 PM</li></ul></div></div>`}
+        ${tab === "Transcript" && html`<div className="transcript">
+          ${[["10:31","Priya Raman","Let's lock sprint 14. Main thing is SKU sync failing on the overnight run."],["10:33","J. Alvarez (Contoso)","Did last night's deploy to staging go through?"],["10:33","Sidekick","Yes. It finished at 11:42 PM; one flaky test was re-run and passed. Details are in the chat.","sk"],["10:39","Sam Okafor","Remind me why we went Cosmos over Postgres for inventory?"],["10:40","Sidekick","✋ Raised hand: “I have the answer to Sam's question.”","hand"],["10:40","Priya Raman","Go ahead, Sidekick."],["10:40","Sidekick","From the April 3 review, ADR-007: stores need multi-region writes for offline selling. Link in chat.","sk"],["10:46","Maria Chen","I'll take the retry logic. Sidekick, make a story for that, assign it to me.","" ],["10:46","Sidekick","Drafted “Retry failed SKU sync jobs with exponential backoff” for Maria. Card is in the chat.","sk"]].map(([t,w,x,c], i) => html`<div key=${i} className=${"utt " + (c || "")}><span className="ts">${t}</span><div><span className="who">${w}</span> ${x}</div></div>`)}</div>`}
+        ${tab === "Draft stories" && html`<div className="table-wrap"><table><thead><tr><th>Story</th><th>Assignee</th><th>Tool</th><th>Status</th><th></th></tr></thead><tbody>
+          ${stories.map(s => html`<tr key=${s.id}><td><b>${s.t}</b></td><td className=${s.a === "Unassigned" ? "" : "muted"} style=${s.a === "Unassigned" ? {color:"var(--hand)"} : null}>${s.a}</td><td className="muted">${s.tool}</td><td>${s.st === "Created" ? html`<${Pill} kind="good">${s.key}</${Pill}>` : html`<${Pill} kind="hand">Draft</${Pill}>`}</td>
+            <td className="r">${s.st === "Draft" && html`<div className="actions" style=${{justifyContent:"flex-end"}}><button className="btn small primary" onClick=${() => { const key = "CON-" + (1183 + stories.filter(x => x.st === "Created").length); setStories(stories.map(x => x.id === s.id ? { ...x, st: "Created", key } : x)); toast("Created " + key + " in " + s.tool); }}>Create</button><button className="btn small ghost" onClick=${() => setStories(stories.filter(x => x.id !== s.id))}>Discard</button></div>`}</td></tr>`)}
+        </tbody></table></div>
+        <div style=${{marginTop:"12px"}}><button className="btn" disabled=${!stories.some(s => s.st === "Draft")} onClick=${() => { let n = 1183 + stories.filter(x => x.st === "Created").length; setStories(stories.map(x => x.st === "Draft" ? { ...x, st: "Created", key: "CON-" + (n++) } : x)); toast("All drafts created"); }}>Create all drafts</button></div>`}
+        ${tab === "Hand-raise log" && html`<div className="table-wrap"><table><thead><tr><th>Time</th><th>Reason</th><th>What it had</th><th>Outcome</th></tr></thead><tbody>
+          ${[["10:40","Memory gap","ADR-007: Cosmos DB chosen for multi-region writes","Called on","good"],["10:52","Missing owner","Rollback runbook has no owner","Ignored, added to notes","warn"],["10:57","Suggestion","Load test depends on staging scale-up (DEV-881, still open)","Skipped: hand-raise limit","info"]].map(r => html`<tr key=${r[0]}><td className="ts">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td><${Pill} kind=${r[4]}>${r[3]}</${Pill}></td></tr>`)}
+        </tbody></table></div>`}
+      </div></div>
+  </${React.Fragment}>`;
+  const shown = MEETINGS.filter(x => wsF === "all" || x.ws === wsF);
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Meetings</div><h1>${shown.length} meetings this period</h1><p>Transcripts, notes, hand-raises and actions for every meeting Sidekick attended.</p></div>
+      <div className="actions"><select className="input" style=${{width:"auto"}} value=${wsF} onChange=${e => setWsF(e.target.value)} aria-label="Filter by workspace"><option value="all">All workspaces</option>${WS.map(w => html`<option key=${w.id} value=${w.id}>${w.name}</option>`)}</select><button className="btn" onClick=${() => toast("Auto-join rules: channels, organizers and title keywords")}>Auto-join rules</button></div></div>
+    <div className="panel"><div className="table-wrap"><table><thead><tr><th>Meeting</th><th>Workspace</th><th>When</th><th className="r">Answers</th><th className="r">✋ Raised</th><th className="r">Stories</th><th></th></tr></thead><tbody>
+      ${shown.map(x => html`<tr key=${x.id} className=${x.skipped ? "" : "clickable"} onClick=${() => !x.skipped && setOpenId(x.id)}><td><b>${x.title}</b>${x.skipped && html`<div className="muted" style=${{fontSize:"12.5px"}}>Not recorded · ${x.skipped}</div>`}</td>
+        <td><span style=${{display:"inline-flex",gap:"6px",alignItems:"center"}}><span className="swatch" style=${{background:wsById[x.ws].color}}></span>${wsById[x.ws].name.split(" – ")[0]}</span></td><td className="muted">${x.date}</td>
+        <td className="r num">${x.q}</td><td className="r num">${x.hands}</td><td className="r num">${x.stories}</td><td className="r">${x.live ? html`<${Pill} kind="bad">Live</${Pill}>` : x.external ? html`<span className="tag">Client guests</span>` : ""}</td></tr>`)}
+    </tbody></table></div></div>
+  </${React.Fragment}>`;
+}
+
+const APPS = [
+  { id:"outlook", name:"Outlook", g:"Microsoft 365", mono:"O", bg:"#0F6CBD", desc:"Calendar and email", status:"Connected", sync:"4 min ago", level:"Draft",
+    scopes:[["Read calendar to auto-join meetings",true],["Read email threads in linked folders",false],["Draft follow-up emails (never sends on its own)",true]] },
+  { id:"teams", name:"Teams", g:"Microsoft 365", mono:"T", bg:"#5B5FC7", desc:"Meetings, chats, channels", status:"Connected", sync:"Live", level:"Draft", required:true,
+    scopes:[["Join meetings and listen (required)",true],["Post notes and cards to linked channels",true],["Read channel history for linked workspaces",true]] },
+  { id:"sharepoint", name:"SharePoint", g:"Microsoft 365", mono:"S", bg:"#038387", desc:"Sites and document libraries", status:"Connected", sync:"9 min ago", level:"Read-only",
+    scopes:[["Read selected sites and libraries",true],["Respect existing SharePoint permissions",true]] },
+  { id:"onedrive", name:"OneDrive", g:"Microsoft 365", mono:"OD", bg:"#0364B8", desc:"Shared files and folders", status:"Not connected", level:"Read-only",
+    scopes:[["Read folders shared with Sidekick",true]] },
+  { id:"planner", name:"Planner", g:"Microsoft 365", mono:"P", bg:"#31752F", desc:"Tasks and plans", status:"Connected", sync:"12 min ago", level:"Draft",
+    scopes:[["Read plans in linked channels",true],["Create tasks from action items",true]] },
+  { id:"powerbi", name:"Power BI", g:"Microsoft 365", mono:"BI", bg:"#F2C811", fg:"#1b1b1b", desc:"Reports and KPIs", status:"Not connected", level:"Read-only",
+    scopes:[["Read shared report summaries",true]] },
+  { id:"ado", name:"Azure DevOps", g:"Engineering", mono:"DO", bg:"#0078D4", desc:"Boards, Repos, Pipelines", status:"Connected", sync:"2 min ago", level:"Draft",
+    scopes:[["Read work items and sprints",true],["Create and update work items",true],["Read repos and pull requests",true],["Read pipeline runs",true]] },
+  { id:"github", name:"GitHub", g:"Engineering", mono:"GH", bg:"#24292F", desc:"Issues, PRs, Actions", status:"Connected", sync:"6 min ago", level:"Read-only",
+    scopes:[["Read issues and pull requests",true],["Read Actions runs",true],["Create issues",false]] },
+  { id:"jira", name:"Jira", g:"Work & docs", mono:"J", bg:"#0052CC", desc:"Issues and sprints", status:"Needs attention", sync:"Sign-in expired 3 h ago", level:"Draft",
+    scopes:[["Read issues and boards",true],["Create and update issues",true]] },
+  { id:"confluence", name:"Confluence", g:"Work & docs", mono:"C", bg:"#1868DB", desc:"Spaces and pages", status:"Connected", sync:"18 min ago", level:"Read-only",
+    scopes:[["Read selected spaces",true]] },
+  { id:"lucid", name:"Lucidchart", g:"Work & docs", mono:"L", bg:"#F96B13", desc:"Architecture diagrams", status:"Not connected", level:"Read-only",
+    scopes:[["Read shared diagrams",true]] },
+  { id:"servicenow", name:"ServiceNow", g:"Business apps", mono:"SN", bg:"#1F3D3A", desc:"Incidents and changes", status:"Not connected", level:"Read-only",
+    scopes:[["Read incidents and change requests",true],["Create incidents",false]] },
+  { id:"salesforce", name:"Salesforce", g:"Business apps", mono:"SF", bg:"#00A1E0", desc:"Accounts and opportunities", status:"Not connected", level:"Read-only",
+    scopes:[["Read accounts and opportunities",true]] },
+  { id:"slack", name:"Slack", g:"Business apps", mono:"S", bg:"#4A154B", desc:"Shared client channels", status:"Not connected", level:"Read-only",
+    scopes:[["Read selected channels",true]] },
+  { id:"web", name:"Web research", g:"Built in", mono:"🌐", bg:"var(--accent)", desc:"Live web search with sources", status:"Connected", sync:"—", level:"Read-only",
+    scopes:[["Search the web during meetings",true],["Remove client names and numbers from searches (always on)",true]] },
+];
+const APP_GROUPS = ["Microsoft 365","Engineering","Work & docs","Business apps","Built in"];
+const AppIcon = ({ a, size }) => html`<span className="app-ico" style=${{background:a.bg,color:a.fg || "#fff",width:size,height:size,fontSize: size > 40 ? "17px" : "14px"}} aria-hidden="true">${a.mono}</span>`;
+
+function Connectors() {
+  const toast = useToast();
+  const [apps, setApps] = useState(APPS);
+  const [open, setOpen] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [filter, setFilter] = useState("All");
+  const levels = ["Read-only","Draft","Voice confirm","Auto"];
+  const start = a => { setOpen(a.id); setDraft(JSON.parse(JSON.stringify({ ...a, wsSel: a.status === "Connected" || a.status === "Needs attention" ? ["contoso","fabrikam"] : [] }))); };
+  const save = connect => {
+    setApps(apps.map(x => x.id === draft.id ? { ...draft, status: connect ? "Connected" : draft.status, sync: connect ? "just now" : draft.sync } : x));
+    toast(connect ? draft.name + " connected. Sidekick can now use it in " + draft.wsSel.length + " workspace" + (draft.wsSel.length === 1 ? "" : "s") + "." : draft.name + " settings saved");
+    setOpen(null);
+  };
+  const counts = { All: apps.length, Connected: apps.filter(a => a.status === "Connected").length, "Needs attention": apps.filter(a => a.status === "Needs attention").length, "Not connected": apps.filter(a => a.status === "Not connected").length };
+  const shown = apps.filter(a => filter === "All" || a.status === filter);
+  const isOn = a => a.status === "Connected" || a.status === "Needs attention";
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Connectors</div><h1>Give Sidekick access to your tools</h1><p>Click a tool to connect it or change what Sidekick may see and do. Every connection uses your own sign-in, so no passwords are stored.</p></div>
+      <div className="seg">${Object.keys(counts).map(k => html`<button key=${k} aria-pressed=${filter === k ? "true" : "false"} onClick=${() => setFilter(k)}>${k} <span className="faint num">${counts[k]}</span></button>`)}</div></div>
+    ${APP_GROUPS.map(g => { const list = shown.filter(a => a.g === g); return list.length > 0 && html`<section key=${g} style=${{display:"flex",flexDirection:"column",gap:"10px"}}>
+      <div className="eyebrow">${g}</div>
+      <div className="app-grid">${list.map(a => html`<button key=${a.id} className=${"app-tile" + (isOn(a) ? " on" : "")} onClick=${() => start(a)} aria-label=${"Configure " + a.name}>
+        <span className="app-status">${a.status === "Connected" ? html`<span className="dot good" title="Connected"></span>` : a.status === "Needs attention" ? html`<span className="dot warn" title="Needs attention"></span>` : null}</span>
+        <${AppIcon} a=${a} size=${48} />
+        <b>${a.name}</b>
+        <span className="muted">${a.desc}</span>
+        <span className=${"app-cta" + (a.status === "Needs attention" ? " warn" : "")}>${a.status === "Connected" ? a.level : a.status === "Needs attention" ? "Reconnect" : "Connect"}</span>
+      </button>`)}</div></section>`; })}
+    ${open && draft && html`<${Modal} title=${(isOn(draft) ? "Configure " : "Connect ") + draft.name} onClose=${() => setOpen(null)}
+      footer=${html`${isOn(draft) && !draft.required && html`<button className="btn danger" style=${{marginRight:"auto"}} onClick=${() => { setApps(apps.map(x => x.id === draft.id ? { ...x, status:"Not connected" } : x)); setOpen(null); toast(draft.name + " disconnected. Sidekick no longer has access."); }}>Disconnect</button>`}<button className="btn" onClick=${() => setOpen(null)}>Cancel</button>${draft.status === "Connected" ? html`<button className="btn primary" onClick=${() => save(false)}>Save</button>` : html`<button className="btn primary" disabled=${draft.wsSel.length === 0} onClick=${() => save(true)}>${draft.status === "Needs attention" ? "Sign in again" : "Sign in & connect"}</button>`}`}>
+      <div style=${{display:"flex",gap:"14px",alignItems:"center"}}><${AppIcon} a=${draft} size=${56} /><div><b style=${{fontSize:"16px"}}>${draft.name}</b><div className="muted">${draft.desc}</div><div style=${{marginTop:"4px"}}><${Pill} kind=${draft.status === "Connected" ? "good" : draft.status === "Needs attention" ? "warn" : ""}>${draft.status}</${Pill}>${draft.sync && draft.status !== "Not connected" && html` <span className="muted" style=${{fontSize:"12.5px"}}>· Last sync ${draft.sync}</span>`}</div></div></div>
+      ${draft.status === "Needs attention" && html`<div className="callout"><${Icon} n="alert" /><div>The sign-in for ${draft.name} expired. Sign in again to keep creating stories for Fabrikam.</div></div>`}
+      <div className="field"><label>What Sidekick can access</label>${draft.scopes.map((sc, i) => html`<label key=${sc[0]} style=${{display:"flex",gap:"8px",alignItems:"flex-start",fontWeight:400}}><input type="checkbox" checked=${sc[1]} disabled=${/required|always on/.test(sc[0])} onChange=${e => { const sc2 = draft.scopes.map((x, j) => j === i ? [x[0], e.target.checked] : x); setDraft({ ...draft, scopes: sc2 }); }} style=${{marginTop:"3px"}} />${sc[0]}</label>`)}</div>
+      <div className="field"><label htmlFor="plevel">Sidekick may</label><div className="seg">${levels.map(l => html`<button key=${l} aria-pressed=${draft.level === l ? "true" : "false"} onClick=${() => setDraft({ ...draft, level: l })}>${l}</button>`)}</div>
+        <span className="hint">${{"Read-only":"Look things up only. Never changes anything.","Draft":"Prepares items; a person clicks Create.","Voice confirm":"Creates items when someone says “create it”.","Auto":"Creates low-risk items without asking. Everything is logged."}[draft.level]}</span></div>
+      <div className="field"><label>Use in these workspaces</label>${WS.map(w => html`<label key=${w.id} style=${{display:"flex",gap:"8px",alignItems:"center",fontWeight:400}}><input type="checkbox" checked=${draft.wsSel.includes(w.id)} onChange=${e => setDraft({ ...draft, wsSel: e.target.checked ? [...draft.wsSel, w.id] : draft.wsSel.filter(x => x !== w.id) })} /><span className="swatch" style=${{background:w.color}}></span>${w.name}</label>`)}</div>
+      <div className="callout info"><${Icon} n="lock" /><div style=${{fontSize:"13px"}}>${draft.g === "Microsoft 365" ? "Uses your Microsoft 365 admin consent. Sidekick only sees what these permissions allow, and respects existing file permissions." : "You'll sign in on " + draft.name + "'s own page. Sidekick stores an encrypted access token in your Key Vault, never a password. You can revoke it anytime."}</div></div>
+    </${Modal}>`}
+  </${React.Fragment}>`;
+}
+
+function Policies() {
+  const toast = useToast();
+  const [topics, setTopics] = useState(["Salaries & compensation","Performance reviews","Other clients' work","Pricing & rate cards (with guests)","Legal disputes"]);
+  const [nt, setNt] = useState("");
+  const [p, setP] = useState({ otr:true, conf:true, web:true, guestsInternal:false, guestsChat:true, oneOnOne:true, hr:true, approve:true, audio:false });
+  const [ret, setRet] = useState({ tr:"1 year", notes:"Keep until deleted", mem:"Keep until deleted" });
+  const T = (k, title, desc) => html`<div className="row"><div className="grow"><b>${title}</b><div className="muted">${desc}</div></div><${Switch} on=${p[k]} onChange=${v => setP({ ...p, [k]: v })} label=${title} /></div>`;
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Restrictions & policies</div><h1>What Sidekick may and may not do</h1><p>Org-wide defaults. Workspace admins can make these stricter for their workspace, never looser.</p></div>
+      <div className="actions"><button className="btn primary" onClick=${() => toast("Policies saved. Changes are in the audit log.")}>Save policies</button></div></div>
+    <div className="grid g2">
+      <div className="panel"><div className="panel-h"><h2>Off-limits topics</h2></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"12px"}}>
+        <div className="chips">${topics.map(t => html`<span key=${t} className="chip">${t}<button aria-label=${"Remove " + t} onClick=${() => setTopics(topics.filter(x => x !== t))}>×</button></span>`)}</div>
+        <form style=${{display:"flex",gap:"8px"}} onSubmit=${e => { e.preventDefault(); if (nt.trim()) { setTopics([...topics, nt.trim()]); setNt(""); } }}><input className="input" placeholder="Add a topic" value=${nt} onInput=${e => setNt(e.target.value)} aria-label="New off-limits topic" /><button className="btn" type="submit">Add</button></form>
+        <span className="hint muted" style=${{fontSize:"12.5px"}}>Sidekick says “That's outside what I can discuss here” and logs the attempt.</span></div></div>
+      <div className="panel"><div className="panel-h"><h2>When client guests are in the meeting</h2></div><div className="panel-b">
+        ${T("guestsInternal","Allow internal documents","When off, documents tagged Internal are never spoken or posted while guests are present.")}
+        ${T("guestsChat","Guests can ask Sidekick in chat","Guests may @mention Sidekick. Answers use only Shareable documents.")}
+      </div></div>
+      <div className="panel"><div className="panel-h"><h2>Never record</h2></div><div className="panel-b">
+        ${T("oneOnOne","1:1 meetings","Sidekick never joins meetings with only two people.")}
+        ${T("hr","HR & staffing meetings","Skips meetings with “HR”, “staffing”, “performance” or “compensation” in the title.")}
+        ${T("otr","“Go off the record” voice command","Anyone can say “Sidekick, go off the record”. Listening pauses, nothing is transcribed or remembered until someone says “back on the record”.")}
+        ${T("conf","Respect Confidential labels","Meetings and files with a Microsoft Purview “Confidential” or “Highly Confidential” label are never recorded or indexed.")}
+        <div style=${{paddingTop:"10px"}}><button className="btn small" onClick=${() => toast("Add a channel, person or keyword rule")}>Add rule</button></div>
+      </div></div>
+      <div className="panel"><div className="panel-h"><h2>Sources & actions</h2></div><div className="panel-b">
+        ${T("web","Web research","Sidekick may search the web during meetings. Client names and internal numbers are removed from searches.")}
+        ${T("approve","Require approval for actions","Overrides connector settings: every created item needs a click or spoken OK.")}
+      </div></div>
+    </div>
+    <div className="panel"><div className="panel-h"><h2>Data retention</h2><${Pill} kind="good">Stored in US (Azure)</${Pill}></div><div className="panel-b grid g4">
+      ${[["tr","Transcripts",["30 days","90 days","1 year","Keep until deleted"]],["notes","Meeting notes",["1 year","3 years","Keep until deleted"]],["mem","Memory",["1 year","Keep until deleted"]]].map(([k,l,opts]) => html`<div key=${k} className="field"><label htmlFor=${"ret" + k}>${l}</label><select id=${"ret" + k} className="input" value=${ret[k]} onChange=${e => setRet({ ...ret, [k]: e.target.value })}>${opts.map(o => html`<option key=${o}>${o}</option>`)}</select></div>`)}
+      <div className="field"><label>Meeting audio</label><div className="row" style=${{padding:"6px 0",border:0}}><span className="muted">${p.audio ? "Kept 30 days" : "Never stored"}</span><${Switch} on=${p.audio} onChange=${v => setP({ ...p, audio: v })} label="Keep meeting audio" /></div></div>
+    </div></div>
+  </${React.Fragment}>`;
+}
+
+function Audit() {
+  const toast = useToast();
+  const [kind, setKind] = useState("All");
+  const [danger, setDanger] = useState(false);
+  const [typed, setTyped] = useState("");
+  const kinds = ["All", ...Array.from(new Set(AUDIT.map(a => a.kind)))];
+  const rows = AUDIT.filter(a => kind === "All" || a.kind === kind);
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Security & audit</div><h1>Every action, recorded</h1><p>Sign-ins, access changes, policy changes, deletions and every action Sidekick takes.</p></div>
+      <div className="actions"><button className="btn" onClick=${() => toast("Audit log export started (CSV)")}><${Icon} n="download" />Export log</button></div></div>
+    <div className="panel"><div className="panel-h"><div className="seg">${kinds.map(k => html`<button key=${k} aria-pressed=${kind === k ? "true" : "false"} onClick=${() => setKind(k)}>${k}</button>`)}</div></div>
+      <div className="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What happened</th><th>Where</th><th>Type</th></tr></thead><tbody>
+        ${rows.map((a, i) => html`<tr key=${i}><td className="ts" style=${{whiteSpace:"nowrap"}}>${a.t}</td><td>${a.who === "Sidekick" ? html`<b style=${{color:"var(--accent)"}}>Sidekick</b>` : a.who}</td><td>${a.what}</td><td className="muted">${a.where}</td><td><span className="tag">${a.kind}</span></td></tr>`)}
+      </tbody></table></div></div>
+    <div className="panel"><div className="panel-h"><h2>Where your data goes</h2><${Pill} kind="good">Never leaves Microsoft Azure · US</${Pill}></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"14px"}}>
+      <div className="flow">${[["Teams meeting","Your Microsoft 365 tenant"],["Sidekick media bot","Azure US East 2 · private network"],["Speech to text & voice","Azure AI Speech · audio not stored"],["Claude (AI)","Azure-hosted in Microsoft Foundry · not used for training"],["Search index & storage","Azure AI Search, Postgres, Blob · encrypted with your key"]].map(([a,b], i) => html`<${React.Fragment} key=${a}>${i > 0 && html`<span className="flow-arrow" aria-hidden="true">→</span>`}<div className="flow-step"><b>${a}</b><span className="muted">${b}</span></div></${React.Fragment}>`)}</div>
+      <div className="grid g3" style=${{gap:"10px"}}>${[["Encrypted in transit","TLS 1.2+ everywhere, including inside Azure"],["Encrypted at rest","AES-256 · customer-managed keys in your Key Vault (Enterprise)"],["Private network only","Databases, storage and AI services have no public internet endpoints"],["No model training","Your meetings and documents are never used to train any AI model"],["Isolated per organization","Separate index, storage and keys per customer; workspaces walled off"],["Every access logged","People and Sidekick actions recorded in the audit log below"]].map(([t,d]) => html`<div key=${t} className="row" style=${{alignItems:"flex-start",border:0,padding:"4px 0"}}><span style=${{color:"var(--good)"}}><${Icon} n="lock" /></span><div className="grow"><b>${t}</b><div className="muted" style=${{fontSize:"12.5px"}}>${d}</div></div></div>`)}</div>
+    </div></div>
+    <div className="grid g2">
+      <div className="panel"><div className="panel-h"><h2>Sign-in & sessions</h2></div><div className="panel-b">
+        <div className="stat-line"><span className="muted">Sign-in</span><span>Microsoft Entra ID (single sign-on)</span></div>
+        <div className="stat-line"><span className="muted">Multi-factor</span><span>Enforced by your Entra ID policy</span></div>
+        <div className="stat-line"><span className="muted">Active sessions</span><span className="num">17</span></div>
+        <div className="stat-line"><span className="muted">Encryption keys</span><span>Microsoft-managed · customer-managed on Enterprise</span></div>
+      </div></div>
+      <div className="panel" style=${{borderColor:"color-mix(in srgb, var(--bad) 35%, var(--line))"}}><div className="panel-h"><h2 style=${{color:"var(--bad)"}}>Export or delete data</h2></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"10px"}}>
+        <div className="row" style=${{paddingTop:0}}><div className="grow"><b>Export all data</b><div className="muted">Documents, transcripts, notes, memory and audit log as a ZIP.</div></div><button className="btn" onClick=${() => toast("Export requested. You'll get a download link by email within an hour.")}>Export</button></div>
+        <div className="row"><div className="grow"><b>Delete all organization data</b><div className="muted">Org Owner only. 7-day cooling-off period, then permanent.</div></div><button className="btn danger" onClick=${() => setDanger(true)}>Delete…</button></div>
+      </div></div>
+    </div>
+    ${danger && html`<${Modal} title="Delete all organization data" onClose=${() => { setDanger(false); setTyped(""); }} footer=${html`<button className="btn" onClick=${() => { setDanger(false); setTyped(""); }}>Cancel</button><button className="btn danger solid" disabled=${typed !== ORG.name} onClick=${() => { setDanger(false); setTyped(""); toast("Deletion scheduled for Oct 21. Cancel anytime before then."); }}>Schedule deletion</button>`}>
+      <div className="callout bad"><${Icon} n="alert" /><div>This deletes <b>5 workspaces, 811 documents, 31 meeting transcripts and all memory</b>. Sidekick leaves your Teams. After 7 days it can't be undone.</div></div>
+      <div className="field"><label htmlFor="confirmname">Type <b>${ORG.name}</b> to confirm</label><input id="confirmname" className="input" value=${typed} onInput=${e => setTyped(e.target.value)} /></div>
+    </${Modal}>`}
+  </${React.Fragment}>`;
+}
+
+function Branding() {
+  const toast = useToast();
+  const b = useContext(BrandCtx);
+  const ref = useRef();
+  const load = f => { if (!f) return; if (!/^image\//.test(f.type)) { toast("Choose an image file (PNG, SVG or JPG)"); return; } const r = new FileReader(); r.onload = () => { b.setLogo(r.result); toast("Logo applied across the portal, Teams cards and notes"); }; r.readAsDataURL(f); };
+  return html`<div className="panel"><div className="panel-h"><h2>Your branding</h2><span className="muted">Portal, Teams cards, meeting notes</span></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"14px"}}>
+    <div className="field"><label>Logo</label><div style=${{display:"flex",gap:"12px",alignItems:"center",flexWrap:"wrap"}}>
+      <div className="logo-slot">${b.logo ? html`<img src=${b.logo} alt="Organization logo" />` : html`<span className="muted" style=${{fontSize:"12px"}}>No logo yet</span>`}</div>
+      <button className="btn small" onClick=${() => ref.current.click()}><${Icon} n="upload" />Upload logo</button>${b.logo && html`<button className="btn small ghost" onClick=${() => b.setLogo(null)}>Remove</button>`}
+      <input ref=${ref} type="file" accept="image/*" hidden onChange=${e => load(e.target.files[0])} /></div>
+      <span className="hint">Use the official file from your brand portal. PNG or SVG with a transparent background works best.</span></div>
+    <div className="field"><label>Brand color</label><div style=${{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>${ACCENTS.map(([n, c]) => html`<button key=${n} className="swatch-btn" aria-pressed=${(b.accent || null) === c ? "true" : "false"} title=${n} aria-label=${"Brand color " + n} onClick=${() => b.setAccent(c)} style=${{background: c || "var(--accent-default)"}}></button>`)}
+      <label className="btn small" style=${{position:"relative"}}>Custom<input type="color" aria-label="Custom brand color" style=${{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onInput=${e => b.setAccent(e.target.value)} /></label></div>
+      <span className="hint">Applied to buttons, highlights and charts. Text contrast is checked automatically.</span></div>
+  </div></div>`;
+}
+
+function Settings() {
+  const toast = useToast();
+  const [n, setN] = useState({ budget:true, connector:true, digest:true, drafts:false });
+  const N = (k, t, d) => html`<div className="row"><div className="grow"><b>${t}</b><div className="muted">${d}</div></div><${Switch} on=${n[k]} onChange=${v => setN({ ...n, [k]: v })} label=${t} /></div>`;
+  return html`<${React.Fragment}>
+    <div className="page-head"><div><div className="eyebrow">Settings</div><h1>Organization & notifications</h1></div><div className="actions"><button className="btn primary" onClick=${() => toast("Settings saved")}>Save</button></div></div>
+    <div className="grid g2">
+      <div className="panel"><div className="panel-h"><h2>Organization</h2></div><div className="panel-b" style=${{display:"flex",flexDirection:"column",gap:"14px"}}>
+        <div className="field"><label htmlFor="oname">Organization name</label><input id="oname" className="input" defaultValue=${ORG.name} /></div>
+        <div className="grid g2" style=${{gap:"12px"}}><div className="field"><label htmlFor="tz">Time zone</label><select id="tz" className="input"><option>Eastern Time (US)</option><option>Central Time (US)</option><option>Pacific Time (US)</option></select></div><div className="field"><label htmlFor="lang">Default language</label><select id="lang" className="input"><option>English (US)</option><option>Spanish</option></select></div></div>
+      </div></div>
+      <${Branding} />
+      <div className="panel"><div className="panel-h"><h2>Notifications</h2><span className="muted">Email and Teams</span></div><div className="panel-b">
+        ${N("budget","Budget alerts","At 50%, 80% and 100% of the monthly budget.")}
+        ${N("connector","Connector problems","When a tool disconnects or a token expires.")}
+        ${N("digest","Weekly digest","Monday summary: meetings, decisions, open questions per workspace.")}
+        ${N("drafts","Draft stories waiting","Daily reminder if draft stories are older than 2 days.")}
+      </div></div>
+    </div>
+    <div className="panel"><div className="panel-h"><h2>Help</h2></div><div className="panel-b" style=${{display:"flex",gap:"10px",flexWrap:"wrap"}}><button className="btn" onClick=${() => toast("Help center would open")}>Help center</button><button className="btn" onClick=${() => toast("Support request form would open")}>Contact support</button><span className="pill good" style=${{alignSelf:"center"}}>All systems working</span></div></div>
+  </${React.Fragment}>`;
+}
+
+/* ---------- Shell ---------- */
+const NAV = [
+  { g:"Overview", items:[["overview","Overview","home"],["billing","Usage & billing","chart"],["models","AI models & agent","cpu"]] },
+  { g:"Manage", items:[["users","Users & access","users"],["workspaces","Workspaces","folder"],["knowledge","Knowledge & docs","doc"],["memory","Memory & gaps","brain"],["meetings","Meetings","video"],["connectors","Connectors","plug"]] },
+  { g:"Govern", items:[["policies","Restrictions & policies","shield"],["audit","Security & audit","lock"],["settings","Settings","gear"]] },
+];
+const ROLE_PAGES = {
+  "Org Admin": null,
+  "Billing Admin": ["overview","billing","settings"],
+  "Workspace Admin": ["overview","knowledge","memory","meetings","connectors","workspaces"],
+  "Member": ["overview","knowledge","memory","meetings"],
+};
+
+function App() {
+  const [page, setPage] = useState(() => { const h = (location.hash || "").slice(1); return NAV.some(g => g.items.some(i => i[0] === h)) ? h : "overview"; });
+  const [ws, setWs] = useState("contoso");
+  const [meetingId, setMeetingId] = useState(null);
+  const [role, setRole] = useState("Org Admin");
+  const [toasts, setToasts] = useState([]);
+  const [logo, setLogo] = useState(BRAND_DEFAULT.logo);
+  const [accent, setAccent] = useState(BRAND_DEFAULT.accent);
+  useEffect(() => { const r = document.documentElement.style; if (accent) { r.setProperty("--accent", accent); r.setProperty("--accent-soft", "color-mix(in srgb, " + accent + " 14%, var(--surface))"); r.setProperty("--accent-fg", "#ffffff"); } else { ["--accent","--accent-soft","--accent-fg"].forEach(k => r.removeProperty(k)); } }, [accent]);
+  const toast = msg => { const id = Math.random(); setToasts(t => [...t, { id, msg }]); setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200); };
+  const allowed = k => !ROLE_PAGES[role] || ROLE_PAGES[role].includes(k);
+  const go = (p, w) => { if (w) setWs(w); if (p !== "meetings") setMeetingId(null); setPage(p); try { history.replaceState(null, "", "#" + p); } catch (e) {} window.scrollTo(0, 0); };
+  useEffect(() => { if (!allowed(page)) go("overview"); }, [role]);
+  const openMeeting = id => { setMeetingId(id); go("meetings"); setMeetingId(id); };
+  const navItems = NAV.map(g => ({ g: g.g, items: g.items.filter(i => allowed(i[0])) })).filter(g => g.items.length);
+  const pageEl = {
+    overview: html`<${Overview} go=${go} openMeeting=${openMeeting} />`,
+    billing: html`<${Billing} />`, models: html`<${Models} />`, users: html`<${Users} />`,
+    workspaces: html`<${Workspaces} go=${go} />`, knowledge: html`<${Knowledge} key=${ws} wsId=${ws} setWs=${setWs} />`,
+    memory: html`<${Memory} go=${go} />`, meetings: html`<${Meetings} openId=${meetingId} setOpenId=${setMeetingId} />`,
+    connectors: html`<${Connectors} />`, policies: html`<${Policies} />`, audit: html`<${Audit} />`, settings: html`<${Settings} />`,
+  }[page];
+  return html`<${BrandCtx.Provider} value=${{ logo, setLogo, accent, setAccent }}><${ToastCtx.Provider} value=${toast}>
+    <div className="app">
+      <aside className="rail">
+        ${logo ? html`<div className="brand brand-logo"><img src=${logo} alt=${ORG.name} /><small>Sidekick · AI teammate</small></div>` : html`<div className="brand"><span className="brand-mark">S</span><div><b>Sidekick</b><small>${ORG.name}</small></div></div>`}
+        <nav className="nav" aria-label="Main">${navItems.map(g => html`<${React.Fragment} key=${g.g}><div className="nav-group">${g.g}</div>${g.items.map(([k, l, ic]) => html`<button key=${k} aria-current=${page === k ? "page" : undefined} onClick=${() => go(k)}><${Icon} n=${ic} />${l}${k === "meetings" && html`<span className="count">2 live</span>`}${k === "memory" && html`<span className="count">6 gaps</span>`}</button>`)}</${React.Fragment}>`)}</nav>
+        <div className="rail-foot"><label htmlFor="rolepick">Preview as role (mockup)</label><select id="rolepick" value=${role} onChange=${e => setRole(e.target.value)}>${Object.keys(ROLE_PAGES).map(r => html`<option key=${r}>${r}</option>`)}</select></div>
+      </aside>
+      <div className="main">
+        <header className="topbar">
+          <div className="mobile-nav"><span className="brand-mark">S</span><select className="input" value=${page} onChange=${e => go(e.target.value)} aria-label="Page">${navItems.map(g => g.items.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`))}</select><select className="input" style=${{maxWidth:"130px"}} value=${role} onChange=${e => setRole(e.target.value)} aria-label="Preview as role">${Object.keys(ROLE_PAGES).map(r => html`<option key=${r}>${r}</option>`)}</select></div>
+          <div className="search"><${Icon} n="search" /><input placeholder="Search meetings, documents, decisions…" aria-label="Search" onKeyDown=${e => { if (e.key === "Enter" && e.target.value.trim()) { toast("Searching all workspaces for “" + e.target.value.trim() + "”"); } }} /></div>
+          <span className="spacer"></span>
+          <${Pill} kind="accent" nodot>Pilot</${Pill}>
+          <button className="btn ghost small" aria-label="Notifications" onClick=${() => go("overview")}><${Icon} n="bell" /></button>
+          <span className="avatar" title="Marcus Bell · ${role}">MB</span>
+        </header>
+        <main className="content">${pageEl}</main>
+      </div>
+    </div>
+    <div className="toasts" aria-live="polite">${toasts.map(t => html`<div key=${t.id} className="toast">${t.msg}</div>`)}</div>
+  </${ToastCtx.Provider}></${BrandCtx.Provider}>`;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
+</script>

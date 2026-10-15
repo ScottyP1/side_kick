@@ -1,6 +1,8 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "sidekick", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev"], "port": 3000 }
+    { "name": "sidekick", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev"], "port": 3000 },
+    { "name": "sidekick-teams", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev:teams"], "port": 3100 },
+    { "name": "agents-playground", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "playground"], "port": 56150 }
   ]
 }

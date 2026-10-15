@@ -104,6 +104,17 @@ CREATE TABLE IF NOT EXISTS platform_flags (
 CREATE TABLE IF NOT EXISTS platform_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
 );
+-- Teams conversations (channels, group chats, 1:1 chats) Sidekick has been added to.
+-- id is the conversation id without any ";messageid=" thread suffix. A row with no workspace_id is
+-- not linked yet: Sidekick shows link_code in Teams and an Org Admin enters it on the Workspaces page.
+CREATE TABLE IF NOT EXISTS teams_conversations (
+  id TEXT PRIMARY KEY, service_url TEXT NOT NULL, tenant_id TEXT, kind TEXT NOT NULL, name TEXT,
+  link_code TEXT UNIQUE, code_expires_at TEXT,
+  org_id TEXT REFERENCES orgs(id), workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+  guests INTEGER NOT NULL DEFAULT 0, linked_by TEXT, linked_at TEXT,
+  created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS teams_conversations_ws ON teams_conversations(workspace_id);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(

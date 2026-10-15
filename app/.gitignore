@@ -44,3 +44,6 @@ next-env.d.ts
 /data
 !.env.example
 /.next-test/
+/.playground-data/
+/.next-playground/
+/devTools/

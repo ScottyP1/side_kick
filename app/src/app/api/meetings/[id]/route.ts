@@ -1,8 +1,10 @@
+import { after } from "next/server";
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { all, get, run } from "@/lib/db";
 import { removeIndexed } from "@/lib/search";
 import { processMeeting } from "@/lib/sidekick";
+import { postMeetingNotes } from "@/lib/teams/bot";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -30,6 +32,7 @@ export const POST = handle(async (_req: Request, { params }: Ctx) => {
   removeIndexed(m.id);
   run("UPDATE meetings SET status = 'Processing', error = NULL WHERE id = ?", m.id);
   await processMeeting(user, m.id);
+  after(() => postMeetingNotes(user.org_id, m.id).catch((e) => console.error("Teams notes post failed", e)));
   return { ok: true };
 });
 

@@ -27,6 +27,36 @@ Open http://localhost:3000/owner. The first visit creates your owner account (on
 - **Performance & errors:** typical and slowest response times, error rates and cache savings per feature and model, failed requests, processing health per client
 - **Releases & switches:** the running version and commit, models in use, kill switches that pause a feature for every client, and the operator log
 
+## Sidekick in Teams: test locally with Microsoft 365 Agents Playground
+
+The Teams bot lives in the same app at `/api/messages`. Agents Playground is a local Teams-like chat window from Microsoft, so you can try it **without a Microsoft 365 tenant, Azure Bot or tunnel**. It uses its own test data folder (`app/.playground-data`), so your real Sidekick data is never touched.
+
+1. Start the test copy of Sidekick (port 3100, separate data, Playground mode on):
+
+   ```bash
+   npm --prefix app run dev:teams
+   ```
+
+2. In a second terminal, start Agents Playground:
+
+   ```bash
+   npm --prefix app run playground
+   ```
+
+   It opens http://localhost:56150, a Teams-style chat with Sidekick. Sidekick greets you with an **8-character link code**.
+
+3. Open http://localhost:3100, set up a test organization (made-up details), create a workspace and add the files from `samples/` (mark them Shareable).
+4. **Workspaces → Link Teams channel**: enter the code, pick the workspace, Link. Sidekick confirms in the Playground chat.
+5. In Playground ask: “Why did we choose Cosmos DB?” You get an answer card with sources.
+6. **Meetings → Import transcript** → `samples/Contoso - Sprint 14 planning.vtt`. The notes card and one card per action item appear in Playground. Type a name and click **Assign**, or **Mark done**: the change shows on the Memory & gaps page.
+7. In Playground, `help` shows the commands and `link` shows which workspace the chat is linked to.
+
+To start the test copy over, stop it and delete `app/.playground-data` (and `app/.next-playground`). If `next dev` adds `.next-playground` lines to `app/tsconfig.json`, undo them with `git checkout app/tsconfig.json`.
+
+**Security:** Playground mode skips Microsoft's sign-in check on bot messages, so it only switches on when `TEAMS_LOCAL_PLAYGROUND=true`, never in production builds, and only accepts requests from this computer. In real Teams every message must carry a token signed by Microsoft for Sidekick's Azure Bot (`CLIENT_ID`/`CLIENT_SECRET`/`TENANT_ID` in `app/.env.local`).
+
+**Rules in Teams:** Sidekick only answers from the workspace linked to that channel or chat. If the channel is marked “Client guests”, answers use Shareable sources only and notes from internal-only meetings are not posted there. Only Org Owners and Admins can link or unlink. Everything is in the audit log.
+
 ## Demo script (5 minutes)
 
 1. **Workspaces** → create “Contoso Retail – Cloud Migration”.
@@ -43,7 +73,8 @@ Open http://localhost:3000/owner. The first visit creates your owner account (on
 |---|---|
 | Sign-in, roles, workspace walls, audit log | Microsoft (Entra ID) sign-in – step 2 |
 | Upload PDF / Word / text / Teams transcripts, keyword search | Azure AI Search with meaning-based search – step 2 |
-| Meeting notes, Q&A with sources, knowledge map, gaps, action items | Sidekick in Teams chat, Jira/DevOps stories – step 2 |
+| Meeting notes, Q&A with sources, knowledge map, gaps, action items | Jira/DevOps stories – step 2 |
+| Teams bot: @Sidekick answers, notes and action-item cards (tested in Agents Playground) | Real Teams install (Azure Bot, manifest, tunnel) – step 2 |
 | Usage and cost metering per feature/model | Live meetings with voice and virtual hand-raise – step 3 |
 | Branding (logo + color) | Connectors (Outlook, SharePoint, Jira, …) – step 2 |
 | Owner Console: all clients, spend, errors, kill switches | Release pipeline and staged rollouts – step 2 |

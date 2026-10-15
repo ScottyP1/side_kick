@@ -1,9 +1,11 @@
+import { after } from "next/server";
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { all, newId, now, run } from "@/lib/db";
 import { fileToText, MAX_UPLOAD_BYTES } from "@/lib/extract";
 import { processMeeting } from "@/lib/sidekick";
 import { assertEnabled } from "@/lib/owner";
+import { postMeetingNotes } from "@/lib/teams/bot";
 
 export const GET = handle(async (req: Request) => {
   const user = await requireUser();
@@ -45,5 +47,7 @@ export const POST = handle(async (req: Request) => {
   );
   audit(user, `Imported meeting “${title}”`, "Data", ws);
   await processMeeting(user, id);
+  // Post the notes to the workspace's linked Teams channels without making the portal wait.
+  after(() => postMeetingNotes(user.org_id, id).catch((e) => console.error("Teams notes post failed", e)));
   return { id };
 });

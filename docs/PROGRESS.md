@@ -13,7 +13,7 @@
 | Azure account (personal) | Created, $25 budget alert set |
 | Microsoft 365 test org "Sidekick Labs" (Business Basic trial) | Created but **cancelled by mistake** (turning off recurring billing on a *trial* cancels it). Needs Reactivate (may take 15–30 min), Microsoft support, or a fresh trial. **Leave recurring billing ON**; cancel before Nov 14, 2026 if not keeping it (worst case $8.40 for one month) |
 | Teams custom-app upload | Not done yet; needs the M365 subscription active first |
-| **Product step 2**: Sidekick in Teams | **Next.** Not started |
+| **Product step 2**: Sidekick in Teams | **Bot built and tested locally in Agents Playground** (branch `feat/teams-bot`). Next: Azure Bot registration, manifest, dev tunnel, real Teams |
 | Product step 3: live voice in meetings | Later |
 
 Repo: `github.com/ScottyP1/side_kick` (private). Local: `~/Desktop/sidekick`. Branch `main` holds everything.
@@ -40,6 +40,9 @@ npm --prefix app run dev
 - `app/src/lib/search.ts`: keyword search (SQLite FTS5/BM25), always filtered by org + workspace, guest mode excludes `internal` docs. **To be replaced behind the same functions by Azure AI Search (hybrid keyword + vector) in step 2.**
 - `app/src/lib/extract.ts`: PDF (unpdf), Word (mammoth), text, Teams `.vtt` → text; chunking.
 - `app/src/lib/sidekick.ts`: Ask (RAG with cited sources, unanswered questions logged as gaps), meeting processing (summary/decisions/action items/open questions/facts), knowledge map (topics + coverage + gaps).
+- `app/src/lib/teams/bot.ts`: Teams bot (Microsoft **Teams SDK 2.1**, `@microsoft/teams.apps`). A small adapter plugs the SDK into the Next.js route `app/src/app/api/messages/route.ts` instead of its own Express server. Handles `install.add` (link code), `message` (@Sidekick → `ask()`, answered via `after()` so Teams isn't kept waiting), `card.action` (Assign / Done / Reopen on action items) and `postMeetingNotes()` (proactive notes + action-item cards to linked conversations; in channels the items go in the notes thread).
+- `app/src/lib/teams/cards.ts`: the Adaptive Cards (answer + sources, link code, help, meeting notes, action item), plain JSON.
+- `teams_conversations` table: every Teams channel/chat Sidekick was added to, with its service URL, link code (24 h) and, once linked, `org_id` + `workspace_id` + `guests`. `app/src/app/api/teams-links/route.ts`: list / link by code / guests toggle / unlink (Org Owner/Admin only, audited). UI: Workspaces page → “Teams channels and chats”.
 - API routes: `app/src/app/api/**` (client) and `app/src/app/api/owner/**` (owner).
 - UI: client pages in `app/src/app/(app)/*/view.tsx`, owner pages in `app/src/app/owner/(console)/*/view.tsx`; shells in `app/src/components/`.
 
@@ -47,14 +50,17 @@ npm --prefix app run dev
 - **Next.js 16.4 with Cache Components**: client-rendered pages need a server `page.tsx` wrapper exporting `instant = false` and re-exporting `./view`. Read `app/node_modules/next/dist/docs/` before using Next APIs; `middleware` is now `proxy.ts`.
 - zsh treats `[id]` in paths as a glob: quote paths in shell commands.
 - Test against a **separate copy** so the owner's real data is untouched: `SIDEKICK_DATA_DIR=<tmp> NEXT_DIST_DIR=.next-test npx next dev --port 3100` (then revert any `tsconfig.json` include lines Next adds, delete `.next-test`).
+- Teams bot auth: `PLAYGROUND_MODE` (no token check) needs `TEAMS_LOCAL_PLAYGROUND=true`, is off whenever `NODE_ENV=production`, and only accepts localhost requests with a localhost service URL. `dangerouslyAllowUnauthenticatedRequests` is always passed explicitly so the SDK's own env var can't switch auth off. The SDK reads `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` itself.
+- Teams users are not portal users yet: in a linked conversation they act as a Member of that one workspace (`teams:<aad id>` in `questions.user_id`, “Name (Teams)” in the audit log). Map them to real users with Entra ID sign-in later.
+- `npm --prefix app run dev:teams` + `npm --prefix app run playground` = local Teams test on port 3100 with `app/.playground-data` (see README). Playground writes `app/devTools/` logs (git-ignored).
 - Teams dev: Microsoft 365 Developer Program sandbox **denied** ("don't currently qualify"), the normal outcome in 2026. Business Basic trial used instead.
 - Production media bot (step 3) **must be hosted in Azure** on Windows (C#/.NET). Graph has **no raise-hand API**, so use a virtual hand-raise (chat card + side panel).
 
 ## Next: product step 2 plan (Sidekick in Teams)
-1. Add a Teams bot endpoint to the app (Microsoft Teams SDK / Agents SDK for TypeScript, `/api/messages`).
-2. @Sidekick in a channel/chat → answers via existing `ask()` for the workspace linked to that channel, with sources as an Adaptive Card.
-3. Link Teams channels to workspaces (new table + UI on the Workspaces page).
-4. After a transcript import, post the meeting notes card to the linked channel; action items as cards with Assign / Done.
-5. Test locally with **Microsoft 365 Agents Playground** (no tenant needed), then:
-6. Azure: create a free **Azure Bot** registration + Entra app; expose local app via dev tunnel; build the Teams app manifest; upload as a custom app to the Sidekick Labs Teams (after custom apps are allowed).
+1. ~~Teams bot endpoint `/api/messages` (Teams SDK 2.1)~~ Done.
+2. ~~@Sidekick answers via `ask()` for the linked workspace, Adaptive Card with sources~~ Done.
+3. ~~Link Teams channels to workspaces (table + Workspaces page UI)~~ Done (link code flow).
+4. ~~Post meeting notes + action-item cards (Assign / Done) after import~~ Done.
+5. ~~Test locally with Microsoft 365 Agents Playground~~ Done (answers, notes, Assign/Done, workspace wall checks).
+6. Azure: create a free **Azure Bot** registration + Entra app; expose local app via dev tunnel; build the Teams app manifest; upload as a custom app to the Sidekick Labs Teams (after custom apps are allowed). Put `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` in `app/.env.local` and run the normal `dev` (not `dev:teams`): over a tunnel Playground mode refuses requests anyway. Manifest bot scopes: `personal`, `team`, `groupChat`. Set `SIDEKICK_PUBLIC_URL` for the card links.
 7. Later in step 2: Microsoft (Entra ID) sign-in, Azure-hosted Claude (`AnthropicFoundry`), Azure AI Search, Postgres.

@@ -12,7 +12,8 @@
 | **Owner Console** (operator dashboard) | **Built, tested, merged into `main`** |
 | Azure account (personal) | Created, $25 budget alert set |
 | Microsoft 365 test org "Sidekick Labs" (Business Basic trial) | **Active again** (new free trial started Oct 15, 2026 in the same org; the first trial was cancelled by turning off recurring billing and could not be reactivated). Trial ends **Nov 14, 2026**; then $8.40 + tax per month (1 license, monthly) on the Visa unless the subscription is cancelled before Nov 15. **Never turn off recurring billing on a trial** (it cancels it) |
-| Teams custom-app upload | Not done yet; the M365 subscription is active again, so this is unblocked (README “Sidekick in real Teams”) |
+| Teams setup (Oct 15, 2026) | Done in Sidekick Labs: Teams "Upload custom apps" = On (Global policy); Entra app **Sidekick Bot** (single tenant, secret 180 days, IDs + secret only in `app/.env.local`); Azure Bot **sidekick-bot-dev** (Free, resource group `sidekick-rg`, Teams channel on, endpoint = dev tunnel); dev tunnel **sidekick** (anonymous, port 3000, expires after 30 days unused). Azure "Test in Web Chat" → app answered (end-to-end OK). Package built: `npm --prefix app run teams:package` |
+| Teams custom-app upload | **Next**: upload `teams/build/sidekick-teams.zip` in Teams. Org-wide "custom apps" setting was still locked ("setting up app management") — check it if upload is refused |
 | **Product step 2**: Sidekick in Teams | **Bot built and tested locally in Agents Playground** (branch `feat/teams-bot`). Next: Azure Bot registration, manifest, dev tunnel, real Teams |
 | Product step 3: live voice in meetings | Later |
 
@@ -55,6 +56,8 @@ npm --prefix app run dev
 - zsh treats `[id]` in paths as a glob: quote paths in shell commands.
 - Test against a **separate copy** so the owner's real data is untouched: `SIDEKICK_DATA_DIR=<tmp> NEXT_DIST_DIR=.next-test npx next dev --port 3100` (then revert any `tsconfig.json` include lines Next adds, delete `.next-test`).
 - Teams bot auth: `PLAYGROUND_MODE` (no token check) needs `TEAMS_LOCAL_PLAYGROUND=true`, is off whenever `NODE_ENV=production`, and only accepts localhost requests with a localhost service URL. `dangerouslyAllowUnauthenticatedRequests` is always passed explicitly so the SDK's own env var can't switch auth off. The SDK reads `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` itself.
+- After editing `app/.env.local` (bot IDs/secret), **restart the app**: a running dev server answered 401s correctly but didn't reply to Teams until restarted.
+- To test in real Teams, run the app (`npm --prefix app run dev`) **and** the tunnel (`npm --prefix app run tunnel`). The tunnel makes the whole portal reachable from the internet while it runs; stop it when not testing.
 - Teams users are not portal users yet: in a linked conversation they act as a Member of that one workspace (`teams:<aad id>` in `questions.user_id`, “Name (Teams)” in the audit log). Map them to real users with Entra ID sign-in later.
 - `npm --prefix app run dev:teams` + `npm --prefix app run playground` = local Teams test on port 3100 with `app/.playground-data` (see README). Playground writes `app/devTools/` logs (git-ignored).
 - Teams dev: Microsoft 365 Developer Program sandbox **denied** ("don't currently qualify"), the normal outcome in 2026. Business Basic trial used instead.

@@ -33,7 +33,7 @@ See [Sidekick in Teams](teams-guide.md) for what people see. To link:
 The **Teams channels and chats** table on the Workspaces page shows every link. Use the switch to change the client-guests setting, or **Unlink** to stop Sidekick answering and posting there.
 
 ## 7. Keep knowledge healthy
-**Memory & gaps → Refresh knowledge map** after adding material. Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place.
+**Memory & gaps → Refresh knowledge map** after adding material (Members and Admins can; Viewers and Billing Admins can't, since each refresh is a paid AI request). Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place.
 
 ## 8. Watch usage and activity
 - **Usage & billing**: AI cost by feature, workspace and day (also open to Billing Admins).

@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Meetings (/meetings): import a transcript (Teams .vtt, Word or pasted text) and read the notes Sidekick wrote:
+ * summary, decisions, action items, open questions and facts. Notes also go to the workspace's linked Teams channels.
+ */
+
 import { useCallback, useEffect, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, Spinner, useToast } from "@/components/ui";

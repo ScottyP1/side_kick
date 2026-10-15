@@ -1,3 +1,7 @@
+/**
+ * PATCH/DELETE /api/users/:id: change a person's role or workspaces, or remove them.
+ * Who: Org Owners and Org Admins. Nobody can be made Org Owner here. Audited.
+ */
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, requireUser, ROLES, type Role } from "@/lib/auth";
 import { all, get, run, tx } from "@/lib/db";

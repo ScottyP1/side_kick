@@ -1,9 +1,25 @@
+/**
+ * @file Small helpers shared by every API route (`app/src/app/api/**`).
+ *
+ * Every route follows the same pattern:
+ *   export const POST = handle(async (req) => {
+ *     const user = await requireUser();               // who is asking (401 if nobody)
+ *     const ws = requireWorkspace(user, body.ws);      // may they use this workspace (404 if not)
+ *     ...do the work, filtered by user.org_id and ws...
+ *     return { ok: true };                             // becomes a JSON response
+ *   });
+ * Errors thrown as `HttpError` become `{ error: "message" }` with that status, which the UI shows as-is.
+ */
 import "server-only";
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { HttpError } from "./auth";
 
-// Wraps a route handler so thrown HttpErrors become clean JSON errors the UI can show.
+/**
+ * Wraps a route handler so its return value becomes JSON and thrown errors become clean JSON errors the
+ * UI can show. Claude API errors (bad key, rate limit, outage) are translated into plain-language messages;
+ * anything unexpected is logged on the server and returned as a 500.
+ */
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>) {
   return async (...args: A) => {
     try {
@@ -26,6 +42,7 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
   };
 }
 
+/** Parses the request body as JSON, or throws 400 with a readable message. */
 export async function readJson<T>(req: Request): Promise<T> {
   try {
     return (await req.json()) as T;
@@ -34,6 +51,7 @@ export async function readJson<T>(req: Request): Promise<T> {
   }
 }
 
+/** Checks a required text field: must be a non-empty string under `max` characters. Returns it trimmed. */
 export function requireText(value: unknown, label: string, max = 500): string {
   if (typeof value !== "string" || !value.trim()) throw new HttpError(400, `${label} is required.`);
   if (value.length > max) throw new HttpError(400, `${label} is too long (max ${max} characters).`);

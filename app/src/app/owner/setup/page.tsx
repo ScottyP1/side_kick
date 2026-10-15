@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Owner Console setup (/owner/setup): creates the first owner account, only from the machine running Sidekick.
+ */
+
 import { useEffect, useState } from "react";
 import { api } from "@/components/ui";
 

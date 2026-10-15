@@ -1,3 +1,7 @@
+/**
+ * POST /api/gaps: assign or resolve a knowledge gap in a workspace.
+ * Who: anyone who can edit content in the workspace.
+ */
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { run } from "@/lib/db";

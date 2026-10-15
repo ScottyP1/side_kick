@@ -1,3 +1,7 @@
+/**
+ * GET/POST /api/users: list the organization's people, or add one with a temporary password.
+ * Who: Org Owners and Org Admins. Audited.
+ */
 import crypto from "node:crypto";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, createUser, HttpError, requireUser, ROLES, type Role } from "@/lib/auth";

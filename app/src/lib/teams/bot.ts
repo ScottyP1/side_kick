@@ -1,3 +1,27 @@
+/**
+ * @file Sidekick inside Microsoft Teams: the chat bot.
+ *
+ * How a Teams message reaches Sidekick
+ *   Teams → Azure Bot Service → POST /api/messages (this app) → Teams SDK → the handlers below.
+ * Each message is an **activity** (JSON describing who wrote what, where). The bot replies by calling back
+ * the **service URL** that came with the activity. Messages Sidekick sends on its own, like meeting notes,
+ * are **proactive** messages: they reuse the service URL saved when Sidekick first saw that conversation.
+ *
+ * Concepts
+ * - **Conversation**: a Teams channel, group chat or 1:1 chat that Sidekick has been added to. Each one
+ *   is a row in `teams_conversations`.
+ * - **Linking**: a conversation must be linked to exactly one workspace before Sidekick answers there.
+ *   Sidekick shows an 8-character code in Teams; an Org Admin enters it on the portal's Workspaces page.
+ *   The code proves the admin can see that chat, and the link puts the chat inside one org's walls.
+ * - **Client guests**: a linked conversation can be marked as having client guests. Answers there use only
+ *   Shareable sources, and notes from internal-only meetings are never posted there.
+ * - **Adaptive Cards**: the formatted messages with buttons (see cards.ts). Button clicks come back as
+ *   `card.action` activities and update the card in place.
+ * - **Authentication**: in production every request carries a token signed by Microsoft for Sidekick's
+ *   Azure Bot, and the Teams SDK rejects anything else (401). Local Playground mode is the only exception.
+ *
+ * Library: Microsoft Teams SDK for TypeScript (`@microsoft/teams.apps`), https://aka.ms/teams-sdk-ts
+ */
 import "server-only";
 import crypto from "node:crypto";
 import { after } from "next/server";
@@ -18,6 +42,7 @@ import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, VERBS
 // it only switches on outside production, when asked for explicitly, and only for localhost traffic.
 export const PLAYGROUND_MODE = process.env.NODE_ENV !== "production" && process.env.TEAMS_LOCAL_PLAYGROUND === "true";
 
+/** True if the URL points at this computer (localhost, 127.0.0.1 or ::1). */
 const isLocalUrl = (url: string) => {
   try {
     return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
@@ -33,6 +58,7 @@ const isLocalUrl = (url: string) => {
 // The Teams SDK normally runs its own Express server. This adapter hands its request handler to our
 // Next.js route instead, so the bot lives inside the same app (and database) as the portal.
 class NextRouteAdapter implements IHttpServerAdapter {
+  /** The SDK's request handler (auth check + activity routing), captured when the app initializes. */
   handler?: HttpRouteHandler;
   registerRoute(_method: "POST", path: string, handler: HttpRouteHandler) {
     if (path === "/api/messages") this.handler = handler;
@@ -43,6 +69,10 @@ declare global {
   var __sidekickTeams: Promise<{ app: App; adapter: NextRouteAdapter }> | undefined;
 }
 
+/**
+ * The one Teams SDK app for this server process, created and initialized on first use. Kept on
+ * `globalThis` so hot reloads in development don't register the handlers twice.
+ */
 export function teams() {
   globalThis.__sidekickTeams ??= (async () => {
     const adapter = new NextRouteAdapter();
@@ -59,6 +89,11 @@ export function teams() {
   return globalThis.__sidekickTeams;
 }
 
+/**
+ * Handles one POST to /api/messages: passes the activity to the Teams SDK (which checks the Microsoft
+ * token and runs the matching handler) and returns its response. In Playground mode, anything that isn't
+ * from this computer, or that asks Sidekick to reply to a non-local service URL, is refused with 401.
+ */
 export async function handleTeamsRequest(req: Request): Promise<Response> {
   let body: { serviceUrl?: string } & Record<string, unknown>;
   try {
@@ -80,6 +115,11 @@ export async function handleTeamsRequest(req: Request): Promise<Response> {
 /* Linked conversations (Teams channel/chat <-> Sidekick workspace)    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * A Teams channel or chat Sidekick has been added to (a `teams_conversations` row).
+ * `kind` is Teams' conversation type: "channel", "groupChat" or "personal" (1:1).
+ * `workspace_id`/`org_id` are null until an admin links it; `link_code` is only set while waiting.
+ */
 export type TeamsConversation = {
   id: string;
   service_url: string;
@@ -93,6 +133,7 @@ export type TeamsConversation = {
   guests: number;
 };
 
+/** The parts of an incoming Teams activity Sidekick uses. */
 type InboundActivity = {
   conversation: { id: string; conversationType?: string; tenantId?: string; name?: string };
   serviceUrl?: string;
@@ -103,6 +144,10 @@ type InboundActivity = {
 // Channel messages arrive as "<channel id>;messageid=<thread>"; the link is for the whole channel.
 export const baseConversationId = (id: string) => id.split(";")[0];
 
+/**
+ * Saves (or refreshes) the conversation an activity came from and returns its row. Keeps the latest
+ * service URL and display name, which proactive messages and the Workspaces page need.
+ */
 function touchConversation(a: InboundActivity): TeamsConversation {
   const id = baseConversationId(a.conversation.id);
   const kind = a.conversation.conversationType ?? "personal";
@@ -120,6 +165,10 @@ function touchConversation(a: InboundActivity): TeamsConversation {
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O or 1/I lookalikes
 const CODE_HOURS = 24;
 
+/**
+ * Returns this conversation's link code, making a new one if there is none or it expired (24 hours).
+ * Format "ABCD-2345": 8 random characters from an alphabet without lookalikes, about 40 bits of randomness.
+ */
 function freshLinkCode(conv: TeamsConversation): string {
   if (conv.link_code && conv.code_expires_at && new Date(conv.code_expires_at) > new Date()) return conv.link_code;
   const chars = Array.from(crypto.randomBytes(8), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
@@ -128,14 +177,17 @@ function freshLinkCode(conv: TeamsConversation): string {
   return code;
 }
 
+/** Accepts a code typed any way ("abcd 2345", "ABCD2345") and returns "ABCD-2345", or null if it can't be one. */
 export const normalizeCode = (code: string) => {
   const c = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
   return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : null;
 };
 
+/** Name of the linked workspace (checked against the conversation's org), or null if not linked. */
 const workspaceName = (conv: TeamsConversation) =>
   conv.workspace_id ? get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", conv.workspace_id, conv.org_id)?.name ?? null : null;
 
+/** True if the owner paused this organization in the Owner Console; Sidekick then stops answering in Teams. */
 const orgPaused = (orgId: string) => get<{ status: string }>("SELECT status FROM orgs WHERE id = ?", orgId)?.status === "Suspended";
 
 // Teams users aren't portal users yet (Entra ID sign-in comes later in step 2). Inside a linked
@@ -153,12 +205,20 @@ const teamsMember = (conv: TeamsConversation, from: InboundActivity["from"]): Us
 /* Activity handlers                                                   */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Wires up what Sidekick does for each kind of Teams activity:
+ * - `install.add`: Sidekick was added to a channel/chat → greet with the help card, or the link code.
+ * - `message`: someone mentioned Sidekick → commands (`help`, `link`) or a question to answer.
+ * - `card.action`: someone clicked Assign / Mark done / Reopen on an action-item card.
+ */
 function registerHandlers(app: App) {
   app.on("install.add", async ({ activity, send }) => {
     const conv = touchConversation(activity);
     await send(conv.workspace_id ? helpCard(workspaceName(conv)) : linkCard(freshLinkCode(conv), conv.kind));
   });
 
+  // In channels and group chats Teams only delivers messages that @mention Sidekick; in 1:1 chats, every message.
+  // stripMentionsText removes the "@Sidekick" part so only the question is left.
   app.on("message", async ({ activity, send, reply }) => {
     const conv = touchConversation(activity);
     const question = (stripMentionsText(activity) ?? "").replace(/\s+/g, " ").trim();
@@ -186,6 +246,7 @@ function registerHandlers(app: App) {
     });
   });
 
+  // Returns the updated card, which Teams swaps in for the old one, so everyone sees the new owner/status.
   app.on("card.action", async ({ activity }) => {
     const { verb, data } = activity.value.action;
     // A message response shows the text to the person who clicked and leaves the card as it was.
@@ -221,10 +282,14 @@ function registerHandlers(app: App) {
 /* Proactive: post meeting notes to the workspace's linked channels    */
 /* ------------------------------------------------------------------ */
 
+/** Wraps an Adaptive Card in a Teams message. */
 const cardMessage = (c: IAdaptiveCard): IMessageActivityInput =>
   ({ type: "message", attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: c }] }) as IMessageActivityInput;
 
-// Sends a card into a Teams conversation outside of a reply (proactive message). Returns the new message id.
+/**
+ * Sends a card into a Teams conversation outside of a reply (a proactive message). Returns the new message
+ * id. Pass `conversationId` to post into a channel thread instead of starting a new post.
+ */
 export async function postCard(conv: Pick<TeamsConversation, "id" | "service_url">, c: IAdaptiveCard, conversationId = conv.id): Promise<string | undefined> {
   if (PLAYGROUND_MODE && !isLocalUrl(conv.service_url)) throw new Error("Playground mode only posts to local conversations.");
   const { app } = await teams();
@@ -232,8 +297,15 @@ export async function postCard(conv: Pick<TeamsConversation, "id" | "service_url
   return res.id;
 }
 
+// Cap so one long meeting can't flood a channel; the full list is always in the portal.
 const MAX_ACTION_CARDS = 15;
 
+/**
+ * Posts a processed meeting's notes card, then one card per action item, to every Teams conversation
+ * linked to the meeting's workspace. Skips conversations with client guests if the meeting was internal.
+ * A failure in one conversation is logged and doesn't stop the others. Returns how many got the notes.
+ * Called from the meeting import/reprocess routes after the response is sent, so imports never wait on Teams.
+ */
 export async function postMeetingNotes(orgId: string, meetingId: string): Promise<number> {
   const m = get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; external_guests: number; ws: string }>(
     "SELECT m.id, m.workspace_id, m.title, m.held_at, m.summary, m.status, m.external_guests, w.name AS ws FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.id = ? AND m.org_id = ?",

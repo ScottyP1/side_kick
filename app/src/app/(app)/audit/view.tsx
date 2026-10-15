@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Security & audit (/audit): the organization's audit log: sign-ins, access changes, uploads, deletions,
+ * Teams links and every action Sidekick takes on its own. Admins only.
+ */
+
 import { useEffect, useState } from "react";
 import { api, fmtTime, Icon, Pill } from "@/components/ui";
 

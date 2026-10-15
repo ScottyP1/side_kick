@@ -1,3 +1,7 @@
+/**
+ * GET /api/owner/performance: response times (typical and slowest), error rates and cache savings per feature and model.
+ * Who: platform operators only.
+ */
 import { handle } from "@/lib/api";
 import { all } from "@/lib/db";
 import { requireOwner } from "@/lib/owner";

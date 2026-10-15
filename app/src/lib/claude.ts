@@ -1,3 +1,20 @@
+/**
+ * @file The only place Sidekick talks to Claude (Anthropic's AI model).
+ *
+ * Concepts
+ * - **Feature**: each kind of AI work has a name (`ask`, `extract`, `insights`) so it can use its own
+ *   model, be metered separately on the Usage page, and be paused with a kill switch in the Owner Console.
+ * - **Structured output**: instead of free text, Claude must reply with JSON matching a Zod schema, so the
+ *   app can save answers, decisions and action items without guessing at their shape.
+ * - **Tokens and cost**: Claude bills per token (roughly ¾ of a word). Every call is logged to
+ *   `usage_events` with tokens, USD cost, latency and any error, whether it succeeded or not.
+ * - **Prompt caching**: repeated instructions are cached by Anthropic, so follow-up calls cost less.
+ * - **Server-side fallback**: if a model declines a request on policy grounds, Anthropic retries it on
+ *   their recommended fallback model automatically.
+ *
+ * The key comes from `ANTHROPIC_API_KEY` in app/.env.local. Production swaps this client for Claude hosted
+ * on Azure (AnthropicFoundry) without changing callers.
+ */
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
@@ -16,7 +33,7 @@ export const MODELS = {
 };
 export type Feature = keyof typeof MODELS;
 
-// USD per million tokens (Claude API list prices). Used for the Usage page.
+// USD per million tokens (Claude API list prices). Used for the Usage page. Cache writes cost 1.25x input.
 const PRICES: Record<string, { in: number; out: number; cacheRead: number }> = {
   "claude-opus-5-5": { in: 4, out: 20, cacheRead: 0.2 },
   "claude-sonnet-5-5": { in: 2, out: 10, cacheRead: 0.2 },
@@ -24,6 +41,7 @@ const PRICES: Record<string, { in: number; out: number; cacheRead: number }> = {
 };
 
 let client: Anthropic | null = null;
+/** The shared Anthropic client. Throws a friendly 503 if no API key is configured yet. */
 function anthropic(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new HttpError(503, "Claude isn't connected yet. Add your key as ANTHROPIC_API_KEY in app/.env.local, then restart the app.");
@@ -32,10 +50,12 @@ function anthropic(): Anthropic {
   return client;
 }
 
+/** True when an API key is set. Drives the "Claude connected" badge in the portal header. */
 export function claudeConfigured() {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
+/** Dollar cost of one call, from its token usage and the model's prices (unknown models priced as Opus). */
 function costOf(model: string, u: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }) {
   const p = PRICES[model] ?? PRICES["claude-opus-5-5"];
   const cacheRead = u.cache_read_input_tokens ?? 0;
@@ -43,11 +63,23 @@ function costOf(model: string, u: { input_tokens: number; output_tokens: number;
   return (u.input_tokens * p.in + cacheWrite * p.in * 1.25 + cacheRead * p.cacheRead + u.output_tokens * p.out) / 1_000_000;
 }
 
+/** Who the call is for, so its cost lands on the right org and workspace in usage reports. */
 type Ctx = { orgId: string; workspaceId: string | null };
 
 /**
- * Calls Claude and returns output validated against a Zod schema.
+ * Calls Claude and returns its answer, validated against a Zod schema.
+ *
+ * @param feature which feature is calling (picks the model, kill switch and usage bucket)
+ * @param ctx     org and workspace the cost is charged to
+ * @param opts.system    instructions for Claude (cached between calls)
+ * @param opts.content   the material to work on, e.g. sources plus the question
+ * @param opts.schema    the exact JSON shape Claude must return
+ * @param opts.effort    how hard Claude thinks: "low" is fast and cheap, "high" is most thorough
+ * @param opts.maxTokens upper limit on the reply length
+ * @throws HttpError 503 if the feature is paused or no key is set; 422 if Claude declined or ran out of room
+ *
  * Server-side fallback ("default") re-runs a policy-declined request on Anthropic's recommended model.
+ * Usage is recorded in `finally`, so failed calls are metered too.
  */
 export async function structured<S extends z.ZodType>(
   feature: Feature,

@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Connectors (/connectors): the tools Sidekick will read from (Outlook, SharePoint, Jira, ...).
+ * Today uploads and transcript import work; real connectors with their own sign-in come in step 2.
+ */
+
 import { Pill } from "@/components/ui";
 
 const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; desc: string; live?: boolean }[] = [

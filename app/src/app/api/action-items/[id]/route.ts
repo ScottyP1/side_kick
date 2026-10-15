@@ -1,3 +1,7 @@
+/**
+ * PATCH /api/action-items/:id: change an action item's status (Open, In progress, Done), owner or due date.
+ * Who: anyone who can edit content in the item's workspace. Audited. Teams cards change items through bot.ts instead.
+ */
 import { handle, readJson } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { get, run } from "@/lib/db";

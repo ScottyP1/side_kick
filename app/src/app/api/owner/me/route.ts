@@ -1,3 +1,6 @@
+/**
+ * GET /api/owner/me: the signed-in platform operator.
+ */
 import { handle } from "@/lib/api";
 import { requireOwner } from "@/lib/owner";
 

@@ -1,3 +1,7 @@
+/**
+ * GET/POST /api/workspaces: the workspaces this user can see (with counts), or create one.
+ * Who: everyone can list their own; only Org Owners and Org Admins can create.
+ */
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, isAdmin, requireUser, workspaceIdsFor, HttpError } from "@/lib/auth";
 import { all, newId, now, run } from "@/lib/db";

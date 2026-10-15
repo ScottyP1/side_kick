@@ -1,3 +1,7 @@
+/**
+ * POST /api/auth/login: sign in to the client portal with email and password; sets the session cookie.
+ * Wrong email and wrong password give the same message, so it doesn't reveal which accounts exist.
+ */
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, startSession, verifyPassword } from "@/lib/auth";
 import { get } from "@/lib/db";

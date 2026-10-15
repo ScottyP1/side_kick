@@ -1,3 +1,7 @@
+/**
+ * GET/POST /api/owner/releases: the running version, models in use, kill switches and the operator log; POST flips a kill switch.
+ * Who: platform operators only.
+ */
 import fs from "node:fs";
 import path from "node:path";
 import { handle, readJson } from "@/lib/api";

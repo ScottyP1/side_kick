@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * First-run setup (/setup): creates the organization and its Org Owner on a new install.
+ */
+
 import { useEffect, useState } from "react";
 import { api } from "@/components/ui";
 

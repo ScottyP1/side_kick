@@ -1,3 +1,7 @@
+/**
+ * PATCH/DELETE /api/docs/:id: re-tag a document as internal or shareable, or delete it (and its search passages).
+ * Who: anyone who can edit content in the document's workspace. Audited.
+ */
 import { handle, readJson } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { get, run } from "@/lib/db";

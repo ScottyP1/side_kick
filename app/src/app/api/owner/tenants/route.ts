@@ -1,3 +1,7 @@
+/**
+ * GET/POST /api/owner/tenants: every client organization with its usage, or onboard a new one.
+ * Who: platform operators only.
+ */
 import crypto from "node:crypto";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, createUser, HttpError } from "@/lib/auth";

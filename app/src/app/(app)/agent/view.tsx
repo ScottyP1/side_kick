@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * AI models & agent (/agent): which Claude model each feature uses and how Sidekick is instructed to behave.
+ * Models are changed with SIDEKICK_MODEL_* settings in app/.env.local (see lib/claude.ts).
+ */
+
 import { useApp } from "@/components/shell";
 import { Pill } from "@/components/ui";
 

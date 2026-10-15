@@ -1,3 +1,7 @@
+/**
+ * POST /api/auth/password: change your own password ({ current, next }, at least 10 characters).
+ * Also clears the "must change password" flag set on accounts created with a temporary password.
+ */
 import { handle, readJson } from "@/lib/api";
 import { audit, hashPassword, HttpError, requireUser, verifyPassword } from "@/lib/auth";
 import { get, run } from "@/lib/db";

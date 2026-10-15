@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Releases & switches (/owner/releases): the running version, models in use, kill switches and the operator log.
+ */
+
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtTime, Modal, Pill, Switch, useToast } from "@/components/ui";
 

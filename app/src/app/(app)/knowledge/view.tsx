@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Knowledge & docs (/knowledge): upload documents to the current workspace, tag them Internal or Shareable,
+ * and try Ask Sidekick. Shareable documents are the only ones used when client guests are present.
+ */
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, CitedText, fmtBytes, fmtDate, Icon, Pill, Spinner, useToast } from "@/components/ui";

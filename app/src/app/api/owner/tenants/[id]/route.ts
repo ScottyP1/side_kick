@@ -1,3 +1,7 @@
+/**
+ * PATCH /api/owner/tenants/:id: pause or resume a client organization.
+ * Who: platform operators only. Logged in the operator log.
+ */
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError } from "@/lib/auth";
 import { get, run } from "@/lib/db";

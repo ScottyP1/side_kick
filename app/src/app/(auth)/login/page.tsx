@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Sign in (/login) to the client portal.
+ */
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/components/ui";

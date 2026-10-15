@@ -1,3 +1,7 @@
+/**
+ * GET/POST /api/auth/setup: first-run setup of a new install.
+ * GET tells the UI whether setup is still needed; POST creates the organization and its Org Owner.
+ */
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, createUser, HttpError, startSession } from "@/lib/auth";
 import { get, newId, now, run, tx } from "@/lib/db";

@@ -1,3 +1,7 @@
+/**
+ * GET /api/owner/overview: platform-wide AI spend, clients, error rate and response times for the Owner Console home.
+ * Who: platform operators only.
+ */
 import { handle } from "@/lib/api";
 import { all, get } from "@/lib/db";
 import { requireOwner } from "@/lib/owner";

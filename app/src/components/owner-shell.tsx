@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * The Owner Console frame: sidebar and header around every Owner Console page, and the owner sign-in check.
+ */
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";

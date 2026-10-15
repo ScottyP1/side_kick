@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Performance & errors (/owner/performance): response times, error rates and cache savings per feature and model.
+ */
+
 import { useEffect, useState } from "react";
 import { api, fmtTime, Pill, usd } from "@/components/ui";
 

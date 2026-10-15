@@ -1,3 +1,7 @@
+/**
+ * GET/POST /api/meetings: list a workspace's meetings, or import a transcript and have Sidekick write the notes.
+ * After a successful import the notes are posted to the workspace's linked Teams channels.
+ */
 import { after } from "next/server";
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";

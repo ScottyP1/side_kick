@@ -1,3 +1,7 @@
+/**
+ * GET/POST/DELETE /api/meetings/:id: a meeting's notes; reprocess it (after a failure); or delete it with its notes and transcript.
+ * Who: workspace members (reprocess and delete need edit rights).
+ */
 import { after } from "next/server";
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";

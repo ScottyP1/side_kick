@@ -1,3 +1,20 @@
+/**
+ * @file Sign-in, roles and workspace walls for the client portal.
+ *
+ * Concepts
+ * - **Session**: after sign-in the browser gets an `sk_session` cookie holding a random token. The
+ *   database stores only a hash of it, so a leaked database can't be used to sign in. Sessions last 7 days.
+ * - **Roles** decide what a user may do inside their org:
+ *   - Org Owner / Org Admin: everything, including users, workspaces, Teams links and settings.
+ *   - Billing Admin: usage and billing, but can't change content.
+ *   - Member: works inside the workspaces they belong to (upload, import meetings, ask).
+ *   - Viewer: read-only inside their workspaces.
+ * - **Workspace walls**: a user only ever sees the workspaces they're a member of (admins see all in
+ *   their org). Every API route that touches workspace data calls `requireWorkspace` first.
+ * - **Audit log**: important actions are recorded with `audit()` and shown on Security & audit.
+ *
+ * Production replaces passwords with Microsoft (Entra ID) sign-in; roles and walls stay the same.
+ */
 import "server-only";
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
@@ -6,9 +23,11 @@ import { all, get, newId, now, run } from "./db";
 export const SESSION_COOKIE = "sk_session";
 const SESSION_DAYS = 7;
 
+/** Every role a portal user can have, from most to least access. */
 export const ROLES = ["Org Owner", "Org Admin", "Billing Admin", "Member", "Viewer"] as const;
 export type Role = (typeof ROLES)[number];
 
+/** The signed-in portal user, as API routes see them. */
 export type User = {
   id: string;
   org_id: string;
@@ -18,12 +37,17 @@ export type User = {
   must_change_password: number;
 };
 
+/**
+ * Hashes a password with scrypt (slow on purpose, so guessing is expensive) and a random salt.
+ * Stored as `scrypt$<salt hex>$<key hex>`.
+ */
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
   const key = crypto.scryptSync(password, salt, 64);
   return `scrypt$${salt.toString("hex")}$${key.toString("hex")}`;
 }
 
+/** Checks a password against a stored hash, using a constant-time comparison to avoid timing leaks. */
 export function verifyPassword(password: string, stored: string): boolean {
   const [scheme, saltHex, keyHex] = stored.split("$");
   if (scheme !== "scrypt" || !saltHex || !keyHex) return false;
@@ -34,6 +58,7 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
+/** Signs a user in: creates a session row and sets the `sk_session` cookie (httpOnly, 7 days). */
 export async function startSession(userId: string) {
   const token = crypto.randomBytes(32).toString("base64url");
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
@@ -48,6 +73,7 @@ export async function startSession(userId: string) {
   });
 }
 
+/** Signs the current browser out: deletes its session row and clears the cookie. */
 export async function endSession() {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
@@ -55,6 +81,10 @@ export async function endSession() {
   jar.delete(SESSION_COOKIE);
 }
 
+/**
+ * Returns the signed-in user for this request, or null if there is no valid session.
+ * Throws 403 if the user's organization has been paused from the Owner Console.
+ */
 export async function currentUser(): Promise<User | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -68,12 +98,20 @@ export async function currentUser(): Promise<User | null> {
   return { id: row.id, org_id: row.org_id, name: row.name, email: row.email, role: row.role, must_change_password: row.must_change_password };
 }
 
+/**
+ * An error with an HTTP status and a message that is safe to show the user. API routes wrapped in
+ * `handle()` (api.ts) turn it into a JSON `{ error }` response with that status.
+ */
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
 }
 
+/**
+ * Returns the signed-in user or throws 401. Pass `roles` to also require one of those roles (403 otherwise).
+ * The first line of almost every API route.
+ */
 export async function requireUser(roles?: readonly Role[]): Promise<User> {
   const user = await currentUser();
   if (!user) throw new HttpError(401, "Sign in to continue.");
@@ -81,7 +119,9 @@ export async function requireUser(roles?: readonly Role[]): Promise<User> {
   return user;
 }
 
+/** Org Owners and Org Admins can manage users, workspaces, Teams links and settings. */
 export const isAdmin = (u: User) => u.role === "Org Owner" || u.role === "Org Admin";
+/** Everyone except Viewers and Billing Admins can change workspace content. */
 export const canEdit = (u: User) => u.role !== "Viewer" && u.role !== "Billing Admin";
 
 // Workspace walls: admins see every workspace in their org; everyone else only the ones they belong to.
@@ -95,6 +135,11 @@ export function workspaceIdsFor(user: User): string[] {
   ).map((r) => r.workspace_id);
 }
 
+/**
+ * The workspace wall. Returns the workspace id if this user may use it; otherwise throws 404 (not 403,
+ * so people can't tell whether a workspace they don't belong to exists). Call it before any query that
+ * reads or writes workspace data, and use the returned id in that query.
+ */
 export function requireWorkspace(user: User, workspaceId: string | null | undefined): string {
   if (!workspaceId || !workspaceIdsFor(user).includes(workspaceId)) {
     throw new HttpError(404, "Workspace not found, or you're not a member of it.");
@@ -102,6 +147,10 @@ export function requireWorkspace(user: User, workspaceId: string | null | undefi
   return workspaceId;
 }
 
+/**
+ * Records an action in the audit log. `kind` groups entries (Access, Data, Agent action, Policy change).
+ * Pass `user = null` for system actions; use `auditAsSidekick` for things Sidekick did on its own.
+ */
 export function audit(user: Pick<User, "org_id" | "name"> | null, action: string, kind: string, workspaceId: string | null = null) {
   run(
     "INSERT INTO audit_log (org_id, actor, action, kind, workspace_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -114,10 +163,15 @@ export function audit(user: Pick<User, "org_id" | "name"> | null, action: string
   );
 }
 
+/** Records an action Sidekick took by itself (e.g. writing meeting notes), shown with "Sidekick" as the actor. */
 export function auditAsSidekick(orgId: string, action: string, kind: string, workspaceId: string | null = null) {
   audit({ org_id: orgId, name: "Sidekick" }, action, kind, workspaceId);
 }
 
+/**
+ * Creates a portal user. With `mustChange` the user has to pick a new password at first sign-in
+ * (used when an admin creates the account with a one-time password).
+ */
 export function createUser(orgId: string, name: string, email: string, role: Role, password: string, mustChange: boolean) {
   const id = newId();
   run(

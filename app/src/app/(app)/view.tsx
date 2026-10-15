@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Home (/): what Sidekick knows and what needs attention across your workspaces: counts, recent meetings, open gaps and action items.
+ */
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/shell";

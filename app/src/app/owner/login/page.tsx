@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Owner Console sign-in (/owner/login), separate from client sign-in.
+ */
+
 import { useEffect, useState } from "react";
 import { api } from "@/components/ui";
 

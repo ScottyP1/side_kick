@@ -1,3 +1,7 @@
+/**
+ * GET /api/audit: the organization's audit log (who did what, when), newest first.
+ * Who: Org Owners and Org Admins.
+ */
 import { handle } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { all } from "@/lib/db";

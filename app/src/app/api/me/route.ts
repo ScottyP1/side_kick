@@ -1,3 +1,7 @@
+/**
+ * GET /api/me: the signed-in user, their organization, branding, and the workspaces they can open.
+ * The portal loads this first to build its menus and workspace picker.
+ */
 import { handle } from "@/lib/api";
 import { isAdmin, requireUser, workspaceIdsFor } from "@/lib/auth";
 import { all, get } from "@/lib/db";

@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Memory & gaps (/memory): the knowledge map (topics and how well each is covered), knowledge gaps with
+ * suggested fixes, and the action-item tracker for the current workspace.
+ */
+
 import { useCallback, useEffect, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, fmtDate, fmtTime, Icon, Pill, Spinner, useToast } from "@/components/ui";

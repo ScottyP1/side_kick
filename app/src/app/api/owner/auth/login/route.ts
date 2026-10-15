@@ -1,3 +1,6 @@
+/**
+ * POST /api/owner/auth/login: sign in to the Owner Console (separate from client sign-in).
+ */
 import { handle, readJson } from "@/lib/api";
 import { HttpError } from "@/lib/auth";
 import { checkOwnerPassword, platformLog, startOwnerSession } from "@/lib/owner";

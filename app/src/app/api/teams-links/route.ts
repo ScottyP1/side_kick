@@ -1,3 +1,7 @@
+/**
+ * GET/POST/PATCH/DELETE /api/teams-links: which Teams channels and chats are linked to which workspace.
+ * Linking uses the code Sidekick shows in Teams (see lib/teams/bot.ts). Listing: workspace members; changes: Org Owners and Org Admins.
+ */
 import { after } from "next/server";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, HttpError, isAdmin, requireUser, requireWorkspace, workspaceIdsFor, type User } from "@/lib/auth";

@@ -1,3 +1,6 @@
+/**
+ * GET/POST /api/owner/auth/setup: create the first Owner Console account (once, from localhost only).
+ */
 import { handle, readJson, requireText } from "@/lib/api";
 import { HttpError } from "@/lib/auth";
 import { assertLocalRequest, createOwner, ownerExists, platformLog, startOwnerSession } from "@/lib/owner";

@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Clients (/owner/clients): every client organization with its users, usage and errors; add a client or pause one.
+ */
+
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Icon, Modal, Pill, usd, useToast } from "@/components/ui";
 

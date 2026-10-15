@@ -1,3 +1,7 @@
+/**
+ * GET/POST /api/docs: list a workspace's documents, or upload new ones.
+ * Uploads are extracted to text and indexed for search straight away. Who: workspace members (upload needs edit rights).
+ */
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { all, newId, now, run } from "@/lib/db";

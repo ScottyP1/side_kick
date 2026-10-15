@@ -32,6 +32,10 @@ npm --prefix app run dev
 - Owner Console: http://localhost:3000/owner (first visit = owner account, localhost only)
 - Demo script: `README.md`
 
+## Documentation
+- User guides: `docs/guide/` (concepts, admin, Teams, Owner Console). Developer overview and rules: `docs/ARCHITECTURE.md`.
+- Every source file has a header comment and every exported function/route a doc comment. Keep it that way (see CLAUDE.md).
+
 ## What step 1 + Owner Console contain (code map)
 - `app/src/lib/db.ts`: SQLite (`node:sqlite`, built into Node 26) schema + small migrations. One file: `app/data/sidekick.db`. `SIDEKICK_DATA_DIR` overrides the folder (used for test copies).
 - `app/src/lib/auth.ts`: client users, scrypt passwords, session cookie `sk_session`, roles (Org Owner/Admin, Billing Admin, Member, Viewer), workspace walls (`requireWorkspace`), audit log, suspended-org check.

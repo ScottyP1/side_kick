@@ -3,9 +3,12 @@
 An AI teammate for Microsoft Teams. This folder holds the step 1 build: a working web dashboard where Sidekick reads your documents and meeting transcripts, writes meeting notes, answers questions with sources, and maps what the team knows and doesn't.
 
 - `app/` – the Next.js (React) app: dashboard + server API
+- `docs/guide/` – user guides: concepts, admin guide, Sidekick in Teams, Owner Console
+- `docs/ARCHITECTURE.md` – how the code fits together, and the rules every change keeps
 - `docs/BLUEPRINT.md` – the full product blueprint (steps 1–3, architecture, security)
 - `docs/sidekick-dashboard*.html` – the original clickable mockups
 - `samples/` – a sample Teams transcript and documents for demos
+- `teams/` – the Teams app package (manifest template + icons)
 
 ## Run it
 

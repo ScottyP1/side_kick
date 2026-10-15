@@ -1,3 +1,7 @@
+/**
+ * GET /api/memory: a workspace's memory: the knowledge map with gap statuses, items from meetings, and action items.
+ * Who: any member of the workspace.
+ */
 import { handle } from "@/lib/api";
 import { requireUser, requireWorkspace } from "@/lib/auth";
 import { all, get } from "@/lib/db";

@@ -1,3 +1,7 @@
+/**
+ * GET /api/usage: what Sidekick's AI work cost this organization, by feature, model, workspace and day.
+ * Who: Org Owners, Org Admins and Billing Admins.
+ */
 import { handle } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { all, get } from "@/lib/db";

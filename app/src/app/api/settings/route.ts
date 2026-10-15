@@ -1,3 +1,7 @@
+/**
+ * PUT /api/settings: organization settings (branding today).
+ * Who: Org Owners and Org Admins. Audited.
+ */
 import { handle, readJson } from "@/lib/api";
 import { audit, requireUser } from "@/lib/auth";
 import { run } from "@/lib/db";

@@ -1,3 +1,7 @@
+/**
+ * POST /api/memory/refresh: rebuild a workspace's knowledge map (topics, coverage, gaps) with Claude.
+ * Who: any member of the workspace.
+ */
 import { handle, readJson } from "@/lib/api";
 import { HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { refreshInsights } from "@/lib/sidekick";

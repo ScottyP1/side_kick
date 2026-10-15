@@ -1,3 +1,6 @@
+/**
+ * GET /api/overview: numbers for the portal home page across the workspaces this user can see.
+ */
 import { handle } from "@/lib/api";
 import { requireUser, workspaceIdsFor } from "@/lib/auth";
 import { all, get } from "@/lib/db";

@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Workspaces (/workspaces): one workspace per client engagement, plus the Teams channels and chats linked to them.
+ * Admins create workspaces and link Teams channels with the code Sidekick shows in Teams.
+ */
+
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";

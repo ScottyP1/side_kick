@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Small shared UI pieces used by every page: the `api()` fetch helper, toasts, icons, pills, switches,
+ * modals, date/money formatting and `CitedText` (shows [S1] citations as small source badges).
+ */
+
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 /* ---------- API helper: JSON in/out, readable errors ---------- */
@@ -9,6 +14,10 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Calls one of Sidekick's API routes and returns the JSON. `json` sends a JSON body.
+ * Throws `ApiError` with the server's plain-language message on failure; a 401 sends the browser to sign-in.
+ */
 export async function api<T = unknown>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {};
   const res = await fetch(url, {
@@ -26,6 +35,7 @@ export async function api<T = unknown>(url: string, init?: RequestInit & { json?
 
 /* ---------- Toasts ---------- */
 const ToastCtx = createContext<(msg: string) => void>(() => {});
+/** Returns `toast(message)`, which shows a short confirmation at the bottom of the screen. */
 export const useToast = () => useContext(ToastCtx);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -83,10 +93,12 @@ export const Pill = ({ kind = "", children, nodot }: { kind?: string; children: 
 
 export const Spinner = () => <span className="spinner" aria-hidden="true" />;
 
+/** An on/off switch. `label` is read out by screen readers. */
 export const Switch = ({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) => (
   <button className="switch" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} />
 );
 
+/** A dialog over the page with a title, body and footer buttons. Escape or the X closes it. */
 export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -121,6 +133,7 @@ export const usd = (n: number) => (n < 0.01 && n > 0 ? "<$0.01" : `$${n.toFixed(
 export const fmtBytes = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 // Renders an answer with [S1] markers styled as citation chips.
+/** Renders answer text with each [S1]-style citation shown as a small badge matching the source list. */
 export function CitedText({ text }: { text: string }) {
   const parts = text.split(/(\[S\d+\])/g);
   return (

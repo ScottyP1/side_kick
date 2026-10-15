@@ -7,7 +7,8 @@ import crypto from "node:crypto";
 // Step 1 uses SQLite (built into Node) so the demo runs on a laptop with no setup.
 // Step 2 moves to Azure Database for PostgreSQL + Azure AI Search (see docs/BLUEPRINT.md 4.4, 4.6).
 
-const DATA_DIR = path.join(process.cwd(), "data");
+// SIDEKICK_DATA_DIR lets a test copy run against its own database.
+const DATA_DIR = process.env.SIDEKICK_DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "sidekick.db");
 
 const SCHEMA = `
@@ -87,6 +88,22 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE TABLE IF NOT EXISTS settings (
   org_id TEXT PRIMARY KEY, json TEXT NOT NULL
 );
+-- Owner Console: platform operators (Sidekick's owner), separate from client users.
+CREATE TABLE IF NOT EXISTS platform_admins (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL, created_at TEXT NOT NULL, last_active TEXT
+);
+CREATE TABLE IF NOT EXISTS owner_sessions (
+  token_hash TEXT PRIMARY KEY, admin_id TEXT NOT NULL REFERENCES platform_admins(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL
+);
+-- Global feature switches the owner can flip (kill switches). Missing key = enabled.
+CREATE TABLE IF NOT EXISTS platform_flags (
+  key TEXT PRIMARY KEY, enabled INTEGER NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS platform_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
+);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -105,9 +122,18 @@ export function db(): DatabaseSync {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const conn = new DatabaseSync(DB_PATH);
     conn.exec(SCHEMA);
+    migrate(conn);
     globalThis.__sidekickDb = conn;
   }
   return globalThis.__sidekickDb;
+}
+
+// Adds columns introduced after a database was first created.
+function migrate(conn: DatabaseSync) {
+  const has = (table: string, col: string) =>
+    (conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === col);
+  if (!has("orgs", "status")) conn.exec("ALTER TABLE orgs ADD COLUMN status TEXT NOT NULL DEFAULT 'Active'");
+  if (!has("usage_events", "error")) conn.exec("ALTER TABLE usage_events ADD COLUMN error TEXT");
 }
 
 export const newId = () => crypto.randomUUID();

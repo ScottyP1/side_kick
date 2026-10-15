@@ -1,0 +1,104 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { api, fmtTime, Pill, usd } from "@/components/ui";
+
+type G = { name: string; calls: number; errors: number; p50: number; p95: number; cost: number; cacheHit: number };
+type P = {
+  byFeature: G[];
+  byModel: G[];
+  errors: { created_at: string; feature: string; model: string; latency_ms: number; error: string | null; tenant: string | null }[];
+  processing: { tenant: string; failed_docs: number; failed_meetings: number; unanswered: number; questions: number }[];
+};
+const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map" };
+const sec = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+
+function Table({ title, rows, label }: { title: string; rows: G[]; label: (n: string) => string }) {
+  return (
+    <div className="panel">
+      <div className="panel-h"><h2>{title}</h2><span className="muted">Last 30 days</span></div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>{title.split(" ").pop()}</th><th className="r">Requests</th><th className="r">Typical (p50)</th><th className="r">Slowest 5% (p95)</th><th className="r">Errors</th><th className="r">Cache hit</th><th className="r">Cost</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.name}>
+                <td className={label(r.name) === r.name ? "mono" : undefined}>{label(r.name)}</td>
+                <td className="r num">{r.calls}</td>
+                <td className="r num">{sec(r.p50)}</td>
+                <td className="r num" style={{ color: r.p95 > 30000 ? "var(--warn)" : undefined }}>{sec(r.p95)}</td>
+                <td className="r num" style={{ color: r.errors ? "var(--bad)" : undefined }}>{r.errors}{r.calls ? <span className="faint"> ({Math.round((r.errors / r.calls) * 100)}%)</span> : null}</td>
+                <td className="r num">{Math.round(r.cacheHit * 100)}%</td>
+                <td className="r num">{usd(r.cost)}</td>
+              </tr>
+            ))}
+            {!rows.length && <tr><td colSpan={7} className="muted">No requests yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default function PerformancePage() {
+  const [p, setP] = useState<P | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    api<P>("/api/owner/performance").then(setP).catch((e) => setErr(e.message));
+  }, []);
+  if (err) return <div className="callout bad">{err}</div>;
+  if (!p) return <span className="muted">Loading…</span>;
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">Performance & errors</div>
+          <h1>Speed, reliability and cost</h1>
+          <p>How fast each feature responds, how often it fails, and how much prompt caching saves.</p>
+        </div>
+      </div>
+      <Table title="By feature" rows={p.byFeature} label={(n) => FEATURE[n] ?? n} />
+      <Table title="By model" rows={p.byModel} label={(n) => n} />
+      <div className="panel">
+        <div className="panel-h"><h2>Processing health by client</h2></div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Client</th><th className="r">Failed documents</th><th className="r">Failed meetings</th><th className="r">Questions with no answer</th></tr></thead>
+            <tbody>
+              {p.processing.map((r) => (
+                <tr key={r.tenant}>
+                  <td>{r.tenant}</td>
+                  <td className="r num" style={{ color: r.failed_docs ? "var(--bad)" : undefined }}>{r.failed_docs}</td>
+                  <td className="r num" style={{ color: r.failed_meetings ? "var(--bad)" : undefined }}>{r.failed_meetings}</td>
+                  <td className="r num">{r.unanswered}<span className="faint"> of {r.questions}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="panel">
+        <div className="panel-h"><h2>Failed requests</h2><Pill kind={p.errors.length ? "bad" : "good"}>{p.errors.length}</Pill></div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>When</th><th>Client</th><th>Feature</th><th>Model</th><th>Error</th></tr></thead>
+            <tbody>
+              {p.errors.map((e, i) => (
+                <tr key={i}>
+                  <td className="ts" style={{ whiteSpace: "nowrap" }}>{fmtTime(e.created_at)}</td>
+                  <td>{e.tenant ?? "—"}</td>
+                  <td>{FEATURE[e.feature] ?? e.feature}</td>
+                  <td className="mono">{e.model}</td>
+                  <td style={{ color: "var(--bad)" }}>{e.error ?? "Unknown error"}</td>
+                </tr>
+              ))}
+              {!p.errors.length && <tr><td colSpan={5} className="muted">No failed requests.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}

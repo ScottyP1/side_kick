@@ -83,6 +83,10 @@ export const Pill = ({ kind = "", children, nodot }: { kind?: string; children: 
 
 export const Spinner = () => <span className="spinner" aria-hidden="true" />;
 
+export const Switch = ({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) => (
+  <button className="switch" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} />
+);
+
 export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();

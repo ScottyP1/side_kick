@@ -58,12 +58,13 @@ export async function endSession() {
 export async function currentUser(): Promise<User | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const row = get<User & { expires_at: string }>(
-    `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password, s.expires_at
-       FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
+  const row = get<User & { expires_at: string; org_status: string }>(
+    `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password, s.expires_at, o.status AS org_status
+       FROM sessions s JOIN users u ON u.id = s.user_id JOIN orgs o ON o.id = u.org_id WHERE s.token_hash = ?`,
     sha256(token),
   );
   if (!row || new Date(row.expires_at) < new Date()) return null;
+  if (row.org_status === "Suspended") throw new HttpError(403, "This organization's Sidekick access is paused. Contact the Sidekick team.");
   return { id: row.id, org_id: row.org_id, name: row.name, email: row.email, role: row.role, must_change_password: row.must_change_password };
 }
 

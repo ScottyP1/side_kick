@@ -3,6 +3,7 @@ import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/
 import { all, newId, now, run } from "@/lib/db";
 import { fileToText, MAX_UPLOAD_BYTES } from "@/lib/extract";
 import { processMeeting } from "@/lib/sidekick";
+import { assertEnabled } from "@/lib/owner";
 
 export const GET = handle(async (req: Request) => {
   const user = await requireUser();
@@ -22,6 +23,7 @@ export const GET = handle(async (req: Request) => {
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
   if (!canEdit(user)) throw new HttpError(403, "Your role can't import meetings.");
+  assertEnabled("extract");
   const form = await req.formData();
   const ws = requireWorkspace(user, String(form.get("ws") ?? ""));
   const file = form.get("file");

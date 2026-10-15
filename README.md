@@ -18,6 +18,15 @@ An AI teammate for Microsoft Teams. This folder holds the step 1 build: a workin
 
 3. Open http://localhost:3000. The first visit asks you to set up your organization; you become the Org Owner.
 
+## Owner Console (for you, the Sidekick operator)
+
+Open http://localhost:3000/owner. The first visit creates your owner account (only possible on this computer). It's separate from any client login.
+
+- **Overview:** AI spend (today, month, projected), clients, error rate, response time, spend per day, spend by client, latest errors
+- **Clients:** every client organization with users, workspaces, meetings, docs, monthly spend and errors. Add a client (creates their Org Owner with a one-time password) or pause/resume their access
+- **Performance & errors:** typical and slowest response times, error rates and cache savings per feature and model, failed requests, processing health per client
+- **Releases & switches:** the running version and commit, models in use, kill switches that pause a feature for every client, and the operator log
+
 ## Demo script (5 minutes)
 
 1. **Workspaces** → create “Contoso Retail – Cloud Migration”.
@@ -37,5 +46,6 @@ An AI teammate for Microsoft Teams. This folder holds the step 1 build: a workin
 | Meeting notes, Q&A with sources, knowledge map, gaps, action items | Sidekick in Teams chat, Jira/DevOps stories – step 2 |
 | Usage and cost metering per feature/model | Live meetings with voice and virtual hand-raise – step 3 |
 | Branding (logo + color) | Connectors (Outlook, SharePoint, Jira, …) – step 2 |
+| Owner Console: all clients, spend, errors, kill switches | Release pipeline and staged rollouts – step 2 |
 
 Data lives in `app/data/sidekick.db` (SQLite, local only). Delete that file to start fresh.

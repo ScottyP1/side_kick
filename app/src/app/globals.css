@@ -252,3 +252,15 @@ a{color:inherit}
 .ws-pick select{max-width:280px}
 .banner{display:flex;gap:10px;align-items:center;padding:10px 16px;background:var(--warn-soft);color:var(--fg);border-bottom:1px solid var(--line);font-size:13.5px;flex-wrap:wrap}
 pre.transcript-raw{white-space:pre-wrap;font-family:var(--f-body);font-size:13.5px;margin:0;max-height:460px;overflow:auto}
+
+/* ---- Owner Console: warm graphite rail + amber mark so it never gets mistaken for a client portal ---- */
+.owner-app .rail{background:#1b1712}
+.owner-app .nav a:hover,.owner-app .nav a[aria-current="page"]{background:#2b241c}
+.owner-app .nav a[aria-current="page"]{box-shadow:inset 3px 0 0 var(--hand)}
+.owner-mark{background:var(--hand) !important;color:#1a1205 !important}
+.spark{display:flex;align-items:flex-end;gap:3px;height:150px}
+.spark > div{flex:1;min-width:4px;display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:2px}
+.spark .c{background:var(--accent);border-radius:3px 3px 0 0}
+.spark .e{background:var(--bad);border-radius:2px}
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;font-size:13.5px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}

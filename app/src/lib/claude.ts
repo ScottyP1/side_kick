@@ -4,6 +4,7 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { z } from "zod";
 import { HttpError } from "./auth";
 import { now, run } from "./db";
+import { assertEnabled } from "./owner";
 
 // One place to choose models. Defaults to Claude Opus 5.5 everywhere; override per feature in .env.local
 // (e.g. SIDEKICK_MODEL_ASK=claude-sonnet-5-5) to trade quality for cost. In step 2 this client is swapped
@@ -53,9 +54,11 @@ export async function structured<S extends z.ZodType>(
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
 ): Promise<z.infer<S>> {
+  assertEnabled(feature);
   const model = MODELS[feature];
   const started = Date.now();
   let ok = 0;
+  let error: string | null = null;
   let usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
   try {
     const response = await anthropic().beta.messages.parse({
@@ -83,10 +86,13 @@ export async function structured<S extends z.ZodType>(
     if (!response.parsed_output) throw new HttpError(502, "Claude's response didn't match the expected format. Try again.");
     ok = 1;
     return response.parsed_output as z.infer<S>;
+  } catch (e) {
+    error = e instanceof Error ? e.message.slice(0, 500) : "Unknown error";
+    throw e;
   } finally {
     run(
-      `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ctx.orgId,
       ctx.workspaceId,
       feature,
@@ -98,6 +104,7 @@ export async function structured<S extends z.ZodType>(
       costOf(model, usage),
       Date.now() - started,
       ok,
+      error,
       now(),
     );
   }

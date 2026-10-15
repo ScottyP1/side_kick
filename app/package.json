@@ -8,7 +8,9 @@
     "playground": "agentsplayground -e http://localhost:3100/api/messages -c msteams",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "teams:package": "node scripts/teams-package.mjs",
+    "tunnel": "devtunnel host sidekick"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

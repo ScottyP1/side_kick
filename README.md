@@ -57,6 +57,66 @@ To start the test copy over, stop it and delete `app/.playground-data` (and `app
 
 **Rules in Teams:** Sidekick only answers from the workspace linked to that channel or chat. If the channel is marked “Client guests”, answers use Shareable sources only and notes from internal-only meetings are not posted there. Only Org Owners and Admins can link or unlink. Everything is in the audit log.
 
+## Sidekick in real Teams (when the Microsoft 365 trial is active)
+
+The app package is ready in `teams/` (manifest template + icons). Do these once, in order. Secrets go only into `app/.env.local`, never into chat.
+
+**1. Dev tunnel** (gives your Mac a stable https address Teams can reach)
+
+```bash
+brew install --cask devtunnel
+```
+
+```bash
+devtunnel user login
+```
+
+```bash
+devtunnel create sidekick --allow-anonymous
+```
+
+```bash
+devtunnel port create sidekick -p 3000
+```
+
+`devtunnel show sidekick` prints the address, like `https://xxxx-3000.usw2.devtunnels.ms`. “Anonymous” is needed because Microsoft's servers call in without a tunnel login; Sidekick checks Microsoft's signed token on every bot message itself. The portal's login page is reachable through the tunnel while it runs, so stop it (Ctrl+C) when you're not testing.
+
+**2. Entra app + Azure Bot**
+- Sign in to https://entra.microsoft.com **with the Sidekick Labs admin account** → App registrations → New registration “Sidekick Bot”, *Accounts in this organizational directory only*. Note the Application (client) ID and Directory (tenant) ID. Certificates & secrets → New client secret; copy the value straight into `app/.env.local`.
+  (Create it in the Sidekick Labs tenant: a single-tenant bot only works for Teams users in the tenant where its app is registered.)
+- In https://portal.azure.com → Create **Azure Bot** → Pricing tier **Free (F0)**, Type of App **Single Tenant**, Creation type **Use existing app registration** with the IDs above.
+- In the bot: Configuration → Messaging endpoint `https://<your tunnel address>/api/messages`. Channels → add **Microsoft Teams**.
+
+**3. `app/.env.local`** (add these lines yourself)
+
+```
+CLIENT_ID=<Application (client) ID>
+CLIENT_SECRET=<client secret value>
+TENANT_ID=<Directory (tenant) ID>
+SIDEKICK_PUBLIC_URL=https://<your tunnel address>
+```
+
+**4. Run it** (three terminals): the app, the tunnel, then build the Teams package.
+
+```bash
+npm --prefix app run dev
+```
+
+```bash
+npm --prefix app run tunnel
+```
+
+```bash
+npm --prefix app run teams:package
+```
+
+That writes `teams/build/sidekick-teams.zip` (it passes Microsoft's 62 app-package validation checks).
+
+**5. Upload to Teams**
+- Teams admin center → Teams apps → Setup policies → Global → turn on **Upload custom apps** (it can take a few hours to apply).
+- In Teams: Apps → Manage your apps → Upload an app → **Upload a custom app** → pick the zip → Add to a team/channel.
+- Mention @Sidekick in the channel: it replies with a link code. Enter it at http://localhost:3000 → Workspaces → Link Teams channel.
+
 ## Demo script (5 minutes)
 
 1. **Workspaces** → create “Contoso Retail – Cloud Migration”.

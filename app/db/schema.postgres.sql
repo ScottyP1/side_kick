@@ -117,3 +117,9 @@ CREATE TABLE IF NOT EXISTS passages (
 CREATE INDEX IF NOT EXISTS passages_tsv ON passages USING GIN (tsv);
 CREATE INDEX IF NOT EXISTS passages_scope ON passages(org_id, workspace_id);
 CREATE INDEX IF NOT EXISTS passages_source ON passages(source_id);
+-- Unexpected server errors with the reference code the person saw (see handle() in src/lib/api.ts).
+CREATE TABLE IF NOT EXISTS app_errors (
+  id BIGSERIAL PRIMARY KEY, ref TEXT NOT NULL, status INTEGER NOT NULL, method TEXT, route TEXT,
+  message TEXT NOT NULL, stack TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS app_errors_ref ON app_errors(ref);

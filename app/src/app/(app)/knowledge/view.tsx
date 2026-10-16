@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
-import { api, CitedText, fmtBytes, fmtDate, Icon, Pill, Spinner, useToast } from "@/components/ui";
+import { api, CitedText, fmtBytes, fmtDate, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 
 type Doc = { id: string; name: string; size: number; audience: string; status: string; error: string | null; chunk_count: number; created_at: string; uploaded_by: string | null };
 type Answer = { found: boolean; answer: string; sources: { id: string; title: string; loc: string; type: string; excerpt: string }[] };
@@ -34,10 +34,11 @@ export default function KnowledgePage() {
     setDocs(r.docs);
     setIndex(r.index);
   }, [ws]);
+  const reportError = useReportError();
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set after the request resolves
-    load().catch(() => {});
-  }, [load]);
+    load().catch(reportError);
+  }, [load, reportError]);
 
   if (!ws) return <NeedsWorkspace />;
 

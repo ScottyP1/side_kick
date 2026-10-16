@@ -41,6 +41,10 @@ export const GET = handle(async () => {
       `SELECT u.created_at, u.feature, u.model, u.latency_ms, u.error, o.name AS tenant FROM usage_events u LEFT JOIN orgs o ON o.id = u.org_id
         WHERE u.ok = 0 ORDER BY u.id DESC LIMIT 50`,
     ),
+    // Unexpected server errors with the reference code the person saw (search the page for a code).
+    appErrors: await all(
+      "SELECT ref, status, method, route, message, created_at FROM app_errors ORDER BY id DESC LIMIT 50",
+    ),
     processing: await all(
       `SELECT o.name AS tenant,
          (SELECT COUNT(*) FROM documents d WHERE d.org_id = o.id AND d.status = 'Failed') AS failed_docs,

@@ -273,6 +273,8 @@ test(`[${ENGINE}] when AI processing fails, the meeting is marked Failed with th
   const r = await member("POST", "/api/meetings", undefined, { form });
   assert.ok(r.status >= 400, "the import should report an error");
   assert.match(r.body.error, /fake failure/);
+  assert.match(r.body.ref, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/, "server problems come with a reference code");
+  s.failRef = r.body.ref;
   const list = (await member("GET", `/api/meetings?ws=${s.wsA}`)).body.meetings;
   const broken = list.find((x) => x.title === "Broken meeting");
   assert.equal(broken.status, "Failed");
@@ -361,6 +363,14 @@ test(`[${ENGINE}] a suspended organization is locked out with a clear message, a
   assert.match(locked.body.error, /paused/);
   assert.equal((await owner("PATCH", `/api/owner/tenants/${orgId}`, { status: "Active" })).status, 200);
   assert.equal((await member("GET", "/api/me")).status, 200);
+});
+
+test(`[${ENGINE}] the owner can look up a reference code a client saw`, async () => {
+  const perf = (await owner("GET", "/api/owner/performance")).body;
+  const hit = perf.appErrors.find((e) => e.ref === s.failRef);
+  assert.ok(hit, "the failed meeting's reference code is in the error log");
+  assert.match(hit.message, /fake failure/);
+  assert.equal(hit.route, "/api/meetings");
 });
 
 test(`[${ENGINE}] client accounts can't reach the Owner Console`, async () => {

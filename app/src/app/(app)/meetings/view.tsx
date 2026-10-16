@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
-import { api, fmtDate, Icon, Modal, Pill, Spinner, useToast } from "@/components/ui";
+import { api, fmtDate, Icon, Modal, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 
 type M = { id: string; title: string; held_at: string; external_guests: number; status: string; error: string | null; decisions: number; actions: number; open_questions: number };
 type Detail = {
@@ -34,10 +34,11 @@ export default function MeetingsPage() {
     if (!ws) return;
     setList((await api<{ meetings: M[] }>(`/api/meetings?ws=${ws}`)).meetings);
   }, [ws]);
+  const reportError = useReportError();
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set after the request resolves
-    load().catch(() => {});
-  }, [load]);
+    load().catch(reportError);
+  }, [load, reportError]);
   useEffect(() => {
     if (openId) api<Detail>(`/api/meetings/${openId}`).then(setDetail).catch((e) => toast(e.message));
   }, [openId, toast]);

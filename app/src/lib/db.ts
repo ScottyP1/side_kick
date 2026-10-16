@@ -141,6 +141,12 @@ CREATE TABLE IF NOT EXISTS platform_flags (
 CREATE TABLE IF NOT EXISTS platform_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
 );
+-- Unexpected server errors, each with the reference code the person saw (see handle() in api.ts).
+-- Listed in the Owner Console; no client document content is stored here, only the error message.
+CREATE TABLE IF NOT EXISTS app_errors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, status INTEGER NOT NULL, method TEXT, route TEXT,
+  message TEXT NOT NULL, stack TEXT, created_at TEXT NOT NULL
+);
 -- Teams conversations (channels, group chats, 1:1 chats) Sidekick has been added to.
 -- id is the conversation id without any ";messageid=" thread suffix. A row with no workspace_id is
 -- not linked yet: Sidekick shows link_code in Teams and an Org Admin enters it on the Workspaces page.

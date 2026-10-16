@@ -27,10 +27,11 @@ Browser (client portal, Owner Console)        Microsoft Teams
 
 | File | Job |
 |---|---|
-| `lib/db.ts` | Schema, migrations, query helpers. Every table with client data has `org_id` and usually `workspace_id` |
+| `lib/db.ts` | The async query API (`all`, `get`, `run`, `tx`) over SQLite (laptop) or Postgres (`DATABASE_URL`); SQLite schema + migrations. Every table with client data has `org_id` and usually `workspace_id` |
+| `db/schema.postgres.sql` | The Postgres schema, mirroring the SQLite one |
 | `lib/auth.ts` | Sessions, roles, `requireUser`, `requireWorkspace` (the workspace wall), audit log |
 | `lib/owner.ts` | Owner Console sign-in, kill switches (`assertEnabled`), operator log |
-| `lib/api.ts` | `handle()` wrapper: JSON responses, `HttpError` → `{ error }` |
+| `lib/api.ts` | `handle()` wrapper: JSON responses, `HttpError` → `{ error }`, reference codes + `app_errors` log for unexpected errors |
 | `lib/extract.ts` | Files → text (PDF, Word, Teams .vtt) and text → passages |
 | `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured |
 | `lib/azure-search.ts` | Azure AI Search index, embeddings and hybrid (keyword + vector) queries |
@@ -65,6 +66,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 - **Audit**: access changes, deletions and anything Sidekick does on its own call `audit()` / `auditAsSidekick()`.
 - **Parameters**: SQL values always go in `?` parameters, never into the SQL string.
 - **Secrets**: only in `app/.env.local` (git-ignored). The Teams bot never runs without token checks in production.
+- **Both databases**: SQL must run on SQLite and Postgres; `npm test` checks both.
+- **No silent failures**: routes use `handle()`; pages use `api()` (opens the problem modal for network/server/paused problems) and `useReportError()` instead of empty catches; page crashes land on `error.tsx`.
+- **Tests**: add or update tests in `app/tests/` with any behaviour change; `npm test` must pass before committing.
 
 ## Documentation conventions
 - Every source file starts with a header comment saying what it's for; library files explain the concepts they introduce.

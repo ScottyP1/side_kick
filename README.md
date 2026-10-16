@@ -21,6 +21,33 @@ An AI teammate for Microsoft Teams. This folder holds the step 1 build: a workin
 
 3. Open http://localhost:3000. The first visit asks you to set up your organization; you become the Org Owner.
 
+## Tests
+
+```bash
+npm --prefix app test
+```
+
+Runs 66 automated tests on **both** databases (SQLite and Postgres): the database layer, plus end-to-end checks of sign-in, workspace walls, roles, the client-guest filter, uploads, meeting notes, failures, the Teams bot, kill switches and suspension. They use a throwaway database, a fake Claude (free, canned answers, test mode only) and a fake Teams connector, so nothing real is touched or paid for. The Postgres half needs Postgres running on this Mac (`brew services start postgresql@17`); without it those are skipped with a warning.
+
+## Postgres and the container (for hosting in Azure later)
+
+- **Database:** without `DATABASE_URL` the app uses the local SQLite file (`app/data/sidekick.db`). With `DATABASE_URL=postgres://…` it uses Postgres and creates its tables on start (`app/db/schema.postgres.sql`). In production it refuses to run on SQLite, so data can't silently vanish.
+- **Move existing data to Postgres** (your SQLite file is only read, never changed; safe to run twice; prints a row-count check):
+
+  ```bash
+  DATABASE_URL=postgres://... npm --prefix app run db:copy-to-postgres
+  ```
+
+- **Container:** `app/Dockerfile` builds a small production image (no source code, no local data, no `.env` files; runs as a non-root user). Secrets are passed in at run time. `GET /api/health` reports whether the app and database are up (no data or secrets), for Azure's health probe.
+
+## When something breaks
+
+People always see what happened, never a silent failure:
+- **Can't reach Sidekick / something went wrong on our side / paused:** a dialog explains it in plain language, with **Try again**, **Copy details** and, for server problems, a **reference code** like `K7Q2-9XM4`.
+- **Smaller problems** (not allowed, not found, bad input): a red message next to the action, or a red toast.
+- **A page crashes:** a "This page hit a problem" screen with Try again; the menu keeps working.
+- **You (operator):** every reference code is logged with the details in **Owner Console → Performance & errors → App errors**.
+
 ## Owner Console (for you, the Sidekick operator)
 
 Open http://localhost:3000/owner. The first visit creates your owner account (only possible on this computer). It's separate from any client login.

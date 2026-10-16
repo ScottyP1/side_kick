@@ -45,6 +45,9 @@ The **Teams channels and chats** table on the Workspaces page shows every link. 
 ## Troubleshooting
 | You see | What to do |
 |---|---|
+| A dialog "Something went wrong on our side" with a reference code | It's on Sidekick's side, not yours. Try again; if it repeats, click **Copy details** and send it (with the reference code) to the Sidekick team. |
+| A dialog "Can't reach Sidekick" | Your connection or Sidekick is down. Anything you saved is safe; try again in a minute. |
+| "This page hit a problem" | Click **Try again**, or use the menu. If it repeats, send the reference code to the Sidekick team. |
 | "Claude isn't connected yet" | The Sidekick team needs to configure the AI key. Contact them. |
 | "… is paused by the Sidekick team" | A feature was paused for maintenance. Try again later. |
 | "This organization's Sidekick access is paused" | Contact the Sidekick team. |

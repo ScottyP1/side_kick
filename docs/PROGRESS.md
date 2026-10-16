@@ -52,11 +52,25 @@ npm --prefix app run dev
 - API routes: `app/src/app/api/**` (client) and `app/src/app/api/owner/**` (owner).
 - UI: client pages in `app/src/app/(app)/*/view.tsx`, owner pages in `app/src/app/owner/(console)/*/view.tsx`; shells in `app/src/components/`.
 
+## Database, tests, errors (Oct 16, 2026)
+- Database layer is async and runs on **SQLite** (laptop, no `DATABASE_URL`) or **Postgres** (`DATABASE_URL`), same SQL. Tested against Postgres 17 locally (`brew services start postgresql@17`, test DB `sidekick_test`). `npm --prefix app run db:copy-to-postgres` copies a SQLite install into Postgres (verified on the real data: every table matched).
+- Container: `app/Dockerfile` + `.dockerignore`; `next.config.ts` builds `standalone` and excludes `data/`, `.env*`, tests and scripts from the bundle (a first build had pulled `app/data` in; now verified 0 such files). Docker isn't installed on the Mac; build in Azure with `az acr build` when hosting. Verified the standalone server in production mode: 503 + clear message without a database, healthy on Postgres, unsigned Teams requests refused.
+- **No hosting yet** (decision: "code now, cloud later"). Budget alert `sidekick-monthly-25` ($25/month; alerts at 80% actual and 100% forecast to cody.l.scott@outlook.com) on the Sidekick Labs subscription. Hosting options when needed: Container Apps scale-to-zero + Postgres B1ms (~$15/mo) or App Service B1 + Postgres (~$28/mo).
+- Tests: `npm --prefix app test` = 66 tests (db layer 7×2, end-to-end 26×2). Fake Claude via `SIDEKICK_FAKE_CLAUDE=1` (refused in production); `__FAIL__` in content forces a failure.
+- Errors: `handle()` adds reference codes and logs to `app_errors`; `api()` + `ProblemProvider` modal; `useReportError()` for loads; crash screens `error.tsx` / `global-error.tsx`.
+
+## Scale-up path (for later, not needed now)
+- **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).
+- **Event Hubs** (Azure's Kafka-compatible event stream): for step 3 live meeting events at scale, or queueing heavy work (transcript processing) once many clients use it. It moves events between services; it is **not** storage. Storage stays Postgres (+ Blob for files, Azure AI Search for retrieval).
+- Postgres: start on Flexible Server Burstable; scale up or add read replicas when usage grows.
+
 ## Gotchas learned
 - **Next.js 16.4 with Cache Components**: client-rendered pages need a server `page.tsx` wrapper exporting `instant = false` and re-exporting `./view`. Read `app/node_modules/next/dist/docs/` before using Next APIs; `middleware` is now `proxy.ts`.
 - zsh treats `[id]` in paths as a glob: quote paths in shell commands.
 - Test against a **separate copy** so the owner's real data is untouched: `SIDEKICK_DATA_DIR=<tmp> NEXT_DIST_DIR=.next-test npx next dev --port 3100` (then revert any `tsconfig.json` include lines Next adds, delete `.next-test`).
 - Teams bot auth: `PLAYGROUND_MODE` (no token check) needs `TEAMS_LOCAL_PLAYGROUND=true`, is off whenever `NODE_ENV=production`, and only accepts localhost requests with a localhost service URL. `dangerouslyAllowUnauthenticatedRequests` is always passed explicitly so the SDK's own env var can't switch auth off. The SDK reads `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` itself.
+- Postgres differences to remember: no `INSERT OR IGNORE` (use `ON CONFLICT DO NOTHING`), `day` needs `AS day`, every selected column must be grouped or aggregated, qualify columns in `ON CONFLICT … DO UPDATE` (`teams_conversations.name`). COUNT/SUM come back as strings from `pg`; db.ts converts them to numbers.
+- Next.js prerenders route handlers at build time: wrappers that catch errors must call `unstable_rethrow`, and routes with no request data (like `/api/health`) need `await connection()`.
 - After editing `app/.env.local` (bot IDs/secret), **restart the app**: a running dev server answered 401s correctly but didn't reply to Teams until restarted.
 - To test in real Teams, run the app (`npm --prefix app run dev`) **and** the tunnel (`npm --prefix app run tunnel`). The tunnel makes the whole portal reachable from the internet while it runs; stop it when not testing.
 - Teams users are not portal users yet: in a linked conversation they act as a Member of that one workspace (`teams:<aad id>` in `questions.user_id`, “Name (Teams)” in the audit log). Map them to real users with Entra ID sign-in later.

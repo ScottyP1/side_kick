@@ -10,7 +10,7 @@ The first owner account can only be created **on the machine running Sidekick** 
 |---|---|
 | **Overview** | AI spend (today, this month, projected), number of clients, error rate, response time, spend per day and per client, latest errors |
 | **Clients** | Every client organization: users, workspaces, meetings, documents, monthly spend, errors. **Add a client** creates the organization and its Org Owner with a one-time password (shown once). **Pause / Resume** turns a client's access off or on |
-| **Performance & errors** | Typical and slowest response times, error rates and prompt-cache savings per feature and model; failed requests; processing health per client |
+| **Performance & errors** | Typical and slowest response times, error rates and prompt-cache savings per feature and model; failed AI requests; processing health per client; **App errors**: every unexpected problem with the **reference code** the person saw, so you can look up a code a client sends you |
 | **Releases & switches** | Running version and commit, models in use, **kill switches**, operator log |
 
 ## Kill switches

@@ -334,3 +334,8 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .good-text{color:var(--good)}
 @media (max-width:720px){.orb-stage{height:230px}.orb-core{width:240px;height:240px}.assist-bubble,.assist-card{max-width:100%}}
 @media (prefers-reduced-motion:reduce){.orb-fallback{animation:none}}
+
+/* ---------- Sign-in: Microsoft button ---------- */
+.ms-btn{justify-content:center;gap:10px;padding:9px 12px;font-weight:600;text-decoration:none;color:var(--fg)}
+.or-line{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12.5px}
+.or-line::before,.or-line::after{content:"";flex:1;height:1px;background:var(--line)}

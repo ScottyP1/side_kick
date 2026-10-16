@@ -54,4 +54,4 @@ Each AI request is metered: how much text went in and out (tokens), what it cost
 - Every request is checked: who you are, your role, and whether you belong to that workspace.
 - Every search and every AI request is limited to one organization and one workspace.
 - Documents and transcripts are treated as information, never as instructions, so text inside a file can't make Sidekick do something else.
-- Passwords are stored only as secure hashes. In production, sign-in moves to your Microsoft (Entra ID) account.
+- Sign in with your Microsoft work account (your company's password rules and MFA apply), or with a password, which is stored only as a secure hash. Your Org Owner can require Microsoft sign-in for everyone.

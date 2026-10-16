@@ -1,12 +1,92 @@
 "use client";
 
 /**
- * Settings (/settings): organization branding (logo and brand color) and your own account (password).
+ * Settings (/settings): Microsoft sign-in (connect the org's Microsoft tenant, require it), organization
+ * branding (logo and brand color) and your own account (password).
  */
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/shell";
-import { api, Icon, useToast } from "@/components/ui";
+import { api, Icon, Pill, Switch, useReportError, useToast } from "@/components/ui";
+
+type MsStatus = { configured: boolean; connected: boolean; tenantId: string | null; required: boolean; linked: boolean; canManage: boolean };
+
+/**
+ * Microsoft sign-in panel. Everyone sees whether it's on and whether their own account is linked; the Org
+ * Owner connects the tenant (by signing in with Microsoft), requires it, or disconnects it. Results of the
+ * Microsoft round trip come back as `?microsoft=connected` or `?error=…` and are shown here.
+ */
+function MicrosoftPanel() {
+  const toast = useToast();
+  const reportError = useReportError();
+  const [s, setS] = useState<MsStatus | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => api<MsStatus>("/api/auth/microsoft").then(setS).catch(reportError), [reportError]);
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.get("microsoft") === "connected") toast("Microsoft sign-in connected");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (q.get("error")) setError(q.get("error")!);
+    if (q.size) history.replaceState(null, "", "/settings");
+    load();
+  }, [load, toast]);
+  if (!s) return null;
+
+  const setRequired = async (required: boolean) => {
+    setError("");
+    try {
+      await api("/api/auth/microsoft", { method: "PATCH", json: { required } });
+      toast(required ? "Passwords are off: everyone signs in with Microsoft" : "Password sign-in allowed again");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't change it.");
+    }
+  };
+  const disconnect = async () => {
+    if (!confirm("Disconnect Microsoft sign-in? People will need their Sidekick password to sign in.")) return;
+    try {
+      await api("/api/auth/microsoft", { method: "DELETE" });
+      toast("Microsoft sign-in disconnected");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't disconnect.");
+    }
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-h">
+        <h2>Microsoft sign-in</h2>
+        {s.connected ? <Pill kind="good">Connected</Pill> : <Pill>Not connected</Pill>}
+      </div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <p className="muted" style={{ margin: 0 }}>
+          People sign in with the Microsoft work account they use for Teams and Outlook. Sidekick still decides what they can see: they must be added on Users &amp; access first, and their role and workspaces apply as usual.
+        </p>
+        {!s.configured && <p className="callout warn" style={{ margin: 0 }}>Microsoft sign-in isn&apos;t set up on this Sidekick yet (the Sidekick team adds the app details).</p>}
+        {s.configured && s.connected && s.tenantId && <span className="muted" style={{ fontSize: 12.5 }}>Microsoft tenant: <code>{s.tenantId}</code></span>}
+        <span style={{ fontSize: 13 }}>Your account: {s.linked ? <Pill kind="good">Linked to Microsoft</Pill> : <Pill>Not linked yet</Pill>}{!s.linked && s.connected && s.configured && <> · <a href="/api/auth/microsoft/start?next=/settings">Sign in with Microsoft to link it</a></>}</span>
+        {s.canManage && s.configured && !s.connected && (
+          <div>
+            <a className="btn primary" href="/api/auth/microsoft/start?mode=link">Connect with Microsoft</a>
+            <span className="hint" style={{ display: "block", marginTop: 6 }}>Sign in with your work account: your company&apos;s Microsoft organization gets connected to this Sidekick organization.</span>
+          </div>
+        )}
+        {s.canManage && s.connected && (
+          <>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13.5 }}>
+              <Switch on={s.required} onChange={setRequired} label="Require Microsoft sign-in" />
+              <span><b>Require Microsoft sign-in</b><span className="muted"> · turns passwords off and signs everyone else out</span></span>
+            </div>
+            {!s.linked && <span className="hint">Link your own account first, so you can&apos;t get locked out.</span>}
+            <div><button className="btn small danger" onClick={disconnect}>Disconnect</button></div>
+          </>
+        )}
+        {error && <p className="err" role="alert" style={{ margin: 0 }}>{error}</p>}
+      </div>
+    </div>
+  );
+}
 
 const ACCENTS: [string, string | null][] = [["Default", null], ["Cobalt", "#2457c5"], ["Crimson", "#b4233c"], ["Violet", "#7a3fd1"], ["Purple", "#A100FF"], ["Graphite", "#3d4a52"]];
 
@@ -53,6 +133,7 @@ export default function SettingsPage() {
     <>
       <div className="page-head"><div><div className="eyebrow">Settings</div><h1>Organization & account</h1></div></div>
       <div className="grid g2">
+        <MicrosoftPanel />
         {me.user.admin && (
           <div className="panel">
             <div className="panel-h"><h2>Your branding</h2><span className="muted">Applies to the whole portal</span></div>

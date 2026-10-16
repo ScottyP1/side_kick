@@ -21,6 +21,7 @@
     "@microsoft/teams.api": "^2.1.0",
     "@microsoft/teams.apps": "^2.1.0",
     "@microsoft/teams.cards": "^2.1.0",
+    "jose": "6.2.12",
     "mammoth": "^1.13.0",
     "next": "16.4.1",
     "ogl": "^1.0.11",

@@ -1,5 +1,6 @@
 /**
- * GET/POST /api/users: list the organization's people, or add one with a temporary password.
+ * GET/POST /api/users: list the organization's people (with whether each is linked to Microsoft sign-in),
+ * or add one with a temporary password (if the org uses Microsoft sign-in, they can use that instead).
  * Who: Org Owners and Org Admins. Audited.
  */
 import crypto from "node:crypto";
@@ -9,7 +10,7 @@ import { all, get, run } from "@/lib/db";
 
 export const GET = handle(async () => {
   const user = await requireUser(["Org Owner", "Org Admin"]);
-  const users = await all("SELECT id, name, email, role, last_active, must_change_password, created_at FROM users WHERE org_id = ? ORDER BY created_at", user.org_id);
+  const users = await all("SELECT id, name, email, role, last_active, must_change_password, CASE WHEN entra_oid IS NULL THEN 0 ELSE 1 END AS microsoft, created_at FROM users WHERE org_id = ? ORDER BY created_at", user.org_id);
   const members = await all<{ user_id: string; workspace_id: string }>(
     "SELECT wm.user_id, wm.workspace_id FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id WHERE w.org_id = ?",
     user.org_id,

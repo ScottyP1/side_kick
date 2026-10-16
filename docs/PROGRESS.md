@@ -71,6 +71,13 @@ npm --prefix app run dev
 - Verified with real Claude in a throwaway copy (`npm --prefix app run dev:preview`, port 3300, data in `app/.preview-data`): create workspace (confirmed), add person (cancelled, nothing changed), "new org" question (explains the Owner Console), dark and light.
 - Tests: 80 (db layer 7×2, end-to-end 33×2), incl. "nothing changes before Confirm", role limits, bad input, kill switch.
 
+## Microsoft sign-in (Oct 16, 2026)
+- `lib/entra.ts` (authorization code + PKCE, state cookie `sk_oidc`, nonce, ID token verified with `jose` against the tenant's keys/issuer), routes `/api/auth/microsoft/start`, `/callback`, and `/api/auth/microsoft` (status, require, disconnect). Same Entra app as the bot (`CLIENT_ID`/`CLIENT_SECRET`/`TENANT_ID`), overridable with `ENTRA_*`.
+- DB: `orgs.entra_tenant_id` (unique), `orgs.sso_required`, `users.entra_oid` (unique per org), `oidc_states` (10-minute sign-in attempts). Both engines.
+- Rules: org connected by its Org Owner signing in from Settings (mode `link`); people must already exist (email match once, then oid); personal Microsoft accounts refused; "require" needs the owner's own account linked and ends other sessions; password login refused when required.
+- Teams: card actions and questions use the linked person's role and name (`teamsActor` in `lib/teams/bot.ts`).
+- Tests: fake Microsoft in `tests/api.test.mjs` (signs real RS256 tokens); covers link, sign-in, strangers, other/personal tenants, wrong nonce, forged key, other browser, replay, cancel, Teams roles, require/disconnect.
+
 ## Scale-up path (for later, not needed now)
 - **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).
 - **Event Hubs** (Azure's Kafka-compatible event stream): for step 3 live meeting events at scale, or queueing heavy work (transcript processing) once many clients use it. It moves events between services; it is **not** storage. Storage stays Postgres (+ Blob for files, Azure AI Search for retrieval).
@@ -85,7 +92,7 @@ npm --prefix app run dev
 - Next.js prerenders route handlers at build time: wrappers that catch errors must call `unstable_rethrow`, and routes with no request data (like `/api/health`) need `await connection()`.
 - After editing `app/.env.local` (bot IDs/secret), **restart the app**: a running dev server answered 401s correctly but didn't reply to Teams until restarted.
 - To test in real Teams, run the app (`npm --prefix app run dev`) **and** the tunnel (`npm --prefix app run tunnel`). The tunnel makes the whole portal reachable from the internet while it runs; stop it when not testing.
-- Teams users are not portal users yet: in a linked conversation they act as a Member of that one workspace (`teams:<aad id>` in `questions.user_id`, “Name (Teams)” in the audit log). Map them to real users with Entra ID sign-in later.
+- Teams identity: if the sender's `aadObjectId` matches a Sidekick person's `users.entra_oid` **and** the message's tenant is the org's connected tenant, Teams uses that person (name + role). Otherwise they act as a Member of the linked workspace (`teams:<aad id>`, “Name (Teams)”).
 - `npm --prefix app run dev:teams` + `npm --prefix app run playground` = local Teams test on port 3100 with `app/.playground-data` (see README). Playground writes `app/devTools/` logs (git-ignored).
 - Teams dev: Microsoft 365 Developer Program sandbox **denied** ("don't currently qualify"), the normal outcome in 2026. Business Basic trial used instead.
 - Production media bot (step 3) **must be hosted in Azure** on Windows (C#/.NET). Graph has **no raise-hand API**, so use a virtual hand-raise (chat card + side panel).
@@ -97,4 +104,4 @@ npm --prefix app run dev
 4. ~~Post meeting notes + action-item cards (Assign / Done) after import~~ Done.
 5. ~~Test locally with Microsoft 365 Agents Playground~~ Done (answers, notes, Assign/Done, workspace wall checks).
 6. ~~Teams app manifest (v1.30) + icons + `teams:package` script~~ Done (`teams/`, passes 62 Agents Toolkit checks). Still to do with the trial active: create the Entra app **in the Sidekick Labs tenant** + free **Azure Bot** (single tenant); dev tunnel `sidekick` (steps in README “Sidekick in real Teams”); upload as a custom app to the Sidekick Labs Teams (after custom apps are allowed). Put `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` in `app/.env.local` and run the normal `dev` (not `dev:teams`): over a tunnel Playground mode refuses requests anyway. Manifest bot scopes: `personal`, `team`, `groupChat`. Set `SIDEKICK_PUBLIC_URL` for the card links.
-7. Later in step 2: Microsoft (Entra ID) sign-in, Azure-hosted Claude (`AnthropicFoundry`, the Foundry resource already exists), ~~Azure AI Search~~ (done), Postgres, hosting in Azure instead of the dev tunnel.
+7. Later in step 2: ~~Microsoft (Entra ID) sign-in~~ (done), Azure-hosted Claude (`AnthropicFoundry`, the Foundry resource already exists), ~~Azure AI Search~~ (done), Postgres, hosting in Azure instead of the dev tunnel.

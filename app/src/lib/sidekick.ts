@@ -45,13 +45,14 @@ Rules:
  * @param user        who is asking (a portal user, or a Teams user acting as a workspace Member)
  * @param workspaceId must already be checked with `requireWorkspace` (or come from a linked Teams channel)
  * @param guests      true when client guests are present: only `shareable` sources are used
+ * @param channel     where it was asked ("portal" or "teams"), for the Activity page's Messages view
  * @returns `found` (false = not in the sources), the `answer` text with [S#] citations, and the `sources`
  *          actually cited, each with title, location and a short excerpt
  *
  * Every question is saved in `questions`; unanswered ones show up as knowledge gaps.
  * If search finds nothing, Claude isn't called at all (no cost).
  */
-export async function ask(user: User, workspaceId: string, question: string, guests: boolean) {
+export async function ask(user: User, workspaceId: string, question: string, guests: boolean, channel: "portal" | "teams" = "portal") {
   await assertEnabled("ask");
   const passages = await searchPassages(user.org_id, workspaceId, question, { guests, limit: 12 });
   const sources = passages.map((p, i) => ({ id: `S${i + 1}`, ...p }));
@@ -76,7 +77,7 @@ export async function ask(user: User, workspaceId: string, question: string, gue
     result.found ? 1 : 0,
     now(),
     user.name,
-    user.id.startsWith("teams:") ? "teams" : "portal",
+    channel,
   );
   const used = new Set(result.source_ids);
   return {

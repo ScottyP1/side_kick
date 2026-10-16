@@ -27,7 +27,7 @@ An AI teammate for Microsoft Teams. This folder holds the step 1 build: a workin
 npm --prefix app test
 ```
 
-Runs 80 automated tests on **both** databases (SQLite and Postgres): the database layer, plus end-to-end checks of sign-in, workspace walls, roles, the client-guest filter, uploads, meeting notes, failures, the Teams bot, the in-app assistant, kill switches and suspension. They use a throwaway database, a fake Claude (free, canned answers, test mode only) and a fake Teams connector, so nothing real is touched or paid for. The Postgres half needs Postgres running on this Mac (`brew services start postgresql@17`); without it those are skipped with a warning.
+Runs 90 automated tests on **both** databases (SQLite and Postgres): the database layer, plus end-to-end checks of sign-in, workspace walls, roles, the client-guest filter, uploads, meeting notes, failures, the Teams bot, the in-app assistant, Microsoft sign-in (including forged and replayed replies), kill switches and suspension. They use a throwaway database, a fake Claude (free, canned answers, test mode only), a fake Teams connector and a fake Microsoft sign-in service, so nothing real is touched or paid for. The Postgres half needs Postgres running on this Mac (`brew services start postgresql@17`); without it those are skipped with a warning.
 
 ## Postgres and the container (for hosting in Azure later)
 
@@ -46,6 +46,15 @@ Runs 80 automated tests on **both** databases (SQLite and Postgres): the databas
 - **In-app assistant** (the chat box under the ball): answers questions about using Sidekick ("how do I link a Teams channel?", "what did we spend this month?") and offers actions your role allows: create a workspace, add a person, link a Teams chat, refresh a knowledge map, open a page. **Nothing changes until you press Confirm** on the card it shows; Confirm calls the same API the regular page uses, so role checks and the audit log apply. New client organizations are still created by the Sidekick team in the Owner Console.
 - **Activity page** (Org Owners and Admins, like Dynatrace): **Overview** (requests, failures, response times, AI calls and cost, portal vs Teams, busiest operations, requests over time), **Traces** (every request and Teams message; click one for its step-by-step waterfall: search, embeddings, Claude, Teams delivery, database time), **Messages** (what was asked where, answered or not) and the **Audit trail**.
 - Traces store timings, counts, model names and costs, never document text, and are deleted after 30 days. The shape follows OpenTelemetry, so it can later also feed Azure Application Insights.
+
+## Microsoft sign-in (Entra ID)
+
+- **Sign in with Microsoft** on the sign-in page: people use their Microsoft work account (the one they use for Teams), with their company's own password rules and MFA. Email and password still work unless the Org Owner turns them off.
+- **Connect once:** the Org Owner opens **Settings → Microsoft sign-in → Connect with Microsoft** and signs in. That ties the organization to their company's Microsoft tenant; only people from that tenant can use Microsoft sign-in there.
+- **Sidekick still decides access:** a person must be added on Users & access first (matched by email the first time, then by their Microsoft account id). Roles and workspace walls don't change.
+- **Require Microsoft sign-in** (Org Owner): turns passwords off for everyone and signs out anyone who signed in with a password.
+- **Same person in Teams:** once someone has signed in with Microsoft, their Teams messages and card clicks count under their Sidekick name and role (a Viewer can ask in Teams but not change action items). People in a linked chat who aren't in Sidekick still work as before: a Member of that one workspace.
+- Setup: the Entra app needs the redirect URI `http://localhost:3000/api/auth/microsoft/callback` (plus the tunnel/hosted address); details and options in `app/.env.example` and `app/src/lib/entra.ts`.
 
 ## When something breaks
 
@@ -168,7 +177,7 @@ That writes `teams/build/sidekick-teams.zip` (it passes Microsoft's 62 app-packa
 
 | Works now | Comes later |
 |---|---|
-| Sign-in, roles, workspace walls, audit log | Microsoft (Entra ID) sign-in – step 2 |
+| Sign-in (Microsoft or password), roles, workspace walls, audit log | |
 | Upload PDF / Word / text / Teams transcripts; keyword search, plus Azure AI Search meaning-based search when configured | |
 | Meeting notes, Q&A with sources, knowledge map, gaps, action items | Jira/DevOps stories – step 2 |
 | Teams bot: @Sidekick answers, notes and action-item cards (tested in Agents Playground) | Real Teams install (Azure Bot, manifest, tunnel) – step 2 |

@@ -123,3 +123,18 @@ CREATE TABLE IF NOT EXISTS app_errors (
   message TEXT NOT NULL, stack TEXT, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS app_errors_ref ON app_errors(ref);
+-- Traces and their steps (see src/lib/trace.ts). Timings, counts, models and costs only; kept 30 days.
+CREATE TABLE IF NOT EXISTS traces (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT, channel TEXT NOT NULL, name TEXT NOT NULL,
+  actor TEXT, status TEXT NOT NULL, http_status INTEGER, error TEXT, ref TEXT, duration_ms INTEGER NOT NULL,
+  span_count INTEGER NOT NULL, db_queries INTEGER NOT NULL DEFAULT 0, db_ms INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS traces_org_time ON traces(org_id, started_at);
+CREATE TABLE IF NOT EXISTS trace_spans (
+  trace_id TEXT NOT NULL, span_id TEXT NOT NULL, parent_id TEXT, kind TEXT NOT NULL, name TEXT NOT NULL,
+  start_ms INTEGER NOT NULL, duration_ms INTEGER NOT NULL, status TEXT NOT NULL, error TEXT, attrs TEXT NOT NULL,
+  PRIMARY KEY (trace_id, span_id)
+);
+-- Columns added after the first release (safe to run on an existing database).
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS asked_by TEXT;
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS channel TEXT;

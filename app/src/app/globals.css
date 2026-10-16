@@ -7,6 +7,8 @@
   --hand:#b86a00; --hand-soft:#fbeed6;
   --good:#1d7a3e; --good-soft:#dff1e5; --warn:#9a6200; --warn-soft:#fbefd4; --bad:#b3261e; --bad-soft:#f9e0de; --info:#2a5ba8; --info-soft:#e0e9f7;
   --rail:#14201f; --rail-fg:#c9d6d2; --rail-active:#22332f;
+  /* Chart series colors (validated categorical palette, fixed order; dataviz skill). */
+  --viz-1:#2a78d6; --viz-2:#eb6834; --viz-3:#1baf7a; --viz-4:#eda100; --viz-5:#e87ba4;
   --f-display:var(--font-display), "Segoe UI", system-ui, sans-serif;
   --f-body:var(--font-body), "Segoe UI", system-ui, sans-serif;
   --f-mono:var(--font-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -18,8 +20,10 @@
   --hand:#f0a43a; --hand-soft:#3a2a12;
   --good:#5cc684; --good-soft:#16301f; --warn:#e7b04f; --warn-soft:#34290f; --bad:#f08a80; --bad-soft:#3a1a18; --info:#82a8ec; --info-soft:#18243a;
   --rail:#0a100f; --rail-fg:#a9b8b4; --rail-active:#1a2523; --shadow:0 1px 2px rgba(0,0,0,.3);
+  --viz-1:#3987e5; --viz-2:#d95926; --viz-3:#199e70; --viz-4:#c98500; --viz-5:#d55181;
   color-scheme:dark}}
 :root[data-theme="dark"]{
+  --viz-1:#3987e5; --viz-2:#d95926; --viz-3:#199e70; --viz-4:#c98500; --viz-5:#d55181;
   --bg:#0f1514; --surface:#161e1d; --sunken:#1c2625; --line:#2a3634; --fg:#e4ebe8; --muted:#9aa9a5; --faint:#6f7e7a;
   --accent:#4fbfa8; --accent-soft:#18332e; --accent-fg:#06201b;
   --hand:#f0a43a; --hand-soft:#3a2a12;
@@ -267,3 +271,30 @@ pre.transcript-raw{white-space:pre-wrap;font-family:var(--f-body);font-size:13.5
 .spark .e{background:var(--bad);border-radius:2px}
 .kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;font-size:13.5px}
 .kv dt{color:var(--muted)} .kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+
+/* ---------- Activity page (observability) ---------- */
+.tabs-row{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap}
+.tabs-row button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;color:var(--muted);font:inherit;cursor:pointer}
+.tabs-row button[aria-selected="true"]{color:var(--fg);border-color:var(--accent);font-weight:600}
+.cols{display:flex;align-items:flex-end;gap:2px;height:170px;position:relative}
+.cols .col{flex:1;min-width:3px;display:flex;flex-direction:column-reverse;gap:2px;height:100%;cursor:default}
+.cols .col .ok{background:var(--viz-1);border-radius:4px 4px 0 0}
+.cols .col .bad{background:var(--bad);border-radius:4px 4px 0 0}
+.cols .col:hover .ok,.cols .col:hover .bad{filter:brightness(1.12)}
+.axis{display:flex;justify-content:space-between;color:var(--faint);font-size:11.5px;margin-top:6px}
+.viz-tip{position:absolute;pointer-events:none;background:var(--fg);color:var(--bg);font-size:12.5px;padding:6px 9px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-110%);z-index:5;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12.5px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.wf{display:flex;flex-direction:column;gap:6px}
+.wf-row{display:grid;grid-template-columns:minmax(150px,34%) 1fr;gap:10px;align-items:center}
+.wf-name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wf-track{position:relative;height:18px;background:var(--sunken);border-radius:4px}
+.wf-bar{position:absolute;top:0;bottom:0;border-radius:4px;min-width:3px}
+.wf-bar.err{outline:2px solid var(--bad);outline-offset:1px}
+.wf-dur{position:absolute;top:50%;transform:translateY(-50%);font-size:11.5px;color:var(--muted);white-space:nowrap}
+.wf-attrs{grid-column:2;font-size:11.5px;color:var(--muted);margin-top:-2px}
+.k-request{background:var(--viz-1)} .k-search{background:var(--viz-2)} .k-ai{background:var(--viz-3)} .k-embed{background:var(--viz-4)} .k-teams{background:var(--viz-5)}
+.k-index{background:var(--viz-2);opacity:.6} .k-file{background:var(--viz-4);opacity:.6}
+tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
+@media (max-width:720px){.wf-row{grid-template-columns:1fr}.wf-attrs{grid-column:1}}
+.modal.wide{width:min(920px,calc(100vw - 32px));max-width:none}

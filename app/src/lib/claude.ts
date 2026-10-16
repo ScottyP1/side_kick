@@ -22,6 +22,7 @@ import type { z } from "zod";
 import { HttpError } from "./auth";
 import { now, run } from "./db";
 import { assertEnabled } from "./owner";
+import { span, spanAttrs } from "./trace";
 
 // One place to choose models. Defaults to Claude Opus 5.5 everywhere; override per feature in .env.local
 // (e.g. SIDEKICK_MODEL_ASK=claude-sonnet-5-5) to trade quality for cost. In step 2 this client is swapped
@@ -114,7 +115,17 @@ type Ctx = { orgId: string; workspaceId: string | null };
  * Server-side fallback ("default") re-runs a policy-declined request on Anthropic's recommended model.
  * Usage is recorded in `finally`, so failed calls are metered too.
  */
+const SPAN_NAMES: Record<Feature, string> = { ask: "Claude: write the answer", extract: "Claude: write meeting notes", insights: "Claude: build the knowledge map" };
 export async function structured<S extends z.ZodType>(
+  feature: Feature,
+  ctx: Ctx,
+  opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
+): Promise<z.infer<S>> {
+  return span("ai", SPAN_NAMES[feature], () => structuredCall(feature, ctx, opts), { model: FAKE_CLAUDE ? "fake-claude" : MODELS[feature], effort: opts.effort ?? "medium" });
+}
+
+/** The Claude call itself (wrapped in a trace span by `structured`). */
+async function structuredCall<S extends z.ZodType>(
   feature: Feature,
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
@@ -156,6 +167,7 @@ export async function structured<S extends z.ZodType>(
     error = e instanceof Error ? e.message.slice(0, 500) : "Unknown error";
     throw e;
   } finally {
+    spanAttrs({ input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cached_tokens: usage.cache_read_input_tokens, cost_usd: Number(costOf(model, usage).toFixed(6)) });
     await run(
       `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

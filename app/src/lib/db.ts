@@ -24,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import pg from "pg";
+import { countDbQuery } from "./trace";
 
 /** Which engine this server uses: Postgres when DATABASE_URL is set, otherwise the local SQLite file. */
 export const DIALECT: "postgres" | "sqlite" = process.env.DATABASE_URL ? "postgres" : "sqlite";
@@ -141,6 +142,19 @@ CREATE TABLE IF NOT EXISTS platform_flags (
 CREATE TABLE IF NOT EXISTS platform_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
 );
+-- Traces: one row per request/Teams message (see trace.ts), and its steps (spans). Timings, counts,
+-- models and costs only, never document text. Shown on the client's Activity page; kept 30 days.
+CREATE TABLE IF NOT EXISTS traces (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT, channel TEXT NOT NULL, name TEXT NOT NULL,
+  actor TEXT, status TEXT NOT NULL, http_status INTEGER, error TEXT, ref TEXT, duration_ms INTEGER NOT NULL,
+  span_count INTEGER NOT NULL, db_queries INTEGER NOT NULL DEFAULT 0, db_ms INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS traces_org_time ON traces(org_id, started_at);
+CREATE TABLE IF NOT EXISTS trace_spans (
+  trace_id TEXT NOT NULL, span_id TEXT NOT NULL, parent_id TEXT, kind TEXT NOT NULL, name TEXT NOT NULL,
+  start_ms INTEGER NOT NULL, duration_ms INTEGER NOT NULL, status TEXT NOT NULL, error TEXT, attrs TEXT NOT NULL,
+  PRIMARY KEY (trace_id, span_id)
+);
 -- Unexpected server errors, each with the reference code the person saw (see handle() in api.ts).
 -- Listed in the Owner Console; no client document content is stored here, only the error message.
 CREATE TABLE IF NOT EXISTS app_errors (
@@ -179,6 +193,7 @@ type Driver = {
 
 declare global {
   var __sidekickDb: DatabaseSync | undefined;
+  var __sidekickDbSchema: string | undefined;
   var __sidekickDriver: Promise<Driver> | undefined;
 }
 
@@ -194,10 +209,15 @@ function sqlite(): DatabaseSync {
       throw new Error("No database configured: set DATABASE_URL to a PostgreSQL database (or SIDEKICK_ALLOW_SQLITE=1 for a single-machine demo).");
     }
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    const conn = new DatabaseSync(DB_PATH);
-    conn.exec(SCHEMA);
-    migrate(conn);
-    globalThis.__sidekickDb = conn;
+    globalThis.__sidekickDb = new DatabaseSync(DB_PATH);
+  }
+  // Apply the schema and migrations on first use, and again whenever they change while the server keeps
+  // running (a code reload in development keeps the old connection, which would miss new tables/columns).
+  const version = SCHEMA + migrate.toString();
+  if (globalThis.__sidekickDbSchema !== version) {
+    globalThis.__sidekickDb.exec(SCHEMA);
+    migrate(globalThis.__sidekickDb);
+    globalThis.__sidekickDbSchema = version;
   }
   return globalThis.__sidekickDb;
 }
@@ -212,6 +232,9 @@ function migrate(conn: DatabaseSync) {
     (conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === col);
   if (!has("orgs", "status")) conn.exec("ALTER TABLE orgs ADD COLUMN status TEXT NOT NULL DEFAULT 'Active'");
   if (!has("usage_events", "error")) conn.exec("ALTER TABLE usage_events ADD COLUMN error TEXT");
+  // Who asked and where (portal or Teams), for the Activity page's Messages view.
+  if (!has("questions", "asked_by")) conn.exec("ALTER TABLE questions ADD COLUMN asked_by TEXT");
+  if (!has("questions", "channel")) conn.exec("ALTER TABLE questions ADD COLUMN channel TEXT");
 }
 
 /**
@@ -294,13 +317,26 @@ async function postgresDriver(): Promise<Driver> {
     // A database on this same machine (localhost, or a local socket) is the only exception.
     ssl: isLocalDatabase(url) ? undefined : { rejectUnauthorized: true },
   });
-  await pool.query(fs.readFileSync(path.join(process.cwd(), "db", "schema.postgres.sql"), "utf8"));
+  const schemaPath = path.join(process.cwd(), "db", "schema.postgres.sql");
+  let applied = fs.readFileSync(schemaPath, "utf8");
+  await pool.query(applied);
+  // In development the server outlives schema edits; re-apply the (idempotent) schema when the file changes.
+  const ensureSchema = async () => {
+    if (process.env.NODE_ENV === "production") return;
+    const current = fs.readFileSync(schemaPath, "utf8");
+    if (current !== applied) {
+      await pool.query(current);
+      applied = current;
+    }
+  };
   const runner = () => pgTx.getStore() ?? pool;
   return {
     async query(sql, params) {
+      await ensureSchema();
       return (await runner().query(toPgPlaceholders(sql), params)).rows;
     },
     async exec(sql, params) {
+      await ensureSchema();
       return { changes: (await runner().query(toPgPlaceholders(sql), params)).rowCount ?? 0 };
     },
     async tx(fn) {
@@ -323,8 +359,11 @@ async function postgresDriver(): Promise<Driver> {
 
 /** The active engine, created once per server process. A failed Postgres connect is retried next call. */
 function driver(): Promise<Driver> {
+  // SQLite: only the connection is shared across reloads (see sqlite()); always use this module's driver
+  // code, so code reloads in development take effect immediately.
+  if (DIALECT === "sqlite") return Promise.resolve(sqliteDriver);
   if (!globalThis.__sidekickDriver) {
-    const d = DIALECT === "postgres" ? postgresDriver() : Promise.resolve(sqliteDriver);
+    const d = postgresDriver();
     d.catch(() => {
       if (globalThis.__sidekickDriver === d) globalThis.__sidekickDriver = undefined;
     });
@@ -343,7 +382,12 @@ export type Row = Record<string, unknown>;
 
 /** Runs a SELECT and returns every matching row. Values go in `params`, matched to `?` in order. */
 export async function all<T = Row>(sql: string, ...params: Param[]): Promise<T[]> {
-  return (await (await driver()).query(sql, params)) as T[];
+  const t0 = performance.now();
+  try {
+    return (await (await driver()).query(sql, params)) as T[];
+  } finally {
+    countDbQuery(performance.now() - t0);
+  }
 }
 /** Runs a SELECT and returns the first row, or `undefined` if nothing matched. */
 export async function get<T = Row>(sql: string, ...params: Param[]): Promise<T | undefined> {
@@ -351,7 +395,12 @@ export async function get<T = Row>(sql: string, ...params: Param[]): Promise<T |
 }
 /** Runs an INSERT, UPDATE or DELETE. Returns how many rows changed. */
 export async function run(sql: string, ...params: Param[]): Promise<{ changes: number }> {
-  return (await driver()).exec(sql, params);
+  const t0 = performance.now();
+  try {
+    return await (await driver()).exec(sql, params);
+  } finally {
+    countDbQuery(performance.now() - t0);
+  }
 }
 /**
  * Runs `fn` as one transaction: either every write inside it is saved, or (if it throws) none are.

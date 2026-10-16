@@ -390,3 +390,49 @@ test(`[${ENGINE}] health check reports the database engine and reveals no data`,
   assert.equal(r.body.database.engine, ENGINE);
   assert.deepEqual(Object.keys(r.body).sort(), ["claude", "database", "ok", "search", "teams"]);
 });
+
+test(`[${ENGINE}] Activity: admins see traces with their steps; members can't`, async () => {
+  assert.equal((await member("GET", "/api/activity?view=overview")).status, 403);
+  await member("POST", "/api/ask", { ws: s.wsA, question: "When is the wave 2 cutover?" });
+  await new Promise((r) => setTimeout(r, 500)); // traces are saved just after the response
+  const list = (await admin("GET", "/api/activity?view=traces&q=ask")).body.traces;
+  const ask = list.find((t) => t.name === "POST /api/ask" && t.status === "ok");
+  assert.ok(ask, "the question was traced");
+  assert.equal(ask.actor, "Mia Member");
+  assert.equal(ask.channel, "portal");
+  const d = (await admin("GET", `/api/activity?view=trace&id=${ask.id}`)).body;
+  const kinds = d.spans.map((x) => x.kind);
+  assert.ok(kinds.includes("search"), `search step recorded (got ${kinds})`);
+  assert.ok(kinds.includes("ai"), "Claude step recorded");
+  const search = d.spans.find((x) => x.kind === "search");
+  assert.equal(search.attrs.engine, "local keyword");
+  assert.ok(search.attrs.results >= 1);
+  assert.ok(d.trace.db_queries > 0, "database queries counted");
+  // The trace never contains document text.
+  assert.doesNotMatch(JSON.stringify(d), /48 stores/);
+});
+
+test(`[${ENGINE}] Activity: failures are traced with their reference code, and Teams answers are traced too`, async () => {
+  const failed = (await admin("GET", `/api/activity?view=traces&q=${s.failRef}`)).body.traces;
+  assert.equal(failed.length, 1, "the failed meeting import can be found by its reference code");
+  assert.equal(failed[0].status, "error");
+  const teams = (await admin("GET", "/api/activity?view=traces&channel=teams")).body.traces;
+  assert.ok(teams.some((t) => t.name === "Teams answer" && t.actor === "Test User"));
+  const overview = (await admin("GET", "/api/activity?view=overview&days=1")).body;
+  assert.ok(overview.kpis.requests > 0 && overview.kpis.teams > 0);
+  assert.equal(overview.series.length, 24);
+  const live = (await admin("GET", "/api/activity?view=live")).body;
+  assert.ok(live.connections.claude && live.connections.search && live.connections.database);
+});
+
+test(`[${ENGINE}] Activity: one organization never sees another's traces`, async () => {
+  const other = client();
+  const r = await owner("POST", "/api/owner/tenants", { org: "Other Org", name: "Other Admin", email: "other@test.local" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal((await other("POST", "/api/auth/login", { email: "other@test.local", password: r.body.tempPassword })).status, 200);
+  const theirs = (await other("GET", "/api/activity?view=traces")).body.traces;
+  assert.ok(theirs.every((t) => t.actor !== "Mia Member" && t.actor !== "Test User"));
+  const mine = (await admin("GET", "/api/activity?view=traces")).body.traces;
+  const leaked = await other("GET", `/api/activity?view=trace&id=${mine[0].id}`);
+  assert.equal(leaked.status, 404);
+});

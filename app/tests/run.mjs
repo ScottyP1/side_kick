@@ -37,13 +37,13 @@ const fresh = () => {
 };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sidekick-dbtest-"));
-step("Database layer · SQLite", ["--conditions=react-server", "--test", "tests/db.test.mjs"], { SIDEKICK_DATA_DIR: tmp, DATABASE_URL: "" });
+step("Database layer · SQLite", ["--conditions=react-server", "--import", "./tests/register-ts.mjs", "--test", "tests/db.test.mjs"], { SIDEKICK_DATA_DIR: tmp, DATABASE_URL: "" });
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const pgOk = postgresAvailable();
 if (pgOk) {
   fresh();
-  step("Database layer · Postgres", ["--conditions=react-server", "--test", "tests/db.test.mjs"], { DATABASE_URL: PG_URL });
+  step("Database layer · Postgres", ["--conditions=react-server", "--import", "./tests/register-ts.mjs", "--test", "tests/db.test.mjs"], { DATABASE_URL: PG_URL });
 }
 
 step("End-to-end API · SQLite", ["--test", "--test-timeout=300000", "tests/api.test.mjs"], { TEST_DB: "sqlite" });

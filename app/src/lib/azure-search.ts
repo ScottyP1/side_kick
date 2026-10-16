@@ -24,6 +24,7 @@ import "server-only";
 import { AzureKeyCredential, SearchClient, SearchIndexClient, type SearchIndex } from "@azure/search-documents";
 import { now, run } from "./db";
 import type { Passage } from "./search";
+import { span, spanAttrs } from "./trace";
 
 const INDEX = process.env.AZURE_SEARCH_INDEX || "sidekick-passages";
 const EMBED_DEPLOYMENT = process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT || "text-embedding-3-small";
@@ -87,6 +88,10 @@ function indexDefinition(): SearchIndex {
  * usage_events as feature "embed" so its (tiny) cost shows up on the Usage page and Owner Console.
  */
 async function embed(texts: string[], ctx: { orgId: string | null; workspaceId: string | null }): Promise<number[][]> {
+  return span("embed", "Embeddings (meaning vectors)", () => embedInner(texts, ctx), { model: EMBED_DEPLOYMENT, texts: texts.length });
+}
+
+async function embedInner(texts: string[], ctx: { orgId: string | null; workspaceId: string | null }): Promise<number[][]> {
   const out: number[][] = [];
   for (let i = 0; i < texts.length; i += 64) {
     const batch = texts.slice(i, i + 64).map((t) => t.slice(0, 8000));
@@ -104,6 +109,7 @@ async function embed(texts: string[], ctx: { orgId: string | null; workspaceId: 
       ctx.orgId, ctx.workspaceId, EMBED_DEPLOYMENT, tokens, (tokens * EMBED_PRICE_PER_M) / 1_000_000, Date.now() - started,
       res.ok ? 1 : 0, res.ok ? null : (json.error?.message ?? `HTTP ${res.status}`).slice(0, 500), now(),
     );
+    spanAttrs({ tokens: tokens });
     if (!res.ok || !json.data) throw new Error(`Embedding request failed: ${json.error?.message ?? res.status}`);
     for (const d of json.data.sort((a, b) => a.index - b.index)) out.push(d.embedding);
   }

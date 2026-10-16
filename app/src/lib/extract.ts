@@ -11,6 +11,7 @@
 import "server-only";
 import path from "node:path";
 import { HttpError } from "./auth";
+import { span } from "./trace";
 
 /** File types Sidekick can read: PDF, Word, Teams transcripts (.vtt) and text formats. */
 export const ACCEPTED = [".pdf", ".docx", ".txt", ".md", ".vtt", ".csv", ".json"];
@@ -23,6 +24,10 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
  * @throws HttpError 415 for file types Sidekick can't read yet
  */
 export async function fileToText(name: string, buf: Buffer): Promise<string> {
+  return span("file", "Read the file", () => readFileText(name, buf), { type: path.extname(name).toLowerCase() || "none", kb: Math.round(buf.length / 1024) });
+}
+
+async function readFileText(name: string, buf: Buffer): Promise<string> {
   const ext = path.extname(name).toLowerCase();
   if (!ACCEPTED.includes(ext)) {
     throw new HttpError(415, `${ext || "This file type"} isn't supported yet. Upload PDF, Word (.docx), text, Markdown or a Teams transcript (.vtt).`);

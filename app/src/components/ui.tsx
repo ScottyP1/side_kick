@@ -224,6 +224,7 @@ const ICONS: Record<string, string> = {
   alert: "M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
   refresh: "M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6",
   logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
+  activity: "M22 12h-4l-3 9L9 3l-3 9H2",
 };
 export const Icon = ({ n }: { n: string }) => (
   <svg className="ico" viewBox="0 0 24 24" aria-hidden="true">
@@ -242,8 +243,8 @@ export const Switch = ({ on, onChange, label }: { on: boolean; onChange: (v: boo
   <button className="switch" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} />
 );
 
-/** A dialog over the page with a title, body and footer buttons. Escape or the X closes it. */
-export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+/** A dialog over the page with a title, body and footer buttons. Escape or the X closes it. `wide` for charts/tables. */
+export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", k);
@@ -251,7 +252,7 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
   }, [onClose]);
   return (
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="panel-h">
           <h2>{title}</h2>
           <button className="btn ghost small" onClick={onClose} aria-label="Close">

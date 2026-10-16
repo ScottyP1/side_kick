@@ -17,6 +17,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import crypto from "node:crypto";
 import { HttpError } from "./auth";
 import { now, run } from "./db";
+import { traceFailed, withTrace } from "./trace";
+
+/** "/api/meetings/3f2a…" → "/api/meetings/:id", so the Activity page groups requests by operation. */
+const routeName = (req: unknown) =>
+  req instanceof Request ? `${req.method} ${new URL(req.url).pathname.replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,}|\/[0-9a-f]{16,}/gi, "/:id")}` : "request";
 
 /** A short code (like "K7Q2-9XM4") that links what the person saw to the full error in the error log. */
 const newRef = () => {
@@ -53,7 +58,8 @@ async function logAppError(ref: string, status: number, req: unknown, e: unknown
  *   the error log (`logAppError`), never to the browser, so internal details can't leak.
  */
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>) {
-  return async (...args: A) => {
+  return async (...args: A) =>
+    withTrace({ name: routeName(args[0]), channel: "portal" }, async () => {
     try {
       const out = await fn(...args);
       return out instanceof Response ? out : NextResponse.json(out ?? { ok: true });
@@ -63,18 +69,21 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
       const fail = async (status: number, error: string) => {
         const ref = newRef();
         await logAppError(ref, status, args[0], e);
+        traceFailed(status, error, ref);
         return NextResponse.json({ error: `${error} (Reference ${ref})`, ref }, { status });
       };
       if (e instanceof HttpError) {
         // 5xx HttpErrors (e.g. Claude declined, Azure down) are still problems worth a reference code.
-        return e.status >= 500 && !/paused/i.test(e.message) ? fail(e.status, e.message) : NextResponse.json({ error: e.message }, { status: e.status });
+        if (e.status >= 500 && !/paused/i.test(e.message)) return fail(e.status, e.message);
+        traceFailed(e.status, e.message);
+        return NextResponse.json({ error: e.message }, { status: e.status });
       }
       if (e instanceof Anthropic.AuthenticationError) return fail(502, "Claude rejected the API key. The Sidekick team needs to update it.");
       if (e instanceof Anthropic.RateLimitError) return fail(429, "Claude is busy right now (rate limit). Wait a minute and try again.");
       if (e instanceof Anthropic.APIError) return fail(502, `Claude couldn't answer right now (${e.status ?? "network"}). Try again in a minute.`);
       return fail(500, "Something went wrong on our side. Try again; if it keeps happening, contact the Sidekick team.");
     }
-  };
+    });
 }
 
 /** Parses the request body as JSON, or throws 400 with a readable message. */

@@ -19,6 +19,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { all, get, newId, now, run } from "./db";
+import { traceScope } from "./trace";
 
 export const SESSION_COOKIE = "sk_session";
 const SESSION_DAYS = 7;
@@ -115,6 +116,7 @@ export class HttpError extends Error {
 export async function requireUser(roles?: readonly Role[]): Promise<User> {
   const user = await currentUser();
   if (!user) throw new HttpError(401, "Sign in to continue.");
+  traceScope({ orgId: user.org_id, actor: user.name });
   if (roles && !roles.includes(user.role)) throw new HttpError(403, "Your role doesn't allow this. Ask an Org Admin.");
   return user;
 }
@@ -144,6 +146,7 @@ export async function requireWorkspace(user: User, workspaceId: string | null | 
   if (!workspaceId || !(await workspaceIdsFor(user)).includes(workspaceId)) {
     throw new HttpError(404, "Workspace not found, or you're not a member of it.");
   }
+  traceScope({ workspaceId });
   return workspaceId;
 }
 

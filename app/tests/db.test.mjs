@@ -1,7 +1,7 @@
 /**
  * Database-layer tests (src/lib/db.ts), run directly in Node for one engine at a time:
- *   SQLite:   SIDEKICK_DATA_DIR=<empty temp dir> node --conditions=react-server --test tests/db.test.mjs
- *   Postgres: DATABASE_URL=postgres:///sidekick_test node --conditions=react-server --test tests/db.test.mjs
+ *   SQLite:   SIDEKICK_DATA_DIR=<empty temp dir> node --conditions=react-server --import ./tests/register-ts.mjs --test tests/db.test.mjs
+ *   Postgres: DATABASE_URL=postgres:///sidekick_test node --conditions=react-server --import ./tests/register-ts.mjs --test tests/db.test.mjs
  * `--conditions=react-server` lets the "server-only" guard load outside Next.js. Use `npm test` to run
  * everything (it sets this up for both engines).
  */

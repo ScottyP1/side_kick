@@ -20,6 +20,7 @@
 import "server-only";
 import { all, DIALECT, run } from "./db";
 import { chunk } from "./extract";
+import { span, spanAttrs } from "./trace";
 import { azureCount, azureIndex, azureRemove, azureSearch, azureSearchConfigured, azureSetAudience } from "./azure-search";
 
 /** One searchable piece of a document or transcript. `loc` is where it came from, like "Page 3" or "00:12:40". */
@@ -47,11 +48,14 @@ export async function indexText(opts: {
   audience: "internal" | "shareable";
   text: string;
 }): Promise<number> {
+  return span("index", "Index passages", async () => {
   const pieces = chunk(opts.text);
+  spanAttrs({ passages: pieces.length, source: opts.sourceType, azure: azureSearchConfigured() });
   const stmt = `INSERT INTO passages (text, title, loc, source_type, source_id, workspace_id, org_id, audience) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
   for (const p of pieces) await run(stmt, p.text, opts.title, p.loc, opts.sourceType, opts.sourceId, opts.workspaceId, opts.orgId, opts.audience);
   if (azureSearchConfigured()) await azureIndex({ ...opts, pieces }).catch((e) => console.error("Azure AI Search: indexing failed (local index still updated)", e));
   return pieces.length;
+  });
 }
 
 /** Removes every passage of one document or meeting from the index (on delete or reprocess). */
@@ -123,15 +127,22 @@ function keywords(question: string): string[] {
  * @param opts.limit  maximum passages to return (default 12)
  */
 export async function searchPassages(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit?: number } = {}): Promise<Passage[]> {
-  if (azureSearchConfigured() && question.trim()) {
-    try {
-      await ensureBackfilled();
-      return await azureSearch(orgId, workspaceId, question, { guests: opts.guests, limit: opts.limit ?? 12 });
-    } catch (e) {
-      console.error("Azure AI Search failed; falling back to local keyword search", e);
+  return span("search", "Search the workspace", async () => {
+    if (azureSearchConfigured() && question.trim()) {
+      try {
+        await ensureBackfilled();
+        const hits = await azureSearch(orgId, workspaceId, question, { guests: opts.guests, limit: opts.limit ?? 12 });
+        spanAttrs({ engine: "Azure AI Search", results: hits.length });
+        return hits;
+      } catch (e) {
+        console.error("Azure AI Search failed; falling back to local keyword search", e);
+        spanAttrs({ fallback: "Azure AI Search failed, used local keyword search" });
+      }
     }
-  }
-  return await keywordSearch(orgId, workspaceId, question, opts);
+    const hits = await keywordSearch(orgId, workspaceId, question, opts);
+    spanAttrs({ engine: "local keyword", results: hits.length });
+    return hits;
+  }, { guests: Boolean(opts.guests) });
 }
 
 /**

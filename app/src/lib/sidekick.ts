@@ -66,7 +66,7 @@ export async function ask(user: User, workspaceId: string, question: string, gue
     result = await structured("ask", { orgId: user.org_id, workspaceId }, { system: ASK_SYSTEM, content, schema: AnswerSchema, effort: "low", maxTokens: 4000 });
   }
   await run(
-    "INSERT INTO questions (id, org_id, workspace_id, user_id, question, answer, found, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO questions (id, org_id, workspace_id, user_id, question, answer, found, created_at, asked_by, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     newId(),
     user.org_id,
     workspaceId,
@@ -75,6 +75,8 @@ export async function ask(user: User, workspaceId: string, question: string, gue
     result.answer,
     result.found ? 1 : 0,
     now(),
+    user.name,
+    user.id.startsWith("teams:") ? "teams" : "portal",
   );
   const used = new Set(result.source_ids);
   return {

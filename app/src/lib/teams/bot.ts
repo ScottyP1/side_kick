@@ -31,6 +31,7 @@ import type { IAdaptiveCard } from "@microsoft/teams.cards";
 import { all, get, now, run } from "../db";
 import { audit, HttpError, type User } from "../auth";
 import { ask } from "../sidekick";
+import { span, traceFailed, traceScope, withTrace } from "../trace";
 import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, VERBS, type ActionItemInput } from "./cards";
 
 /* ------------------------------------------------------------------ */
@@ -107,8 +108,12 @@ export async function handleTeamsRequest(req: Request): Promise<Response> {
   const { adapter } = await teams();
   const headers: Record<string, string> = {};
   req.headers.forEach((v, k) => (headers[k] = v));
-  const res = await adapter.handler!({ body, headers });
-  return res.body === undefined ? new Response(null, { status: res.status }) : Response.json(res.body, { status: res.status });
+  const kind = String(body.type ?? "activity") === "invoke" ? "Teams card button" : String(body.type) === "message" ? "Teams message" : `Teams ${String(body.type ?? "event")}`;
+  return withTrace({ name: kind, channel: "teams" }, async () => {
+    const res = await adapter.handler!({ body, headers });
+    if (res.status >= 400) traceFailed(res.status, `Teams request answered ${res.status}`);
+    return res.body === undefined ? new Response(null, { status: res.status }) : Response.json(res.body, { status: res.status });
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -221,6 +226,7 @@ function registerHandlers(app: App) {
   // stripMentionsText removes the "@Sidekick" part so only the question is left.
   app.on("message", async ({ activity, send, reply }) => {
     const conv = await touchConversation(activity);
+    traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
     const question = (stripMentionsText(activity) ?? "").replace(/\s+/g, " ").trim();
     const command = question.toLowerCase().replace(/[^a-z]/g, "");
 
@@ -235,15 +241,19 @@ function registerHandlers(app: App) {
     await send({ type: "typing" });
     // Teams expects a reply to its request within a few seconds; Claude can take longer, so the
     // answer is sent as a follow-up message after this request has already been acknowledged.
-    after(async () => {
-      try {
-        const result = await ask(teamsMember(conv, activity.from), conv.workspace_id!, question, conv.guests === 1);
-        await reply(answerCard(question, result, await workspaceName(conv) ?? "Workspace"));
-      } catch (e) {
-        console.error("Teams ask failed", e);
-        await send(e instanceof HttpError ? e.message : "Sorry, I couldn't answer that just now. Please try again in a minute.").catch(() => {});
-      }
-    });
+    after(() =>
+      withTrace({ name: "Teams answer", channel: "teams", orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user", detached: true }, async () => {
+        try {
+          const result = await ask(teamsMember(conv, activity.from), conv.workspace_id!, question, conv.guests === 1);
+          const card = answerCard(question, result, (await workspaceName(conv)) ?? "Workspace");
+          await span("teams", "Send the answer card to Teams", () => reply(card));
+        } catch (e) {
+          console.error("Teams ask failed", e);
+          traceFailed(e instanceof HttpError ? e.status : 500, e instanceof Error ? e.message : String(e));
+          await send(e instanceof HttpError ? e.message : "Sorry, I couldn't answer that just now. Please try again in a minute.").catch(() => {});
+        }
+      }),
+    );
   });
 
   // Returns the updated card, which Teams swaps in for the old one, so everyone sees the new owner/status.
@@ -253,6 +263,7 @@ function registerHandlers(app: App) {
     const fail = (message: string) => ({ statusCode: 200 as const, type: "application/vnd.microsoft.activity.message" as const, value: message });
     const conv = await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", baseConversationId(activity.conversation.id));
     if (!conv?.workspace_id || !conv.org_id) return fail("This chat isn't linked to a Sidekick workspace anymore.");
+    traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
     if (await orgPaused(conv.org_id)) return fail("Sidekick is paused for this organization.");
     // Workspace wall: the card only works in a conversation linked to the item's own workspace.
     const item = await get<ActionItemInput & { workspace_id: string }>(
@@ -293,8 +304,7 @@ const cardMessage = (c: IAdaptiveCard): IMessageActivityInput =>
 export async function postCard(conv: Pick<TeamsConversation, "id" | "service_url">, c: IAdaptiveCard, conversationId = conv.id): Promise<string | undefined> {
   if (PLAYGROUND_MODE && !isLocalUrl(conv.service_url)) throw new Error("Playground mode only posts to local conversations.");
   const { app } = await teams();
-  const res = await app.api.clone({ serviceUrl: conv.service_url }).conversations.createActivity(conversationId, cardMessage(c));
-  return res.id;
+  return span("teams", "Post a card to Teams", async () => (await app.api.clone({ serviceUrl: conv.service_url }).conversations.createActivity(conversationId, cardMessage(c))).id);
 }
 
 // Cap so one long meeting can't flood a channel; the full list is always in the portal.
@@ -307,11 +317,16 @@ const MAX_ACTION_CARDS = 15;
  * Called from the meeting import/reprocess routes after the response is sent, so imports never wait on Teams.
  */
 export async function postMeetingNotes(orgId: string, meetingId: string): Promise<number> {
+  return withTrace({ name: "Post meeting notes to Teams", channel: "teams", orgId, detached: true }, () => postMeetingNotesInner(orgId, meetingId));
+}
+
+async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<number> {
   const m = await get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; external_guests: number; ws: string }>(
     "SELECT m.id, m.workspace_id, m.title, m.held_at, m.summary, m.status, m.external_guests, w.name AS ws FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.id = ? AND m.org_id = ?",
     meetingId, orgId,
   );
   if (!m || m.status !== "Ready") return 0;
+  traceScope({ workspaceId: m.workspace_id });
   // Notes from an internal-only meeting never go to a conversation that has client guests in it.
   const convs = await all<TeamsConversation>(
     "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND (guests = 0 OR ? = 1)",

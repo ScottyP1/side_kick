@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Owner Console home (/owner): spend, speed, errors and activity across every client organization.
+ */
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, fmtTime, Pill, usd } from "@/components/ui";

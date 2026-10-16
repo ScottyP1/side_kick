@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Performance & errors (/owner/performance): response times, error rates and cache savings per feature and model.
+ */
+
 import { useEffect, useState } from "react";
 import { api, fmtTime, Pill, usd } from "@/components/ui";
 
@@ -9,6 +13,7 @@ type P = {
   byModel: G[];
   errors: { created_at: string; feature: string; model: string; latency_ms: number; error: string | null; tenant: string | null }[];
   processing: { tenant: string; failed_docs: number; failed_meetings: number; unanswered: number; questions: number }[];
+  appErrors: { ref: string; status: number; method: string | null; route: string | null; message: string; created_at: string }[];
 };
 const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map" };
 const sec = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
@@ -95,6 +100,32 @@ export default function PerformancePage() {
                 </tr>
               ))}
               {!p.errors.length && <tr><td colSpan={5} className="muted">No failed requests.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="panel">
+        <div className="panel-h">
+          <h2>App errors (reference codes)</h2>
+          <Pill kind={p.appErrors.length ? "bad" : "good"}>{p.appErrors.length}</Pill>
+        </div>
+        <div className="panel-b muted" style={{ paddingBottom: 0 }}>
+          Unexpected problems a person saw as &ldquo;Something went wrong… (Reference ABCD-1234)&rdquo;. Use the code a client sends you to find the details here.
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>When</th><th>Reference</th><th>Request</th><th>Status</th><th>What happened</th></tr></thead>
+            <tbody>
+              {p.appErrors.map((e) => (
+                <tr key={e.ref}>
+                  <td className="ts" style={{ whiteSpace: "nowrap" }}>{fmtTime(e.created_at)}</td>
+                  <td className="mono"><b>{e.ref}</b></td>
+                  <td className="mono">{e.method} {e.route}</td>
+                  <td>{e.status}</td>
+                  <td style={{ color: "var(--bad)" }}>{e.message}</td>
+                </tr>
+              ))}
+              {!p.appErrors.length && <tr><td colSpan={5} className="muted">No app errors.</td></tr>}
             </tbody>
           </table>
         </div>

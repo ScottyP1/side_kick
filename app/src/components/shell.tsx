@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * The client portal frame: sidebar menu, workspace picker and header, around every signed-in page.
+ * It loads /api/me once and shares it through `useApp()`: the user, their role, branding, workspaces and the current workspace.
+ */
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
@@ -16,6 +21,10 @@ export type Me = {
 
 type Ctx = { me: Me; ws: string; setWs: (id: string) => void; reload: () => Promise<void> };
 const AppCtx = createContext<Ctx | null>(null);
+/**
+ * Everything a portal page needs about the current session: `me` (user, role, org, branding, workspaces),
+ * the current workspace id `ws` and `setWs` to switch it, and `reload` to refresh after changes.
+ */
 export function useApp() {
   const c = useContext(AppCtx);
   if (!c) throw new Error("useApp must be used inside the app shell");
@@ -25,7 +34,7 @@ export function useApp() {
 const NAV: { g: string; items: [string, string, string, ((m: Me) => boolean)?][] }[] = [
   { g: "Overview", items: [["/", "Overview", "home"], ["/usage", "Usage & billing", "chart", (m) => ["Org Owner", "Org Admin", "Billing Admin"].includes(m.user.role)], ["/agent", "AI models & agent", "cpu"]] },
   { g: "Manage", items: [["/workspaces", "Workspaces", "folder"], ["/knowledge", "Knowledge & docs", "doc"], ["/meetings", "Meetings", "video"], ["/memory", "Memory & gaps", "brain"], ["/connectors", "Connectors", "plug"], ["/users", "Users & access", "users", (m) => m.user.admin]] },
-  { g: "Govern", items: [["/audit", "Security & audit", "lock", (m) => m.user.admin], ["/settings", "Settings", "gear"]] },
+  { g: "Govern", items: [["/activity", "Activity", "activity", (m) => m.user.admin], ["/audit", "Security & audit", "lock", (m) => m.user.admin], ["/settings", "Settings", "gear"]] },
 ];
 
 const WS_KEY = "sidekick.ws";
@@ -187,6 +196,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 // Shown on workspace pages when the person has no workspace yet.
+/** Shown instead of a page's content when the user has no workspace yet (admins get a "create one" link). */
 export function NeedsWorkspace() {
   const { me } = useApp();
   return (

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.30",
+  "version": "1.0.0",
+  "id": "{{BOT_ID}}",
+  "developer": {
+    "name": "Sidekick",
+    "websiteUrl": "{{PUBLIC_URL}}",
+    "privacyUrl": "{{PUBLIC_URL}}",
+    "termsOfUseUrl": "{{PUBLIC_URL}}"
+  },
+  "name": { "short": "Sidekick", "full": "Sidekick: AI teammate for client teams" },
+  "description": {
+    "short": "Answers from your workspace's documents and meetings, with sources.",
+    "full": "Mention @Sidekick in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. After each meeting Sidekick posts the notes, decisions and action items, and you can assign or close action items right from the card."
+  },
+  "icons": { "color": "color.png", "outline": "outline.png" },
+  "accentColor": "#0F6B5C",
+  "supportsChannelFeatures": "tier1",
+  "bots": [
+    {
+      "botId": "{{BOT_ID}}",
+      "scopes": ["personal", "team", "groupChat"],
+      "isNotificationOnly": false,
+      "supportsFiles": false,
+      "commandLists": [
+        {
+          "scopes": ["personal", "team", "groupChat"],
+          "commands": [
+            { "title": "help", "description": "What Sidekick can do here" },
+            { "title": "link", "description": "Get the code to link this chat to a workspace" }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["{{PUBLIC_HOST}}"]
+}

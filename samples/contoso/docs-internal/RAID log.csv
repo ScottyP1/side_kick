@@ -1,0 +1,8 @@
+ID,Type,Description,Owner,Status,Opened,Due
+R-01,Risk,Wave 2 store count may rise from 48 to 52; CR-02 priced for 48,Priya Raman,Open,2026-10-07,2026-10-16
+R-02,Risk,Card reader model in wave 2 stores unknown; driver change may affect PCI,Sam Okafor,Closed,2026-10-06,2026-10-10
+R-03,Risk,Rollback plan has no named owner for night shift,Priya Raman,Open,2026-09-30,2026-10-20
+I-01,Issue,SKU sync job times out when store API is slow during 2 a.m. backups,Maria Chen,Open,2026-10-06,2026-10-21
+I-02,Issue,Cosmos DB request cost 18% over estimate,Sam Okafor,Closed,2026-10-02,2026-10-06
+A-01,Assumption,Contoso security owns the PCI assessment,Tom Becker,Open,2026-09-30,
+D-01,Dependency,Lab store with network switched off for offline tests,Lena Ortiz,Closed,2026-10-02,2026-10-07

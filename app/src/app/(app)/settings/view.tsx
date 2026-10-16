@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Settings (/settings): organization branding (logo and brand color) and your own account (password).
+ */
+
 import { useRef, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, Icon, useToast } from "@/components/ui";

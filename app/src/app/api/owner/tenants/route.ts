@@ -1,3 +1,7 @@
+/**
+ * GET/POST /api/owner/tenants: every client organization with its usage, or onboard a new one.
+ * Who: platform operators only.
+ */
 import crypto from "node:crypto";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, createUser, HttpError } from "@/lib/auth";
@@ -8,7 +12,7 @@ export const GET = handle(async () => {
   await requireOwner();
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
   const since7 = new Date(Date.now() - 7 * 86400_000).toISOString();
-  const tenants = all(
+  const tenants = await all(
     `SELECT o.id, o.name, o.status, o.created_at,
        (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id) AS users,
        (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.last_active >= ?) AS active_users,
@@ -34,14 +38,14 @@ export const POST = handle(async (req: Request) => {
   const name = requireText(body.name, "Admin name", 120);
   const email = requireText(body.email, "Admin email", 200).toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, "Enter a valid email address.");
-  if (get("SELECT id FROM users WHERE email = ?", email)) throw new HttpError(409, "Someone with that email already has an account.");
+  if (await get("SELECT id FROM users WHERE email = ?", email)) throw new HttpError(409, "Someone with that email already has an account.");
   const temp = crypto.randomBytes(9).toString("base64url");
   const orgId = newId();
-  tx(() => {
-    run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", orgId, org, now());
-    createUser(orgId, name, email, "Org Owner", temp, true);
+  await tx(async () => {
+    await run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", orgId, org, now());
+    await createUser(orgId, name, email, "Org Owner", temp, true);
   });
-  audit({ org_id: orgId, name: "Sidekick team" }, `Created organization “${org}” with ${name} as Org Owner`, "Access");
-  platformLog(owner.name, `Onboarded ${org} (${email})`);
+  await audit({ org_id: orgId, name: "Sidekick team" }, `Created organization “${org}” with ${name} as Org Owner`, "Access");
+  await platformLog(owner.name, `Onboarded ${org} (${email})`);
   return { id: orgId, tempPassword: temp };
 });

@@ -1,7 +1,11 @@
 "use client";
 
+/**
+ * Releases & switches (/owner/releases): the running version, models in use, kill switches and the operator log.
+ */
+
 import { useCallback, useEffect, useState } from "react";
-import { api, fmtTime, Modal, Pill, Switch, useToast } from "@/components/ui";
+import { api, fmtTime, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
 
 type R = {
   build: { version: string; branch: string | null; commit: string | null; next: string; sdk: string; node: string; environment: string; startedAt: string };
@@ -16,9 +20,10 @@ export default function ReleasesPage() {
   const [r, setR] = useState<R | null>(null);
   const [pending, setPending] = useState<{ key: string; label: string; enabled: boolean } | null>(null);
   const load = useCallback(() => api<R>("/api/owner/releases").then(setR), []);
+  const reportError = useReportError();
   useEffect(() => {
-    load().catch(() => {});
-  }, [load]);
+    load().catch(reportError);
+  }, [load, reportError]);
   if (!r) return <span className="muted">Loading…</span>;
 
   const flip = async (key: string, enabled: boolean, label: string) => {

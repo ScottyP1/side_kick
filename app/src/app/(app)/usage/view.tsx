@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Usage & billing (/usage): every Claude request metered: tokens, cost and response time by feature, model,
+ * workspace and day. Owners, Admins and Billing Admins.
+ */
+
 import { useEffect, useState } from "react";
 import { api, usd } from "@/components/ui";
 

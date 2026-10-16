@@ -4,14 +4,25 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:teams": "TEAMS_LOCAL_PLAYGROUND=true SIDEKICK_DATA_DIR=.playground-data NEXT_DIST_DIR=.next-playground next dev --port 3100",
+    "playground": "agentsplayground -e http://localhost:3100/api/messages -c msteams",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "teams:package": "node scripts/teams-package.mjs",
+    "tunnel": "devtunnel host sidekick",
+    "test": "node tests/run.mjs",
+    "db:copy-to-postgres": "node scripts/copy-to-postgres.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",
+    "@azure/search-documents": "^13.0.0",
+    "@microsoft/teams.api": "^2.1.0",
+    "@microsoft/teams.apps": "^2.1.0",
+    "@microsoft/teams.cards": "^2.1.0",
     "mammoth": "^1.13.0",
     "next": "16.4.1",
+    "pg": "^8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1",
@@ -19,7 +30,9 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@microsoft/m365agentsplayground": "^0.2.29",
     "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:05.000 --> 00:00:13.000
+<v Priya Raman>Morning. Yesterday we planned sprint 14: Maria on retries, Sam on the load test, me on store manager comms.</v>
+
+00:00:15.000 --> 00:00:21.000
+<v Maria Chen>Retry logic is started. Exponential backoff, five attempts, then page on-call.</v>
+
+00:00:23.000 --> 00:00:34.000
+<v Sam Okafor>Load test environment is booked for October 23. Tom sent the card reader list last night, it's the Verifone P400 in all wave 2 stores.</v>
+
+00:00:36.000 --> 00:00:42.000
+<v Dev Patel>I'll add the P400 to the regression tests.</v>
+
+00:00:44.000 --> 00:00:51.000
+<v Priya Raman>Rollback owner is still open. Jordan asked again. I'll propose Dev for the night shift, Dev?</v>
+
+00:00:53.000 --> 00:00:59.000
+<v Dev Patel>I can do it if I get a backup.</v>
+
+00:01:01.000 --> 00:01:07.000
+<v Priya Raman>Okay, Dev owns the rollback for wave 2, backup to be decided.</v>

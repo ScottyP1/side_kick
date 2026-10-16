@@ -11,9 +11,11 @@
 | **Product step 1**: client dashboard + AI brain | **Built, tested, on GitHub `main`** |
 | **Owner Console** (operator dashboard) | **Built, tested, merged into `main`** |
 | Azure account (personal) | Created, $25 budget alert set |
-| Microsoft 365 test org "Sidekick Labs" (Business Basic trial) | Created but **cancelled by mistake** (turning off recurring billing on a *trial* cancels it). Needs Reactivate (may take 15–30 min), Microsoft support, or a fresh trial. **Leave recurring billing ON**; cancel before Nov 14, 2026 if not keeping it (worst case $8.40 for one month) |
-| Teams custom-app upload | Not done yet; needs the M365 subscription active first |
-| **Product step 2**: Sidekick in Teams | **Next.** Not started |
+| Microsoft 365 test org "Sidekick Labs" (Business Basic trial) | **Active again** (new free trial started Oct 15, 2026 in the same org; the first trial was cancelled by turning off recurring billing and could not be reactivated). Trial ends **Nov 14, 2026**; then $8.40 + tax per month (1 license, monthly) on the Visa unless the subscription is cancelled before Nov 15. **Never turn off recurring billing on a trial** (it cancels it) |
+| Teams setup (Oct 15, 2026) | Done in Sidekick Labs: Teams "Upload custom apps" = On (Global policy); Entra app **Sidekick Bot** (single tenant, secret 180 days, IDs + secret only in `app/.env.local`); Azure Bot **sidekick-bot-dev** (Free, resource group `sidekick-rg`, Teams channel on, endpoint = dev tunnel); dev tunnel **sidekick** (anonymous, port 3000, expires after 30 days unused). Azure "Test in Web Chat" → app answered (end-to-end OK). Package built: `npm --prefix app run teams:package` |
+| Azure AI Search (Oct 16, 2026) | **Live**: Free search service `sidekick-labs-search` + embedding deployment `text-embedding-3-small` in Foundry resource `codyscott-9578-resource` (project `sidekick`), all in `sidekick-rg`; keys only in `app/.env.local`. Backfill copied 17 sources; 18 embedding calls cost $0.0001. Meaning search found the Oct 15 rollback owner that keyword search missed; guest filter verified |
+| Teams custom-app upload | **Next**: upload `teams/build/sidekick-teams.zip` in Teams. Org-wide "custom apps" setting was still locked ("setting up app management") — check it if upload is refused |
+| **Product step 2**: Sidekick in Teams | **Bot built and tested locally in Agents Playground** (branch `feat/teams-bot`). Next: Azure Bot registration, manifest, dev tunnel, real Teams |
 | Product step 3: live voice in meetings | Later |
 
 Repo: `github.com/ScottyP1/side_kick` (private). Local: `~/Desktop/sidekick`. Branch `main` holds everything.
@@ -32,29 +34,60 @@ npm --prefix app run dev
 - Owner Console: http://localhost:3000/owner (first visit = owner account, localhost only)
 - Demo script: `README.md`
 
+## Documentation
+- User guides: `docs/guide/` (concepts, admin, Teams, Owner Console). Developer overview and rules: `docs/ARCHITECTURE.md`.
+- Every source file has a header comment and every exported function/route a doc comment. Keep it that way (see CLAUDE.md).
+
 ## What step 1 + Owner Console contain (code map)
 - `app/src/lib/db.ts`: SQLite (`node:sqlite`, built into Node 26) schema + small migrations. One file: `app/data/sidekick.db`. `SIDEKICK_DATA_DIR` overrides the folder (used for test copies).
 - `app/src/lib/auth.ts`: client users, scrypt passwords, session cookie `sk_session`, roles (Org Owner/Admin, Billing Admin, Member, Viewer), workspace walls (`requireWorkspace`), audit log, suspended-org check.
 - `app/src/lib/owner.ts`: Owner Console auth (separate cookie `sk_owner`, first owner only from localhost), kill switches (`assertEnabled`), operator log.
 - `app/src/lib/claude.ts`: all Claude calls. Default model `claude-opus-5-5` (override per feature with `SIDEKICK_MODEL_ASK/EXTRACT/INSIGHTS`), structured outputs via `betaZodOutputFormat`, server-side fallback `"default"`, prompt caching, usage + cost + errors metered into `usage_events`.
-- `app/src/lib/search.ts`: keyword search (SQLite FTS5/BM25), always filtered by org + workspace, guest mode excludes `internal` docs. **To be replaced behind the same functions by Azure AI Search (hybrid keyword + vector) in step 2.**
+- `app/src/lib/search.ts`: the one door for search. SQLite FTS5/BM25 keyword index is the source of truth and the fallback; when `AZURE_SEARCH_*` is set it mirrors every passage to **Azure AI Search** and answers with **hybrid keyword + vector** search (`app/src/lib/azure-search.ts`, embeddings from `text-embedding-3-small`, metered as feature `embed`). An empty Azure index is backfilled automatically on first use. Always filtered by org + workspace; guest mode = `shareable` only.
 - `app/src/lib/extract.ts`: PDF (unpdf), Word (mammoth), text, Teams `.vtt` → text; chunking.
 - `app/src/lib/sidekick.ts`: Ask (RAG with cited sources, unanswered questions logged as gaps), meeting processing (summary/decisions/action items/open questions/facts), knowledge map (topics + coverage + gaps).
+- `app/src/lib/teams/bot.ts`: Teams bot (Microsoft **Teams SDK 2.1**, `@microsoft/teams.apps`). A small adapter plugs the SDK into the Next.js route `app/src/app/api/messages/route.ts` instead of its own Express server. Handles `install.add` (link code), `message` (@Sidekick → `ask()`, answered via `after()` so Teams isn't kept waiting), `card.action` (Assign / Done / Reopen on action items) and `postMeetingNotes()` (proactive notes + action-item cards to linked conversations; in channels the items go in the notes thread).
+- `app/src/lib/teams/cards.ts`: the Adaptive Cards (answer + sources, link code, help, meeting notes, action item), plain JSON.
+- `teams_conversations` table: every Teams channel/chat Sidekick was added to, with its service URL, link code (24 h) and, once linked, `org_id` + `workspace_id` + `guests`. `app/src/app/api/teams-links/route.ts`: list / link by code / guests toggle / unlink (Org Owner/Admin only, audited). UI: Workspaces page → “Teams channels and chats”.
 - API routes: `app/src/app/api/**` (client) and `app/src/app/api/owner/**` (owner).
 - UI: client pages in `app/src/app/(app)/*/view.tsx`, owner pages in `app/src/app/owner/(console)/*/view.tsx`; shells in `app/src/components/`.
+
+## Database, tests, errors (Oct 16, 2026)
+- Database layer is async and runs on **SQLite** (laptop, no `DATABASE_URL`) or **Postgres** (`DATABASE_URL`), same SQL. Tested against Postgres 17 locally (`brew services start postgresql@17`, test DB `sidekick_test`). `npm --prefix app run db:copy-to-postgres` copies a SQLite install into Postgres (verified on the real data: every table matched).
+- Container: `app/Dockerfile` + `.dockerignore`; `next.config.ts` builds `standalone` and excludes `data/`, `.env*`, tests and scripts from the bundle (a first build had pulled `app/data` in; now verified 0 such files). Docker isn't installed on the Mac; build in Azure with `az acr build` when hosting. Verified the standalone server in production mode: 503 + clear message without a database, healthy on Postgres, unsigned Teams requests refused.
+- **No hosting yet** (decision: "code now, cloud later"). Budget alert `sidekick-monthly-25` ($25/month; alerts at 80% actual and 100% forecast to cody.l.scott@outlook.com) on the Sidekick Labs subscription. Hosting options when needed: Container Apps scale-to-zero + Postgres B1ms (~$15/mo) or App Service B1 + Postgres (~$28/mo).
+- Tests: `npm --prefix app test` = 66 tests (db layer 7×2, end-to-end 26×2). Fake Claude via `SIDEKICK_FAKE_CLAUDE=1` (refused in production); `__FAIL__` in content forces a failure.
+- Errors: `handle()` adds reference codes and logs to `app_errors`; `api()` + `ProblemProvider` modal; `useReportError()` for loads; crash screens `error.tsx` / `global-error.tsx`.
+
+## Activity + live orb (Oct 16, 2026)
+- `lib/trace.ts` traces every API request (`handle()`), Teams message/answer/card/post, with spans for search (engine, results, fallback), embeddings, Claude (model, tokens, cost), file reading and indexing, plus per-request DB query count/time. Tables `traces` + `trace_spans` (both engines), 30-day retention.
+- `/api/activity` views: overview, traces, trace, messages (admins), live (everyone; names for admins only). `/activity` page (admins) and the home-page orb (`components/live-orb.tsx`, WebGL shader, no new dependency; reduced-motion and no-WebGL fallbacks).
+- Dev gotchas fixed: the schema is re-applied when it changes while the server runs; the trace store is shared across module reloads. After big server-side changes in dev, a restart is still the safest check.
+
+## Scale-up path (for later, not needed now)
+- **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).
+- **Event Hubs** (Azure's Kafka-compatible event stream): for step 3 live meeting events at scale, or queueing heavy work (transcript processing) once many clients use it. It moves events between services; it is **not** storage. Storage stays Postgres (+ Blob for files, Azure AI Search for retrieval).
+- Postgres: start on Flexible Server Burstable; scale up or add read replicas when usage grows.
 
 ## Gotchas learned
 - **Next.js 16.4 with Cache Components**: client-rendered pages need a server `page.tsx` wrapper exporting `instant = false` and re-exporting `./view`. Read `app/node_modules/next/dist/docs/` before using Next APIs; `middleware` is now `proxy.ts`.
 - zsh treats `[id]` in paths as a glob: quote paths in shell commands.
 - Test against a **separate copy** so the owner's real data is untouched: `SIDEKICK_DATA_DIR=<tmp> NEXT_DIST_DIR=.next-test npx next dev --port 3100` (then revert any `tsconfig.json` include lines Next adds, delete `.next-test`).
+- Teams bot auth: `PLAYGROUND_MODE` (no token check) needs `TEAMS_LOCAL_PLAYGROUND=true`, is off whenever `NODE_ENV=production`, and only accepts localhost requests with a localhost service URL. `dangerouslyAllowUnauthenticatedRequests` is always passed explicitly so the SDK's own env var can't switch auth off. The SDK reads `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` itself.
+- Postgres differences to remember: no `INSERT OR IGNORE` (use `ON CONFLICT DO NOTHING`), `day` needs `AS day`, every selected column must be grouped or aggregated, qualify columns in `ON CONFLICT … DO UPDATE` (`teams_conversations.name`). COUNT/SUM come back as strings from `pg`; db.ts converts them to numbers.
+- Next.js prerenders route handlers at build time: wrappers that catch errors must call `unstable_rethrow`, and routes with no request data (like `/api/health`) need `await connection()`.
+- After editing `app/.env.local` (bot IDs/secret), **restart the app**: a running dev server answered 401s correctly but didn't reply to Teams until restarted.
+- To test in real Teams, run the app (`npm --prefix app run dev`) **and** the tunnel (`npm --prefix app run tunnel`). The tunnel makes the whole portal reachable from the internet while it runs; stop it when not testing.
+- Teams users are not portal users yet: in a linked conversation they act as a Member of that one workspace (`teams:<aad id>` in `questions.user_id`, “Name (Teams)” in the audit log). Map them to real users with Entra ID sign-in later.
+- `npm --prefix app run dev:teams` + `npm --prefix app run playground` = local Teams test on port 3100 with `app/.playground-data` (see README). Playground writes `app/devTools/` logs (git-ignored).
 - Teams dev: Microsoft 365 Developer Program sandbox **denied** ("don't currently qualify"), the normal outcome in 2026. Business Basic trial used instead.
 - Production media bot (step 3) **must be hosted in Azure** on Windows (C#/.NET). Graph has **no raise-hand API**, so use a virtual hand-raise (chat card + side panel).
 
 ## Next: product step 2 plan (Sidekick in Teams)
-1. Add a Teams bot endpoint to the app (Microsoft Teams SDK / Agents SDK for TypeScript, `/api/messages`).
-2. @Sidekick in a channel/chat → answers via existing `ask()` for the workspace linked to that channel, with sources as an Adaptive Card.
-3. Link Teams channels to workspaces (new table + UI on the Workspaces page).
-4. After a transcript import, post the meeting notes card to the linked channel; action items as cards with Assign / Done.
-5. Test locally with **Microsoft 365 Agents Playground** (no tenant needed), then:
-6. Azure: create a free **Azure Bot** registration + Entra app; expose local app via dev tunnel; build the Teams app manifest; upload as a custom app to the Sidekick Labs Teams (after custom apps are allowed).
-7. Later in step 2: Microsoft (Entra ID) sign-in, Azure-hosted Claude (`AnthropicFoundry`), Azure AI Search, Postgres.
+1. ~~Teams bot endpoint `/api/messages` (Teams SDK 2.1)~~ Done.
+2. ~~@Sidekick answers via `ask()` for the linked workspace, Adaptive Card with sources~~ Done.
+3. ~~Link Teams channels to workspaces (table + Workspaces page UI)~~ Done (link code flow).
+4. ~~Post meeting notes + action-item cards (Assign / Done) after import~~ Done.
+5. ~~Test locally with Microsoft 365 Agents Playground~~ Done (answers, notes, Assign/Done, workspace wall checks).
+6. ~~Teams app manifest (v1.30) + icons + `teams:package` script~~ Done (`teams/`, passes 62 Agents Toolkit checks). Still to do with the trial active: create the Entra app **in the Sidekick Labs tenant** + free **Azure Bot** (single tenant); dev tunnel `sidekick` (steps in README “Sidekick in real Teams”); upload as a custom app to the Sidekick Labs Teams (after custom apps are allowed). Put `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` in `app/.env.local` and run the normal `dev` (not `dev:teams`): over a tunnel Playground mode refuses requests anyway. Manifest bot scopes: `personal`, `team`, `groupChat`. Set `SIDEKICK_PUBLIC_URL` for the card links.
+7. Later in step 2: Microsoft (Entra ID) sign-in, Azure-hosted Claude (`AnthropicFoundry`, the Foundry resource already exists), ~~Azure AI Search~~ (done), Postgres, hosting in Azure instead of the dev tunnel.

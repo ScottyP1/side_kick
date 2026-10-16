@@ -1,8 +1,13 @@
 "use client";
 
+/**
+ * Memory & gaps (/memory): the knowledge map (topics and how well each is covered), knowledge gaps with
+ * suggested fixes, and the action-item tracker for the current workspace.
+ */
+
 import { useCallback, useEffect, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
-import { api, fmtDate, fmtTime, Icon, Pill, Spinner, useToast } from "@/components/ui";
+import { api, fmtDate, fmtTime, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 
 type Topic = { name: string; summary: string; coverage: number; key_facts: string[]; document_titles: string[]; meeting_titles: string[] };
 type Gap = { kind: string; text: string; suggestion: string; topic: string; assignee: string | null };
@@ -29,10 +34,11 @@ export default function MemoryPage() {
     if (!ws) return;
     setData(await api<Data>(`/api/memory?ws=${ws}`));
   }, [ws]);
+  const reportError = useReportError();
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set after the request resolves
-    load().catch(() => {});
-  }, [load]);
+    load().catch(reportError);
+  }, [load, reportError]);
 
   if (!ws) return <NeedsWorkspace />;
 

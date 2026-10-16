@@ -1,9 +1,14 @@
 "use client";
 
+/**
+ * Home (/): what Sidekick knows and what needs attention across your workspaces: counts, recent meetings, open gaps and action items.
+ */
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
-import { api, fmtDate, Pill, usd } from "@/components/ui";
+import { LiveOrb } from "@/components/live-orb";
+import { api, fmtDate, Pill, usd, useReportError } from "@/components/ui";
 
 type Overview = {
   stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; spendMonth: number };
@@ -18,9 +23,10 @@ type Overview = {
 export default function OverviewPage() {
   const { me, setWs } = useApp();
   const [data, setData] = useState<Overview | null>(null);
+  const reportError = useReportError();
   useEffect(() => {
-    api<Overview>("/api/overview").then(setData).catch(() => {});
-  }, []);
+    api<Overview>("/api/overview").then(setData).catch(reportError);
+  }, [reportError]);
   const s = data?.stats;
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -56,7 +62,9 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <div className="grid g4">
+      <LiveOrb admin={me.user.admin} />
+
+      <div className="grid g4" style={{ marginTop: 16 }}>
         <Link className="kpi" href="/meetings" style={{ textDecoration: "none" }}>
           <span className="eyebrow">Meetings</span>
           <span className="v">{s?.meetings ?? "—"}</span>

@@ -1,0 +1,78 @@
+# How Sidekick's code fits together
+
+For developers. User-facing guides are in [guide/](guide/README.md); status and next steps in [PROGRESS.md](PROGRESS.md); the full product design in [BLUEPRINT.md](BLUEPRINT.md).
+
+## The pieces
+
+```
+Browser (client portal, Owner Console)        Microsoft Teams
+            │  fetch /api/*                         │  Azure Bot Service
+            ▼                                       ▼
+   ┌──────────────── Next.js app (app/) ─────────────────────┐
+   │  app/src/app/api/**/route.ts   app/src/app/api/messages │
+   │        │                              │                 │
+   │        ▼                              ▼                 │
+   │  lib/auth.ts  (who, role, workspace wall)   lib/teams/bot.ts
+   │        │                              │                 │
+   │        ▼                              ▼                 │
+   │  lib/sidekick.ts  ── ask / processMeeting / refreshInsights
+   │     │                    │                              │
+   │     ▼                    ▼                              │
+   │  lib/search.ts        lib/claude.ts ──► Claude API      │
+   │     │                    │                              │
+   │     ▼                    ▼                              │
+   │  lib/db.ts  (SQLite: app/data/sidekick.db)              │
+   └─────────────────────────────────────────────────────────┘
+```
+
+| File | Job |
+|---|---|
+| `lib/db.ts` | The async query API (`all`, `get`, `run`, `tx`) over SQLite (laptop) or Postgres (`DATABASE_URL`); SQLite schema + migrations. Every table with client data has `org_id` and usually `workspace_id` |
+| `db/schema.postgres.sql` | The Postgres schema, mirroring the SQLite one |
+| `lib/auth.ts` | Sessions, roles, `requireUser`, `requireWorkspace` (the workspace wall), audit log |
+| `lib/owner.ts` | Owner Console sign-in, kill switches (`assertEnabled`), operator log |
+| `lib/trace.ts` | Traces and steps (spans) for every request and Teams message; feeds the Activity page and the home orb |
+| `lib/api.ts` | `handle()` wrapper: JSON responses, `HttpError` → `{ error }`, reference codes + `app_errors` log for unexpected errors |
+| `lib/extract.ts` | Files → text (PDF, Word, Teams .vtt) and text → passages |
+| `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured |
+| `lib/azure-search.ts` | Azure AI Search index, embeddings and hybrid (keyword + vector) queries |
+| `lib/claude.ts` | **All Claude calls go through here**: model per feature, structured output, metering |
+| `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
+| `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
+| `components/` | Portal and Owner Console frames, shared UI |
+| `app/(app)/*/view.tsx` | Client portal pages; `app/owner/(console)/*/view.tsx` Owner Console pages |
+
+## Three flows worth knowing
+
+**Asking a question** (portal or Teams)
+1. Route checks the user and workspace (`requireUser`, `requireWorkspace`), or the Teams conversation's link.
+2. `ask()` → `searchPassages()` finds up to 12 passages in that org + workspace (Shareable only if guests are present): Azure hybrid search when configured, otherwise local keyword search.
+3. `structured("ask", …)` sends the numbered passages and the question to Claude, which must return `{ found, answer, source_ids }`.
+4. The question is saved in `questions` (unanswered = knowledge gap); the cited sources are returned.
+
+**Importing a meeting**
+1. `POST /api/meetings` stores the transcript (`.vtt` converted to "[time] Speaker: text").
+2. `processMeeting()` asks Claude for summary, decisions, action items, open questions and facts, saves them in one transaction, and indexes the transcript.
+3. After the response is sent (`after()`), `postMeetingNotes()` posts the cards to linked Teams conversations.
+
+**A Teams message**
+1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
+2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
+3. Unlinked conversation → link-code card. Linked → typing indicator now, answer card after the request returns.
+
+## Rules every change must keep
+- **Walls**: filter every query by `org_id`, and by a workspace id that went through `requireWorkspace` (or a linked Teams conversation). Never trust an id from the request on its own.
+- **Data, not instructions**: anything from documents, transcripts or users goes to Claude inside tags, and the system prompt says to ignore instructions in it.
+- **One path each**: Claude only via `lib/claude.ts`, search only via `lib/search.ts`, so Azure (Foundry, AI Search) can be swapped in later without touching callers.
+- **Audit**: access changes, deletions and anything Sidekick does on its own call `audit()` / `auditAsSidekick()`.
+- **Parameters**: SQL values always go in `?` parameters, never into the SQL string.
+- **Secrets**: only in `app/.env.local` (git-ignored). The Teams bot never runs without token checks in production.
+- **Both databases**: SQL must run on SQLite and Postgres; `npm test` checks both.
+- **No silent failures**: routes use `handle()`; pages use `api()` (opens the problem modal for network/server/paused problems) and `useReportError()` instead of empty catches; page crashes land on `error.tsx`.
+- **Tests**: add or update tests in `app/tests/` with any behaviour change; `npm test` must pass before committing.
+
+## Documentation conventions
+- Every source file starts with a header comment saying what it's for; library files explain the concepts they introduce.
+- Every exported function, type and route has a doc comment: what it does, who may call it, what it returns or throws.
+- Comments explain *why* and the concept, not what the next line literally does.
+- User-visible behavior changes also update the matching guide in `docs/guide/`.

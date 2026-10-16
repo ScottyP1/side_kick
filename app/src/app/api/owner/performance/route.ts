@@ -1,3 +1,7 @@
+/**
+ * GET /api/owner/performance: response times (typical and slowest), error rates and cache savings per feature and model.
+ * Who: platform operators only.
+ */
 import { handle } from "@/lib/api";
 import { all } from "@/lib/db";
 import { requireOwner } from "@/lib/owner";
@@ -11,7 +15,7 @@ const pct = (xs: number[], p: number) => {
 export const GET = handle(async () => {
   await requireOwner();
   const since = new Date(Date.now() - 30 * 86400_000).toISOString();
-  const rows = all<{ feature: string; model: string; latency_ms: number; ok: number; input_tokens: number; cache_read_tokens: number; cache_write_tokens: number; cost_usd: number }>(
+  const rows = await all<{ feature: string; model: string; latency_ms: number; ok: number; input_tokens: number; cache_read_tokens: number; cache_write_tokens: number; cost_usd: number }>(
     "SELECT feature, model, latency_ms, ok, input_tokens, cache_read_tokens, cache_write_tokens, cost_usd FROM usage_events WHERE created_at >= ?",
     since,
   );
@@ -33,11 +37,15 @@ export const GET = handle(async () => {
   return {
     byFeature: group("feature"),
     byModel: group("model"),
-    errors: all(
+    errors: await all(
       `SELECT u.created_at, u.feature, u.model, u.latency_ms, u.error, o.name AS tenant FROM usage_events u LEFT JOIN orgs o ON o.id = u.org_id
         WHERE u.ok = 0 ORDER BY u.id DESC LIMIT 50`,
     ),
-    processing: all(
+    // Unexpected server errors with the reference code the person saw (search the page for a code).
+    appErrors: await all(
+      "SELECT ref, status, method, route, message, created_at FROM app_errors ORDER BY id DESC LIMIT 50",
+    ),
+    processing: await all(
       `SELECT o.name AS tenant,
          (SELECT COUNT(*) FROM documents d WHERE d.org_id = o.id AND d.status = 'Failed') AS failed_docs,
          (SELECT COUNT(*) FROM meetings m WHERE m.org_id = o.id AND m.status = 'Failed') AS failed_meetings,

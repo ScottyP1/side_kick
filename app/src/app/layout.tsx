@@ -1,3 +1,4 @@
+/** Root layout for every page: fonts, page title and the global stylesheet. */
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans, Instrument_Sans } from "next/font/google";
 import "./globals.css";

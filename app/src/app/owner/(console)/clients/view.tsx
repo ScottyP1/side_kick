@@ -1,7 +1,11 @@
 "use client";
 
+/**
+ * Clients (/owner/clients): every client organization with its users, usage and errors; add a client or pause one.
+ */
+
 import { useCallback, useEffect, useState } from "react";
-import { api, fmtDate, fmtTime, Icon, Modal, Pill, usd, useToast } from "@/components/ui";
+import { api, fmtDate, fmtTime, Icon, Modal, Pill, usd, useReportError, useToast } from "@/components/ui";
 
 type T = {
   id: string; name: string; status: string; created_at: string; users: number; active_users: number; workspaces: number; documents: number; meetings: number;
@@ -18,9 +22,10 @@ export default function ClientsPage() {
   const [confirm, setConfirm] = useState<T | null>(null);
 
   const load = useCallback(() => api<{ tenants: T[] }>("/api/owner/tenants").then((r) => setList(r.tenants)), []);
+  const reportError = useReportError();
   useEffect(() => {
-    load().catch(() => {});
-  }, [load]);
+    load().catch(reportError);
+  }, [load, reportError]);
 
   const add = async () => {
     setFormErr("");

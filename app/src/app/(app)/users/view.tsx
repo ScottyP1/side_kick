@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Users & access (/users): add people, choose their role and which workspaces they can see, or remove them.
+ * Admins only. New people get a temporary password they must change at first sign-in.
+ */
+
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, useToast } from "@/components/ui";

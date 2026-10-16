@@ -1,0 +1,12 @@
+Microsoft Teams channel export: Contoso Delivery › General (internal team)
+
+[2026-10-03 09:12] Maria Chen: Runbook v0.3 is out, link in Files. Includes the store manager checklist Lena asked for.
+[2026-10-03 09:20] Priya Raman: Thanks! Sending to Lena now.
+[2026-10-06 16:45] Sam Okafor: Cosmos index change is live. Costs back within 5% of estimate.
+[2026-10-07 13:05] Priya Raman: Heads up: Jordan wants to move wave 2 to Thursday Nov 12 and may add 4 stores (52). Not confirmed. Don't change the runbook date yet.
+[2026-10-09 10:30] Dev Patel: Does anyone know the bridge line number for cutover night?
+[2026-10-09 10:41] Maria Chen: Not decided yet I think. Priya?
+[2026-10-09 11:02] Priya Raman: Will get one from Contoso IT. Remind me if I forget.
+[2026-10-13 07:55] Maria Chen: SKU sync failed again overnight. Timeouts. Logs in the incident folder.
+[2026-10-14 17:30] Sam Okafor: Load test env booked for Oct 23 (3x peak).
+[2026-10-14 22:10] Sam Okafor: Tom sent the card reader list: Verifone P400 in all wave 2 stores.

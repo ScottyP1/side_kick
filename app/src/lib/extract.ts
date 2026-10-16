@@ -1,12 +1,33 @@
+/**
+ * @file Turning uploaded files into plain text, and plain text into searchable passages.
+ *
+ * Concepts
+ * - **Extraction**: PDFs, Word files and Teams transcripts are converted to plain text, keeping location
+ *   markers (`[Page 3]` for PDFs, `[00:12:40]` timestamps for transcripts) so answers can cite where a
+ *   fact came from.
+ * - **Chunking**: long text is cut into passages of about 1,200 characters on paragraph or speaker
+ *   boundaries. Small passages make search precise and keep what we send to Claude short (and cheap).
+ */
 import "server-only";
 import path from "node:path";
 import { HttpError } from "./auth";
+import { span } from "./trace";
 
-// Turns an uploaded file into plain text. PDF, Word, Teams transcripts (.vtt) and text formats.
+/** File types Sidekick can read: PDF, Word, Teams transcripts (.vtt) and text formats. */
 export const ACCEPTED = [".pdf", ".docx", ".txt", ".md", ".vtt", ".csv", ".json"];
+/** Largest file accepted, per file (25 MB). */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+/**
+ * Extracts the text of an uploaded file. PDFs get a `[Page N]` marker per page; `.vtt` transcripts are
+ * converted to readable "[time] Speaker: words" lines.
+ * @throws HttpError 415 for file types Sidekick can't read yet
+ */
 export async function fileToText(name: string, buf: Buffer): Promise<string> {
+  return span("file", "Read the file", () => readFileText(name, buf), { type: path.extname(name).toLowerCase() || "none", kb: Math.round(buf.length / 1024) });
+}
+
+async function readFileText(name: string, buf: Buffer): Promise<string> {
   const ext = path.extname(name).toLowerCase();
   if (!ACCEPTED.includes(ext)) {
     throw new HttpError(415, `${ext || "This file type"} isn't supported yet. Upload PDF, Word (.docx), text, Markdown or a Teams transcript (.vtt).`);
@@ -26,7 +47,11 @@ export async function fileToText(name: string, buf: Buffer): Promise<string> {
   return ext === ".vtt" ? vttToTranscript(text) : text;
 }
 
-// Teams WebVTT: "00:01:02.345 --> 00:01:05.000" followed by "<v Speaker Name>text</v>".
+/**
+ * Converts a Teams WebVTT transcript into readable lines like `[00:01:02] Maria Chen: We agreed to ...`.
+ * Teams .vtt cues look like "00:01:02.345 --> 00:01:05.000" followed by "<v Speaker Name>text</v>".
+ * Cue numbers, ids and NOTE lines are dropped, and consecutive lines from the same speaker are merged.
+ */
 export function vttToTranscript(vtt: string): string {
   const lines = vtt.replace(/\r/g, "").split("\n");
   const out: string[] = [];
@@ -55,7 +80,11 @@ export function vttToTranscript(vtt: string): string {
   return merged.join("\n");
 }
 
-// Splits text into ~1,200-character passages on paragraph/line boundaries, keeping a location label.
+/**
+ * Splits text into ~`size`-character passages on page, paragraph or speaker boundaries. Each passage keeps
+ * the most recent location label (page or timestamp) so citations can point to it. Very long paragraphs
+ * are cut into fixed-size slices.
+ */
 export function chunk(text: string, size = 1200): { text: string; loc: string }[] {
   const parts = text.split(/\n(?=\[Page \d+\])|\n{2,}|\n(?=\[\d{2}:\d{2}:\d{2}\])/);
   const chunks: { text: string; loc: string }[] = [];

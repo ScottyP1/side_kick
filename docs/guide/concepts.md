@@ -20,7 +20,7 @@ One client engagement, like "Contoso Retail – Cloud Migration". Each workspace
 Owners and Admins see every workspace. Everyone else sees only the workspaces they've been added to.
 
 ## Sources and citations
-When Sidekick answers, it first searches the workspace for the passages most related to your question, then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, and a short excerpt. If two sources disagree, Sidekick says so and cites both.
+When Sidekick answers, it first searches the workspace for the passages most related to your question (by keyword and by meaning, so different wording still finds the right passage), then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, and a short excerpt. If two sources disagree, Sidekick says so and cites both.
 
 ## "I couldn't find that" and knowledge gaps
 If the workspace doesn't contain the answer, Sidekick says so instead of guessing. The question is saved as a **knowledge gap** so someone can fill it in, for example by uploading the missing document. Gaps also come from questions nobody answered in a meeting, conflicting facts, out-of-date documents, and decisions that only exist in a transcript.

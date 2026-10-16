@@ -2,7 +2,6 @@
 
 For developers. User-facing guides are in [guide/](guide/README.md); status and next steps in [PROGRESS.md](PROGRESS.md); the full product design in [BLUEPRINT.md](BLUEPRINT.md).
 
-
 ## The pieces
 
 ```
@@ -33,7 +32,8 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/owner.ts` | Owner Console sign-in, kill switches (`assertEnabled`), operator log |
 | `lib/api.ts` | `handle()` wrapper: JSON responses, `HttpError` → `{ error }` |
 | `lib/extract.ts` | Files → text (PDF, Word, Teams .vtt) and text → passages |
-| `lib/search.ts` | Indexing and keyword search. **All search goes through here** |
+| `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured |
+| `lib/azure-search.ts` | Azure AI Search index, embeddings and hybrid (keyword + vector) queries |
 | `lib/claude.ts` | **All Claude calls go through here**: model per feature, structured output, metering |
 | `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
 | `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
@@ -44,7 +44,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 
 **Asking a question** (portal or Teams)
 1. Route checks the user and workspace (`requireUser`, `requireWorkspace`), or the Teams conversation's link.
-2. `ask()` → `searchPassages()` finds up to 12 passages in that org + workspace (Shareable only if guests are present).
+2. `ask()` → `searchPassages()` finds up to 12 passages in that org + workspace (Shareable only if guests are present): Azure hybrid search when configured, otherwise local keyword search.
 3. `structured("ask", …)` sends the numbered passages and the question to Claude, which must return `{ found, answer, source_ids }`.
 4. The question is saved in `questions` (unanswered = knowledge gap); the cited sources are returned.
 

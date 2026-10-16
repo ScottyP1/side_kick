@@ -135,7 +135,7 @@ That writes `teams/build/sidekick-teams.zip` (it passes Microsoft's 62 app-packa
 | Works now | Comes later |
 |---|---|
 | Sign-in, roles, workspace walls, audit log | Microsoft (Entra ID) sign-in – step 2 |
-| Upload PDF / Word / text / Teams transcripts, keyword search | Azure AI Search with meaning-based search – step 2 |
+| Upload PDF / Word / text / Teams transcripts; keyword search, plus Azure AI Search meaning-based search when configured | |
 | Meeting notes, Q&A with sources, knowledge map, gaps, action items | Jira/DevOps stories – step 2 |
 | Teams bot: @Sidekick answers, notes and action-item cards (tested in Agents Playground) | Real Teams install (Azure Bot, manifest, tunnel) – step 2 |
 | Usage and cost metering per feature/model | Live meetings with voice and virtual hand-raise – step 3 |

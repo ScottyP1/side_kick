@@ -2,7 +2,6 @@
 
 For developers. User-facing guides are in [guide/](guide/README.md); status and next steps in [PROGRESS.md](PROGRESS.md); the full product design in [BLUEPRINT.md](BLUEPRINT.md).
 
-Pitch diagram (dark slides, today vs. all-Azure target): [sidekick-architecture.html](sidekick-architecture.html) (PNGs: [today](sidekick-architecture.png), [target](sidekick-architecture-target.png)).
 
 ## The pieces
 

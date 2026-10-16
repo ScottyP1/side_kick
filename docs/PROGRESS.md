@@ -64,6 +64,13 @@ npm --prefix app run dev
 - `/api/activity` views: overview, traces, trace, messages (admins), live (everyone; names for admins only). `/activity` page (admins) and the home-page orb (`components/live-orb.tsx`, WebGL shader, no new dependency; reduced-motion and no-WebGL fallbacks).
 - Dev gotchas fixed: the schema is re-applied when it changes while the server runs; the trace store is shared across module reloads. After big server-side changes in dev, a restart is still the safest check.
 
+## Home-page assistant (Oct 16, 2026)
+- The orb's satellites ("moons") are gone: the crystal ball stays, with a one-line connection-health row and the **in-app assistant** chat under it (`components/assistant.tsx`, `POST /api/assistant`, `lib/assistant.ts`).
+- Claude feature `assist` (own model override `SIDEKICK_MODEL_ASSIST`, kill switch "In-app assistant", metered on Usage). Effort low, 2,000 tokens max.
+- **Confirm-first, role-limited**: Claude is told only the actions the person's role allows and returns at most one proposal; `checkAction` drops anything not allowed or missing details and turns the rest into a fixed request (`/api/workspaces`, `/api/users`, `/api/teams-links`, `/api/memory/refresh`). The browser sends it only on Confirm, so the regular route checks the role again and audits it. Creating organizations stays in the Owner Console.
+- Verified with real Claude in a throwaway copy (`npm --prefix app run dev:preview`, port 3300, data in `app/.preview-data`): create workspace (confirmed), add person (cancelled, nothing changed), "new org" question (explains the Owner Console), dark and light.
+- Tests: 80 (db layer 7×2, end-to-end 33×2), incl. "nothing changes before Confirm", role limits, bad input, kill switch.
+
 ## Scale-up path (for later, not needed now)
 - **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).
 - **Event Hubs** (Azure's Kafka-compatible event stream): for step 3 live meeting events at scale, or queueing heavy work (transcript processing) once many clients use it. It moves events between services; it is **not** storage. Storage stays Postgres (+ Blob for files, Azure AI Search for retrieval).
@@ -72,7 +79,7 @@ npm --prefix app run dev
 ## Gotchas learned
 - **Next.js 16.4 with Cache Components**: client-rendered pages need a server `page.tsx` wrapper exporting `instant = false` and re-exporting `./view`. Read `app/node_modules/next/dist/docs/` before using Next APIs; `middleware` is now `proxy.ts`.
 - zsh treats `[id]` in paths as a glob: quote paths in shell commands.
-- Test against a **separate copy** so the owner's real data is untouched: `SIDEKICK_DATA_DIR=<tmp> NEXT_DIST_DIR=.next-test npx next dev --port 3100` (then revert any `tsconfig.json` include lines Next adds, delete `.next-test`).
+- Test against a **separate copy** so the owner's real data is untouched: `npm --prefix app run dev:preview` (port 3300, data in `app/.preview-data`, build in `.next-preview`, both git-ignored; launch config `sidekick-preview`). Never `npm --prefix app exec next …`: that runs Next in the repo root, which then installs TypeScript and writes `package.json`/`tsconfig.json` there.
 - Teams bot auth: `PLAYGROUND_MODE` (no token check) needs `TEAMS_LOCAL_PLAYGROUND=true`, is off whenever `NODE_ENV=production`, and only accepts localhost requests with a localhost service URL. `dangerouslyAllowUnauthenticatedRequests` is always passed explicitly so the SDK's own env var can't switch auth off. The SDK reads `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` itself.
 - Postgres differences to remember: no `INSERT OR IGNORE` (use `ON CONFLICT DO NOTHING`), `day` needs `AS day`, every selected column must be grouped or aggregated, qualify columns in `ON CONFLICT … DO UPDATE` (`teams_conversations.name`). COUNT/SUM come back as strings from `pg`; db.ts converts them to numbers.
 - Next.js prerenders route handlers at build time: wrappers that catch errors must call `unstable_rethrow`, and routes with no request data (like `/api/health`) need `await connection()`.

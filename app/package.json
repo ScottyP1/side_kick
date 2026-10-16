@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:teams": "TEAMS_LOCAL_PLAYGROUND=true SIDEKICK_DATA_DIR=.playground-data NEXT_DIST_DIR=.next-playground next dev --port 3100",
+    "dev:preview": "SIDEKICK_DATA_DIR=.preview-data NEXT_DIST_DIR=.next-preview next dev --port 3300",
     "playground": "agentsplayground -e http://localhost:3100/api/messages -c msteams",
     "build": "next build",
     "start": "next start",

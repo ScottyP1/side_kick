@@ -94,6 +94,7 @@ export const FLAGS = {
   ask: { label: "Answering questions", help: "Ask Sidekick in every workspace" },
   extract: { label: "Meeting notes", help: "Processing imported transcripts" },
   insights: { label: "Knowledge map", help: "Topics, coverage and gap detection" },
+  assist: { label: "In-app assistant", help: "The chat box on the home page" },
   uploads: { label: "Document uploads", help: "New files from any client" },
 } as const;
 export type FlagKey = keyof typeof FLAGS;

@@ -17,7 +17,7 @@ type O = {
   topTenants: { id: string; name: string; status: string; cost: number; calls: number }[];
   recentErrors: { created_at: string; feature: string; model: string; error: string | null; tenant: string | null }[];
 };
-const FEATURE: Record<string, string> = { ask: "Answers", extract: "Meeting notes", insights: "Knowledge map" };
+const FEATURE: Record<string, string> = { ask: "Answers", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant" };
 
 export default function OwnerOverview() {
   const [o, setO] = useState<O | null>(null);

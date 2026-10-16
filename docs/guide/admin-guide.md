@@ -43,7 +43,10 @@ The **Teams channels and chats** table on the Workspaces page shows every link. 
 - **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, Claude, search, database) with their health, and who's active.
 - **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, Claude and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored.
 
-## 10. Branding
+## 10. Use the assistant for quick admin jobs
+On the home page, type requests like "create a workspace for Fabrikam, code FAB", "add Maria Chen maria@fabrikam.example as a Member of Fabrikam" or "link Teams code K7Q2 to Fabrikam". Sidekick shows a card with the details; check them and press **Confirm**. When adding a person, the card shows their temporary password once: send it to them privately. If a detail is missing, the assistant asks for it first.
+
+## 11. Branding
 **Settings**: upload your logo and pick a brand color. They're applied across the portal.
 
 ## Troubleshooting

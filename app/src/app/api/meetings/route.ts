@@ -13,8 +13,8 @@ import { postMeetingNotes } from "@/lib/teams/bot";
 
 export const GET = handle(async (req: Request) => {
   const user = await requireUser();
-  const ws = requireWorkspace(user, new URL(req.url).searchParams.get("ws"));
-  const meetings = all(
+  const ws = await requireWorkspace(user, new URL(req.url).searchParams.get("ws"));
+  const meetings = await all(
     `SELECT m.id, m.title, m.held_at, m.external_guests, m.status, m.error, m.created_at,
        (SELECT COUNT(*) FROM items i WHERE i.meeting_id = m.id AND i.kind = 'decision') AS decisions,
        (SELECT COUNT(*) FROM action_items a WHERE a.meeting_id = m.id) AS actions,
@@ -29,9 +29,9 @@ export const GET = handle(async (req: Request) => {
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
   if (!canEdit(user)) throw new HttpError(403, "Your role can't import meetings.");
-  assertEnabled("extract");
+  await assertEnabled("extract");
   const form = await req.formData();
-  const ws = requireWorkspace(user, String(form.get("ws") ?? ""));
+  const ws = await requireWorkspace(user, String(form.get("ws") ?? ""));
   const file = form.get("file");
   const pasted = String(form.get("text") ?? "");
   let transcript = pasted.trim();
@@ -45,11 +45,11 @@ export const POST = handle(async (req: Request) => {
   if (!title) throw new HttpError(400, "Give the meeting a title.");
   const heldAt = String(form.get("held_at") ?? "").trim() || now().slice(0, 10);
   const id = newId();
-  run(
+  await run(
     "INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?)",
     id, user.org_id, ws, title, heldAt, form.get("external") === "true" ? 1 : 0, transcript, user.id, now(),
   );
-  audit(user, `Imported meeting “${title}”`, "Data", ws);
+  await audit(user, `Imported meeting “${title}”`, "Data", ws);
   await processMeeting(user, id);
   // Post the notes to the workspace's linked Teams channels without making the portal wait.
   after(() => postMeetingNotes(user.org_id, id).catch((e) => console.error("Teams notes post failed", e)));

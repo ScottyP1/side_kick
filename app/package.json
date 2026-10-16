@@ -10,7 +10,8 @@
     "start": "next start",
     "lint": "eslint",
     "teams:package": "node scripts/teams-package.mjs",
-    "tunnel": "devtunnel host sidekick"
+    "tunnel": "devtunnel host sidekick",
+    "test": "node tests/run.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",
@@ -20,6 +21,7 @@
     "@microsoft/teams.cards": "^2.1.0",
     "mammoth": "^1.13.0",
     "next": "16.4.1",
+    "pg": "^8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1",
@@ -29,6 +31,7 @@
   "devDependencies": {
     "@microsoft/m365agentsplayground": "^0.2.29",
     "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

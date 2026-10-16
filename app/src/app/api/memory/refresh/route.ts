@@ -11,7 +11,7 @@ export const POST = handle(async (req: Request) => {
   const user = await requireUser();
   if (!canEdit(user)) throw new HttpError(403, "Your role can't refresh the knowledge map. Ask a Member or an Org Admin.");
   const { ws } = await readJson<{ ws?: string }>(req);
-  const id = requireWorkspace(user, ws);
+  const id = await requireWorkspace(user, ws);
   const out = await refreshInsights(user, id);
   if (!out) throw new HttpError(400, "Add documents or import a meeting first, so Sidekick has something to map.");
   return { ok: true };

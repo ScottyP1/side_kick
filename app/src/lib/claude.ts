@@ -40,6 +40,39 @@ const PRICES: Record<string, { in: number; out: number; cacheRead: number }> = {
   "claude-haiku-5-5": { in: 0.1, out: 0.5, cacheRead: 0.01 },
 };
 
+/**
+ * Test mode: SIDEKICK_FAKE_CLAUDE=1 makes every call return a small canned answer instead of calling
+ * Claude, so the automated tests are free, fast and predictable. It can never switch on in production.
+ */
+export const FAKE_CLAUDE = process.env.SIDEKICK_FAKE_CLAUDE === "1" && process.env.NODE_ENV !== "production";
+
+/**
+ * Canned, schema-shaped outputs for test mode. A content containing "__FAIL__" makes the call fail, so
+ * tests can check that failures are reported (e.g. a meeting marked Failed with a reason).
+ */
+async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<unknown> {
+  await run(
+    `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
+     VALUES (?, ?, ?, 'fake-claude', 0, 0, 0, 0, ?, ?, ?)`,
+    ctx.orgId, ctx.workspaceId, feature, content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
+  );
+  if (content.includes("__FAIL__")) throw new HttpError(502, "Claude API error (test): fake failure for testing.");
+  if (feature === "ask") {
+    const ids = [...content.matchAll(/<source id="(S\d+)"/g)].map((m) => m[1]);
+    return { found: ids.length > 0, answer: ids.length ? `Test answer from ${ids.join(", ")} [S1].` : "Not in the sources.", source_ids: ids.slice(0, 2) };
+  }
+  if (feature === "extract") {
+    return {
+      summary: "Test summary of the meeting.",
+      decisions: [{ text: "Test decision", made_by: "Priya Raman" }],
+      action_items: [{ text: "Send the test report", owner: "Maria Chen", due: "Oct 21" }, { text: "Book the load test", owner: null, due: null }],
+      open_questions: [{ text: "Who owns rollback?", answered: false }],
+      facts: [{ kind: "risk", text: "Test risk" }],
+    };
+  }
+  return { topics: [{ name: "Test topic", summary: "About the test", coverage: 150, key_facts: [], document_titles: [], meeting_titles: [] }], gaps: [] };
+}
+
 let client: Anthropic | null = null;
 /** The shared Anthropic client. Throws a friendly 503 if no API key is configured yet. */
 function anthropic(): Anthropic {
@@ -86,7 +119,8 @@ export async function structured<S extends z.ZodType>(
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
 ): Promise<z.infer<S>> {
-  assertEnabled(feature);
+  await assertEnabled(feature);
+  if (FAKE_CLAUDE) return fakeClaude(feature, ctx, opts.content) as z.infer<S>;
   const model = MODELS[feature];
   const started = Date.now();
   let ok = 0;
@@ -122,7 +156,7 @@ export async function structured<S extends z.ZodType>(
     error = e instanceof Error ? e.message.slice(0, 500) : "Unknown error";
     throw e;
   } finally {
-    run(
+    await run(
       `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ctx.orgId,

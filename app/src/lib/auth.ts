@@ -11,7 +11,7 @@
  *   - Viewer: read-only inside their workspaces.
  * - **Workspace walls**: a user only ever sees the workspaces they're a member of (admins see all in
  *   their org). Every API route that touches workspace data calls `requireWorkspace` first.
- * - **Audit log**: important actions are recorded with `audit()` and shown on Security & audit.
+ * - **Audit log**: important actions are recorded with `await audit()` and shown on Security & audit.
  *
  * Production replaces passwords with Microsoft (Entra ID) sign-in; roles and walls stay the same.
  */
@@ -62,8 +62,8 @@ const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex"
 export async function startSession(userId: string) {
   const token = crypto.randomBytes(32).toString("base64url");
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
-  run("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)", sha256(token), userId, expires.toISOString());
-  run("UPDATE users SET last_active = ? WHERE id = ?", now(), userId);
+  await run("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)", sha256(token), userId, expires.toISOString());
+  await run("UPDATE users SET last_active = ? WHERE id = ?", now(), userId);
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -77,7 +77,7 @@ export async function startSession(userId: string) {
 export async function endSession() {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
-  if (token) run("DELETE FROM sessions WHERE token_hash = ?", sha256(token));
+  if (token) await run("DELETE FROM sessions WHERE token_hash = ?", sha256(token));
   jar.delete(SESSION_COOKIE);
 }
 
@@ -88,7 +88,7 @@ export async function endSession() {
 export async function currentUser(): Promise<User | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const row = get<User & { expires_at: string; org_status: string }>(
+  const row = await get<User & { expires_at: string; org_status: string }>(
     `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password, s.expires_at, o.status AS org_status
        FROM sessions s JOIN users u ON u.id = s.user_id JOIN orgs o ON o.id = u.org_id WHERE s.token_hash = ?`,
     sha256(token),
@@ -125,14 +125,14 @@ export const isAdmin = (u: User) => u.role === "Org Owner" || u.role === "Org Ad
 export const canEdit = (u: User) => u.role !== "Viewer" && u.role !== "Billing Admin";
 
 // Workspace walls: admins see every workspace in their org; everyone else only the ones they belong to.
-export function workspaceIdsFor(user: User): string[] {
-  if (isAdmin(user)) return all<{ id: string }>("SELECT id FROM workspaces WHERE org_id = ?", user.org_id).map((r) => r.id);
-  return all<{ workspace_id: string }>(
+export async function workspaceIdsFor(user: User): Promise<string[]> {
+  if (isAdmin(user)) return (await all<{ id: string }>("SELECT id FROM workspaces WHERE org_id = ?", user.org_id)).map((r) => r.id);
+  return (await all<{ workspace_id: string }>(
     `SELECT wm.workspace_id FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id
       WHERE wm.user_id = ? AND w.org_id = ?`,
     user.id,
     user.org_id,
-  ).map((r) => r.workspace_id);
+  )).map((r) => r.workspace_id);
 }
 
 /**
@@ -140,8 +140,8 @@ export function workspaceIdsFor(user: User): string[] {
  * so people can't tell whether a workspace they don't belong to exists). Call it before any query that
  * reads or writes workspace data, and use the returned id in that query.
  */
-export function requireWorkspace(user: User, workspaceId: string | null | undefined): string {
-  if (!workspaceId || !workspaceIdsFor(user).includes(workspaceId)) {
+export async function requireWorkspace(user: User, workspaceId: string | null | undefined): Promise<string> {
+  if (!workspaceId || !(await workspaceIdsFor(user)).includes(workspaceId)) {
     throw new HttpError(404, "Workspace not found, or you're not a member of it.");
   }
   return workspaceId;
@@ -151,8 +151,8 @@ export function requireWorkspace(user: User, workspaceId: string | null | undefi
  * Records an action in the audit log. `kind` groups entries (Access, Data, Agent action, Policy change).
  * Pass `user = null` for system actions; use `auditAsSidekick` for things Sidekick did on its own.
  */
-export function audit(user: Pick<User, "org_id" | "name"> | null, action: string, kind: string, workspaceId: string | null = null) {
-  run(
+export async function audit(user: Pick<User, "org_id" | "name"> | null, action: string, kind: string, workspaceId: string | null = null) {
+  await run(
     "INSERT INTO audit_log (org_id, actor, action, kind, workspace_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     user?.org_id ?? null,
     user?.name ?? "System",
@@ -164,17 +164,17 @@ export function audit(user: Pick<User, "org_id" | "name"> | null, action: string
 }
 
 /** Records an action Sidekick took by itself (e.g. writing meeting notes), shown with "Sidekick" as the actor. */
-export function auditAsSidekick(orgId: string, action: string, kind: string, workspaceId: string | null = null) {
-  audit({ org_id: orgId, name: "Sidekick" }, action, kind, workspaceId);
+export async function auditAsSidekick(orgId: string, action: string, kind: string, workspaceId: string | null = null) {
+  await audit({ org_id: orgId, name: "Sidekick" }, action, kind, workspaceId);
 }
 
 /**
  * Creates a portal user. With `mustChange` the user has to pick a new password at first sign-in
  * (used when an admin creates the account with a one-time password).
  */
-export function createUser(orgId: string, name: string, email: string, role: Role, password: string, mustChange: boolean) {
+export async function createUser(orgId: string, name: string, email: string, role: Role, password: string, mustChange: boolean) {
   const id = newId();
-  run(
+  await run(
     "INSERT INTO users (id, org_id, name, email, role, password_hash, must_change_password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     id,
     orgId,

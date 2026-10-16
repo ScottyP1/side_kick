@@ -148,18 +148,18 @@ export const baseConversationId = (id: string) => id.split(";")[0];
  * Saves (or refreshes) the conversation an activity came from and returns its row. Keeps the latest
  * service URL and display name, which proactive messages and the Workspaces page need.
  */
-function touchConversation(a: InboundActivity): TeamsConversation {
+async function touchConversation(a: InboundActivity): Promise<TeamsConversation> {
   const id = baseConversationId(a.conversation.id);
   const kind = a.conversation.conversationType ?? "personal";
   const team = a.channelData?.team?.name;
   const channel = a.channelData?.channel?.name;
   const name = channel ? `${team ? `${team} › ` : ""}${channel}` : (a.conversation.name ?? (kind === "personal" ? "1:1 chat" : "Group chat"));
-  run(
+  await run(
     `INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET service_url = excluded.service_url, name = COALESCE(excluded.name, name), last_seen_at = excluded.last_seen_at`,
+     ON CONFLICT(id) DO UPDATE SET service_url = excluded.service_url, name = COALESCE(excluded.name, teams_conversations.name), last_seen_at = excluded.last_seen_at`,
     id, a.serviceUrl ?? "", a.conversation.tenantId ?? a.channelData?.tenant?.id ?? null, kind, name, now(), now(),
   );
-  return get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", id)!;
+  return (await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", id))!;
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O or 1/I lookalikes
@@ -169,11 +169,11 @@ const CODE_HOURS = 24;
  * Returns this conversation's link code, making a new one if there is none or it expired (24 hours).
  * Format "ABCD-2345": 8 random characters from an alphabet without lookalikes, about 40 bits of randomness.
  */
-function freshLinkCode(conv: TeamsConversation): string {
+async function freshLinkCode(conv: TeamsConversation): Promise<string> {
   if (conv.link_code && conv.code_expires_at && new Date(conv.code_expires_at) > new Date()) return conv.link_code;
   const chars = Array.from(crypto.randomBytes(8), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
   const code = `${chars.slice(0, 4)}-${chars.slice(4)}`;
-  run("UPDATE teams_conversations SET link_code = ?, code_expires_at = ? WHERE id = ?", code, new Date(Date.now() + CODE_HOURS * 3600_000).toISOString(), conv.id);
+  await run("UPDATE teams_conversations SET link_code = ?, code_expires_at = ? WHERE id = ?", code, new Date(Date.now() + CODE_HOURS * 3600_000).toISOString(), conv.id);
   return code;
 }
 
@@ -184,11 +184,11 @@ export const normalizeCode = (code: string) => {
 };
 
 /** Name of the linked workspace (checked against the conversation's org), or null if not linked. */
-const workspaceName = (conv: TeamsConversation) =>
-  conv.workspace_id ? get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", conv.workspace_id, conv.org_id)?.name ?? null : null;
+const workspaceName = async (conv: TeamsConversation) =>
+  conv.workspace_id ? (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", conv.workspace_id, conv.org_id))?.name ?? null : null;
 
 /** True if the owner paused this organization in the Owner Console; Sidekick then stops answering in Teams. */
-const orgPaused = (orgId: string) => get<{ status: string }>("SELECT status FROM orgs WHERE id = ?", orgId)?.status === "Suspended";
+const orgPaused = async (orgId: string) => (await get<{ status: string }>("SELECT status FROM orgs WHERE id = ?", orgId))?.status === "Suspended";
 
 // Teams users aren't portal users yet (Entra ID sign-in comes later in step 2). Inside a linked
 // channel they act as a Member of that one workspace, which is all ask() and the card actions need.
@@ -213,23 +213,23 @@ const teamsMember = (conv: TeamsConversation, from: InboundActivity["from"]): Us
  */
 function registerHandlers(app: App) {
   app.on("install.add", async ({ activity, send }) => {
-    const conv = touchConversation(activity);
-    await send(conv.workspace_id ? helpCard(workspaceName(conv)) : linkCard(freshLinkCode(conv), conv.kind));
+    const conv = await touchConversation(activity);
+    await send(conv.workspace_id ? helpCard(await workspaceName(conv)) : linkCard(await freshLinkCode(conv), conv.kind));
   });
 
   // In channels and group chats Teams only delivers messages that @mention Sidekick; in 1:1 chats, every message.
   // stripMentionsText removes the "@Sidekick" part so only the question is left.
   app.on("message", async ({ activity, send, reply }) => {
-    const conv = touchConversation(activity);
+    const conv = await touchConversation(activity);
     const question = (stripMentionsText(activity) ?? "").replace(/\s+/g, " ").trim();
     const command = question.toLowerCase().replace(/[^a-z]/g, "");
 
-    if (!question || command === "help") return void (await send(helpCard(workspaceName(conv))));
-    if (!conv.workspace_id) return void (await send(linkCard(freshLinkCode(conv), conv.kind)));
+    if (!question || command === "help") return void (await send(helpCard(await workspaceName(conv))));
+    if (!conv.workspace_id) return void (await send(linkCard(await freshLinkCode(conv), conv.kind)));
     if (command === "link") {
-      return void (await send(`This ${conv.kind === "channel" ? "channel" : "chat"} is linked to **${workspaceName(conv)}**. An Org Admin can change that on the Workspaces page in the Sidekick portal.`));
+      return void (await send(`This ${conv.kind === "channel" ? "channel" : "chat"} is linked to **${await workspaceName(conv)}**. An Org Admin can change that on the Workspaces page in the Sidekick portal.`));
     }
-    if (orgPaused(conv.org_id!)) return void (await send("Sidekick is paused for this organization. Contact the Sidekick team."));
+    if (await orgPaused(conv.org_id!)) return void (await send("Sidekick is paused for this organization. Contact the Sidekick team."));
     if (question.length > 1000) return void (await send("That question is too long for me (max 1,000 characters)."));
 
     await send({ type: "typing" });
@@ -238,7 +238,7 @@ function registerHandlers(app: App) {
     after(async () => {
       try {
         const result = await ask(teamsMember(conv, activity.from), conv.workspace_id!, question, conv.guests === 1);
-        await reply(answerCard(question, result, workspaceName(conv) ?? "Workspace"));
+        await reply(answerCard(question, result, await workspaceName(conv) ?? "Workspace"));
       } catch (e) {
         console.error("Teams ask failed", e);
         await send(e instanceof HttpError ? e.message : "Sorry, I couldn't answer that just now. Please try again in a minute.").catch(() => {});
@@ -251,11 +251,11 @@ function registerHandlers(app: App) {
     const { verb, data } = activity.value.action;
     // A message response shows the text to the person who clicked and leaves the card as it was.
     const fail = (message: string) => ({ statusCode: 200 as const, type: "application/vnd.microsoft.activity.message" as const, value: message });
-    const conv = get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", baseConversationId(activity.conversation.id));
+    const conv = await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", baseConversationId(activity.conversation.id));
     if (!conv?.workspace_id || !conv.org_id) return fail("This chat isn't linked to a Sidekick workspace anymore.");
-    if (orgPaused(conv.org_id)) return fail("Sidekick is paused for this organization.");
+    if (await orgPaused(conv.org_id)) return fail("Sidekick is paused for this organization.");
     // Workspace wall: the card only works in a conversation linked to the item's own workspace.
-    const item = get<ActionItemInput & { workspace_id: string }>(
+    const item = await get<ActionItemInput & { workspace_id: string }>(
       "SELECT id, text, owner, due, status, workspace_id FROM action_items WHERE id = ? AND org_id = ? AND workspace_id = ?",
       String(data?.itemId ?? ""), conv.org_id, conv.workspace_id,
     );
@@ -264,16 +264,16 @@ function registerHandlers(app: App) {
     if (verb === VERBS.assign) {
       const owner = String(data?.owner ?? "").trim().slice(0, 120);
       if (!owner) return fail("Type a name to assign it to.");
-      run("UPDATE action_items SET owner = ?, status = CASE WHEN status = 'Open' THEN 'In progress' ELSE status END WHERE id = ?", owner, item.id);
-      audit(actor, `Assigned action item “${item.text.slice(0, 60)}” to ${owner} in Teams`, "Data", item.workspace_id);
+      await run("UPDATE action_items SET owner = ?, status = CASE WHEN status = 'Open' THEN 'In progress' ELSE status END WHERE id = ?", owner, item.id);
+      await audit(actor, `Assigned action item “${item.text.slice(0, 60)}” to ${owner} in Teams`, "Data", item.workspace_id);
     } else if (verb === VERBS.done || verb === VERBS.reopen) {
       const status = verb === VERBS.done ? "Done" : "Open";
-      run("UPDATE action_items SET status = ? WHERE id = ?", status, item.id);
-      audit(actor, `Marked action item “${item.text.slice(0, 60)}” ${status === "Done" ? "done" : "open again"} in Teams`, "Data", item.workspace_id);
+      await run("UPDATE action_items SET status = ? WHERE id = ?", status, item.id);
+      await audit(actor, `Marked action item “${item.text.slice(0, 60)}” ${status === "Done" ? "done" : "open again"} in Teams`, "Data", item.workspace_id);
     } else {
       return fail("Unknown action.");
     }
-    const updated = get<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE id = ?", item.id)!;
+    const updated = (await get<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE id = ?", item.id))!;
     return { statusCode: 200 as const, type: "application/vnd.microsoft.card.adaptive" as const, value: actionItemCard({ ...updated, updatedBy: activity.from.name }) };
   });
 }
@@ -307,19 +307,19 @@ const MAX_ACTION_CARDS = 15;
  * Called from the meeting import/reprocess routes after the response is sent, so imports never wait on Teams.
  */
 export async function postMeetingNotes(orgId: string, meetingId: string): Promise<number> {
-  const m = get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; external_guests: number; ws: string }>(
+  const m = await get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; external_guests: number; ws: string }>(
     "SELECT m.id, m.workspace_id, m.title, m.held_at, m.summary, m.status, m.external_guests, w.name AS ws FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.id = ? AND m.org_id = ?",
     meetingId, orgId,
   );
   if (!m || m.status !== "Ready") return 0;
   // Notes from an internal-only meeting never go to a conversation that has client guests in it.
-  const convs = all<TeamsConversation>(
+  const convs = await all<TeamsConversation>(
     "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND (guests = 0 OR ? = 1)",
     orgId, m.workspace_id, m.external_guests,
   );
   if (!convs.length) return 0;
-  const items = all<{ kind: string; text: string; answered: number | null }>("SELECT kind, text, answered FROM items WHERE meeting_id = ? ORDER BY rowid", m.id);
-  const actions = all<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE meeting_id = ? ORDER BY rowid", m.id);
+  const items = await all<{ kind: string; text: string; answered: number | null }>("SELECT kind, text, answered FROM items WHERE meeting_id = ? ORDER BY rowid", m.id);
+  const actions = await all<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE meeting_id = ? ORDER BY rowid", m.id);
   const notes = meetingNotesCard({
     workspace: m.ws,
     title: m.title,
@@ -343,6 +343,6 @@ export async function postMeetingNotes(orgId: string, meetingId: string): Promis
       console.error(`Couldn't post meeting notes to Teams conversation ${conv.id}`, e);
     }
   }
-  if (posted) audit({ org_id: orgId, name: "Sidekick" }, `Posted notes for “${m.title}” to ${posted} Teams ${posted === 1 ? "conversation" : "conversations"}`, "Agent action", m.workspace_id);
+  if (posted) await audit({ org_id: orgId, name: "Sidekick" }, `Posted notes for “${m.title}” to ${posted} Teams ${posted === 1 ? "conversation" : "conversations"}`, "Agent action", m.workspace_id);
   return posted;
 }

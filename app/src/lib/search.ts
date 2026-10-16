@@ -18,7 +18,7 @@
  *   search falls back to local keyword search, so answers keep working.
  */
 import "server-only";
-import { all, run } from "./db";
+import { all, DIALECT, run } from "./db";
 import { chunk } from "./extract";
 import { azureCount, azureIndex, azureRemove, azureSearch, azureSearchConfigured, azureSetAudience } from "./azure-search";
 
@@ -49,20 +49,20 @@ export async function indexText(opts: {
 }): Promise<number> {
   const pieces = chunk(opts.text);
   const stmt = `INSERT INTO passages (text, title, loc, source_type, source_id, workspace_id, org_id, audience) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-  for (const p of pieces) run(stmt, p.text, opts.title, p.loc, opts.sourceType, opts.sourceId, opts.workspaceId, opts.orgId, opts.audience);
+  for (const p of pieces) await run(stmt, p.text, opts.title, p.loc, opts.sourceType, opts.sourceId, opts.workspaceId, opts.orgId, opts.audience);
   if (azureSearchConfigured()) await azureIndex({ ...opts, pieces }).catch((e) => console.error("Azure AI Search: indexing failed (local index still updated)", e));
   return pieces.length;
 }
 
 /** Removes every passage of one document or meeting from the index (on delete or reprocess). */
 export async function removeIndexed(sourceId: string) {
-  run("DELETE FROM passages WHERE source_id = ?", sourceId);
+  await run("DELETE FROM passages WHERE source_id = ?", sourceId);
   if (azureSearchConfigured()) await azureRemove(sourceId).catch((e) => console.error("Azure AI Search: delete failed", e));
 }
 
 /** Changes whether a source's passages are internal or shareable (when a document is re-tagged). */
 export async function setAudience(sourceId: string, audience: string) {
-  run("UPDATE passages SET audience = ? WHERE source_id = ?", audience, sourceId);
+  await run("UPDATE passages SET audience = ? WHERE source_id = ?", audience, sourceId);
   if (azureSearchConfigured()) await azureSetAudience(sourceId, audience).catch((e) => console.error("Azure AI Search: audience update failed", e));
 }
 
@@ -72,7 +72,7 @@ export async function setAudience(sourceId: string, audience: string) {
  * Returns how many sources were copied.
  */
 export async function reindexAzure(): Promise<number> {
-  const rows = all<{ text: string; title: string; loc: string; source_type: string; source_id: string; workspace_id: string; org_id: string; audience: string }>(
+  const rows = await all<{ text: string; title: string; loc: string; source_type: string; source_id: string; workspace_id: string; org_id: string; audience: string }>(
     "SELECT text, title, loc, source_type, source_id, workspace_id, org_id, audience FROM passages ORDER BY source_id, rowid",
   );
   const bySource = new Map<string, typeof rows>();
@@ -91,7 +91,7 @@ declare global {
 /** Backfills the Azure index once per server start if it's empty but local passages exist. */
 function ensureBackfilled() {
   globalThis.__sidekickAzureBackfill ??= (async () => {
-    const local = all<{ n: number }>("SELECT COUNT(*) AS n FROM passages")[0]?.n ?? 0;
+    const local = (await all<{ n: number }>("SELECT COUNT(*) AS n FROM passages"))[0]?.n ?? 0;
     if (local && (await azureCount()) === 0) {
       const n = await reindexAzure();
       console.log(`Azure AI Search: copied ${n} documents/meetings from the local index`);
@@ -108,14 +108,9 @@ const STOP = new Set(
   "a an and are as at be but by can could did do does for from had has have how i if in into is it its me my of on or our so than that the their them then there these they this to was we were what when where which who why will with would you your about again also any just more most much not now only other over some such too very did done get got let make made need should".split(" "),
 );
 
-/**
- * Turns a plain-language question into a full-text query: keeps meaningful words, matches each as a
- * prefix ("migrat"* finds migrate/migration), and ORs them together. Null if nothing is left to search.
- */
-function toQuery(question: string): string | null {
-  const words = (question.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length > 1 && !STOP.has(w));
-  if (!words.length) return null;
-  return [...new Set(words)].map((w) => `"${w}"*`).join(" OR ");
+/** The meaningful words of a question (lower-case letters/digits, stop words removed, no duplicates). */
+function keywords(question: string): string[] {
+  return [...new Set((question.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length > 1 && !STOP.has(w)))];
 }
 
 /**
@@ -136,20 +131,36 @@ export async function searchPassages(orgId: string, workspaceId: string, questio
       console.error("Azure AI Search failed; falling back to local keyword search", e);
     }
   }
-  return keywordSearch(orgId, workspaceId, question, opts);
+  return await keywordSearch(orgId, workspaceId, question, opts);
 }
 
-/** Local keyword (BM25) search in SQLite: the fallback, and the only engine when Azure is not configured. */
-function keywordSearch(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit?: number }): Passage[] {
-  const q = toQuery(question);
-  if (!q) return [];
+/**
+ * Local keyword search: the fallback, and the only engine when Azure is not configured.
+ * - SQLite: FTS5 with BM25 ranking (title weighted 2x), prefix matching on each word.
+ * - Postgres: the generated `tsv` column (English stemming, title weighted higher) ranked with ts_rank,
+ *   matching any of the question's meaningful words (and words starting with them).
+ */
+async function keywordSearch(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit?: number }): Promise<Passage[]> {
+  const words = keywords(question);
+  if (!words.length) return [];
   const audienceClause = opts.guests ? "AND audience = 'shareable'" : "";
-  return all<Passage>(
+  if (DIALECT === "postgres") {
+    // to_tsquery syntax: word:* = prefix match, | = OR. Words are letters/digits only, so they're safe here,
+    // and the whole query still goes in as a bound parameter.
+    return await all<Passage>(
+      `SELECT rowid, text, title, loc, source_type, source_id, audience
+         FROM passages
+        WHERE tsv @@ to_tsquery('english', ?) AND org_id = ? AND workspace_id = ? ${audienceClause}
+        ORDER BY ts_rank(tsv, to_tsquery('english', ?)) DESC LIMIT ?`,
+      words.map((w) => `${w}:*`).join(" | "), orgId, workspaceId, words.map((w) => `${w}:*`).join(" | "), opts.limit ?? 12,
+    );
+  }
+  return await all<Passage>(
     `SELECT rowid, text, title, loc, source_type, source_id, audience
        FROM passages
       WHERE passages MATCH ? AND org_id = ? AND workspace_id = ? ${audienceClause}
       ORDER BY bm25(passages, 1.0, 2.0) LIMIT ?`,
-    q,
+    words.map((w) => `"${w}"*`).join(" OR "),
     orgId,
     workspaceId,
     opts.limit ?? 12,

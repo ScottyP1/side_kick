@@ -4,7 +4,7 @@
  * Every route follows the same pattern:
  *   export const POST = handle(async (req) => {
  *     const user = await requireUser();               // who is asking (401 if nobody)
- *     const ws = requireWorkspace(user, body.ws);      // may they use this workspace (404 if not)
+ *     const ws = await requireWorkspace(user, body.ws);      // may they use this workspace (404 if not)
  *     ...do the work, filtered by user.org_id and ws...
  *     return { ok: true };                             // becomes a JSON response
  *   });

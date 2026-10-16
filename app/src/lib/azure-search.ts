@@ -98,7 +98,7 @@ async function embed(texts: string[], ctx: { orgId: string | null; workspaceId: 
     });
     const json = (await res.json().catch(() => ({}))) as { data?: { embedding: number[]; index: number }[]; usage?: { prompt_tokens?: number }; error?: { message?: string } };
     const tokens = json.usage?.prompt_tokens ?? 0;
-    run(
+    await run(
       `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
        VALUES (?, ?, 'embed', ?, ?, 0, ?, ?, ?, ?, ?)`,
       ctx.orgId, ctx.workspaceId, EMBED_DEPLOYMENT, tokens, (tokens * EMBED_PRICE_PER_M) / 1_000_000, Date.now() - started,

@@ -10,10 +10,10 @@ const COLORS = ["#0f6b5c", "#2a5ba8", "#7a5a2a", "#8b3f6b", "#5a6b1f", "#9a4a1f"
 
 export const GET = handle(async () => {
   const user = await requireUser();
-  const ids = workspaceIdsFor(user);
+  const ids = await workspaceIdsFor(user);
   if (!ids.length) return { workspaces: [] };
   const ph = ids.map(() => "?").join(",");
-  const workspaces = all(
+  const workspaces = await all(
     `SELECT w.id, w.name, w.code, w.color, w.created_at,
        (SELECT COUNT(*) FROM documents d WHERE d.workspace_id = w.id) AS docs,
        (SELECT COUNT(*) FROM meetings m WHERE m.workspace_id = w.id) AS meetings,
@@ -32,9 +32,9 @@ export const POST = handle(async (req: Request) => {
   const body = await readJson<{ name?: string; code?: string }>(req);
   const name = requireText(body.name, "Workspace name", 120);
   const id = newId();
-  const count = all("SELECT id FROM workspaces WHERE org_id = ?", user.org_id).length;
-  run("INSERT INTO workspaces (id, org_id, name, code, color, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, user.org_id, name, body.code?.trim() || null, COLORS[count % COLORS.length], now());
-  run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", id, user.id);
-  audit(user, `Created workspace “${name}”`, "Access", id);
+  const count = (await all("SELECT id FROM workspaces WHERE org_id = ?", user.org_id)).length;
+  await run("INSERT INTO workspaces (id, org_id, name, code, color, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, user.org_id, name, body.code?.trim() || null, COLORS[count % COLORS.length], now());
+  await run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", id, user.id);
+  await audit(user, `Created workspace “${name}”`, "Access", id);
   return { id };
 });

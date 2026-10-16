@@ -42,8 +42,8 @@ export const GET = handle(async () => {
   return {
     build: buildInfo(),
     models: MODELS,
-    flags: (Object.keys(FLAGS) as FlagKey[]).map((k) => ({ key: k, ...FLAGS[k], enabled: flagEnabled(k) })),
-    log: all("SELECT id, actor, action, created_at FROM platform_log ORDER BY id DESC LIMIT 50"),
+    flags: await Promise.all((Object.keys(FLAGS) as FlagKey[]).map(async (k) => ({ key: k, ...FLAGS[k], enabled: await flagEnabled(k) }))),
+    log: await all("SELECT id, actor, action, created_at FROM platform_log ORDER BY id DESC LIMIT 50"),
   };
 });
 
@@ -52,10 +52,10 @@ export const POST = handle(async (req: Request) => {
   const owner = await requireOwner();
   const { key, enabled } = await readJson<{ key?: string; enabled?: boolean }>(req);
   if (!key || !(key in FLAGS)) throw new HttpError(400, "Unknown switch.");
-  run(
+  await run(
     "INSERT INTO platform_flags (key, enabled, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET enabled = excluded.enabled, updated_by = excluded.updated_by, updated_at = excluded.updated_at",
     key, enabled ? 1 : 0, owner.name, now(),
   );
-  platformLog(owner.name, `${enabled ? "Turned on" : "Paused"} ${FLAGS[key as FlagKey].label} for all clients`);
+  await platformLog(owner.name, `${enabled ? "Turned on" : "Paused"} ${FLAGS[key as FlagKey].label} for all clients`);
   return { ok: true };
 });

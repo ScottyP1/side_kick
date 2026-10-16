@@ -1,5 +1,5 @@
 /**
- * @file Sidekick's database: one SQLite file holding every organization's data.
+ * @file Sidekick's database layer: one small API (`all`, `get`, `run`, `tx`) over two engines.
  *
  * Concepts
  * - **Organization (org)**: one client company using Sidekick. Every row that holds client data has an
@@ -7,18 +7,26 @@
  * - **Workspace**: one client engagement inside an org (e.g. "Contoso – Cloud Migration"). Documents,
  *   meetings, questions and action items all belong to exactly one workspace. Users only see the
  *   workspaces they're members of (see `requireWorkspace` in auth.ts).
- * - **Passages**: documents and transcripts are split into short passages and stored in a full-text
- *   index (`passages`) so Sidekick can find the few that answer a question.
- *
- * Step 1 uses SQLite (built into Node) so the demo runs on a laptop with no setup. Production moves to
- * Azure Database for PostgreSQL + Azure AI Search (see docs/BLUEPRINT.md 4.4, 4.6). Keep queries in plain
- * SQL with `?` parameters (never string-built values) so that move stays simple and injection-safe.
+ * - **Passages**: documents and transcripts are split into short passages and stored in a keyword index
+ *   (`passages`) so Sidekick can find the few that answer a question (see search.ts).
+ * - **Two engines, same SQL**:
+ *   - **SQLite** (one file, built into Node) when `DATABASE_URL` is not set: the laptop/demo setup.
+ *   - **PostgreSQL** when `DATABASE_URL` is set: production (Azure Database for PostgreSQL). Its schema
+ *     is in `db/schema.postgres.sql` and mirrors the SQLite one, so the app's queries run unchanged.
+ *   Queries use `?` placeholders (converted to `$1, $2…` for Postgres) and never string-built values,
+ *   which keeps them injection-safe on both.
+ * - **Async**: every call returns a Promise (`await all(...)`), because Postgres is a network service.
  */
 import "server-only";
 import { DatabaseSync } from "node:sqlite";
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import pg from "pg";
+
+/** Which engine this server uses: Postgres when DATABASE_URL is set, otherwise the local SQLite file. */
+export const DIALECT: "postgres" | "sqlite" = process.env.DATABASE_URL ? "postgres" : "sqlite";
 
 // SIDEKICK_DATA_DIR lets a test copy run against its own database (tests and Agents Playground use this
 // so the real data in app/data is never touched).
@@ -153,16 +161,25 @@ CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
 );
 `;
 
+/** A value that can be bound to a `?` placeholder. */
+export type Param = string | number | null;
+
+/** What each engine must provide. `tx` runs `fn` with every query inside it in one transaction. */
+type Driver = {
+  query(sql: string, params: Param[]): Promise<Record<string, unknown>[]>;
+  exec(sql: string, params: Param[]): Promise<{ changes: number }>;
+  tx<T>(fn: () => Promise<T>): Promise<T>;
+};
+
 declare global {
   var __sidekickDb: DatabaseSync | undefined;
+  var __sidekickDriver: Promise<Driver> | undefined;
 }
 
-/**
- * Returns the shared database connection, creating the file and tables on first use.
- * The connection is kept on `globalThis` so Next.js hot reloads in development reuse it instead of
- * opening a new one on every code change.
- */
-export function db(): DatabaseSync {
+/* ---------------- SQLite (local file) ---------------- */
+
+/** The SQLite connection, creating the file and tables on first use. Kept on globalThis for hot reloads. */
+function sqlite(): DatabaseSync {
   if (!globalThis.__sidekickDb) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const conn = new DatabaseSync(DB_PATH);
@@ -185,6 +202,125 @@ function migrate(conn: DatabaseSync) {
   if (!has("usage_events", "error")) conn.exec("ALTER TABLE usage_events ADD COLUMN error TEXT");
 }
 
+/**
+ * SQLite has one connection for the whole server, so a transaction would otherwise see writes from other
+ * requests that run while it awaits. This lock makes a transaction exclusive: other queries wait for it.
+ */
+let sqliteLock: Promise<void> = Promise.resolve();
+const inSqliteTx = new AsyncLocalStorage<true>();
+const waitForLock = () => (inSqliteTx.getStore() ? Promise.resolve() : sqliteLock);
+
+const sqliteDriver: Driver = {
+  async query(sql, params) {
+    await waitForLock();
+    return sqlite().prepare(sql).all(...params) as Record<string, unknown>[];
+  },
+  async exec(sql, params) {
+    await waitForLock();
+    return { changes: Number(sqlite().prepare(sql).run(...params).changes) };
+  },
+  async tx(fn) {
+    if (inSqliteTx.getStore()) return fn(); // nested: join the outer transaction
+    const previous = sqliteLock;
+    let release!: () => void;
+    sqliteLock = new Promise((r) => (release = r));
+    await previous;
+    const conn = sqlite();
+    try {
+      conn.exec("BEGIN");
+      const out = await inSqliteTx.run(true, fn);
+      conn.exec("COMMIT");
+      return out;
+    } catch (e) {
+      conn.exec("ROLLBACK");
+      throw e;
+    } finally {
+      release();
+    }
+  },
+};
+
+/* ---------------- PostgreSQL (DATABASE_URL) ---------------- */
+
+// Postgres returns 64-bit integers (COUNT, SUM of integers) and NUMERIC (AVG) as strings to avoid losing
+// precision; Sidekick's numbers are small, so read them as plain JS numbers like SQLite does.
+pg.types.setTypeParser(20, (v) => Number(v));
+pg.types.setTypeParser(1700, (v) => Number(v));
+
+/** Converts `?` placeholders to Postgres's `$1, $2…`, skipping any `?` inside quoted strings. */
+export function toPgPlaceholders(sql: string): string {
+  let n = 0;
+  let quoted = false;
+  let out = "";
+  for (const ch of sql) {
+    if (ch === "'") quoted = !quoted;
+    out += ch === "?" && !quoted ? `$${++n}` : ch;
+  }
+  return out;
+}
+
+const pgTx = new AsyncLocalStorage<pg.PoolClient>();
+
+/** True for a Postgres URL that points at this computer (no network, so no TLS needed). */
+export function isLocalDatabase(url: string): boolean {
+  if (/^postgres(ql)?:\/\/\//.test(url)) return true; // postgres:///dbname = local socket
+  try {
+    return ["localhost", "127.0.0.1", "[::1]", ""].includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Connects to Postgres and makes sure every table exists (the schema file is idempotent). */
+async function postgresDriver(): Promise<Driver> {
+  const url = process.env.DATABASE_URL ?? "";
+  const pool = new pg.Pool({
+    connectionString: url,
+    max: Number(process.env.DATABASE_POOL_MAX || 10),
+    allowExitOnIdle: true, // scripts and tests can exit without closing the pool
+    // Azure Database for PostgreSQL requires encrypted (TLS) connections, checked against its certificate.
+    // A database on this same machine (localhost, or a local socket) is the only exception.
+    ssl: isLocalDatabase(url) ? undefined : { rejectUnauthorized: true },
+  });
+  await pool.query(fs.readFileSync(path.join(process.cwd(), "db", "schema.postgres.sql"), "utf8"));
+  const runner = () => pgTx.getStore() ?? pool;
+  return {
+    async query(sql, params) {
+      return (await runner().query(toPgPlaceholders(sql), params)).rows;
+    },
+    async exec(sql, params) {
+      return { changes: (await runner().query(toPgPlaceholders(sql), params)).rowCount ?? 0 };
+    },
+    async tx(fn) {
+      if (pgTx.getStore()) return fn(); // nested: join the outer transaction
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const out = await pgTx.run(client, fn);
+        await client.query("COMMIT");
+        return out;
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+/** The active engine, created once per server process. A failed Postgres connect is retried next call. */
+function driver(): Promise<Driver> {
+  if (!globalThis.__sidekickDriver) {
+    const d = DIALECT === "postgres" ? postgresDriver() : Promise.resolve(sqliteDriver);
+    d.catch(() => {
+      if (globalThis.__sidekickDriver === d) globalThis.__sidekickDriver = undefined;
+    });
+    globalThis.__sidekickDriver = d;
+  }
+  return globalThis.__sidekickDriver;
+}
+
 /** New random id for a row (UUID v4). */
 export const newId = () => crypto.randomUUID();
 /** Current time as an ISO 8601 string, the format every `*_at` column uses. */
@@ -194,30 +330,22 @@ export const now = () => new Date().toISOString();
 export type Row = Record<string, unknown>;
 
 /** Runs a SELECT and returns every matching row. Values go in `params`, matched to `?` in order. */
-export function all<T = Row>(sql: string, ...params: (string | number | null)[]): T[] {
-  return db().prepare(sql).all(...params) as T[];
+export async function all<T = Row>(sql: string, ...params: Param[]): Promise<T[]> {
+  return (await (await driver()).query(sql, params)) as T[];
 }
 /** Runs a SELECT and returns the first row, or `undefined` if nothing matched. */
-export function get<T = Row>(sql: string, ...params: (string | number | null)[]): T | undefined {
-  return db().prepare(sql).get(...params) as T | undefined;
+export async function get<T = Row>(sql: string, ...params: Param[]): Promise<T | undefined> {
+  return (await all<T>(sql, ...params))[0];
 }
-/** Runs an INSERT, UPDATE or DELETE. Returns the change count and last inserted rowid. */
-export function run(sql: string, ...params: (string | number | null)[]) {
-  return db().prepare(sql).run(...params);
+/** Runs an INSERT, UPDATE or DELETE. Returns how many rows changed. */
+export async function run(sql: string, ...params: Param[]): Promise<{ changes: number }> {
+  return (await driver()).exec(sql, params);
 }
 /**
  * Runs `fn` as one transaction: either every write inside it is saved, or (if it throws) none are.
- * Use it when several rows must change together, like saving all notes from one meeting.
+ * Use it when several rows must change together, like saving all notes from one meeting. Every
+ * `all`/`get`/`run` awaited inside `fn` automatically joins the transaction.
  */
-export function tx<T>(fn: () => T): T {
-  const conn = db();
-  conn.exec("BEGIN");
-  try {
-    const out = fn();
-    conn.exec("COMMIT");
-    return out;
-  } catch (e) {
-    conn.exec("ROLLBACK");
-    throw e;
-  }
+export async function tx<T>(fn: () => Promise<T>): Promise<T> {
+  return (await driver()).tx(fn);
 }

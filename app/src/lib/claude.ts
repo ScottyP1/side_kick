@@ -2,7 +2,7 @@
  * @file The only place Sidekick talks to Claude (Anthropic's AI model).
  *
  * Concepts
- * - **Feature**: each kind of AI work has a name (`ask`, `extract`, `insights`) so it can use its own
+ * - **Feature**: each kind of AI work has a name (`ask`, `extract`, `insights`, `assist`) so it can use its own
  *   model, be metered separately on the Usage page, and be paused with a kill switch in the Owner Console.
  * - **Structured output**: instead of free text, Claude must reply with JSON matching a Zod schema, so the
  *   app can save answers, decisions and action items without guessing at their shape.
@@ -31,6 +31,7 @@ export const MODELS = {
   extract: process.env.SIDEKICK_MODEL_EXTRACT || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
   ask: process.env.SIDEKICK_MODEL_ASK || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
   insights: process.env.SIDEKICK_MODEL_INSIGHTS || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
+  assist: process.env.SIDEKICK_MODEL_ASSIST || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
 };
 export type Feature = keyof typeof MODELS;
 
@@ -70,6 +71,15 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
       open_questions: [{ text: "Who owns rollback?", answered: false }],
       facts: [{ kind: "risk", text: "Test risk" }],
     };
+  }
+  if (feature === "assist") {
+    // Understands two test phrases: "create workspace <name>" and "add <name> <email>"; anything else gets a plain reply.
+    const msg = content.match(/<message>([\s\S]*)<\/message>/)?.[1].trim() ?? "";
+    const ws = msg.match(/^create (?:a )?workspace (?:called |named )?(.+)$/i);
+    if (ws) return { reply: `Here's what I'll do: create “${ws[1]}”. Press Confirm.`, action: { type: "create_workspace", name: ws[1], code: null, email: null, role: null, workspace_ids: [], guests: null, page: null } };
+    const person = msg.match(/^add (.+?) (\S+@\S+)$/i);
+    if (person) return { reply: `Here's what I'll do: add ${person[1]}. Press Confirm.`, action: { type: "add_person", name: person[1], code: null, email: person[2], role: "Member", workspace_ids: [], guests: null, page: null } };
+    return { reply: "Test assistant reply.", action: null };
   }
   return { topics: [{ name: "Test topic", summary: "About the test", coverage: 150, key_facts: [], document_titles: [], meeting_titles: [] }], gaps: [] };
 }
@@ -115,7 +125,7 @@ type Ctx = { orgId: string; workspaceId: string | null };
  * Server-side fallback ("default") re-runs a policy-declined request on Anthropic's recommended model.
  * Usage is recorded in `finally`, so failed calls are metered too.
  */
-const SPAN_NAMES: Record<Feature, string> = { ask: "Claude: write the answer", extract: "Claude: write meeting notes", insights: "Claude: build the knowledge map" };
+const SPAN_NAMES: Record<Feature, string> = { ask: "Claude: write the answer", extract: "Claude: write meeting notes", insights: "Claude: build the knowledge map", assist: "Claude: in-app assistant" };
 export async function structured<S extends z.ZodType>(
   feature: Feature,
   ctx: Ctx,

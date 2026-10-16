@@ -10,7 +10,7 @@
  * - trace (&id=…): one trace with all its steps (spans), for the waterfall.
  * - messages (&limit=…): questions asked in the portal and in Teams, and whether they were answered.
  * - live: the last few minutes, for the home page orb: active people, each connection's health
- *   (Teams, Claude, search, database), and recent events to animate.
+ *   (Teams, Claude, search, database), and recent work (used to tell whether Sidekick is busy).
  *
  * Traces hold timings, counts, model names and costs only; no document text (see lib/trace.ts).
  */

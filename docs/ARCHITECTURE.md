@@ -37,6 +37,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured |
 | `lib/azure-search.ts` | Azure AI Search index, embeddings and hybrid (keyword + vector) queries |
 | `lib/claude.ts` | **All Claude calls go through here**: model per feature, structured output, metering |
+| `lib/assistant.ts` | The in-app assistant on the home page: answers questions about Sidekick and proposes role-limited actions that only run when the person presses Confirm |
 | `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
 | `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
 | `components/` | Portal and Owner Console frames, shared UI |

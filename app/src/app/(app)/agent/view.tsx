@@ -12,6 +12,7 @@ const ROLES: Record<string, [string, string]> = {
   extract: ["Meeting notes", "Reads a transcript and writes the summary, decisions, action items, open questions and facts."],
   ask: ["Answering questions", "Answers from this workspace's documents and meetings only, with a source for every claim."],
   insights: ["Knowledge map", "Groups what the team knows into topics, scores coverage and finds gaps."],
+  assist: ["In-app assistant", "The chat box on the home page: answers questions about Sidekick and offers actions your role allows, each confirmed first."],
 };
 
 export default function AgentPage() {

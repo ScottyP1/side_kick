@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Build folders of the side-by-side copies (dev:teams, dev:preview, tests).
+    ".next-*/**",
   ]),
 ]);
 

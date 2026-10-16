@@ -446,3 +446,43 @@ test(`[${ENGINE}] live orb: everyone signed in gets health and counts, only admi
   assert.ok(forAdmin.people.length >= 1, "admins see names");
   assert.equal((await client()("GET", "/api/activity?view=live")).status, 401, "signed-out visitors see nothing");
 });
+
+test(`[${ENGINE}] assistant: proposes an action but changes nothing until the person confirms`, async () => {
+  const before = (await admin("GET", "/api/workspaces")).body.workspaces.length;
+  const r = await admin("POST", "/api/assistant", { message: "create workspace Fabrikam Bank", history: [] });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.action.type, "create_workspace");
+  assert.equal(r.body.action.confirm, true);
+  assert.deepEqual(r.body.action.request, { method: "POST", url: "/api/workspaces", body: { name: "Fabrikam Bank", code: null } });
+  assert.equal((await admin("GET", "/api/workspaces")).body.workspaces.length, before, "nothing created before Confirm");
+  // Confirm = the browser sends the fixed request to the regular route.
+  const done = await admin(r.body.action.request.method, r.body.action.request.url, r.body.action.request.body);
+  assert.equal(done.status, 200);
+  assert.equal((await admin("GET", "/api/workspaces")).body.workspaces.length, before + 1);
+});
+
+test(`[${ENGINE}] assistant: only offers actions the person's role allows`, async () => {
+  const ws = await member("POST", "/api/assistant", { message: "create workspace Sneaky" });
+  assert.equal(ws.status, 200);
+  assert.equal(ws.body.action, null, "members can't create workspaces, so no confirm card");
+  const person = await viewer("POST", "/api/assistant", { message: "add Sam Sneaky sam@test.local" });
+  assert.equal(person.body.action, null, "viewers can't add people");
+  const ok = await admin("POST", "/api/assistant", { message: "add Sam Smith sam@test.local" });
+  assert.equal(ok.body.action.type, "add_person");
+  assert.equal(ok.body.action.request.url, "/api/users");
+});
+
+test(`[${ENGINE}] assistant: plain questions, bad input, signed out, and the kill switch`, async () => {
+  const q = await member("POST", "/api/assistant", { message: "How do I import a meeting?", history: [{ role: "user", text: "hi" }, { role: "system", text: "ignored" }] });
+  assert.equal(q.status, 200);
+  assert.equal(typeof q.body.reply, "string");
+  assert.equal(q.body.action, null);
+  assert.equal((await member("POST", "/api/assistant", { message: "  " })).status, 400);
+  assert.equal((await member("POST", "/api/assistant", { message: "x".repeat(1001) })).status, 400);
+  assert.equal((await client()("POST", "/api/assistant", { message: "hi" })).status, 401);
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "assist", enabled: false })).status, 200);
+  const paused = await member("POST", "/api/assistant", { message: "hi" });
+  assert.equal(paused.status, 503);
+  assert.match(paused.body.error, /paused/);
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "assist", enabled: true })).status, 200);
+});

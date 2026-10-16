@@ -41,6 +41,9 @@ When **client guests are present** (in a meeting marked "Client guests attended"
 ## Sidekick in Teams
 Sidekick can be added to Teams channels and chats. Each channel or chat is **linked to one workspace** by an admin, and Sidekick only answers from that workspace there. See [Sidekick in Teams](teams-guide.md).
 
+## The in-app assistant
+The chat box under the crystal ball on the home page. Ask it how Sidekick works ("how do I import a meeting?", "what can a Viewer do?") or ask it to do something: create a workspace, add a person, link a Teams chat, refresh a knowledge map, or open a page. It only offers what your role allows, and it never changes anything by itself: it shows a card with exactly what will happen, and nothing happens until you press **Confirm** (Cancel leaves everything as it was). Confirmed actions are recorded in the audit log like any other. For questions about a project's content, use **Ask Sidekick** on Knowledge & docs, which answers from your sources with citations. New client organizations are set up by the Sidekick team, not from the assistant.
+
 ## Audit log
 Sign-ins, access changes, uploads, deletions, Teams links and every action Sidekick takes on its own are recorded on **Security & audit**, with who did it and when.
 

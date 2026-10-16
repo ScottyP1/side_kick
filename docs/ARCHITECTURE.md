@@ -31,6 +31,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `db/schema.postgres.sql` | The Postgres schema, mirroring the SQLite one |
 | `lib/auth.ts` | Sessions, roles, `requireUser`, `requireWorkspace` (the workspace wall), audit log |
 | `lib/owner.ts` | Owner Console sign-in, kill switches (`assertEnabled`), operator log |
+| `lib/trace.ts` | Traces and steps (spans) for every request and Teams message; feeds the Activity page and the home orb |
 | `lib/api.ts` | `handle()` wrapper: JSON responses, `HttpError` → `{ error }`, reference codes + `app_errors` log for unexpected errors |
 | `lib/extract.ts` | Files → text (PDF, Word, Teams .vtt) and text → passages |
 | `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured |

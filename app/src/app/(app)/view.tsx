@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
+import { LiveOrb } from "@/components/live-orb";
 import { api, fmtDate, Pill, usd, useReportError } from "@/components/ui";
 
 type Overview = {
@@ -61,7 +62,9 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <div className="grid g4">
+      <LiveOrb admin={me.user.admin} />
+
+      <div className="grid g4" style={{ marginTop: 16 }}>
         <Link className="kpi" href="/meetings" style={{ textDecoration: "none" }}>
           <span className="eyebrow">Meetings</span>
           <span className="v">{s?.meetings ?? "—"}</span>

@@ -6,7 +6,8 @@ AI teammate for Microsoft Teams: personal project of Cody Scott. **Read `docs/PR
 - Claude calls go only through `app/src/lib/claude.ts` (default `claude-opus-5-5`, per-feature override via env).
 - Search goes only through `app/src/lib/search.ts` (local keyword index as source of truth/fallback; Azure AI Search hybrid when configured).
 - Database calls go only through `app/src/lib/db.ts` (`await all/get/run/tx`, `?` placeholders). SQL must run on **both** SQLite and Postgres (`app/db/schema.postgres.sql` mirrors the SQLite schema); no SQLite-only syntax (`INSERT OR`, bare `day` alias, selecting non-grouped columns).
-- Run `npm --prefix app test` before committing (66 tests, both engines; needs local Postgres: `brew services start postgresql@17`). Add tests for new behaviour.
+- Run `npm --prefix app test` before committing (74 tests, both engines; needs local Postgres: `brew services start postgresql@17`). Add tests for new behaviour.
+- New kinds of work get a trace step: wrap it in `span(kind, name, fn, attrs)` from `app/src/lib/trace.ts` (timings/counts/models only, never document text) so it shows on the Activity page and the home orb.
 - Nothing fails silently: API routes use `handle()`; pages use `api()` and `useReportError()` (never `.catch(() => {})`).
 - Every data query must stay scoped to the user's org and workspace (`requireWorkspace`).
 - Test with a separate data folder (`SIDEKICK_DATA_DIR`) so Cody's real local data is never touched.

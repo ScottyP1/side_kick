@@ -27,7 +27,7 @@ An AI teammate for Microsoft Teams. This folder holds the step 1 build: a workin
 npm --prefix app test
 ```
 
-Runs 66 automated tests on **both** databases (SQLite and Postgres): the database layer, plus end-to-end checks of sign-in, workspace walls, roles, the client-guest filter, uploads, meeting notes, failures, the Teams bot, kill switches and suspension. They use a throwaway database, a fake Claude (free, canned answers, test mode only) and a fake Teams connector, so nothing real is touched or paid for. The Postgres half needs Postgres running on this Mac (`brew services start postgresql@17`); without it those are skipped with a warning.
+Runs 74 automated tests on **both** databases (SQLite and Postgres): the database layer, plus end-to-end checks of sign-in, workspace walls, roles, the client-guest filter, uploads, meeting notes, failures, the Teams bot, kill switches and suspension. They use a throwaway database, a fake Claude (free, canned answers, test mode only) and a fake Teams connector, so nothing real is touched or paid for. The Postgres half needs Postgres running on this Mac (`brew services start postgresql@17`); without it those are skipped with a warning.
 
 ## Postgres and the container (for hosting in Azure later)
 
@@ -39,6 +39,12 @@ Runs 66 automated tests on **both** databases (SQLite and Postgres): the databas
   ```
 
 - **Container:** `app/Dockerfile` builds a small production image (no source code, no local data, no `.env` files; runs as a non-root user). Secrets are passed in at run time. `GET /api/health` reports whether the app and database are up (no data or secrets), for Azure's health probe.
+
+## Activity (observability) and the live orb
+
+- **Home page:** "Sidekick live" shows a liquid orb (Sidekick) with satellites for Teams, Claude, Search, the Database and the people active right now, each labelled with its health (Healthy / Slow / Failing / Idle / Not set up). The orb works harder while Sidekick is busy, and sparks run along the links each piece of work used. Members see counts; admins also see names. It pauses when hidden and stays still for people who turn off animations.
+- **Activity page** (Org Owners and Admins, like Dynatrace): **Overview** (requests, failures, response times, AI calls and cost, portal vs Teams, busiest operations, requests over time), **Traces** (every request and Teams message; click one for its step-by-step waterfall: search, embeddings, Claude, Teams delivery, database time), **Messages** (what was asked where, answered or not) and the **Audit trail**.
+- Traces store timings, counts, model names and costs, never document text, and are deleted after 30 days. The shape follows OpenTelemetry, so it can later also feed Azure Application Insights.
 
 ## When something breaks
 

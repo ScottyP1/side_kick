@@ -1,6 +1,7 @@
 /**
  * GET /api/activity?view=…: the client's observability data (Activity page and the live home orb).
- * Who: Org Owners and Org Admins. Everything is filtered to their own organization.
+ * Who: Org Owners and Org Admins; `live` (the home orb) is open to everyone signed in, but only admins
+ * see names of active people (others get a count). Everything is filtered to the caller's own organization.
  *
  * Views
  * - overview (&days=1|7|30): request volume, failures, response times (p50/p95), AI calls and cost,
@@ -14,7 +15,7 @@
  * Traces hold timings, counts, model names and costs only; no document text (see lib/trace.ts).
  */
 import { handle } from "@/lib/api";
-import { HttpError, requireUser } from "@/lib/auth";
+import { HttpError, isAdmin, requireUser } from "@/lib/auth";
 import { all, DIALECT, get } from "@/lib/db";
 import { claudeConfigured } from "@/lib/claude";
 import { azureSearchConfigured, embeddingsConfigured } from "@/lib/azure-search";
@@ -29,9 +30,9 @@ const pct = (xs: number[], p: number) => {
 };
 
 export const GET = handle(async (req: Request) => {
-  const user = await requireUser(["Org Owner", "Org Admin"]);
   const q = new URL(req.url).searchParams;
   const view = q.get("view") ?? "overview";
+  const user = await requireUser(view === "live" ? undefined : ["Org Owner", "Org Admin"]);
   const org = user.org_id;
 
   if (view === "overview") {
@@ -189,7 +190,8 @@ export const GET = handle(async (req: Request) => {
     );
     return {
       now: new Date().toISOString(),
-      people,
+      peopleCount: new Set(people.map((p) => p.actor)).size,
+      people: isAdmin(user) ? people : [],
       connections: {
         teams: { ...health("teams", Boolean(teamsLinks?.n)), linked: teamsLinks?.n ?? 0, lastSeen: teamsLinks?.last ?? null },
         claude: health("ai", claudeConfigured() || process.env.SIDEKICK_FAKE_CLAUDE === "1"),

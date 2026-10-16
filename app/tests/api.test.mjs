@@ -436,3 +436,13 @@ test(`[${ENGINE}] Activity: one organization never sees another's traces`, async
   const leaked = await other("GET", `/api/activity?view=trace&id=${mine[0].id}`);
   assert.equal(leaked.status, 404);
 });
+
+test(`[${ENGINE}] live orb: everyone signed in gets health and counts, only admins see names`, async () => {
+  const forMember = await member("GET", "/api/activity?view=live");
+  assert.equal(forMember.status, 200);
+  assert.deepEqual(forMember.body.people, [], "members don't see who is active");
+  assert.ok(forMember.body.peopleCount >= 1);
+  const forAdmin = (await admin("GET", "/api/activity?view=live")).body;
+  assert.ok(forAdmin.people.length >= 1, "admins see names");
+  assert.equal((await client()("GET", "/api/activity?view=live")).status, 401, "signed-out visitors see nothing");
+});

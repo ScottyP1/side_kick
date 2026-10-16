@@ -59,6 +59,11 @@ npm --prefix app run dev
 - Tests: `npm --prefix app test` = 66 tests (db layer 7×2, end-to-end 26×2). Fake Claude via `SIDEKICK_FAKE_CLAUDE=1` (refused in production); `__FAIL__` in content forces a failure.
 - Errors: `handle()` adds reference codes and logs to `app_errors`; `api()` + `ProblemProvider` modal; `useReportError()` for loads; crash screens `error.tsx` / `global-error.tsx`.
 
+## Activity + live orb (Oct 16, 2026)
+- `lib/trace.ts` traces every API request (`handle()`), Teams message/answer/card/post, with spans for search (engine, results, fallback), embeddings, Claude (model, tokens, cost), file reading and indexing, plus per-request DB query count/time. Tables `traces` + `trace_spans` (both engines), 30-day retention.
+- `/api/activity` views: overview, traces, trace, messages (admins), live (everyone; names for admins only). `/activity` page (admins) and the home-page orb (`components/live-orb.tsx`, WebGL shader, no new dependency; reduced-motion and no-WebGL fallbacks).
+- Dev gotchas fixed: the schema is re-applied when it changes while the server runs; the trace store is shared across module reloads. After big server-side changes in dev, a restart is still the safest check.
+
 ## Scale-up path (for later, not needed now)
 - **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).
 - **Event Hubs** (Azure's Kafka-compatible event stream): for step 3 live meeting events at scale, or queueing heavy work (transcript processing) once many clients use it. It moves events between services; it is **not** storage. Storage stays Postgres (+ Blob for files, Azure AI Search for retrieval).

@@ -39,7 +39,11 @@ The **Teams channels and chats** table on the Workspaces page shows every link. 
 - **Usage & billing**: AI cost by feature, workspace and day (also open to Billing Admins).
 - **Security & audit**: who did what and when, including everything Sidekick did on its own.
 
-## 9. Branding
+## 9. See what Sidekick is doing (Activity)
+- **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, Claude, search, database) with their health, and who's active.
+- **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, Claude and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored.
+
+## 10. Branding
 **Settings**: upload your logo and pick a brand color. They're applied across the portal.
 
 ## Troubleshooting

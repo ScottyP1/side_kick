@@ -181,6 +181,12 @@ declare global {
 /** The SQLite connection, creating the file and tables on first use. Kept on globalThis for hot reloads. */
 function sqlite(): DatabaseSync {
   if (!globalThis.__sidekickDb) {
+    // In production the SQLite file would live inside the container and vanish on every restart or
+    // deploy, silently losing client data. Refuse loudly instead (set DATABASE_URL to Postgres), unless
+    // someone explicitly opts in (e.g. a single-machine demo with a persistent disk).
+    if (process.env.NODE_ENV === "production" && process.env.SIDEKICK_ALLOW_SQLITE !== "1") {
+      throw new Error("No database configured: set DATABASE_URL to a PostgreSQL database (or SIDEKICK_ALLOW_SQLITE=1 for a single-machine demo).");
+    }
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const conn = new DatabaseSync(DB_PATH);
     conn.exec(SCHEMA);

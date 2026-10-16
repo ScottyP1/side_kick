@@ -321,7 +321,7 @@ test(`[${ENGINE}] Teams: a question gets an answer card with sources`, async () 
   const before = sent.length;
   const r = await toBot(activity({ type: "message", text: "When is the wave 2 cutover?" }));
   assert.ok(r.status < 300);
-  const msg = await waitForSent((m, i) => sent.indexOf(m) >= before && cardsOf(m).some((c) => /Sources/.test(cardText(c))));
+  const msg = await waitForSent((m) => sent.indexOf(m) >= before && cardsOf(m).some((c) => /Sources/.test(cardText(c))));
   assert.match(cardText(cardsOf(msg)[0]), /Runbook\.md/);
 });
 
@@ -371,4 +371,12 @@ test(`[${ENGINE}] the audit log recorded the important actions`, async () => {
   const log = (await admin("GET", "/api/audit")).body;
   const text = JSON.stringify(log);
   for (const phrase of ["Created workspace", "Uploaded", "Imported meeting", "Linked Teams"]) assert.match(text, new RegExp(phrase));
+});
+
+test(`[${ENGINE}] health check reports the database engine and reveals no data`, async () => {
+  const r = await client()("GET", "/api/health");
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.database.engine, ENGINE);
+  assert.deepEqual(Object.keys(r.body).sort(), ["claude", "database", "ok", "search", "teams"]);
 });

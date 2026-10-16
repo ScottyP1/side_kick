@@ -12,6 +12,7 @@
  */
 import "server-only";
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import Anthropic from "@anthropic-ai/sdk";
 import { HttpError } from "./auth";
 
@@ -26,6 +27,8 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
       const out = await fn(...args);
       return out instanceof Response ? out : NextResponse.json(out ?? { ok: true });
     } catch (e) {
+      // Next.js signals things like "this route needs the request (cookies)" by throwing; let those through.
+      unstable_rethrow(e);
       if (e instanceof HttpError) return NextResponse.json({ error: e.message }, { status: e.status });
       if (e instanceof Anthropic.AuthenticationError) {
         return NextResponse.json({ error: "Claude rejected the API key. Check ANTHROPIC_API_KEY in app/.env.local, then restart the app." }, { status: 502 });

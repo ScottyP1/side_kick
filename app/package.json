@@ -11,7 +11,8 @@
     "lint": "eslint",
     "teams:package": "node scripts/teams-package.mjs",
     "tunnel": "devtunnel host sidekick",
-    "test": "node tests/run.mjs"
+    "test": "node tests/run.mjs",
+    "db:copy-to-postgres": "node scripts/copy-to-postgres.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

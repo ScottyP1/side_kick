@@ -1,0 +1,10 @@
+# Never send local data, secrets or build output into the image build.
+data
+.playground-data
+.env*
+!.env.example
+.next*
+node_modules
+tests
+devTools
+*.log

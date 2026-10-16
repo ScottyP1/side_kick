@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * "Sidekick live" on the home page: the crystal ball (Sidekick itself), a row showing each connection's
+ * "Sidekick live" on the home page: a greeting that fades in above the crystal ball (Sidekick itself), a row showing each connection's
  * health and who's active, and the in-app assistant chat underneath (components/assistant.tsx).
  *
  * What it shows (from GET /api/activity?view=live, refreshed every 5 seconds):
@@ -99,8 +99,11 @@ function Core({ busy, reduced }: { busy: boolean; reduced: boolean }) {
 
 /* ---------------- The panel: ball, connection health, assistant ---------------- */
 
-/** The home page's live panel. `admin` decides whether names of active people are shown. */
-export function LiveOrb({ admin }: { admin: boolean }) {
+/**
+ * The home page's live panel. `admin` decides whether names of active people are shown; `greeting`
+ * ("Good morning, Cody") fades in above the ball (shown without the fade for reduced motion).
+ */
+export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string }) {
   const [live, setLive] = useState<Live | null>(null);
   const [failed, setFailed] = useState(false);
   const [reduced, setReduced] = useState(false);
@@ -166,6 +169,7 @@ export function LiveOrb({ admin }: { admin: boolean }) {
       </div>
       <p className="sr-only" aria-live="polite">{summary}</p>
       <div className="orb-stage">
+        {greeting && <p className="orb-greeting">{greeting}</p>}
         <div className="orb-core">
           <Core busy={busy} reduced={reduced} />
         </div>

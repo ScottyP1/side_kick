@@ -657,6 +657,84 @@ test(`[${ENGINE}] branding (logo and color) can only be changed by Org Owners an
   assert.equal((await admin("PUT", "/api/settings", { logo: null, accent: null })).status, 200);
 });
 
+/* ---------- Team Lead: manages people and Teams links in the workspaces they lead, nothing else ---------- */
+const lead = client();
+
+test(`[${ENGINE}] Team Lead: sees and adds people only in the workspaces they lead`, async () => {
+  const l = await admin("POST", "/api/users", { name: "Leo Lead", email: "lead@test.local", role: "Team Lead", workspaces: [s.wsA] });
+  assert.equal(l.status, 200, JSON.stringify(l.body));
+  s.leadId = l.body.id;
+  assert.equal((await lead("POST", "/api/auth/login", { email: "lead@test.local", password: l.body.tempPassword })).status, 200);
+  assert.equal((await lead("GET", "/api/me")).body.user.lead, true);
+  // Someone who is only in workspace B, which the lead doesn't lead.
+  s.bea = (await admin("POST", "/api/users", { name: "Bea Bee", email: "bea@test.local", role: "Member", workspaces: [s.wsB] })).body.id;
+
+  const seen = (await lead("GET", "/api/users")).body.users;
+  const emails = seen.map((u) => u.email);
+  assert.ok(emails.includes("member@test.local") && emails.includes("lead@test.local"));
+  assert.ok(!emails.includes("bea@test.local"), "people outside their workspaces stay hidden");
+  assert.ok(seen.every((u) => u.workspaces.every((w) => w === s.wsA)), "only their own workspace ids are shown");
+
+  const added = await lead("POST", "/api/users", { name: "Nia New", email: "nia@test.local", role: "Member", workspaces: [s.wsA] });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  assert.ok(added.body.tempPassword);
+  assert.equal((await lead("POST", "/api/users", { name: "X", email: "x1@test.local", role: "Member", workspaces: [s.wsB] })).status, 400, "not a workspace they lead");
+  assert.equal((await lead("POST", "/api/users", { name: "X", email: "x2@test.local", role: "Org Admin", workspaces: [s.wsA] })).status, 403);
+  assert.equal((await lead("POST", "/api/users", { name: "X", email: "x3@test.local", role: "Team Lead", workspaces: [s.wsA] })).status, 403);
+  assert.equal((await lead("POST", "/api/users", { name: "X", email: "nora@northwind.test", role: "Member", workspaces: [s.wsA] })).status, 409, "someone in another org");
+
+  // An existing colleague is added to the lead's workspace, keeping their other workspace.
+  const bea = await lead("POST", "/api/users", { name: "Bea Bee", email: "bea@test.local", role: "Member", workspaces: [s.wsA] });
+  assert.equal(bea.status, 200);
+  assert.equal(bea.body.existing, true);
+  assert.equal(bea.body.tempPassword, undefined);
+  const beaForLead = (await lead("GET", "/api/users")).body.users.find((u) => u.email === "bea@test.local");
+  assert.deepEqual(beaForLead.workspaces, [s.wsA], "workspace B isn't revealed to the lead");
+  const beaWs = () => admin("GET", "/api/users").then((r) => r.body.users.find((u) => u.email === "bea@test.local").workspaces.sort());
+  assert.deepEqual(await beaWs(), [s.wsA, s.wsB].sort());
+
+  // Taking her off the lead's workspace leaves workspace B alone.
+  assert.equal((await lead("PATCH", `/api/users/${s.bea}`, { workspaces: [] })).status, 200);
+  assert.deepEqual(await beaWs(), [s.wsB]);
+  assert.equal((await lead("PATCH", `/api/users/${s.bea}`, { workspaces: [s.wsA] })).status, 404, "no longer visible to the lead");
+});
+
+test(`[${ENGINE}] Team Lead: can't change roles, remove people, create workspaces or reach admin pages`, async () => {
+  const mia = (await admin("GET", "/api/users")).body.users.find((u) => u.email === "member@test.local");
+  assert.equal((await lead("PATCH", `/api/users/${mia.id}`, { role: "Org Admin" })).status, 403);
+  assert.equal((await lead("PATCH", `/api/users/${mia.id}`, { role: "Viewer" })).status, 403);
+  assert.equal((await lead("DELETE", `/api/users/${mia.id}`)).status, 403);
+  assert.equal((await admin("GET", "/api/users")).body.users.find((u) => u.id === mia.id).role, "Member", "nothing changed");
+  assert.equal((await lead("POST", "/api/workspaces", { name: "Lead's own" })).status, 403);
+  assert.equal((await lead("GET", "/api/audit")).status, 403);
+  assert.equal((await lead("PUT", "/api/settings", { logo: null, accent: "#123456" })).status, 403);
+  assert.equal((await lead("GET", `/api/docs?ws=${s.wsB}`)).status, 404, "other workspaces stay walled off");
+  // Members still can't manage people.
+  assert.equal((await member("GET", "/api/users")).status, 403);
+  assert.equal((await member("POST", "/api/users", { name: "X", email: "x4@test.local", role: "Member", workspaces: [s.wsA] })).status, 403);
+});
+
+test(`[${ENGINE}] Team Lead: links Teams chats only to the workspaces they lead`, async () => {
+  const wrongWs = await lead("POST", "/api/teams-links", { code: "ZZZZ-9999", ws: s.wsB });
+  assert.equal(wrongWs.status, 404, "not their workspace");
+  const own = await lead("POST", "/api/teams-links", { code: "ZZZZ-9999", ws: s.wsA });
+  assert.equal(own.status, 404, "allowed to try; the made-up code just doesn't match");
+  assert.match(own.body.error, /code/);
+  assert.equal((await member("POST", "/api/teams-links", { code: "ZZZZ-9999", ws: s.wsA })).status, 403, "Members can't link");
+});
+
+test(`[${ENGINE}] Team Lead: the assistant only offers what a lead may do`, async () => {
+  const ok = (await lead("POST", "/api/assistant", { message: `add Sam Lead samlead@test.local to ${s.wsA}` })).body.action;
+  assert.equal(ok?.type, "add_person");
+  assert.deepEqual(ok.request.body.workspaces, [s.wsA]);
+  assert.equal((await lead("POST", "/api/assistant", { message: `add Sam Lead samlead@test.local as Org Admin to ${s.wsA}` })).body.action, null);
+  assert.equal((await lead("POST", "/api/assistant", { message: `add Sam Lead samlead@test.local to ${s.wsB}` })).body.action, null);
+  assert.equal((await lead("POST", "/api/assistant", { message: "add Sam Lead samlead@test.local" })).body.action, null, "needs one of their workspaces");
+  assert.equal((await lead("POST", "/api/assistant", { message: "create workspace Lead Land" })).body.action, null);
+  assert.equal((await lead("POST", "/api/assistant", { message: "start a new organization please" })).body.action, null);
+  assert.equal((await admin("POST", "/api/assistant", { message: `add Tia Tee tia@test.local as Team Lead to ${s.wsA}` })).body.action?.request.body.role, "Team Lead", "admins can make Team Leads");
+});
+
 /* ---------- Guardrails (lib/guardrails.ts) and the workspace isolation check ---------- */
 const askA = (who, question, extra = {}) => who("POST", "/api/ask", { ws: s.wsA, question, ...extra });
 

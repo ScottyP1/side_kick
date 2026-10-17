@@ -6,6 +6,10 @@
  *   database stores only a hash of it, so a leaked database can't be used to sign in. Sessions last 7 days.
  * - **Roles** decide what a user may do inside their org:
  *   - Org Owner / Org Admin: everything, including users, workspaces, Teams links and settings.
+ *   - Team Lead: a Member who also runs the people side of the workspaces they belong to (the ones they
+ *     lead): adds people to those workspaces (as Member or Viewer), takes them off again, and links Teams
+ *     chats to them. A Team Lead can't create workspaces or organizations, change roles, remove anyone
+ *     from the organization, or see or touch any other workspace. Only Org Owners/Admins make Team Leads.
  *   - Billing Admin: usage and billing, but can't change content.
  *   - Member: works inside the workspaces they belong to (upload, import meetings, ask).
  *   - Viewer: read-only inside their workspaces.
@@ -25,7 +29,7 @@ export const SESSION_COOKIE = "sk_session";
 const SESSION_DAYS = 7;
 
 /** Every role a portal user can have, from most to least access. */
-export const ROLES = ["Org Owner", "Org Admin", "Billing Admin", "Member", "Viewer"] as const;
+export const ROLES = ["Org Owner", "Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"] as const;
 export type Role = (typeof ROLES)[number];
 
 /** The signed-in portal user, as API routes see them. */
@@ -123,6 +127,10 @@ export async function requireUser(roles?: readonly Role[]): Promise<User> {
 
 /** Org Owners and Org Admins can manage users, workspaces, Teams links and settings. */
 export const isAdmin = (u: User) => u.role === "Org Owner" || u.role === "Org Admin";
+/** Team Leads manage people and Teams links, but only in the workspaces they belong to (see `requireManage`). */
+export const isLead = (u: User) => u.role === "Team Lead";
+/** Roles a Team Lead may give people they add to their workspaces. */
+export const LEAD_ASSIGNABLE_ROLES: readonly Role[] = ["Member", "Viewer"];
 /** Everyone except Viewers and Billing Admins can change workspace content. */
 export const canEdit = (u: User) => u.role !== "Viewer" && u.role !== "Billing Admin";
 
@@ -148,6 +156,25 @@ export async function requireWorkspace(user: User, workspaceId: string | null | 
   }
   traceScope({ workspaceId });
   return workspaceId;
+}
+
+/**
+ * The workspaces whose people and Teams links this user may manage: every workspace in the org for Org
+ * Owners/Admins, the ones they belong to for a Team Lead, none for anyone else.
+ */
+export async function managedWorkspaceIds(user: User): Promise<string[]> {
+  return isAdmin(user) || isLead(user) ? workspaceIdsFor(user) : [];
+}
+
+/**
+ * Like `requireWorkspace`, plus the person must be allowed to manage that workspace's people and Teams
+ * links (an Org Owner/Admin, or a Team Lead of it). Throws 404 for a workspace they can't see, 403 if they
+ * can see it but not manage it. Returns the workspace id.
+ */
+export async function requireManage(user: User, workspaceId: string | null | undefined): Promise<string> {
+  const ws = await requireWorkspace(user, workspaceId);
+  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the workspace's Team Lead can do this.");
+  return ws;
 }
 
 /**

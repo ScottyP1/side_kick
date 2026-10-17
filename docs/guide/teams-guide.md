@@ -5,7 +5,7 @@ Sidekick works inside Microsoft Teams channels, group chats and 1:1 chats. It an
 ## Getting started in a channel
 1. Add Sidekick to the team or chat (Apps → Sidekick → Add).
 2. Mention it: `@Sidekick link`. If the channel isn't linked yet, Sidekick replies with an 8-character code.
-3. Ask an Org Admin to enter that code in the Sidekick portal (**Workspaces → Link Teams channel**). Sidekick confirms in the channel when it's done.
+3. Ask an Org Admin (or the workspace's Team Lead) to enter that code in the Sidekick portal (**Workspaces → Link Teams channel**). Sidekick confirms in the channel when it's done.
 
 ## Asking questions
 Mention Sidekick with your question:

@@ -168,13 +168,13 @@ export async function managedWorkspaceIds(user: User): Promise<string[]> {
 
 /**
  * Like `requireWorkspace`, plus the person must be allowed to manage that workspace's people and Teams
- * links (an Org Owner/Admin, or a Team Lead of it). Throws 404 for a workspace they can't see, 403 if they
- * can see it but not manage it. Returns the workspace id.
+ * links (an Org Owner/Admin, or a Team Lead of it). The role is checked first (403 for roles that never
+ * manage anything, so they learn nothing about which workspaces exist), then the wall (404 for a
+ * workspace an admin or lead can't see). Returns the workspace id.
  */
 export async function requireManage(user: User, workspaceId: string | null | undefined): Promise<string> {
-  const ws = await requireWorkspace(user, workspaceId);
   if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the workspace's Team Lead can do this.");
-  return ws;
+  return requireWorkspace(user, workspaceId);
 }
 
 /**

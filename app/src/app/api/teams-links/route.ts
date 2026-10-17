@@ -5,7 +5,7 @@
  */
 import { after } from "next/server";
 import { handle, readJson, requireText } from "@/lib/api";
-import { audit, HttpError, requireManage, requireUser, workspaceIdsFor, type User } from "@/lib/auth";
+import { audit, HttpError, isAdmin, isLead, requireManage, requireUser, workspaceIdsFor, type User } from "@/lib/auth";
 import { all, get, now, run } from "@/lib/db";
 import { helpCard } from "@/lib/teams/cards";
 import { normalizeCode, postCard, type TeamsConversation } from "@/lib/teams/bot";
@@ -69,8 +69,9 @@ export const DELETE = handle(async (req: Request) => {
   return { ok: true };
 });
 
-/** A linked conversation in a workspace this user may manage (404 / 403 otherwise). */
+/** A linked conversation in a workspace this user may manage (403 for roles that can't manage links, checked first; 404 otherwise). */
 async function ownLink(user: User, id: string | null | undefined): Promise<TeamsConversation> {
+  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the workspace's Team Lead can do this.");
   const conv = id ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
   if (!conv) throw new HttpError(404, "Linked Teams channel not found.");
   await requireManage(user, conv.workspace_id);

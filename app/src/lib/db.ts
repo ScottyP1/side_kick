@@ -179,6 +179,17 @@ CREATE TABLE IF NOT EXISTS teams_conversations (
   created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS teams_conversations_ws ON teams_conversations(workspace_id);
+-- Guardrails (see guardrails.ts). guard_rules: the org's switches as JSON (missing = defaults).
+-- guard_events: one row each time a rule fired (question refused, answer masked/replaced): which rule,
+-- where and when, never the question or answer text. Shown as counts to Org Owners/Admins.
+CREATE TABLE IF NOT EXISTS guard_rules (
+  org_id TEXT PRIMARY KEY, json TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS guard_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, org_id TEXT NOT NULL, workspace_id TEXT, channel TEXT NOT NULL,
+  stage TEXT NOT NULL, rule TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS guard_events_org_time ON guard_events(org_id, created_at);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(

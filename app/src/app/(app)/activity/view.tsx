@@ -15,6 +15,7 @@ import { api, fmtTime, Modal, Pill, Spinner, usd, useReportError } from "@/compo
 
 type Overview = {
   days: number;
+  guardrails: { total: number; blocked: number; rules: { rule: string; label: string; total: number }[] };
   kpis: { requests: number; failed: number; refused: number; errorRate: number; p50: number; p95: number; teams: number; portal: number; people: number; aiCalls: number; aiCost: number; aiFailed: number; questions: number; answered: number };
   series: { key: string; requests: number; errors: number }[];
   operations: { name: string; count: number; errors: number; p50: number; p95: number }[];
@@ -32,7 +33,7 @@ const ms = (n: number) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFi
 const pctText = (x: number) => `${(x * 100).toFixed(x > 0 && x < 0.01 ? 1 : 0)}%`;
 
 /** Plain-language names and colors (CSS classes k-*) for each kind of step. */
-const KINDS: Record<string, string> = { request: "Request", search: "Search", ai: "Claude", embed: "Embeddings", teams: "Teams", index: "Indexing", file: "Reading a file" };
+const KINDS: Record<string, string> = { request: "Request", search: "Search", ai: "Claude", embed: "Embeddings", teams: "Teams", index: "Indexing", file: "Reading a file", guard: "Guardrails" };
 
 export default function ActivityPage() {
   const [tab, setTab] = useState<Tab>("Overview");
@@ -88,6 +89,7 @@ function OverviewTab() {
         <Kpi label="AI work" value={`${k.aiCalls} calls`} sub={`${usd(k.aiCost)}${k.aiFailed ? ` · ${k.aiFailed} failed` : ""}`} tone={k.aiFailed ? "bad" : undefined} />
         <Kpi label="Questions answered" value={k.questions ? pctText(k.answered / k.questions) : "—"} sub={`${k.answered} of ${k.questions} found in the sources`} />
         <Kpi label="People active" value={String(k.people)} sub="signed-in people and Teams users" />
+        <Kpi label="Guardrails" value={`${o.guardrails.blocked} refused`} sub={o.guardrails.total ? `${o.guardrails.total - o.guardrails.blocked} answers cleaned · most: ${o.guardrails.rules[0].label}` : "nothing refused or cleaned up"} />
       </div>
       <div className="panel">
         <div className="panel-h">

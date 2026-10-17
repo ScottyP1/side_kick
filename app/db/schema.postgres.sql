@@ -151,3 +151,12 @@ ALTER TABLE orgs ADD COLUMN IF NOT EXISTS sso_required INTEGER NOT NULL DEFAULT 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS entra_oid TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS orgs_entra_tenant ON orgs(entra_tenant_id);
 CREATE UNIQUE INDEX IF NOT EXISTS users_entra_oid ON users(org_id, entra_oid);
+-- Guardrails (see src/lib/guardrails.ts): the org's switches, and counts of rules that fired (no text).
+CREATE TABLE IF NOT EXISTS guard_rules (
+  org_id TEXT PRIMARY KEY, json TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS guard_events (
+  id BIGSERIAL PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT, channel TEXT NOT NULL,
+  stage TEXT NOT NULL, rule TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS guard_events_org_time ON guard_events(org_id, created_at);

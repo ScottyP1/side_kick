@@ -18,6 +18,8 @@ In a 1:1 chat with Sidekick you don't need the mention. You get a card with:
 
 If the workspace doesn't contain the answer, Sidekick says so instead of guessing, and logs it as a knowledge gap for the team to fill.
 
+Your organization's **guardrails** apply in Teams exactly as in the portal. A question that breaks them (abuse, trying to get Sidekick to drop its rules, asking about another client, or something your Org Owner switched off) gets a short, polite refusal card instead of an answer.
+
 ## Meeting notes
 After a meeting transcript is imported for the workspace, Sidekick posts:
 1. a **notes card**: summary, decisions and questions still open, with **Open in Sidekick** for the full notes;

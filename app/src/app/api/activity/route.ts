@@ -5,7 +5,8 @@
  *
  * Views
  * - overview (&days=1|7|30): request volume, failures, response times (p50/p95), AI calls and cost,
- *   portal vs Teams, the busiest operations, and requests per day.
+ *   portal vs Teams, the busiest operations, requests per day, and guardrail counts per rule
+ *   (`guardrails`, from guard_events: counts only).
  * - traces (&channel=portal|teams&status=error|refused|ok&q=text&limit=…): the most recent traces.
  * - trace (&id=…): one trace with all its steps (spans), for the waterfall.
  * - messages (&limit=…): questions asked in the portal and in Teams, and whether they were answered.
@@ -14,6 +15,7 @@
  *
  * Traces hold timings, counts, model names and costs only; no document text (see lib/trace.ts).
  */
+import { guardSummary } from "@/lib/guardrails";
 import { handle } from "@/lib/api";
 import { HttpError, isAdmin, requireUser } from "@/lib/auth";
 import { all, DIALECT, get } from "@/lib/db";
@@ -75,8 +77,10 @@ export const GET = handle(async (req: Request) => {
       "SELECT COUNT(*) AS total, COALESCE(SUM(found), 0) AS found FROM questions WHERE org_id = ? AND created_at >= ?",
       org, since,
     );
+    const guard = await guardSummary(org, since);
     return {
       days,
+      guardrails: guard,
       kpis: {
         requests: rows.length,
         failed,

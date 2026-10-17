@@ -14,7 +14,7 @@ The first owner account can only be created **on the machine running Sidekick** 
 | **Releases & switches** | Running version and commit, models in use, **kill switches**, operator log |
 
 ## Kill switches
-Each switch pauses one AI feature **for every client at once**: answering questions, meeting notes, knowledge map, or document uploads. Use it during an incident or a cost spike. Clients see a friendly "paused by the Sidekick team" message, and Sidekick stops answering in Teams for that feature. Every flip is recorded in the operator log.
+Each switch pauses one AI feature **for every client at once**: answering questions, meeting notes, knowledge map, the in-app assistant, the **guardrail check**, or document uploads. Pausing the guardrail check also stops answers (Sidekick never answers a question it hasn't checked). Use it during an incident or a cost spike. Clients see a friendly "paused by the Sidekick team" message, and Sidekick stops answering in Teams for that feature. Every flip is recorded in the operator log.
 
 ## Pausing a client
 A paused organization can't use the portal or any feature, and Sidekick stops answering in its Teams channels. Its data is kept and comes back as it was on **Resume**.

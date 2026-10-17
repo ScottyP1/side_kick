@@ -31,7 +31,7 @@ if (!fs.existsSync(SQLITE_PATH)) {
 const TABLES = [
   "orgs", "users", "sessions", "workspaces", "workspace_members", "documents", "meetings", "items", "action_items",
   "questions", "insights", "gap_status", "usage_events", "audit_log", "settings", "platform_admins", "owner_sessions",
-  "platform_flags", "platform_log", "teams_conversations", "passages",
+  "platform_flags", "platform_log", "teams_conversations", "passages", "guard_rules", "guard_events",
 ];
 // Tables where SQLite's hidden rowid carries meaning (order) and Postgres has an explicit rowid column.
 const KEEP_ROWID = new Set(["items", "action_items", "passages"]);

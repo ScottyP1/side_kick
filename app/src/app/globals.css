@@ -293,7 +293,7 @@ pre.transcript-raw{white-space:pre-wrap;font-family:var(--f-body);font-size:13.5
 .wf-bar.err{outline:2px solid var(--bad);outline-offset:1px}
 .wf-dur{position:absolute;top:50%;transform:translateY(-50%);font-size:11.5px;color:var(--muted);white-space:nowrap}
 .wf-attrs{grid-column:2;font-size:11.5px;color:var(--muted);margin-top:-2px}
-.k-request{background:var(--viz-1)} .k-search{background:var(--viz-2)} .k-ai{background:var(--viz-3)} .k-embed{background:var(--viz-4)} .k-teams{background:var(--viz-5)}
+.k-request{background:var(--viz-1)} .k-search{background:var(--viz-2)} .k-ai{background:var(--viz-3)} .k-embed{background:var(--viz-4)} .k-teams{background:var(--viz-5)} .k-guard{background:var(--warn)}
 .k-index{background:var(--viz-2);opacity:.6} .k-file{background:var(--viz-4);opacity:.6}
 tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 @media (max-width:720px){.wf-row{grid-template-columns:1fr}.wf-attrs{grid-column:1}}

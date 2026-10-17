@@ -192,6 +192,8 @@ Each gap has a suggested fix and can be **assigned** to a person (Teams message)
 
 When it hits a restriction, Sidekick politely declines ("That's outside what I can discuss here") and logs the attempt for admins.
 
+**Built (Oct 2026, phase 1):** a locked floor (no hate/bias, harassment, sexual content or harm; jailbreak resistance; never crosses client walls; "I don't know" instead of guessing) plus org-wide switches set by the Org Owner (swearing, small talk, judging people, HR/legal/medical, contact details, competitors), enforced in the portal, Teams and the assistant, with counts (never text) per rule. Next: per-workspace settings (stricter only) and plain-language custom rules. See `app/src/lib/guardrails.ts` and docs/guide/admin-guide.md.
+
 ---
 
 ## 4. Architecture

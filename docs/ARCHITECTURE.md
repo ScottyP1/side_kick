@@ -40,6 +40,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/claude.ts` | **All Claude calls go through here**: model per feature, structured output, metering |
 | `lib/assistant.ts` | The in-app assistant on the home page: answers questions about Sidekick and proposes role-limited actions that only run when the person presses Confirm |
 | `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
+| `lib/guardrails.ts` | The firm's guardrails: locked floor + org-wide switches, the question check (quick local check, then Claude feature `guard`), the answer check (grounding, masking), and `guard_events` counts |
 | `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
 | `components/` | Portal and Owner Console frames, shared UI |
 | `app/(app)/*/view.tsx` | Client portal pages; `app/owner/(console)/*/view.tsx` Owner Console pages |
@@ -48,9 +49,11 @@ Browser (client portal, Owner Console)        Microsoft Teams
 
 **Asking a question** (portal or Teams)
 1. Route checks the user and workspace (`requireUser`, `requireWorkspace`), or the Teams conversation's link.
-2. `ask()` → `searchPassages()` finds up to 12 passages in that org + workspace (Shareable only if guests are present): Azure hybrid search when configured, otherwise local keyword search.
-3. `structured("ask", …)` sends the numbered passages and the question to Claude, which must return `{ found, answer, source_ids }`.
-4. The question is saved in `questions` (unanswered = knowledge gap); the cited sources are returned.
+2. `ask()` runs the guardrail check (`screenQuestion`: local check, then Claude `guard`) **at the same time as** the search. A refused question returns a fixed reply with `blocked` set and is counted in `guard_events`; it isn't answered or saved as a gap.
+3. `searchPassages()` finds up to 12 passages in that org + workspace (Shareable only if guests are present): Azure hybrid search when configured, otherwise local keyword search.
+4. `structured("ask", …)` sends the numbered passages, the question and the org's rules (`answerRules`) to Claude, which must return `{ found, answer, source_ids }`.
+5. `checkGrounding` turns a "found" answer with no real cited source into "I don't know"; `cleanOutput` masks swearing (and contact details if switched on) in the answer and excerpts.
+6. The question is saved in `questions` (unanswered = knowledge gap); the cited sources are returned.
 
 **Importing a meeting**
 1. `POST /api/meetings` stores the transcript (`.vtt` converted to "[time] Speaker: text").
@@ -65,6 +68,8 @@ Browser (client portal, Owner Console)        Microsoft Teams
 ## Rules every change must keep
 - **Walls**: filter every query by `org_id`, and by a workspace id that went through `requireWorkspace` (or a linked Teams conversation). Never trust an id from the request on its own.
 - **Data, not instructions**: anything from documents, transcripts or users goes to Claude inside tags, and the system prompt says to ignore instructions in it.
+- **Guardrails**: anything that answers people (portal, Teams, assistant) goes through `lib/guardrails.ts`: `screenQuestion` before, `cleanOutput` (and `checkGrounding` for sourced answers) after. Refusals use the fixed `MESSAGES`, never Claude-written text. `guard_events` stores rule/where/when only, never text.
+- **Isolation test**: `tests/api.test.mjs` plants a secret in workspace B and checks it can't be reached from workspace A, another org, Teams or the assistant. New routes or surfaces that read workspace data belong in that test.
 - **One path each**: Claude only via `lib/claude.ts`, search only via `lib/search.ts`, so Azure (Foundry, AI Search) can be swapped in later without touching callers.
 - **Audit**: access changes, deletions and anything Sidekick does on its own call `audit()` / `auditAsSidekick()`.
 - **Parameters**: SQL values always go in `?` parameters, never into the SQL string.

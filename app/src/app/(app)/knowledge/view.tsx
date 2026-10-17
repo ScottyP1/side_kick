@@ -10,7 +10,7 @@ import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, CitedText, fmtBytes, fmtDate, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 
 type Doc = { id: string; name: string; size: number; audience: string; status: string; error: string | null; chunk_count: number; created_at: string; uploaded_by: string | null };
-type Answer = { found: boolean; answer: string; sources: { id: string; title: string; loc: string; type: string; excerpt: string }[] };
+type Answer = { found: boolean; answer: string; blocked?: string | null; sources: { id: string; title: string; loc: string; type: string; excerpt: string }[] };
 
 export default function KnowledgePage() {
   const { ws, me } = useApp();
@@ -125,7 +125,7 @@ export default function KnowledgePage() {
           {askErr && <p className="err">{askErr}</p>}
           {answer && (
             <div className="answer">
-              {!answer.found && <Pill kind="hand">No answer in your sources. Logged as a knowledge gap</Pill>}
+              {answer.blocked ? <Pill kind="warn">Refused by your organization&apos;s guardrails (see Guardrails)</Pill> : !answer.found && <Pill kind="hand">No answer in your sources. Logged as a knowledge gap</Pill>}
               <p style={{ margin: 0 }}>
                 <CitedText text={answer.answer} />
               </p>

@@ -208,6 +208,35 @@ CREATE TABLE IF NOT EXISTS guard_rule_versions (
   rule_id TEXT NOT NULL, org_id TEXT NOT NULL, version INTEGER NOT NULL, text TEXT NOT NULL,
   change TEXT NOT NULL, changed_by TEXT, changed_at TEXT NOT NULL, PRIMARY KEY (rule_id, version)
 );
+-- Per Teams chat/channel settings (see lib/reminders.ts): whether Sidekick reads every message there,
+-- gets meeting notes, and sends reminders (time, time zone, quiet days, kinds). JSON; missing = defaults.
+-- workspace_id is the workspace the chat was linked to when saved: a relinked chat starts from defaults.
+CREATE TABLE IF NOT EXISTS teams_chat_settings (
+  conversation_id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+  json TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+-- Messages Sidekick read in tracked chats (only chats an Org Owner/Admin switched "Track messages" on).
+-- audience: shareable when the chat has client guests, internal otherwise. Kept 90 days.
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  conversation_id TEXT NOT NULL, author TEXT, text TEXT NOT NULL, audience TEXT NOT NULL, sent_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS chat_messages_ws ON chat_messages(workspace_id, sent_at);
+CREATE INDEX IF NOT EXISTS chat_messages_conv ON chat_messages(conversation_id);
+-- Reminder digests: one row per chat and slot (a local day for the daily one, "meeting:<id>" after a
+-- meeting, "manual:<id>" for Send now). The unique slot stops double posts. json = the points shown.
+CREATE TABLE IF NOT EXISTS reminder_runs (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL,
+  slot TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL, points INTEGER NOT NULL DEFAULT 0,
+  json TEXT, error TEXT, created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS reminder_runs_slot ON reminder_runs(conversation_id, slot);
+CREATE INDEX IF NOT EXISTS reminder_runs_ws ON reminder_runs(workspace_id, created_at);
+-- Items people snoozed or marked "Not relevant" from a reminder card (item_key: action:<id>, item:<id>, gap:<hash>).
+CREATE TABLE IF NOT EXISTS reminder_state (
+  workspace_id TEXT NOT NULL, item_key TEXT NOT NULL, status TEXT NOT NULL, until_at TEXT,
+  updated_by TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (workspace_id, item_key)
+);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -278,6 +307,9 @@ function migrate(conn: DatabaseSync) {
   if (!has("users", "entra_oid")) conn.exec("ALTER TABLE users ADD COLUMN entra_oid TEXT");
   conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS orgs_entra_tenant ON orgs(entra_tenant_id)");
   conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_entra_oid ON users(org_id, entra_oid)");
+  // Reminders: due dates as real dates (YYYY-MM-DD), worked out from what was said and the meeting date.
+  if (!has("action_items", "due_on")) conn.exec("ALTER TABLE action_items ADD COLUMN due_on TEXT");
+  if (!has("items", "due_on")) conn.exec("ALTER TABLE items ADD COLUMN due_on TEXT");
 }
 
 /**

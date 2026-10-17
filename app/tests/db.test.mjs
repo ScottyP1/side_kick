@@ -76,3 +76,34 @@ test(`[${engine}] upsert (ON CONFLICT) works the same on both engines`, async ()
   await db.run("INSERT INTO settings (org_id, json) VALUES (?, ?) ON CONFLICT(org_id) DO UPDATE SET json = excluded.json", org, '{"a":2}');
   assert.equal((await db.get("SELECT json FROM settings WHERE org_id = ?", org)).json, '{"a":2}');
 });
+
+/* ---------- reminder rules (src/lib/reminder-rules.ts): pure, so the same on both engines ---------- */
+const rules = await import("../src/lib/reminder-rules.ts");
+
+test(`[${engine}] reminder settings: defaults, bad values refused, changes listed for the audit log`, () => {
+  const d = rules.parseChatSettings(null);
+  assert.deepEqual([d.track, d.notes, d.reminders, d.time], [false, true, false, "09:00"]);
+  assert.deepEqual(rules.parseChatSettings("{not json").quietDays, [0, 6], "broken JSON falls back to defaults");
+  assert.equal(rules.parseChatSettings(JSON.stringify({ time: "25:00", timeZone: "Nowhere/Here" })).time, "09:00");
+  for (const bad of [{ time: "7:5" }, { timeZone: "Nowhere/Here" }, { quietDays: [7] }, { quietDays: [0, 1, 2, 3, 4, 5, 6] }, { kinds: { nope: true } }, { notes: 1 }, { extra: 1 }, null, []]) {
+    assert.ok("error" in rules.applySettingsChanges(d, bad), JSON.stringify(bad));
+  }
+  const ok = rules.applySettingsChanges(d, { reminders: true, time: "08:30", quietDays: [6, 0, 0], kinds: { conflicts: false } });
+  assert.deepEqual(ok.settings.quietDays, [0, 6]);
+  assert.deepEqual(ok.changed, ["reminders on", "time 08:30", "sources that disagree off"]);
+  assert.deepEqual(rules.applySettingsChanges(d, { notes: true }).changed, [], "no change, nothing to audit");
+});
+
+test(`[${engine}] reminder timing: local time zone, quiet days, at or after the chosen time, one slot per local day`, () => {
+  const s = { ...rules.DEFAULT_CHAT_SETTINGS, reminders: true, time: "09:00", timeZone: "America/New_York", quietDays: [0, 6] };
+  // Friday Oct 16, 2026, 12:59 UTC = 08:59 in New York (EDT): not yet; 13:00 UTC = 09:00: due.
+  assert.equal(rules.dailySlotDue(s, new Date("2026-10-16T12:59:00Z")), null);
+  assert.equal(rules.dailySlotDue(s, new Date("2026-10-16T13:00:00Z")), "2026-10-16");
+  // 02:00 UTC on Saturday is still Friday evening in New York: Friday's slot.
+  assert.equal(rules.dailySlotDue(s, new Date("2026-10-17T02:00:00Z")), "2026-10-16");
+  // Saturday in New York is a quiet day.
+  assert.equal(rules.dailySlotDue(s, new Date("2026-10-17T15:00:00Z")), null);
+  assert.equal(rules.dailySlotDue({ ...s, reminders: false }, new Date("2026-10-16T15:00:00Z")), null);
+  assert.equal(rules.dailySlotDue({ ...s, timeZone: "Asia/Tokyo" }, new Date("2026-10-16T01:00:00Z")), "2026-10-16", "10:00 in Tokyo");
+  assert.equal(rules.addDays("2026-10-31", 2), "2026-11-02");
+});

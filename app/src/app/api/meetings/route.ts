@@ -1,6 +1,7 @@
 /**
  * GET/POST /api/meetings: list a workspace's meetings, or import a transcript and have Sidekick write the notes.
- * After a successful import the notes are posted to the workspace's linked Teams channels.
+ * After a successful import the notes are posted to the workspace's linked Teams chats that take meeting notes,
+ * followed by a reminder in the chats that want one after meetings (lib/reminders.ts).
  */
 import { after } from "next/server";
 import { handle } from "@/lib/api";
@@ -10,6 +11,7 @@ import { fileToText, MAX_UPLOAD_BYTES } from "@/lib/extract";
 import { processMeeting } from "@/lib/sidekick";
 import { assertEnabled } from "@/lib/owner";
 import { postMeetingNotes } from "@/lib/teams/bot";
+import { remindAfterMeeting } from "@/lib/reminders";
 
 export const GET = handle(async (req: Request) => {
   const user = await requireUser();
@@ -52,6 +54,10 @@ export const POST = handle(async (req: Request) => {
   await audit(user, `Imported meeting “${title}”`, "Data", ws);
   await processMeeting(user, id);
   // Post the notes to the workspace's linked Teams channels without making the portal wait.
-  after(() => postMeetingNotes(user.org_id, id).catch((e) => console.error("Teams notes post failed", e)));
+  after(async () => {
+    await postMeetingNotes(user.org_id, id).catch((e) => console.error("Teams notes post failed", e));
+    // Then a reminder in the chats that want one after meetings (what's still open from earlier).
+    await remindAfterMeeting(user.org_id, id).catch((e) => console.error("Teams reminders after the meeting failed", e));
+  });
   return { id };
 });

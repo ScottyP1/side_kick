@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
   "manifestVersion": "1.30",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "id": "{{BOT_ID}}",
   "developer": {
     "name": "Sidekick",
@@ -12,7 +12,7 @@
   "name": { "short": "Sidekick", "full": "Sidekick: AI teammate for client teams" },
   "description": {
     "short": "Answers from your workspace's documents and meetings, with sources.",
-    "full": "Mention @Sidekick in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. After each meeting Sidekick posts the notes, decisions and action items, and you can assign or close action items right from the card."
+    "full": "Mention @Sidekick in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. After each meeting Sidekick posts the notes, decisions and action items, and you can assign or close action items right from the card. In chats an admin chooses to track, Sidekick reads the messages to keep track of decisions and dates, and posts reminders about what's still open."
   },
   "icons": { "color": "color.png", "outline": "outline.png" },
   "accentColor": "#0F6B5C",
@@ -35,5 +35,14 @@
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],
+  "webApplicationInfo": { "id": "{{BOT_ID}}", "resource": "api://{{PUBLIC_HOST}}/{{BOT_ID}}" },
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        { "name": "ChannelMessage.Read.Group", "type": "Application" },
+        { "name": "ChatMessage.Read.Chat", "type": "Application" }
+      ]
+    }
+  },
   "validDomains": ["{{PUBLIC_HOST}}"]
 }

@@ -13,7 +13,7 @@ type R = {
   flags: { key: string; label: string; help: string; enabled: boolean }[];
   log: { id: number; actor: string; action: string; created_at: string }[];
 };
-const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check" };
+const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", remind: "Reminders" };
 
 export default function ReleasesPage() {
   const toast = useToast();

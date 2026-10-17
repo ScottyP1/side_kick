@@ -2,7 +2,7 @@
  * @file Finding the passages that can answer a question. All search goes through this file.
  *
  * Concepts
- * - **Indexing**: when a document or transcript is added, its text is split into ~1,200-character
+ * - **Indexing**: when a document, transcript or tracked Teams chat message is added, its text is split into ~1,200-character
  *   passages (see `chunk` in extract.ts) and stored in a SQLite full-text index with its org, workspace
  *   and audience.
  * - **Retrieval (the "R" in RAG)**: Sidekick doesn't send whole documents to Claude. It looks up the
@@ -29,7 +29,7 @@ export type Passage = {
   text: string;
   title: string;
   loc: string;
-  source_type: "document" | "meeting";
+  source_type: "document" | "meeting" | "chat";
   source_id: string;
   audience: string;
 };
@@ -42,7 +42,7 @@ export type Passage = {
 export async function indexText(opts: {
   orgId: string;
   workspaceId: string;
-  sourceType: "document" | "meeting";
+  sourceType: "document" | "meeting" | "chat";
   sourceId: string;
   title: string;
   audience: "internal" | "shareable";

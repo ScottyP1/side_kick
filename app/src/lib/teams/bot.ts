@@ -15,6 +15,9 @@
  *   The code proves the admin can see that chat, and the link puts the chat inside one org's walls.
  * - **Client guests**: a linked conversation can be marked as having client guests. Answers there use only
  *   Shareable sources, and notes from internal-only meetings are never posted there.
+ * - **Chat settings** (see reminders.ts): per linked chat, an Org Admin chooses whether Sidekick tracks
+ *   every message there (needs the app's resource-specific consent permissions, see teams/manifest),
+ *   whether meeting notes go there, and whether reminders are posted there.
  * - **Adaptive Cards**: the formatted messages with buttons (see cards.ts). Button clicks come back as
  *   `card.action` activities and update the card in place.
  * - **Authentication**: in production every request carries a token signed by Microsoft for Sidekick's
@@ -32,7 +35,8 @@ import { all, get, now, run } from "../db";
 import { audit, canEdit, HttpError, type User } from "../auth";
 import { ask } from "../sidekick";
 import { span, traceFailed, traceScope, withTrace } from "../trace";
-import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, VERBS, type ActionItemInput } from "./cards";
+import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, REMIND_PREFIX, VERBS, type ActionItemInput } from "./cards";
+import { getChatSettings, recordChatMessage, reminderAction } from "../reminders";
 
 /* ------------------------------------------------------------------ */
 /* Security mode                                                       */
@@ -188,6 +192,13 @@ export const normalizeCode = (code: string) => {
   return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : null;
 };
 
+/** True if the message @mentions Sidekick itself (the activity's recipient is the bot). */
+const mentionsSidekick = (a: { recipient?: { id?: string }; entities?: unknown[] }) =>
+  (a.entities ?? []).some((e) => {
+    const m = e as { type?: string; mentioned?: { id?: string } };
+    return m.type === "mention" && !!m.mentioned?.id && m.mentioned.id === a.recipient?.id;
+  });
+
 /** Name of the linked workspace (checked against the conversation's org), or null if not linked. */
 const workspaceName = async (conv: TeamsConversation) =>
   conv.workspace_id ? (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", conv.workspace_id, conv.org_id))?.name ?? null : null;
@@ -243,9 +254,15 @@ function registerHandlers(app: App) {
 
   // In channels and group chats Teams only delivers messages that @mention Sidekick; in 1:1 chats, every message.
   // stripMentionsText removes the "@Sidekick" part so only the question is left.
+  // With the resource-specific consent permissions in the manifest, Teams also delivers channel and
+  // group-chat messages that don't mention Sidekick: those are only saved (tracked chats) or ignored.
   app.on("message", async ({ activity, send, reply }) => {
     const conv = await touchConversation(activity);
     traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
+    if (conv.kind !== "personal" && !mentionsSidekick(activity)) {
+      if (conv.workspace_id && !(await orgPaused(conv.org_id!))) await recordChatMessage(conv, activity);
+      return;
+    }
     const question = (stripMentionsText(activity) ?? "").replace(/\s+/g, " ").trim();
     const command = question.toLowerCase().replace(/[^a-z]/g, "");
 
@@ -286,6 +303,11 @@ function registerHandlers(app: App) {
     if (!conv?.workspace_id || !conv.org_id) return fail("This chat isn't linked to a Sidekick workspace anymore.");
     traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
     if (await orgPaused(conv.org_id)) return fail("Sidekick is paused for this organization.");
+    if (typeof verb === "string" && verb.startsWith(REMIND_PREFIX)) {
+      const out = await span("remind", "Reminder card button", async () => reminderAction(conv, await teamsActor(conv, activity), verb, { ...(data ?? {}) }));
+      if ("error" in out) return fail(out.error);
+      return { statusCode: 200 as const, type: "application/vnd.microsoft.card.adaptive" as const, value: out.card };
+    }
     // Workspace wall: the card only works in a conversation linked to the item's own workspace.
     const item = await get<ActionItemInput & { workspace_id: string }>(
       "SELECT id, text, owner, due, status, workspace_id FROM action_items WHERE id = ? AND org_id = ? AND workspace_id = ?",
@@ -334,7 +356,8 @@ const MAX_ACTION_CARDS = 15;
 
 /**
  * Posts a processed meeting's notes card, then one card per action item, to every Teams conversation
- * linked to the meeting's workspace. Skips conversations with client guests if the meeting was internal.
+ * linked to the meeting's workspace that has meeting notes switched on in its chat settings (the default).
+ * Skips conversations with client guests if the meeting was internal.
  * A failure in one conversation is logged and doesn't stop the others. Returns how many got the notes.
  * Called from the meeting import/reprocess routes after the response is sent, so imports never wait on Teams.
  */
@@ -354,7 +377,10 @@ async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<
     "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND (guests = 0 OR ? = 1)",
     orgId, m.workspace_id, m.external_guests,
   );
-  if (!convs.length) return 0;
+  // Only chats an admin left (or set) to receive meeting notes: a workspace can keep them to one notes chat.
+  const settings = await Promise.all(convs.map((c) => getChatSettings(c)));
+  const targets = convs.filter((_, i) => settings[i].notes);
+  if (!targets.length) return 0;
   const items = await all<{ kind: string; text: string; answered: number | null }>("SELECT kind, text, answered FROM items WHERE meeting_id = ? ORDER BY rowid", m.id);
   const actions = await all<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE meeting_id = ? ORDER BY rowid", m.id);
   const notes = meetingNotesCard({
@@ -369,7 +395,7 @@ async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<
   });
 
   let posted = 0;
-  for (const conv of convs) {
+  for (const conv of targets) {
     try {
       const postId = await postCard(conv, notes);
       // In a channel the action items go in the notes post's thread; in chats they follow it.

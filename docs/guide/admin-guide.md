@@ -33,7 +33,14 @@ See [Sidekick in Teams](teams-guide.md) for what people see. To link:
 3. In the portal: **Workspaces → Link Teams channel**, enter the code, pick the workspace.
 4. Tick **Client guests are in this channel** if the client can read it.
 
-The **Teams channels and chats** table on the Workspaces page shows every link. Use the switch to change the client-guests setting, or **Unlink** to stop Sidekick answering and posting there.
+The **Teams channels and chats** table on the Workspaces page shows every link. Use the switch to change the client-guests setting, or **Unlink** to stop Sidekick answering and posting there (this also deletes the messages it saved from that chat).
+
+**Settings** (Org Owners and Org Admins) chooses what Sidekick does in each chat; every change is in the audit log:
+- **Meeting notes**: post notes and action items here after each meeting (on by default). Turn it off in the other chats to keep notes in one dedicated chat.
+- **Keep track of every message** (channels and group chats): Sidekick reads every message, keeps it 90 days and uses it for answers, the knowledge map and reminders. It announces the change in the chat. This needs the Sidekick Teams app version 1.1 or later (it asks the team or chat owner for permission to read messages when it's added).
+- **Reminders**: a daily card at the time and time zone you pick, skipping the quiet days, plus one right after each meeting if you want. Choose which kinds: overdue or unowned action items, open questions and decisions, out-of-date documents, sources that disagree. **Preview** shows what the next one would say without posting; **Send now** posts it. The row shows when the last reminder went out (or why it failed).
+
+Reminders only cover the chat's own workspace, and a chat with client guests only gets items whose sources are all Shareable. Out-of-date documents and disagreeing sources come from the knowledge map, so refresh it now and then (see below).
 
 ## 8. Keep knowledge healthy
 **Memory & gaps → Refresh knowledge map** after adding material (Members and Admins can; Viewers and Billing Admins can't, since each refresh is a paid AI request). Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place.

@@ -76,3 +76,23 @@ first if it would trip again). Not test-fired yet, because firing it takes the l
 
 The cloud database started empty. Org "Test Suite" (Org Owner Cody, cody.l.scott@outlook.com) with the
 made-up Contoso workspace from `samples/` (9 documents, 8 meetings). Local data on the Mac is separate.
+
+## Scheduled work: reminders (October 17, 2026)
+
+Daily Teams reminders need something to run on a clock. For now that's an **in-app timer**: when the
+server starts, `app/src/instrumentation.ts` calls `POST /api/reminders/tick` on itself every 5 minutes
+with a random per-start token. That fits how the app is hosted: exactly **one always-on copy**
+(min = max = 1 replica), so the timer is always running and there is no extra Azure resource or cost.
+
+Safe with more copies: each reminder claims a unique row (`reminder_runs`, one per chat and day) before
+it's built, so two copies would never post twice; they'd only both check.
+
+When to switch to an **Azure Container Apps job** (a scheduled container, cron `*/5 * * * *`): if the app
+ever scales to zero, runs several copies, or the timer should be visible and retryable in Azure. Then:
+1. Set `SIDEKICK_TICK_SECRET` (a long random value, as a Container App secret) on the app, and
+   `SIDEKICK_SCHEDULER=off` so the in-app timer stops.
+2. Create the job in `sidekick-env` running `curl -fsS -X POST -H "x-sidekick-tick: $SECRET" https://<app>/api/reminders/tick`
+   with the same secret. Cost: a few seconds of compute every 5 minutes, well inside the free grant.
+
+Without the right header the route answers 404. Pausing **Reminders in Teams** in the Owner Console stops
+all reminders immediately.

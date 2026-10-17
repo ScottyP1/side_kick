@@ -147,6 +147,7 @@ export default function MeetingsPage() {
                       <p style={{ margin: "4px 0 0" }}>{m!.summary ?? "—"}</p>
                     </div>
                     <Section title="Decisions" items={of("decision").map((d) => `${d.text}${d.who ? ` (${d.who})` : ""}`)} />
+                    {of("pending").length > 0 && <Section title="Decisions still to make" items={of("pending").map((d) => `${d.text}${d.answered ? " (made)" : ""}`)} />}
                     <div>
                       <h3>Action items</h3>
                       {detail.actions.length ? (

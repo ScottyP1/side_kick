@@ -1,6 +1,6 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 16, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design.
+> Last updated: October 17, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design.
 
 ## Where we are
 
@@ -104,6 +104,14 @@ npm --prefix app run dev
 - Branding test: Members/Viewers get 403 on `PUT /api/settings` (UI already hid the controls for non-admins).
 - **Team Lead role** (Cody: the project lead knows the team and which chats matter): `ROLES` gains "Team Lead" (no schema change; role is text). `isLead`, `managedWorkspaceIds`, `requireManage` in `lib/auth.ts`. A lead leads the workspaces they're a member of: `/api/users` GET shows only people in those (with only those workspace ids), POST adds Member/Viewer into them (an existing Member/Viewer of the same org is added to the workspace instead of 409), PATCH replaces only the lead's workspaces, no role changes or DELETE; `/api/teams-links` changes use `requireManage`. Assistant offers a lead add_person (Member/Viewer, own workspace required) and link_teams. UI: Users & access + Teams link controls for leads (`me.user.lead`). Not yet: workspace guardrail switches stay admin-only.
 - Tests: 134 (db 7×2, end-to-end 60×2). Not checked with real Claude, and the new pages weren't looked at in a browser (the client page is checked to render).
+
+## Proactive reminders + per-chat settings (Oct 17, 2026, branch `feat/proactive-reminders`)
+- **Per-chat settings** (`teams_chat_settings`, rules in `lib/reminder-rules.ts`): Workspaces → Teams channels and chats → **Settings** (Org Owner/Admin, or a Team Lead for the workspaces they lead; audited): meeting notes here (default on; turn off elsewhere for one dedicated notes chat), **keep track of every message** (channels/group chats; announced in the chat), **reminders** (time, IANA time zone, quiet days, after meetings, kinds). Preview / Send now.
+- **Chat tracking**: manifest 1.1.0 adds RSC `ChannelMessage.Read.Group` + `ChatMessage.Read.Chat` (+ `webApplicationInfo`), so Teams delivers non-mention messages. `bot.ts` saves them only for tracked chats (`chat_messages`, indexed as source type `chat`, audience = shareable if guests), never replies; untracked = ignored. 90-day retention; unlinking deletes them. The knowledge map now reads recent chat messages and gaps carry `sources` (titles).
+- **Reminders** (`lib/reminders.ts`): items picked in code (overdue/unowned action items via new `due_on`, open questions + new `pending` decisions due within 2 days or 7+ days old, "Out of date"/"Conflicting" gaps whose cited titles resolve to real docs/meetings/chats). Walls + guests filtered before Claude. Claude feature `remind` (`SIDEKICK_MODEL_REMIND`, kill switch "Reminders in Teams") only words them; unknown ids dropped, sources attached by code, `cleanOutput` + custom rules. Card buttons Assign / Mark done / Snooze (7 days) / Not relevant (`reminder_state`), checked against the card's own chat + workspace + guests, audited, card updated in place.
+- **Schedule**: in-app timer (`src/instrumentation.ts`, every 5 min → `POST /api/reminders/tick` with a per-start token), daily slot claimed in `reminder_runs` (unique per chat+day). Also right after meeting notes. Container Apps job alternative documented in `docs/HOSTING.md` (`SIDEKICK_TICK_SECRET`, `SIDEKICK_SCHEDULER=off`).
+- Meeting extraction now also returns `due_date` (YYYY-MM-DD) and `pending_decisions`; shown as "Decisions still to make" / Memory "To decide".
+- Tests: rules unit tests (db.test) + 6 end-to-end reminder tests per engine. Not yet tried with real Claude or real Teams (needs the new manifest uploaded; RSC consent is given by the team/chat owner when adding the app).
 
 ## Scale-up path (for later, not needed now)
 - **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).

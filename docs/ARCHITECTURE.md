@@ -42,6 +42,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
 | `lib/guardrails.ts` | The firm's guardrails: locked floor + org-wide switches, per-workspace extra switches (stricter only) and custom rules (save-time loosening check, versioned) merged by `getGuardPolicy`, the question check (quick local check, then Claude feature `guard`), the answer check (grounding, masking), and `guard_events` counts |
 | `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
+| `lib/reminders.ts` | Per-chat settings (notes, tracking, reminders), saving tracked chat messages, building reminder digests (items picked in code, worded by Claude feature `remind`, every point with a source) and their card buttons |
+| `lib/reminder-rules.ts` | Plain rules for chat settings and reminder timing (defaults, validation, time zones, quiet days); no I/O, unit-tested |
+| `instrumentation.ts` | Starts the in-app timer that calls `POST /api/reminders/tick` every 5 minutes (off with `SIDEKICK_SCHEDULER=off`) |
 | `components/` | Portal and Owner Console frames, shared UI |
 | `app/(app)/*/view.tsx` | Client portal pages; `app/owner/(console)/*/view.tsx` Owner Console pages |
 
@@ -58,12 +61,18 @@ Browser (client portal, Owner Console)        Microsoft Teams
 **Importing a meeting**
 1. `POST /api/meetings` stores the transcript (`.vtt` converted to "[time] Speaker: text").
 2. `processMeeting()` asks Claude for summary, decisions, action items, open questions and facts, saves them in one transaction, and indexes the transcript.
-3. After the response is sent (`after()`), `postMeetingNotes()` posts the cards to linked Teams conversations.
+3. After the response is sent (`after()`), `postMeetingNotes()` posts the cards to the linked Teams conversations that take notes, then `remindAfterMeeting()` posts a reminder to the chats that want one after meetings.
+
+**A daily reminder**
+1. The timer (`instrumentation.ts`) calls `POST /api/reminders/tick` with its secret; `runDueReminders()` finds chats whose local time is past their reminder time (not a quiet day).
+2. `sendReminder()` claims the chat's slot for that day in `reminder_runs` (unique, so never twice), then `gatherReminders()` picks items **in code**, within the workspace and, for guest chats, Shareable only.
+3. `buildDigest()` has Claude (`remind`) word them; points naming unknown items are dropped, sources are attached by code, `cleanOutput` cleans the text. The card goes out through `postCard()`; its buttons come back to `reminderAction()`.
 
 **A Teams message**
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
 2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
 3. Unlinked conversation → link-code card. Linked → typing indicator now, answer card after the request returns.
+4. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
 
 ## Rules every change must keep
 - **Walls**: filter every query by `org_id`, and by a workspace id that went through `requireWorkspace` (or a linked Teams conversation). Never trust an id from the request on its own.

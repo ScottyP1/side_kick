@@ -35,6 +35,9 @@ export const MODELS = {
   // The guardrail check on every question (see guardrails.ts). A short yes/no judgement, so a smaller
   // model (SIDEKICK_MODEL_GUARD=claude-haiku-5-5) is a good way to cut its cost.
   guard: process.env.SIDEKICK_MODEL_GUARD || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
+  // Proactive reminders in Teams (see reminders.ts): rewords a short list of items picked in code, so a
+  // smaller model (SIDEKICK_MODEL_REMIND=claude-sonnet-5-5) works well here too.
+  remind: process.env.SIDEKICK_MODEL_REMIND || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
 };
 export type Feature = keyof typeof MODELS;
 
@@ -63,6 +66,18 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
   );
   if (content.includes("__FAIL__")) throw new HttpError(502, "Claude API error (test): fake failure for testing.");
   if (feature === "guard") return fakeGuard(content);
+  if (feature === "remind") {
+    // One point per item it was given, plus one pointing at an item that doesn't exist ("R99"), so tests
+    // can check that points without a real source are dropped. "__CONTACT__" in an item adds an email.
+    const ids = [...content.matchAll(/<item id="(R\d+)"[^>]*>([\s\S]*?)<\/item>/g)];
+    return {
+      intro: "A few things still need the team's attention.",
+      points: [
+        ...ids.map(([, id, body]) => ({ item_id: id, text: `Reminder: ${body.split("\n")[0].slice(0, 120)}${body.includes("__CONTACT__") ? " Ask maria.chen@contoso.example." : ""}` })),
+        { item_id: "R99", text: "Made-up point with no source." },
+      ],
+    };
+  }
   if (feature === "ask") {
     const question = content.slice(content.lastIndexOf("Question:"));
     // Test markers: an answer that claims to be found but cites nothing (grounding check), one with
@@ -77,8 +92,10 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
     return {
       summary: "Test summary of the meeting.",
       decisions: [{ text: "Test decision", made_by: "Priya Raman" }],
-      action_items: [{ text: "Send the test report", owner: "Maria Chen", due: "Oct 21" }, { text: "Book the load test", owner: null, due: null }],
-      open_questions: [{ text: "Who owns rollback?", answered: false }],
+      // The report's due date is long past, so reminder tests always have an overdue item.
+      action_items: [{ text: "Send the test report", owner: "Maria Chen", due: "Oct 21", due_date: "2020-10-21" }, { text: "Book the load test", owner: null, due: null, due_date: null }],
+      open_questions: [{ text: "Who owns rollback?", answered: false, due_date: "2020-10-23" }],
+      pending_decisions: [{ text: "Pick the cutover weekend", due_date: "2020-10-25" }],
       facts: [{ kind: "risk", text: "Test risk" }],
     };
   }
@@ -104,7 +121,17 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
     if (person) return { reply: `Here's what I'll do: add ${person[1]}. Press Confirm.`, action: { type: "add_person", name: person[1], code: null, email: person[2], role: person[3] ?? "Member", workspace_ids: person[4] ? [person[4]] : [], guests: null, page: null } };
     return { reply: "Test assistant reply.", action: null };
   }
-  return { topics: [{ name: "Test topic", summary: "About the test", coverage: 150, key_facts: [], document_titles: [], meeting_titles: [] }], gaps: [] };
+  // Knowledge map: one "Out of date" gap citing the first document and the newest meeting or chat in the
+  // inventory, and one "Conflicting information" gap citing a source that doesn't exist (reminders must drop it).
+  const doc = content.match(/^- "([^"]+)" \(added/m)?.[1];
+  const later = content.match(/^## "([^"]+)"/m)?.[1];
+  const gaps = doc && later
+    ? [
+        { kind: "Out of date", text: `"${doc}" is older than what was said in "${later}".`, suggestion: "Update the document.", topic: "Test topic", sources: [doc, later] },
+        { kind: "Conflicting information", text: "Two sources disagree about the go-live date.", suggestion: "Confirm the date.", topic: "Test topic", sources: ["Ghost document.pdf"] },
+      ]
+    : [];
+  return { topics: [{ name: "Test topic", summary: "About the test", coverage: 150, key_facts: [], document_titles: [], meeting_titles: [] }], gaps };
 }
 
 // Common words skipped when the fake guard matches a question against a custom rule.
@@ -187,7 +214,7 @@ type Ctx = { orgId: string; workspaceId: string | null };
  * Server-side fallback ("default") re-runs a policy-declined request on Anthropic's recommended model.
  * Usage is recorded in `finally`, so failed calls are metered too.
  */
-const SPAN_NAMES: Record<Feature, string> = { ask: "Claude: write the answer", extract: "Claude: write meeting notes", insights: "Claude: build the knowledge map", assist: "Claude: in-app assistant", guard: "Claude: guardrail check" };
+const SPAN_NAMES: Record<Feature, string> = { ask: "Claude: write the answer", extract: "Claude: write meeting notes", insights: "Claude: build the knowledge map", assist: "Claude: in-app assistant", guard: "Claude: guardrail check", remind: "Claude: word the reminders" };
 export async function structured<S extends z.ZodType>(
   feature: Feature,
   ctx: Ctx,

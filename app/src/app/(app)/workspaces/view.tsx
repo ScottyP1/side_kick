@@ -3,15 +3,20 @@
 /**
  * Workspaces (/workspaces): one workspace per client engagement, plus the Teams channels and chats linked to them.
  * Admins create workspaces. Admins, and Team Leads for the workspaces they lead, link Teams channels with the
- * code Sidekick shows in Teams.
+ * code Sidekick shows in Teams, and choose per chat what Sidekick does there (meeting notes, tracking every
+ * message, reminders; components/chat-settings.tsx).
  */
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
-import { api, fmtDate, Icon, Modal, Pill, Switch, useToast } from "@/components/ui";
+import { api, fmtDate, Icon, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
+import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
 
-type TeamsLink = { id: string; kind: string; name: string | null; guests: number; linked_at: string; last_seen_at: string; workspace_id: string; workspace: string };
+type TeamsLink = {
+  id: string; kind: string; name: string | null; guests: number; linked_at: string; last_seen_at: string; workspace_id: string; workspace: string;
+  settings: ChatSettings; lastReminder: LastReminder; savedMessages: number;
+};
 type W = { id: string; name: string; code: string | null; color: string; docs: number; meetings: number; members: number; open_items: number; last_meeting: string | null };
 
 export default function WorkspacesPage() {
@@ -27,6 +32,8 @@ export default function WorkspacesPage() {
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkForm, setLinkForm] = useState({ code: "", ws: "", guests: false });
   const [linkError, setLinkError] = useState("");
+  const [settingsFor, setSettingsFor] = useState<TeamsLink | null>(null);
+  const reportError = useReportError();
 
   const load = useCallback(
     () =>
@@ -37,8 +44,8 @@ export default function WorkspacesPage() {
     [],
   );
   useEffect(() => {
-    load();
-  }, [load]);
+    load().catch(reportError);
+  }, [load, reportError]);
 
   const create = async () => {
     setError("");
@@ -84,7 +91,7 @@ export default function WorkspacesPage() {
   };
 
   const unlink = async (l: TeamsLink) => {
-    if (!confirm(`Unlink “${l.name ?? "this chat"}” from ${l.workspace}? Sidekick will stop answering and posting notes there.`)) return;
+    if (!confirm(`Unlink “${l.name ?? "this chat"}” from ${l.workspace}? Sidekick will stop answering and posting there, and forget the messages it saved from it.`)) return;
     try {
       await api(`/api/teams-links?id=${encodeURIComponent(l.id)}`, { method: "DELETE" });
       await load();
@@ -146,7 +153,7 @@ export default function WorkspacesPage() {
         <div className="panel-h">
           <div>
             <h2>Teams channels and chats</h2>
-            <span className="muted" style={{ fontSize: 12.5 }}>@Sidekick answers there from the linked workspace only, and posts meeting notes after each transcript import.</span>
+            <span className="muted" style={{ fontSize: 12.5 }}>@Sidekick answers there from the linked workspace only. Per chat, choose whether it gets meeting notes, keeps track of every message and posts reminders.</span>
           </div>
           {manage && !!list?.length && (
             <button className="btn" onClick={openLink}>
@@ -167,6 +174,7 @@ export default function WorkspacesPage() {
                   <th>Channel or chat</th>
                   <th>Workspace</th>
                   <th>Client guests</th>
+                  <th>Sidekick here</th>
                   <th>Linked</th>
                   <th>Last activity</th>
                   {manage && <th />}
@@ -187,10 +195,20 @@ export default function WorkspacesPage() {
                         </span>
                       ) : l.guests ? "Yes" : "No"}
                     </td>
+                    <td>
+                      <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                        {l.settings.notes && <Pill nodot>Notes</Pill>}
+                        {l.settings.track && <Pill kind="hand" nodot>Tracking messages</Pill>}
+                        {l.settings.reminders && <Pill kind="good" nodot>Reminders {l.settings.time}</Pill>}
+                        {!l.settings.notes && !l.settings.track && !l.settings.reminders && <span className="muted">Answers only</span>}
+                      </span>
+                      {l.settings.reminders && <div className="muted" style={{ fontSize: 12 }}>{lastReminderText(l.lastReminder)}</div>}
+                    </td>
                     <td>{fmtDate(l.linked_at)}</td>
                     <td>{fmtDate(l.last_seen_at)}</td>
                     {manage && (
-                      <td style={{ textAlign: "right" }}>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        <button className="btn" onClick={() => setSettingsFor(l)} style={{ marginRight: 6 }}>Settings</button>
                         <button className="btn" onClick={() => unlink(l)}>Unlink</button>
                       </td>
                     )}
@@ -201,6 +219,7 @@ export default function WorkspacesPage() {
           </div>
         )}
       </div>
+      {settingsFor && <ChatSettingsModal chat={settingsFor} onClose={() => setSettingsFor(null)} onSaved={() => load().catch(reportError)} />}
       {linkOpen && (
         <Modal
           title="Link a Teams channel or chat"

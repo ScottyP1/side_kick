@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * AI models & agent (/agent): which Claude model each feature uses and how Sidekick is instructed to behave.
+ * AI models & agent (/agent): which Claude model each feature uses, how Sidekick is instructed to behave, and what's ready vs coming next.
  * Models are changed with SIDEKICK_MODEL_* settings in app/.env.local (see lib/claude.ts).
  */
 
@@ -15,6 +15,20 @@ const ROLES: Record<string, [string, string]> = {
   guard: ["Guardrail check", "Checks every question against your organization's guardrails before Sidekick answers (see Guardrails)."],
   assist: ["In-app assistant", "The chat box on the home page: answers questions about Sidekick and offers actions your role allows, each confirmed first."],
 };
+
+/**
+ * The roadmap shown at the bottom of the page: "Ready" (shipped) first, then what's coming. Keep it in
+ * step with docs/PROGRESS.md when something ships.
+ */
+const ROADMAP: [string, string][] = [
+  ["Ready", "Sidekick in Teams chat: @Sidekick answers with sources, meeting notes and action-item cards posted automatically"],
+  ["Ready", "Microsoft sign-in, with the same person and role in Teams and the portal"],
+  ["Ready", "Azure AI Search with meaning-based search, and the in-app assistant on the home page"],
+  ["Next", "Draft Jira / Azure DevOps stories from action items"],
+  ["Next", "Claude hosted in Azure (Microsoft Foundry), and Sidekick itself hosted in Azure"],
+  ["Later", "Live meetings: joins calls, listens, raises a virtual hand, answers out loud (Azure AI Speech)"],
+  ["Later", "Persona settings: voice, speaking style, participation mode, hand-raise triggers"],
+];
 
 export default function AgentPage() {
   const { me } = useApp();
@@ -39,15 +53,13 @@ export default function AgentPage() {
         ))}
       </div>
       <div className="panel">
-        <div className="panel-h"><h2>Coming in steps 2–3</h2></div>
+        <div className="panel-h"><h2>What’s ready and what’s next</h2></div>
         <div className="list">
-          {[
-            ["Step 2", "Sidekick in Teams chat: @Sidekick questions in channels, notes posted automatically, draft Jira / Azure DevOps stories"],
-            ["Step 2", "Microsoft sign-in, Azure-hosted Claude (Microsoft Foundry), Azure AI Search with meaning-based search"],
-            ["Step 3", "Live meetings: joins calls, listens, raises a virtual hand, answers out loud (Azure AI Speech)"],
-            ["Step 3", "Persona settings: voice, speaking style, participation mode, hand-raise triggers"],
-          ].map(([s, t], i) => (
-            <div key={i} className="li"><Pill kind="info" nodot>{s}</Pill><div className="grow">{t}</div></div>
+          {ROADMAP.map(([status, text], i) => (
+            <div key={i} className="li">
+              <Pill kind={status === "Ready" ? "good" : "info"} nodot>{status}</Pill>
+              <div className="grow">{text}</div>
+            </div>
           ))}
         </div>
       </div>

@@ -94,11 +94,23 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
   return { topics: [{ name: "Test topic", summary: "About the test", coverage: 150, key_facts: [], document_titles: [], meeting_titles: [] }], gaps: [] };
 }
 
+// Common words skipped when the fake guard matches a question against a custom rule.
+const RULE_FILLER = new Set(["never", "don't", "dont", "avoid", "discuss", "mention", "quote", "share", "about", "should", "always", "anything", "questions", "answer", "sidekick"]);
+
 /**
  * Test-mode guardrail check: refuses on a few test phrases, honoring which switches are on (they are
  * listed in the content), so tests can check that switches really change what's refused.
+ * Custom rules (listed as `<custom_rules>`) refuse a question containing any word of 5+ letters from the
+ * rule other than common filler ("Never quote day rates" refuses questions mentioning "rates").
+ * A proposed rule (`<proposed_rule>`, the save-time check) is judged "loosens" if it says relax, loosen
+ * or lenient, "not_a_rule" if it contains __not_a_rule__, and "restricts" otherwise.
  */
 function fakeGuard(content: string) {
+  const proposed = content.match(/<proposed_rule>([\s\S]*)<\/proposed_rule>/)?.[1];
+  if (proposed !== undefined) {
+    if (/\b(relax\w*|loosen\w*|lenient)\b/i.test(proposed)) return { verdict: "loosens" };
+    return { verdict: /__not_a_rule__/i.test(proposed) ? "not_a_rule" : "restricts" };
+  }
   const active = content.match(/<active_switches>(.*?)<\/active_switches>/)?.[1] ?? "";
   const q = (content.match(/<question>([\s\S]*)<\/question>/)?.[1] ?? "").toLowerCase();
   const tests: [string, RegExp, boolean][] = [
@@ -110,7 +122,15 @@ function fakeGuard(content: string) {
     ["competitors", /\bcompetitors?\b/, active.includes("competitors")],
   ];
   const hit = tests.find(([, re, on]) => on && re.test(q));
-  return hit ? { allowed: false, rule: hit[0] } : { allowed: true, rule: "none" };
+  if (hit) return { allowed: false, rule: hit[0], custom_rule: null };
+  const rules = (content.match(/<custom_rules>\n([\s\S]*?)\n<\/custom_rules>/)?.[1] ?? "").split("\n").filter(Boolean);
+  const qWords = new Set(q.split(/[^a-z']+/));
+  for (const line of rules) {
+    const [, n, text] = line.match(/^(\d+)\. (.*)$/) ?? [];
+    const keys = (text ?? "").toLowerCase().split(/[^a-z']+/).filter((w) => w.length >= 5 && !RULE_FILLER.has(w));
+    if (keys.some((k) => qWords.has(k))) return { allowed: false, rule: "custom", custom_rule: Number(n) };
+  }
+  return { allowed: true, rule: "none", custom_rule: null };
 }
 
 let client: Anthropic | null = null;

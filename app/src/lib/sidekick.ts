@@ -21,7 +21,7 @@ import { structured } from "./claude";
 import { indexText, searchPassages } from "./search";
 import { auditAsSidekick, type User } from "./auth";
 import { assertEnabled } from "./owner";
-import { answerRules, checkGrounding, cleanOutput, getGuardSettings, MESSAGES, recordGuard, screenQuestion, type GuardPlace, type RuleId } from "./guardrails";
+import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, type GuardPlace, type RuleId } from "./guardrails";
 
 /* ------------------------------------------------------------------ */
 /* Ask Sidekick: answer from this workspace's documents and meetings   */
@@ -51,7 +51,8 @@ Rules:
  * @returns `found` (false = not in the sources), the `answer` text with [S#] citations, and the `sources`
  *          actually cited, each with title, location and a short excerpt
  *
- * Guardrails: the question is checked (`screenQuestion`) at the same time as the search runs. A refused
+ * Guardrails: the workspace's policy (`getGuardPolicy`: org switches, the workspace's extra switches and
+ * the custom rules) applies. The question is checked (`screenQuestion`) at the same time as the search runs. A refused
  * question returns `blocked` (the rule's id) with a fixed polite reply, isn't answered and isn't saved
  * as a knowledge gap; only a guardrail event (no text) is recorded. The answer must cite a real source
  * (otherwise it becomes "I don't know"), and the answer and excerpts are cleaned (`cleanOutput`).
@@ -62,14 +63,16 @@ Rules:
 export async function ask(user: User, workspaceId: string, question: string, guests: boolean, channel: "portal" | "teams" = "portal") {
   await assertEnabled("ask");
   const place: GuardPlace = { orgId: user.org_id, workspaceId, channel };
-  const settings = await getGuardSettings(user.org_id);
+  // The workspace's guardrails: org switches plus any it turned on itself, and org-wide + workspace custom rules.
+  const policy = await getGuardPolicy(user.org_id, workspaceId);
+  const settings = policy.switches;
   const [blocked, passages] = await Promise.all([
-    screenQuestion({ orgId: user.org_id, workspaceId }, settings, question),
+    screenQuestion({ orgId: user.org_id, workspaceId }, policy, question),
     searchPassages(user.org_id, workspaceId, question, { guests, limit: 12 }),
   ]);
   if (blocked) {
     await recordGuard(place, "question", blocked, "blocked");
-    return { found: false, answer: MESSAGES[blocked], sources: [], blocked: blocked as RuleId | null };
+    return { found: false, answer: refusalFor(blocked), sources: [], blocked: blocked as RuleId | null };
   }
   const sources = passages.map((p, i) => ({ id: `S${i + 1}`, ...p }));
   let result: z.infer<typeof AnswerSchema>;
@@ -80,7 +83,7 @@ export async function ask(user: User, workspaceId: string, question: string, gue
       sources
         .map((s) => `<source id="${s.id}" type="${s.source_type}" title="${esc(s.title)}"${s.loc ? ` location="${esc(s.loc)}"` : ""}>\n${s.text}\n</source>`)
         .join("\n\n") + `\n\nQuestion: ${question}`;
-    const raw = await structured("ask", { orgId: user.org_id, workspaceId }, { system: `${ASK_SYSTEM}\n\n${answerRules(settings)}`, content, schema: AnswerSchema, effort: "low", maxTokens: 4000 });
+    const raw = await structured("ask", { orgId: user.org_id, workspaceId }, { system: `${ASK_SYSTEM}\n\n${answerRules(policy)}`, content, schema: AnswerSchema, effort: "low", maxTokens: 4000 });
     const grounded = checkGrounding(raw, sources.map((s) => s.id));
     if (grounded.ungrounded) await recordGuard(place, "answer", "ungrounded", "replaced");
     result = grounded;

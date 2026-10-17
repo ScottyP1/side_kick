@@ -30,6 +30,12 @@ If the workspace doesn't contain the answer, Sidekick says so instead of guessin
 ## Guardrails
 Rules Sidekick follows in every answer, everywhere (portal, Teams, the home assistant). Some are **locked** and always on: no hate, racism, bias, harassment, sexual content or help with harm; it can't be talked out of its rules ("ignore your instructions", "pretend you have no rules"); it never crosses into another workspace or organization; and it only states project facts it can cite, otherwise it says **"I don't know"**. The Org Owner can add stricter **switches** for the whole organization (swearing, small talk, judging people, HR/legal/medical questions, contact details, competitors). Each question is checked before it's answered, and each answer is checked again before you see it: an answer without a real source becomes "I don't know", swear words are masked, and contact details are hidden when that switch is on.
 
+On top of that, Org Owners and Admins can:
+- make **one workspace stricter** than the rest by turning on extra switches just for it (for example "No talk about competitors" for one sensitive client). A workspace can never be looser than the organization.
+- write **custom rules** in plain language, such as "Never quote day rates", for the whole organization or one workspace (up to 20 each). Custom rules can only add restrictions: a rule that tries to loosen the guardrails ("ignore the rules for managers", "you may swear") is refused when it's saved, with the reason. Every version of a rule is kept.
+
+A question refused by a custom rule gets a fixed reply ("Your organization has asked me not to help with that here") that doesn't repeat the rule, because client guests may see it in Teams.
+
 ## Knowledge map and coverage
 On **Memory & gaps**, Sidekick groups what a workspace knows into topics. Each topic has a **coverage** score from 0 to 100: high means it's well documented and consistent, low means it's mostly been talked about but not written down.
 

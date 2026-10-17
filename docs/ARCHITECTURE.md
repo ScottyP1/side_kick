@@ -40,7 +40,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/claude.ts` | **All Claude calls go through here**: model per feature, structured output, metering |
 | `lib/assistant.ts` | The in-app assistant on the home page: answers questions about Sidekick and proposes role-limited actions that only run when the person presses Confirm |
 | `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
-| `lib/guardrails.ts` | The firm's guardrails: locked floor + org-wide switches, the question check (quick local check, then Claude feature `guard`), the answer check (grounding, masking), and `guard_events` counts |
+| `lib/guardrails.ts` | The firm's guardrails: locked floor + org-wide switches, per-workspace extra switches (stricter only) and custom rules (save-time loosening check, versioned) merged by `getGuardPolicy`, the question check (quick local check, then Claude feature `guard`), the answer check (grounding, masking), and `guard_events` counts |
 | `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
 | `components/` | Portal and Owner Console frames, shared UI |
 | `app/(app)/*/view.tsx` | Client portal pages; `app/owner/(console)/*/view.tsx` Owner Console pages |

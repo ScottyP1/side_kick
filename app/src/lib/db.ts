@@ -190,6 +190,24 @@ CREATE TABLE IF NOT EXISTS guard_events (
   stage TEXT NOT NULL, rule TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS guard_events_org_time ON guard_events(org_id, created_at);
+-- Per-workspace guardrails (phase 2). guard_workspace_rules: switches a workspace turns on on top of the
+-- organization's (only ever stricter). guard_custom_rules: short plain-language rules written by Org
+-- Owners/Admins, org-wide (workspace_id NULL) or for one workspace; a removed rule is kept with active = 0.
+-- guard_rule_versions: every version of every custom rule (created, edited, removed), for history.
+CREATE TABLE IF NOT EXISTS guard_workspace_rules (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE, org_id TEXT NOT NULL,
+  json TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS guard_custom_rules (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+  text TEXT NOT NULL, version INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT, created_at TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS guard_custom_rules_org ON guard_custom_rules(org_id, workspace_id);
+CREATE TABLE IF NOT EXISTS guard_rule_versions (
+  rule_id TEXT NOT NULL, org_id TEXT NOT NULL, version INTEGER NOT NULL, text TEXT NOT NULL,
+  change TEXT NOT NULL, changed_by TEXT, changed_at TEXT NOT NULL, PRIMARY KEY (rule_id, version)
+);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(

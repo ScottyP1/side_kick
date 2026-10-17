@@ -32,7 +32,7 @@ import { z } from "zod";
 import { canEdit, isAdmin, workspaceIdsFor, type User } from "./auth";
 import { all, get } from "./db";
 import { structured } from "./claude";
-import { cleanOutput, getGuardSettings, MESSAGES, recordGuard, screenQuestion, type GuardPlace } from "./guardrails";
+import { cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, type GuardPlace } from "./guardrails";
 
 /** Pages the assistant can send someone to, with who may see each (mirrors the sidebar in shell.tsx). */
 export const PAGES: Record<string, { label: string; href: string; who?: (u: User) => boolean }> = {
@@ -170,7 +170,7 @@ export function checkAction(user: User, a: ProposedAction | null, workspaces: { 
  */
 const GUIDE = `
 Sidekick is an AI teammate for Microsoft Teams used by delivery teams on client engagements.
-Pages (sidebar): Overview (home), Usage & billing, AI models & agent, Workspaces, Knowledge & docs (upload documents, Ask Sidekick with cited sources), Meetings (import Teams .vtt / Word / text transcripts; Sidekick writes the summary, decisions, action items, open questions), Memory & gaps (knowledge map: topics with a 0-100 coverage score, gaps, conflicts, action-item tracker), Connectors, Users & access, Guardrails (rules Sidekick always follows: a locked floor against hate, harassment, sexual content, harm, jailbreaks, crossing client walls and guessing; plus org-wide switches only the Org Owner can change, e.g. refuse swearing, stick to work, no judging people, steer HR/legal/medical questions, hide contact details, no competitor talk; admins see counts of how often each rule fired), Activity (traces, waterfall, messages, audit trail), Security & audit, Settings.
+Pages (sidebar): Overview (home), Usage & billing, AI models & agent, Workspaces, Knowledge & docs (upload documents, Ask Sidekick with cited sources), Meetings (import Teams .vtt / Word / text transcripts; Sidekick writes the summary, decisions, action items, open questions), Memory & gaps (knowledge map: topics with a 0-100 coverage score, gaps, conflicts, action-item tracker), Connectors, Users & access, Guardrails (rules Sidekick always follows: a locked floor against hate, harassment, sexual content, harm, jailbreaks, crossing client walls and guessing; plus org-wide switches only the Org Owner can change, e.g. refuse swearing, stick to work, no judging people, steer HR/legal/medical questions, hide contact details, no competitor talk; Org Owners/Admins can make one workspace stricter with extra switches, add up to 20 custom rules like "Never quote day rates" (org-wide or per workspace; rules that loosen the guardrails are refused) and try a question in the Test it box; admins see counts of how often each rule fired), Activity (traces, waterfall, messages, audit trail), Security & audit, Settings.
 Workspaces: one per client engagement; walls mean people only see workspaces they belong to (admins see all in their org). Each document is Internal or Shareable; when client guests are present only Shareable documents are used.
 Roles: Org Owner and Org Admin (everything: people, workspaces, Teams links, settings, Activity), Billing Admin (usage and billing only), Member (works in their workspaces: upload, import meetings, ask, refresh map), Viewer (read-only).
 Teams: add the Sidekick app to a chat or channel, write "@Sidekick link" and it posts a link code; an admin enters the code here (or asks this assistant) to link it to a workspace. Then "@Sidekick <question>" answers with sources, and processed meetings post a notes card with Assign / Done buttons on action items. "@Sidekick help" lists commands. Sidekick only reads messages that mention it.
@@ -189,11 +189,13 @@ Sign-in: email and password, or Microsoft (Entra ID) once the Org Owner connects
  */
 export async function assist(user: User, message: string, history: Turn[]): Promise<{ reply: string; action: ReadyAction | null }> {
   const place: GuardPlace = { orgId: user.org_id, workspaceId: null, channel: "assistant" };
-  const settings = await getGuardSettings(user.org_id);
-  const blocked = await screenQuestion({ orgId: user.org_id, workspaceId: null }, settings, message);
+  // Not tied to one workspace: the org's switches and org-wide custom rules apply.
+  const policy = await getGuardPolicy(user.org_id, null);
+  const settings = policy.switches;
+  const blocked = await screenQuestion({ orgId: user.org_id, workspaceId: null }, policy, message);
   if (blocked) {
     await recordGuard(place, "question", blocked, "blocked");
-    return { reply: MESSAGES[blocked], action: null };
+    return { reply: refusalFor(blocked), action: null };
   }
   const ids = await workspaceIdsFor(user);
   const workspaces = ids.length

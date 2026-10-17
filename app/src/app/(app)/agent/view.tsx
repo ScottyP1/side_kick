@@ -13,6 +13,7 @@ const ROLES: Record<string, [string, string]> = {
   ask: ["Answering questions", "Answers from this workspace's documents and meetings only, with a source for every claim."],
   insights: ["Knowledge map", "Groups what the team knows into topics, scores coverage and finds gaps."],
   guard: ["Guardrail check", "Checks every question against your organization's guardrails before Sidekick answers (see Guardrails)."],
+  remind: ["Reminders in Teams", "Words the daily and after-meeting reminder cards from items Sidekick picked itself; every point cites its source."],
   assist: ["In-app assistant", "The chat box on the home page: answers questions about Sidekick and offers actions your role allows, each confirmed first."],
 };
 
@@ -24,6 +25,8 @@ const ROADMAP: [string, string][] = [
   ["Ready", "Sidekick in Teams chat: @Sidekick answers with sources, meeting notes and action-item cards posted automatically"],
   ["Ready", "Microsoft sign-in, with the same person and role in Teams and the portal"],
   ["Ready", "Azure AI Search with meaning-based search, and the in-app assistant on the home page"],
+  ["Ready", "Proactive reminders in Teams: overdue and unowned action items, open decisions, out-of-date documents, with sources and Assign / Done / Snooze buttons"],
+  ["Ready", "Per-chat settings: dedicated meeting-notes chat, and chats Sidekick keeps track of (every message, 90 days)"],
   ["Next", "Draft Jira / Azure DevOps stories from action items"],
   ["Next", "Claude hosted in Azure (Microsoft Foundry), and Sidekick itself hosted in Azure"],
   ["Later", "Live meetings: joins calls, listens, raises a virtual hand, answers out loud (Azure AI Speech)"],

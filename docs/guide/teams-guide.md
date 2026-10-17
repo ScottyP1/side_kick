@@ -1,6 +1,6 @@
 # Sidekick in Teams
 
-Sidekick works inside Microsoft Teams channels, group chats and 1:1 chats. It answers from **one client workspace** (the one the channel is linked to) and posts meeting notes after each meeting.
+Sidekick works inside Microsoft Teams channels, group chats and 1:1 chats. It answers from **one client workspace** (the one the channel is linked to), posts meeting notes after each meeting, and, where an admin turned it on, keeps track of the chat and reminds the team about what's still open.
 
 ## Getting started in a channel
 1. Add Sidekick to the team or chat (Apps → Sidekick → Add).
@@ -31,6 +31,24 @@ On an action-item card:
 
 Changes show on the card for everyone, in the portal's tracker, and in the audit log under your name.
 
+## Reminders
+In chats where an Org Admin turned **Reminders** on, Sidekick posts a short **reminder card** once a day (at the chosen time, not on quiet days such as weekends) and right after each meeting. It lists up to six things that are still open:
+- action items that are **overdue** or have **no owner**;
+- **open questions** and **decisions still to make** that are due (or have been open for a week);
+- documents that look **out of date** compared with newer meetings or chat messages (for example the runbook says Nov 5 but the cutover moved to Nov 12);
+- **sources that disagree**.
+
+Every point says where it comes from (the meeting, document or chat, with its date). Sidekick never posts a point it can't back up with a source, and it posts nothing when there's nothing to remind about.
+
+Buttons on each point:
+- **Assign** (action items): type a name. **Mark done**: closes the action item, answers the question or decision, or resolves the knowledge gap.
+- **Snooze**: hides it from reminders for a week. **Not relevant**: hides it for good.
+
+Changes show on the card for everyone and go in the audit log under your name. A Viewer can't change items.
+
+## Chats Sidekick keeps track of
+An Org Admin can switch **Keep track of every message** on for a channel or group chat. Sidekick then posts a notice in that chat, reads every message there (not only @mentions) and remembers them for 90 days, so it can answer from them and notice when plans change. It doesn't reply to messages that don't mention it. Only the linked workspace's team can search what it learned; in a chat with client guests, what's said there counts as Shareable. When the switch is turned off, Sidekick says so in the chat; when the chat is unlinked, the saved messages are deleted.
+
 ## Who you are in Teams
 Once you've signed in to the Sidekick portal with Microsoft, Sidekick recognises you in Teams too: your questions and card clicks count under your Sidekick name and role. A **Viewer** can ask questions but can't assign or close action items. People in a linked chat who don't have a Sidekick account can still ask and use the cards, for that chat's workspace only.
 
@@ -42,7 +60,8 @@ Once you've signed in to the Sidekick portal with Microsoft, Sidekick recognises
 | `@Sidekick help` | Show what Sidekick can do here |
 
 ## What Sidekick can and can't see
-- It only reads messages that mention it (every message in a 1:1 chat with it). It doesn't read the rest of the channel.
+- It only reads messages that mention it (every message in a 1:1 chat with it), unless an admin turned on **Keep track of every message** for that chat (Sidekick announces it there).
+- Meeting notes go to the chats an admin left notes switched on for (all linked chats by default), so a workspace can keep them in one dedicated notes chat.
 - It only answers from the linked workspace. It never uses other workspaces or other clients' material.
-- In channels marked as having **client guests**, it only uses documents tagged *Shareable*, and never posts notes from internal-only meetings there.
+- In channels marked as having **client guests**, it only uses documents tagged *Shareable*, never posts notes from internal-only meetings there, and only reminds about items whose every source is Shareable.
 - If the channel is unlinked, Sidekick stops answering and posting there until it's linked again.

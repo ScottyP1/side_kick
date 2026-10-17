@@ -14,7 +14,18 @@ import type { IAdaptiveCard } from "@microsoft/teams.cards";
  */
 
 /** Button verbs handled by the `card.action` handler in bot.ts. Namespaced so they can't clash with other apps. */
-export const VERBS = { assign: "sidekick.action.assign", done: "sidekick.action.done", reopen: "sidekick.action.reopen" } as const;
+export const VERBS = {
+  assign: "sidekick.action.assign",
+  done: "sidekick.action.done",
+  reopen: "sidekick.action.reopen",
+  // Buttons on a reminder card (see reminders.ts). All start with REMIND_PREFIX.
+  remindAssign: "sidekick.remind.assign",
+  remindDone: "sidekick.remind.done",
+  remindSnooze: "sidekick.remind.snooze",
+  remindDismiss: "sidekick.remind.dismiss",
+} as const;
+/** Every reminder-card verb starts with this, so the bot can route them to reminders.ts. */
+export const REMIND_PREFIX = "sidekick.remind.";
 
 type Block = Record<string, unknown>;
 /** Builds a card from body elements and (optional) buttons. Version 1.5 is what Teams supports today. */
@@ -89,7 +100,7 @@ export function helpCard(workspace: string | null): IAdaptiveCard {
         { title: "@Sidekick help", value: "Show this card" },
       ],
     },
-    text("After a meeting transcript is imported for this workspace, I post the notes and action items here.", { size: "Small", isSubtle: true }),
+    text("Depending on how an admin set up this chat, I post meeting notes and action items here after each meeting, and reminders about what's still open.", { size: "Small", isSubtle: true }),
   ]);
 }
 
@@ -152,4 +163,72 @@ export function actionItemCard(a: ActionItemInput): IAdaptiveCard {
     { type: "Action.Execute", title: "Assign", verb: VERBS.assign, data: { itemId: a.id }, associatedInputs: "auto" },
     { type: "Action.Execute", title: "Mark done", verb: VERBS.done, data: { itemId: a.id }, style: "positive", associatedInputs: "none" },
   ]);
+}
+
+/** A short announcement from Sidekick, e.g. that message tracking was switched on in this chat. */
+export function noticeCard(title: string, body: string, footnote?: string): IAdaptiveCard {
+  return card([...header("Sidekick", title), text(body), ...(footnote ? [text(footnote, { size: "Small", isSubtle: true })] : [])]);
+}
+
+/** Where a reminder point came from: a meeting, document or tracked Teams chat, with its date. */
+export type ReminderSource = { type: "meeting" | "document" | "chat"; title: string; when: string | null };
+
+/**
+ * One point on a reminder card. `key` names the item (action:<id>, item:<id>, gap:<hash>); `canAssign`
+ * is true for action items. `status`/`by` are set once someone clicked a button on it.
+ */
+export type ReminderPointInput = {
+  key: string;
+  label: string;
+  text: string;
+  canAssign: boolean;
+  sources: ReminderSource[];
+  status?: "done" | "assigned" | "snoozed" | "dismissed";
+  by?: string;
+  owner?: string;
+};
+
+const SOURCE_WORD = { meeting: "Meeting", document: "Document", chat: "Chat" } as const;
+const STATUS_TEXT = { done: "✓ Marked done", assigned: "✓ Assigned", snoozed: "Snoozed for a week", dismissed: "Marked not relevant" } as const;
+
+/**
+ * The reminder digest: a friendly intro, then up to six points. Each point shows what kind of reminder
+ * it is, the text, and its source(s), then the buttons: Assign (action items only; opens a name box),
+ * Mark done, Snooze (a week) and Not relevant. A point someone already handled shows who did what instead.
+ */
+export function reminderCard(r: { runId: string; workspace: string; intro: string; points: ReminderPointInput[]; portalUrl: string }): IAdaptiveCard {
+  const body: Block[] = [...header(`Reminders · ${r.workspace}`, "Still open for the team"), text(r.intro, { spacing: "Small" })];
+  r.points.forEach((p, i) => {
+    const sources = p.sources.map((s) => `${SOURCE_WORD[s.type]}: ${s.title}${s.when ? ` · ${s.when}` : ""}`).join("  |  ");
+    const items: Block[] = [
+      text(p.label.toUpperCase(), { size: "Small", weight: "Bolder", color: p.label.startsWith("Overdue") ? "Attention" : "Accent", spacing: "None" }),
+      text(p.text, { spacing: "Small" }),
+      text(`Source: ${sources}`, { size: "Small", isSubtle: true, spacing: "None" }),
+    ];
+    if (p.status) {
+      items.push(text(`${STATUS_TEXT[p.status]}${p.status === "assigned" && p.owner ? ` to ${p.owner}` : ""}${p.by ? ` by ${p.by}` : ""}`, { size: "Small", weight: "Bolder", color: p.status === "done" || p.status === "assigned" ? "Good" : "Default" }));
+    } else {
+      const data = { runId: r.runId, key: p.key };
+      const actions: Block[] = [];
+      if (p.canAssign) {
+        actions.push({
+          type: "Action.ShowCard",
+          title: "Assign",
+          card: {
+            type: "AdaptiveCard",
+            body: [{ type: "Input.Text", id: `owner_${i}`, placeholder: "Name of the person taking it", label: "Assign to" }],
+            actions: [{ type: "Action.Execute", title: "Assign", verb: VERBS.remindAssign, data: { ...data, input: `owner_${i}` }, associatedInputs: "auto" }],
+          },
+        });
+      }
+      actions.push(
+        { type: "Action.Execute", title: "Mark done", verb: VERBS.remindDone, data, style: "positive", associatedInputs: "none" },
+        { type: "Action.Execute", title: "Snooze", verb: VERBS.remindSnooze, data, associatedInputs: "none" },
+        { type: "Action.Execute", title: "Not relevant", verb: VERBS.remindDismiss, data, associatedInputs: "none" },
+      );
+      items.push({ type: "ActionSet", actions, spacing: "Small" });
+    }
+    body.push({ type: "Container", separator: true, spacing: "Medium", items });
+  });
+  return card(body, [{ type: "Action.OpenUrl", title: "Open in Sidekick", url: r.portalUrl }]);
 }

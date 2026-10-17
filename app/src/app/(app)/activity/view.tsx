@@ -33,7 +33,7 @@ const ms = (n: number) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFi
 const pctText = (x: number) => `${(x * 100).toFixed(x > 0 && x < 0.01 ? 1 : 0)}%`;
 
 /** Plain-language names and colors (CSS classes k-*) for each kind of step. */
-const KINDS: Record<string, string> = { request: "Request", search: "Search", ai: "Claude", embed: "Embeddings", teams: "Teams", index: "Indexing", file: "Reading a file", guard: "Guardrails" };
+const KINDS: Record<string, string> = { request: "Request", search: "Search", ai: "Claude", embed: "Embeddings", teams: "Teams", index: "Indexing", file: "Reading a file", guard: "Guardrails", remind: "Reminders" };
 
 export default function ActivityPage() {
   const [tab, setTab] = useState<Tab>("Overview");

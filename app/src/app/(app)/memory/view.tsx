@@ -245,7 +245,7 @@ export default function MemoryPage() {
           <>
             <div className="panel-h">
               <div className="seg">
-                {[["decision", "Decisions"], ["requirement", "Requirements"], ["fact", "Facts"], ["risk", "Risks"], ["glossary", "Glossary"], ["question", "Questions"]].map(([k, l]) => (
+                {[["decision", "Decisions"], ["pending", "To decide"], ["requirement", "Requirements"], ["fact", "Facts"], ["risk", "Risks"], ["glossary", "Glossary"], ["question", "Questions"]].map(([k, l]) => (
                   <button key={k} aria-pressed={factTab === k} onClick={() => setFactTab(k)}>{l}</button>
                 ))}
               </div>
@@ -259,6 +259,7 @@ export default function MemoryPage() {
                     <div className="muted" style={{ fontSize: 12.5 }}>
                       {f.meeting ?? "Document"}{f.held_at ? ` · ${fmtDate(f.held_at)}` : ""}{f.who ? ` · ${f.who}` : ""}
                       {f.kind === "question" && (f.answered ? " · answered" : " · unanswered")}
+                      {f.kind === "pending" && (f.answered ? " · made" : " · still to decide")}
                     </div>
                   </div>
                 </div>

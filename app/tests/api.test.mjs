@@ -552,6 +552,111 @@ test(`[${ENGINE}] assistant: plain questions, bad input, signed out, and the kil
   assert.equal((await owner("POST", "/api/owner/releases", { key: "assist", enabled: true })).status, 200);
 });
 
+test(`[${ENGINE}] assistant: nobody can create an organization from the chat, whatever their role`, async () => {
+  const before = (await owner("GET", "/api/owner/tenants")).body.tenants.length;
+  // Fake Claude plays a model breaking its rules: it proposes a "create_org" action. It must be dropped.
+  for (const who of [admin, member, viewer]) {
+    const r = await who("POST", "/api/assistant", { message: "Create a new organization called Rogue Org for me" });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.action, null, "no confirm card for creating an organization");
+  }
+  assert.equal((await owner("GET", "/api/owner/tenants")).body.tenants.length, before, "no organization was created");
+});
+
+test(`[${ENGINE}] assistant: only sees the person's own org and workspaces, and can't act on anyone else's`, async () => {
+  // A second client with a workspace the first client must never hear about.
+  const r = await owner("POST", "/api/owner/tenants", { org: "Northwind Health", name: "Nora North", email: "nora@northwind.test" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  s.northwind = { id: r.body.id, call: client() };
+  assert.equal((await s.northwind.call("POST", "/api/auth/login", { email: "nora@northwind.test", password: r.body.tempPassword })).status, 200);
+  s.northwind.ws = (await s.northwind.call("POST", "/api/workspaces", { name: "Northwind Secret Project" })).body.id;
+  assert.ok(s.northwind.ws);
+
+  const forMember = (await member("POST", "/api/assistant", { message: "which workspaces do I have?" })).body.reply;
+  assert.match(forMember, /Workspace A/);
+  assert.doesNotMatch(forMember, /Workspace B/, "a Member only hears about their own workspaces");
+  assert.doesNotMatch(forMember, /Northwind/, "nothing from another organization");
+  const forAdmin = (await admin("POST", "/api/assistant", { message: "which workspaces do I have?" })).body.reply;
+  assert.match(forAdmin, /Workspace B/, "admins see every workspace in their own org");
+  assert.doesNotMatch(forAdmin, /Northwind/, "but still nothing from another organization");
+  const theirs = (await s.northwind.call("POST", "/api/assistant", { message: "which workspaces do I have?" })).body.reply;
+  assert.match(theirs, /Northwind Secret Project/);
+  assert.doesNotMatch(theirs, /Workspace A|Workspace B/);
+
+  // Proposals naming a workspace outside the person's list are dropped.
+  assert.equal((await admin("POST", "/api/assistant", { message: `refresh map ${s.northwind.ws}` })).body.action, null, "another org's workspace");
+  assert.equal((await member("POST", "/api/assistant", { message: `refresh map ${s.wsB}` })).body.action, null, "a workspace the member isn't in");
+  const ok = (await member("POST", "/api/assistant", { message: `refresh map ${s.wsA}` })).body.action;
+  assert.equal(ok.type, "refresh_map");
+  assert.deepEqual(ok.request.body, { ws: s.wsA });
+});
+
+test(`[${ENGINE}] Owner Console: a client's people, workspaces and switches, for operators only`, async () => {
+  const orgId = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Test Org").id;
+  const d = await owner("GET", `/api/owner/tenants/${orgId}`);
+  assert.equal(d.status, 200, JSON.stringify(d.body));
+  assert.equal(d.body.org.name, "Test Org");
+  const mia = d.body.people.find((p) => p.email === "member@test.local");
+  assert.equal(mia.role, "Member");
+  assert.deepEqual(mia.workspaces, ["Workspace A"]);
+  assert.deepEqual(d.body.people.find((p) => p.email === "admin@test.local").workspaces, ["All workspaces"]);
+  assert.ok(d.body.workspaces.some((w) => w.name === "Workspace A" && w.members >= 2));
+  assert.ok(!d.body.people.some((p) => p.email === "nora@northwind.test"), "only this org's people");
+  assert.ok(d.body.flags.every((f) => f.enabled && f.platformEnabled));
+  const log = (await owner("GET", "/api/owner/releases")).body.log;
+  assert.ok(log.some((l) => l.action === "Viewed the people and workspaces of Test Org"), "looking is logged");
+  // Client accounts, even the Org Owner, can't use it.
+  assert.equal((await admin("GET", `/api/owner/tenants/${orgId}`)).status, 401);
+  assert.equal((await admin("POST", `/api/owner/tenants/${orgId}/flags`, { key: "assist", enabled: false })).status, 401);
+  const page = await owner("GET", `/owner/clients/${orgId}`);
+  assert.equal(page.status, 200, "the client page renders");
+  assert.equal((await owner("GET", "/api/owner/tenants/nope")).status, 404);
+  assert.equal((await owner("POST", `/api/owner/tenants/${orgId}/flags`, { key: "nope", enabled: false })).status, 400);
+  assert.equal((await owner("POST", `/api/owner/tenants/${orgId}/flags`, { key: "assist" })).status, 400);
+});
+
+test(`[${ENGINE}] Owner Console: a restriction turns a feature off for one client only`, async () => {
+  const nw = s.northwind;
+  assert.equal((await owner("POST", `/api/owner/tenants/${nw.id}/flags`, { key: "assist", enabled: false })).status, 200);
+  const off = await nw.call("POST", "/api/assistant", { message: "hi" });
+  assert.equal(off.status, 503);
+  assert.match(off.body.error, /turned off for your organization/);
+  assert.equal((await member("POST", "/api/assistant", { message: "hi" })).status, 200, "other clients are unaffected");
+  assert.equal((await owner("GET", `/api/owner/tenants/${nw.id}`)).body.flags.find((f) => f.key === "assist").enabled, false);
+  const audit = (await nw.call("GET", "/api/audit")).body;
+  assert.ok(JSON.stringify(audit).includes("Turned off In-app assistant for this organization"), "the client sees it in their audit log");
+  assert.equal((await owner("POST", `/api/owner/tenants/${nw.id}/flags`, { key: "assist", enabled: true })).status, 200);
+  assert.equal((await nw.call("POST", "/api/assistant", { message: "hi" })).status, 200);
+  // Uploads too (checked before the file is read).
+  assert.equal((await owner("POST", `/api/owner/tenants/${nw.id}/flags`, { key: "uploads", enabled: false })).status, 200);
+  const fd = new FormData();
+  fd.set("ws", nw.ws);
+  fd.append("files", new Blob(["hello"], { type: "text/plain" }), "a.txt");
+  assert.equal((await nw.call("POST", "/api/docs", undefined, { form: fd })).status, 503);
+  assert.equal((await owner("POST", `/api/owner/tenants/${nw.id}/flags`, { key: "uploads", enabled: true })).status, 200);
+});
+
+test(`[${ENGINE}] first-run setup can't be used from outside the machine running Sidekick`, async () => {
+  const res = await new Promise((resolve, reject) => {
+    const body = JSON.stringify({ org: "Stranger Org", name: "Stranger", email: "stranger@example.test", password: "correct horse battery" });
+    const req = http.request({ host: "127.0.0.1", port: PORT, path: "/api/auth/setup", method: "POST", headers: { host: "sidekick.example.test", "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, (r) => {
+      let t = "";
+      r.on("data", (c) => (t += c));
+      r.on("end", () => resolve({ status: r.statusCode, body: JSON.parse(t) }));
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+  assert.equal(res.status, 403);
+  assert.match(res.body.error, /localhost/);
+});
+
+test(`[${ENGINE}] branding (logo and color) can only be changed by Org Owners and Org Admins`, async () => {
+  for (const who of [member, viewer]) assert.equal((await who("PUT", "/api/settings", { logo: null, accent: "#123456" })).status, 403);
+  assert.equal((await admin("PUT", "/api/settings", { logo: null, accent: "#123456" })).status, 200);
+  assert.equal((await admin("PUT", "/api/settings", { logo: null, accent: null })).status, 200);
+});
+
 /* ---------- Guardrails (lib/guardrails.ts) and the workspace isolation check ---------- */
 const askA = (who, question, extra = {}) => who("POST", "/api/ask", { ws: s.wsA, question, ...extra });
 

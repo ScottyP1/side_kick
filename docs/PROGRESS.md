@@ -94,6 +94,15 @@ npm --prefix app run dev
 - Tests: 114 (db 7×2, end-to-end 50×2). Fake Claude: a custom rule refuses questions containing any 5+ letter word of it other than filler; proposed rules with relax/loosen/lenient → loosens, `__not_a_rule__` → not_a_rule.
 - Not verified with real Claude yet (fake Claude in tests). Worth a real-key check of the rule-check wording and of custom rules being too broad (false refusals).
 
+## Org access controls (Oct 17, 2026, branch `feat/org-access-controls`)
+- Checked for Cody: the home assistant has no "create organization" action for any role (its schema only has workspace/person/Teams link/refresh/open page), its context is only the person's org and their `workspaceIdsFor` workspaces (names and counts, no document text), and `checkAction` drops proposals naming any other workspace. Microsoft sign-in only lets in people an admin already added, into their own org.
+- Added: system-prompt rules "only your own organization" and "nobody creates organizations here"; tests where fake Claude misbehaves (proposes `create_org`, or a refresh for another org's / another workspace's id) and both are dropped; a Member's assistant only hears their own workspace names.
+- **Owner Console client page** `/owner/clients/[id]` (`GET /api/owner/tenants/:id`): people (role, workspaces or "All workspaces" for admins, Microsoft/password, last active), workspaces (members, docs, meetings), switches. Viewing is written to the operator log.
+- **Per-org restrictions** (`org_flags`, both engines; `POST /api/owner/tenants/:id/flags`): the kill-switch features can be turned off for one client. `assertEnabled(key, orgId)` checks platform switch then org switch (message "turned off for your organization"). Claude calls pass `ctx.orgId`, so every AI feature honours it; uploads/meetings/ask pass the user's org. Audited in the client's log + operator log.
+- **First-run setup** (`POST /api/auth/setup`) now localhost-only (`assertLocalRequest`), so an empty hosted server can't be claimed.
+- Branding test: Members/Viewers get 403 on `PUT /api/settings` (UI already hid the controls for non-admins).
+- Not checked with real Claude (fake Claude in tests). Open question for Cody: a workspace-level "team lead" role (manage people and Teams links for their own workspaces only) vs. today's Org Admin.
+
 ## Scale-up path (for later, not needed now)
 - **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).
 - **Event Hubs** (Azure's Kafka-compatible event stream): for step 3 live meeting events at scale, or queueing heavy work (transcript processing) once many clients use it. It moves events between services; it is **not** storage. Storage stays Postgres (+ Blob for files, Azure AI Search for retrieval).

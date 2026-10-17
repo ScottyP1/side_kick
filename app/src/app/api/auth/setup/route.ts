@@ -1,17 +1,22 @@
 /**
  * GET/POST /api/auth/setup: first-run setup of a new install.
  * GET tells the UI whether setup is still needed (and whether Microsoft sign-in is available); POST creates the organization and its Org Owner.
+ * Who: POST only from the machine running Sidekick (localhost) and only while nobody has an account, so a
+ * stranger can never create an organization on a server that happens to be empty. Every later
+ * organization is created by the Sidekick team in the Owner Console.
  */
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, createUser, HttpError, startSession } from "@/lib/auth";
 import { get, newId, now, run, tx } from "@/lib/db";
 import { entraConfigured } from "@/lib/entra";
+import { assertLocalRequest } from "@/lib/owner";
 
 // First-run setup: creates the organization and its Org Owner. Only works while no users exist.
 // `microsoft` tells the sign-in page whether to show "Sign in with Microsoft".
 export const GET = handle(async () => ({ needsSetup: !await get("SELECT id FROM users LIMIT 1"), microsoft: entraConfigured() }));
 
 export const POST = handle(async (req: Request) => {
+  await assertLocalRequest("First-run setup only works on the machine running Sidekick (localhost). New organizations are added by the Sidekick team in the Owner Console.");
   if (await get("SELECT id FROM users LIMIT 1")) throw new HttpError(409, "Setup is already done. Sign in instead.");
   const body = await readJson<{ org?: string; name?: string; email?: string; password?: string }>(req);
   const org = requireText(body.org, "Organization name", 120);

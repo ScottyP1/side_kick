@@ -100,6 +100,11 @@ CREATE TABLE IF NOT EXISTS owner_sessions (
 CREATE TABLE IF NOT EXISTS platform_flags (
   key TEXT PRIMARY KEY, enabled INTEGER NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
 );
+-- Per-organization feature switches set in the Owner Console (a restriction for one client). Missing row = on.
+CREATE TABLE IF NOT EXISTS org_flags (
+  org_id TEXT NOT NULL, flag_key TEXT NOT NULL, enabled INTEGER NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, flag_key)
+);
 CREATE TABLE IF NOT EXISTS platform_log (
   id BIGSERIAL PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
 );

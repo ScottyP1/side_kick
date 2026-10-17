@@ -83,8 +83,20 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
     };
   }
   if (feature === "assist") {
-    // Understands two test phrases: "create workspace <name>" and "add <name> <email>"; anything else gets a plain reply.
+    // Understands a few test phrases: "create workspace <name>", "add <name> <email>", "which workspaces"
+    // (lists the workspace names it was given), and two that act like a model breaking its rules: anything
+    // about a new organization proposes a made-up "create_org" action, and "refresh map <id>" uses that id
+    // as given. checkAction must drop both when they aren't allowed. Anything else gets a plain reply.
     const msg = content.match(/<message>([\s\S]*)<\/message>/)?.[1].trim() ?? "";
+    const blank = { name: null, code: null, email: null, role: null, workspace_ids: [], guests: null, page: null };
+    if (/\b(new|create|add|start)\b.*\b(organi[sz]ation|org)\b/i.test(msg)) return { reply: "Creating organization.", action: { ...blank, type: "create_org", name: "Rogue Org" } };
+    const refresh = msg.match(/^refresh map (\S+)$/i);
+    if (refresh) return { reply: "Here's what I'll do: refresh that map.", action: { ...blank, type: "refresh_map", workspace_ids: [refresh[1]] } };
+    if (/^which workspaces/i.test(msg)) {
+      const ctxJson = content.match(/<context>([\s\S]*?)<\/context>/)?.[1] ?? "{}";
+      const names = (JSON.parse(ctxJson).workspaces ?? []).map((w: { name: string }) => w.name);
+      return { reply: `Your workspaces: ${names.join(", ") || "none"}.`, action: null };
+    }
     const ws = msg.match(/^create (?:a )?workspace (?:called |named )?(.+)$/i);
     if (ws) return { reply: `Here's what I'll do: create “${ws[1]}”. Press Confirm.`, action: { type: "create_workspace", name: ws[1], code: null, email: null, role: null, workspace_ids: [], guests: null, page: null } };
     const person = msg.match(/^add (.+?) (\S+@\S+)$/i);
@@ -189,7 +201,7 @@ async function structuredCall<S extends z.ZodType>(
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
 ): Promise<z.infer<S>> {
-  await assertEnabled(feature);
+  await assertEnabled(feature, ctx.orgId);
   if (FAKE_CLAUDE) return fakeClaude(feature, ctx, opts.content) as z.infer<S>;
   const model = MODELS[feature];
   const started = Date.now();

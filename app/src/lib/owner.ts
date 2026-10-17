@@ -10,6 +10,9 @@
  * - **Kill switches (flags)**: owners can pause a feature (answering, meeting notes, knowledge map,
  *   uploads) for every client at once, e.g. during an incident or a cost spike. Code checks them with
  *   `assertEnabled` before doing that work.
+ * - **Per-organization switches** (`org_flags`): the same features can also be turned off for one client
+ *   only (a restriction set on that client's page in the Owner Console). A feature runs only when both
+ *   the platform-wide switch and that organization's switch are on.
  * - **Operator log**: owner actions are recorded in `platform_log`, separate from each client's audit log.
  */
 import "server-only";
@@ -32,12 +35,15 @@ export async function ownerExists() {
   return Boolean(await get("SELECT id FROM platform_admins LIMIT 1"));
 }
 
-/** Throws 403 unless the request was made to localhost: the first owner can only be created on this machine. */
-export async function assertLocalRequest() {
+/**
+ * Throws 403 unless the request was made to localhost. Used where something may only be set up on the
+ * machine running Sidekick: the first owner account, and first-run setup of the first organization.
+ *
+ * @param message what to tell someone who tried from elsewhere
+ */
+export async function assertLocalRequest(message = "The first owner account can only be created on the machine running Sidekick (localhost).") {
   const host = (await headers()).get("host") ?? "";
-  if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host)) {
-    throw new HttpError(403, "The first owner account can only be created on the machine running Sidekick (localhost).");
-  }
+  if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host)) throw new HttpError(403, message);
 }
 
 /** Creates an owner account (password stored as an scrypt hash). */
@@ -106,7 +112,26 @@ export async function flagEnabled(key: FlagKey): Promise<boolean> {
   return row ? row.enabled === 1 : true;
 }
 
-/** Throws a friendly 503 if the owner has paused this feature. Call it before starting that work. */
-export async function assertEnabled(key: FlagKey) {
+/** Whether a feature is on for one organization (its own switch only). Untouched counts as on. */
+export async function orgFlagEnabled(orgId: string, key: FlagKey): Promise<boolean> {
+  const row = await get<{ enabled: number }>("SELECT enabled FROM org_flags WHERE org_id = ? AND flag_key = ?", orgId, key);
+  return row ? row.enabled === 1 : true;
+}
+
+/** Every switch for one organization: its own setting plus whether the platform-wide one is on. */
+export async function orgFlags(orgId: string) {
+  return Promise.all((Object.keys(FLAGS) as FlagKey[]).map(async (key) => ({
+    key, ...FLAGS[key], enabled: await orgFlagEnabled(orgId, key), platformEnabled: await flagEnabled(key),
+  })));
+}
+
+/**
+ * Throws a friendly 503 if the owner has paused this feature, for everyone or (with `orgId`) for that
+ * organization. Call it before starting that work; pass the org whenever the work belongs to one.
+ */
+export async function assertEnabled(key: FlagKey, orgId?: string | null) {
   if (!(await flagEnabled(key))) throw new HttpError(503, `${FLAGS[key].label} is paused by the Sidekick team. Try again later.`);
+  if (orgId && !(await orgFlagEnabled(orgId, key))) {
+    throw new HttpError(503, `${FLAGS[key].label} is turned off for your organization by the Sidekick team. Ask your Org Owner.`);
+  }
 }

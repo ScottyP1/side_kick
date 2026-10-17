@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The client portal frame: sidebar menu, workspace picker and header, around every signed-in page.
+ * The client portal frame: sidebar menu and top bar (with the workspace label or switcher on workspace pages), around every signed-in page.
  * It loads /api/me once and shares it through `useApp()`: the user, their role, branding, workspaces and the current workspace.
  */
 
@@ -38,6 +38,31 @@ const NAV: { g: string; items: [string, string, string, ((m: Me) => boolean)?][]
 ];
 
 const WS_KEY = "sidekick.ws";
+
+/**
+ * Pages whose content belongs to one workspace, so the top bar shows which one.
+ * Every other page (Overview, Usage, Users, Activity, Audit, Settings, ...) is org-wide and shows no workspace.
+ */
+const WS_PAGES = ["/knowledge", "/meetings", "/memory"];
+
+/**
+ * The top-bar workspace indicator on workspace pages. Most people work in one workspace, so they just see its
+ * name as a quiet label; only someone in two or more gets a compact switcher. With no workspaces it shows nothing
+ * (the page itself explains via `NeedsWorkspace`).
+ */
+function WorkspacePick({ workspaces, ws, setWs }: { workspaces: Workspace[]; ws: string; setWs: (id: string) => void }) {
+  if (!workspaces.length) return null;
+  if (workspaces.length === 1) return <span className="ws-label" title="Workspace">{workspaces[0].name}</span>;
+  return (
+    <select className="input ws-pick" value={ws} onChange={(e) => setWs(e.target.value)} aria-label="Workspace">
+      {workspaces.map((w) => (
+        <option key={w.id} value={w.id}>
+          {w.name}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
@@ -167,20 +192,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   ))}
                 </select>
               </div>
-              <div className="ws-pick">
-                <span className="eyebrow">Workspace</span>
-                {me.workspaces.length ? (
-                  <select className="input" value={ws} onChange={(e) => setWs(e.target.value)} aria-label="Current workspace">
-                    {me.workspaces.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="muted">None yet</span>
-                )}
-              </div>
+              {WS_PAGES.some((p) => path.startsWith(p)) && <WorkspacePick workspaces={me.workspaces} ws={ws} setWs={setWs} />}
               <span className="spacer" />
               <Pill kind={me.claude.configured ? "good" : "warn"}>{me.claude.configured ? "Claude connected" : "Claude not connected"}</Pill>
               <span className="avatar" title={`${me.user.name} · ${me.user.role}`}>

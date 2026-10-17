@@ -255,8 +255,8 @@ a{color:inherit}
 .spinner{width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;display:inline-block;animation:spin .7s linear infinite;vertical-align:-2px}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){.spinner{animation:none}}
-.ws-pick{display:flex;align-items:center;gap:8px}
-.ws-pick select{max-width:280px}
+select.ws-pick{width:auto;max-width:240px;padding-top:5px;padding-bottom:5px;font-size:13px}
+.ws-label{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
 .banner{display:flex;gap:10px;align-items:center;padding:10px 16px;background:var(--warn-soft);color:var(--fg);border-bottom:1px solid var(--line);font-size:13.5px;flex-wrap:wrap}
 pre.transcript-raw{white-space:pre-wrap;font-family:var(--f-body);font-size:13.5px;margin:0;max-height:460px;overflow:auto}
 

@@ -19,6 +19,8 @@ One client engagement, like "Contoso Retail – Cloud Migration". Each workspace
 
 Owners and Admins see every workspace. Everyone else sees only the workspaces they've been added to.
 
+The workspace you're in shows at the top of the pages that belong to one workspace (**Knowledge & docs**, **Meetings**, **Memory & gaps**). If you're in just one workspace it's a plain label; if you're in two or more it's a small menu to switch between them. Org-wide pages (Overview, Usage & billing, Users & access, Activity, Security & audit, Settings and the rest) don't show a workspace at all.
+
 ## Sources and citations
 When Sidekick answers, it first searches the workspace for the passages most related to your question (by keyword and by meaning, so different wording still finds the right passage), then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, and a short excerpt. If two sources disagree, Sidekick says so and cites both.
 

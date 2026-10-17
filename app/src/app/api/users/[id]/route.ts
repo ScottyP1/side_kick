@@ -54,8 +54,9 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
 });
 
 export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
+  // Role first (before looking the person up), like every other route.
+  if (!isAdmin(await requireUser())) throw new HttpError(403, "Only Org Owners and Org Admins can remove people from the organization. You can take them off your workspaces instead.");
   const { admin, target } = await load((await params).id);
-  if (!isAdmin(admin)) throw new HttpError(403, "Only Org Owners and Org Admins can remove people from the organization. You can take them off your workspaces instead.");
   await run("DELETE FROM users WHERE id = ?", target.id);
   await audit(admin, `Removed ${target.name}`, "Access");
   return { ok: true };

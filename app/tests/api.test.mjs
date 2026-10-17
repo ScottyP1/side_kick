@@ -1047,7 +1047,7 @@ test(`[${ENGINE}] permission matrix: every role gets exactly the access the role
   const b = await admin("POST", "/api/users", { name: "Bea Billing", email: "billing@test.local", role: "Billing Admin", workspaces: [s.wsA] });
   assert.equal(b.status, 200, JSON.stringify(b.body));
   assert.equal((await billing("POST", "/api/auth/login", { email: "billing@test.local", password: b.body.tempPassword })).status, 200);
-  const as = { owner: admin, admin: orgAdmin, billing, member, viewer };
+  const as = { owner: admin, admin: orgAdmin, lead, billing, member, viewer };
   const wrong = [];
   for (const row of MATRIX) {
     for (const role of EVERYONE) {

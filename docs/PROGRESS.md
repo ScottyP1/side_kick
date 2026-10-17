@@ -1,6 +1,6 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 16, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design.
+> Last updated: October 17, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design.
 
 ## Where we are
 
@@ -105,6 +105,11 @@ npm --prefix app run dev
 - **Team Lead role** (Cody: the project lead knows the team and which chats matter): `ROLES` gains "Team Lead" (no schema change; role is text). `isLead`, `managedWorkspaceIds`, `requireManage` in `lib/auth.ts`. A lead leads the workspaces they're a member of: `/api/users` GET shows only people in those (with only those workspace ids), POST adds Member/Viewer into them (an existing Member/Viewer of the same org is added to the workspace instead of 409), PATCH replaces only the lead's workspaces, no role changes or DELETE; `/api/teams-links` changes use `requireManage`. Assistant offers a lead add_person (Member/Viewer, own workspace required) and link_teams. UI: Users & access + Teams link controls for leads (`me.user.lead`). Not yet: workspace guardrail switches stay admin-only.
 - Tests: 134 (db 7×2, end-to-end 60×2). Not checked with real Claude, and the new pages weren't looked at in a browser (the client page is checked to render).
 
+## Build check + CI (Oct 17, 2026, branch `chore/build-check`)
+- Why: PR #9 passed `npm test` but broke `next build` (Owner Console client page: `usePathname` in the layout under a dynamic route needs `<Suspense>` with cacheComponents), so the Azure deploy failed. The tests use `next dev`, which doesn't report that.
+- `npm --prefix app test` now ends with **Production build (next build)**: throwaway `NEXT_DIST_DIR=.next-test-build` (git-ignored, deleted after), empty temp data folder, service keys blanked (like the Docker build, where secrets only arrive at run time). Puts `tsconfig.json` / `next-env.d.ts` back if Next rewrote them. On failure: last 80 lines of build output plus a plain explanation, and the run fails. `SKIP_BUILD=1` skips it for quick iterations.
+- `.github/workflows/test.yml`: on every pull request (and by hand), `npm --prefix app ci` + `npm --prefix app test` with `REQUIRE_POSTGRES=1` and a `postgres:17` service container (trust auth, no secrets). Official actions only, pinned to commits (checkout v7.0.1, setup-node v7.0.0), Node 26 like the image. Free minutes for private repos (2,000/month on the free plan). Not yet run on GitHub: it runs on the first pull request after this is pushed. Worth making it a required check on `main` (repo Settings → Branches) once it has passed once.
+
 ## Scale-up path (for later, not needed now)
 - **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).
 - **Event Hubs** (Azure's Kafka-compatible event stream): for step 3 live meeting events at scale, or queueing heavy work (transcript processing) once many clients use it. It moves events between services; it is **not** storage. Storage stays Postgres (+ Blob for files, Azure AI Search for retrieval).
@@ -116,6 +121,7 @@ npm --prefix app run dev
 - Test against a **separate copy** so the owner's real data is untouched: `npm --prefix app run dev:preview` (port 3300, data in `app/.preview-data`, build in `.next-preview`, both git-ignored; launch config `sidekick-preview`). Never `npm --prefix app exec next …`: that runs Next in the repo root, which then installs TypeScript and writes `package.json`/`tsconfig.json` there.
 - Teams bot auth: `PLAYGROUND_MODE` (no token check) needs `TEAMS_LOCAL_PLAYGROUND=true`, is off whenever `NODE_ENV=production`, and only accepts localhost requests with a localhost service URL. `dangerouslyAllowUnauthenticatedRequests` is always passed explicitly so the SDK's own env var can't switch auth off. The SDK reads `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` itself.
 - Postgres differences to remember: no `INSERT OR IGNORE` (use `ON CONFLICT DO NOTHING`), `day` needs `AS day`, every selected column must be grouped or aggregated, qualify columns in `ON CONFLICT … DO UPDATE` (`teams_conversations.name`). COUNT/SUM come back as strings from `pg`; db.ts converts them to numbers.
+- `next dev` is more forgiving than `next build` (e.g. `usePathname`/`useSearchParams` in a layout under a dynamic route needs a `<Suspense>` boundary with cacheComponents). `npm test` runs a production build last to catch this; don't skip it before committing.
 - Next.js prerenders route handlers at build time: wrappers that catch errors must call `unstable_rethrow`, and routes with no request data (like `/api/health`) need `await connection()`.
 - After editing `app/.env.local` (bot IDs/secret), **restart the app**: a running dev server answered 401s correctly but didn't reply to Teams until restarted.
 - To test in real Teams, run the app (`npm --prefix app run dev`) **and** the tunnel (`npm --prefix app run tunnel`). The tunnel makes the whole portal reachable from the internet while it runs; stop it when not testing.

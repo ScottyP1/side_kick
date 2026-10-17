@@ -76,7 +76,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 - **Secrets**: only in `app/.env.local` (git-ignored). The Teams bot never runs without token checks in production.
 - **Both databases**: SQL must run on SQLite and Postgres; `npm test` checks both.
 - **No silent failures**: routes use `handle()`; pages use `api()` (opens the problem modal for network/server/paused problems) and `useReportError()` instead of empty catches; page crashes land on `error.tsx`.
-- **Tests**: add or update tests in `app/tests/` with any behaviour change; `npm test` must pass before committing.
+- **Tests**: add or update tests in `app/tests/` with any behaviour change; `npm test` (which ends with a production `next build`) must pass before committing, and the same suite runs on every pull request in GitHub Actions.
 
 ## Documentation conventions
 - Every source file starts with a header comment saying what it's for; library files explain the concepts they introduce.

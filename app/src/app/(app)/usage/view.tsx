@@ -17,7 +17,7 @@ type U = {
   daily: { day: string; cost: number; calls: number }[];
   models: Record<string, string>;
 };
-const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant" };
+const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check" };
 
 export default function UsagePage() {
   const [u, setU] = useState<U | null>(null);

@@ -1,6 +1,6 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 15, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design.
+> Last updated: October 16, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design.
 
 ## Where we are
 
@@ -77,6 +77,14 @@ npm --prefix app run dev
 - Rules: org connected by its Org Owner signing in from Settings (mode `link`); people must already exist (email match once, then oid); personal Microsoft accounts refused; "require" needs the owner's own account linked and ends other sessions; password login refused when required.
 - Teams: card actions and questions use the linked person's role and name (`teamsActor` in `lib/teams/bot.ts`).
 - Tests: fake Microsoft in `tests/api.test.mjs` (signs real RS256 tokens); covers link, sign-in, strangers, other/personal tenants, wrong nonce, forged key, other browser, replay, cancel, Teams roles, require/disconnect.
+
+## Guardrails + isolation check (Oct 16, 2026, branch `feat/firm-rules`)
+- Agreed order with Cody: **trust** (guardrails + isolation) → hosting in Azure → live meetings. Workspaces already are the per-client/per-project wall (confirmed: search local + Azure filtered by org + workspace before ranking, memory/map per workspace, one Teams chat → one workspace, assistant only sees your workspaces). A **client level above projects** was offered and declined for now.
+- `lib/guardrails.ts`: locked floor (hate/bias, harassment, sexual, harm, jailbreak, other clients' data, "I don't know" instead of guessing) + 6 org-wide switches (Org Owner only, audited): swearing in questions, stick to work, judging people, HR/legal/medical, hide contact details, competitors. Tables `guard_rules`, `guard_events` (both engines; counts only, no text).
+- Checks: quick local check (slurs, swearing incl. look-alikes like "sh1t" / "f.u.c.k", jailbreak phrases) then Claude feature `guard` (own model `SIDEKICK_MODEL_GUARD`, e.g. Haiku to save cost; kill switch "Guardrail check" — pausing it pauses answers too). Runs in parallel with search, so no extra wait for the search. Answers: grounding (no real cited source → "I don't know"), swearing masked, slurs replace the answer, contacts masked. Same in portal Ask, Teams and the home assistant.
+- UI: **Govern → Guardrails** page (everyone reads; Org Owner flips; admins see 30-day counts per rule), Guardrails KPI on Activity, "refused by guardrails" pill in Ask and note on the Teams card.
+- Tests: 104 (db 7×2, end-to-end 45×2), incl. switches/roles/audit, local and Claude checks, false positives ("ignore the old firewall rules", "assess"), grounding, masking, Teams + assistant, counts without text, other org sees none, paused check = no answers, and the **workspace isolation test**.
+- Not verified with real Claude yet (the throwaway preview had no key; the local check, page, switches and counts were checked in the browser). **Phase 2** (agreed): per-workspace settings (stricter only), up to ~20 plain-language custom rules (Owner/Admin, audited, versioned, can't loosen the floor, "Test it" box). Parked for Cody to place: document freshness/relevance, per-workspace learned profile + answer verification.
 
 ## Scale-up path (for later, not needed now)
 - **AKS** (Azure's Kubernetes, the EKS equivalent): needed in step 3 for the Windows real-time media bot; the web app is fine on Container Apps (Kubernetes underneath, managed for us).

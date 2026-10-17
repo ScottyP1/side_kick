@@ -36,9 +36,10 @@ export type CardSource = { id: string; title: string; loc: string | null; type: 
 
 /**
  * The reply to a question: the question as the title, the answer (with [S1]-style citations), and each
- * cited source with its location and a short excerpt. Unanswered questions say they were logged as a gap.
+ * cited source with its location and a short excerpt. Unanswered questions say they were logged as a gap;
+ * questions refused by the guardrails (`blocked`) say the organization's guardrails apply instead.
  */
-export function answerCard(question: string, answer: { found: boolean; answer: string; sources: CardSource[] }, workspace: string): IAdaptiveCard {
+export function answerCard(question: string, answer: { found: boolean; answer: string; sources: CardSource[]; blocked?: string | null }, workspace: string): IAdaptiveCard {
   const body: Block[] = [
     ...header(`Sidekick · ${workspace}`, question),
     text(answer.answer, { spacing: "Medium" }),
@@ -55,6 +56,8 @@ export function answerCard(question: string, answer: { found: boolean; answer: s
         ],
       });
     }
+  } else if (answer.blocked) {
+    body.push(text("Your organization's guardrails apply here, in Teams and in the portal.", { size: "Small", isSubtle: true }));
   } else if (!answer.found) {
     body.push(text("I logged this as a knowledge gap so the team can fill it in.", { size: "Small", isSubtle: true }));
   }

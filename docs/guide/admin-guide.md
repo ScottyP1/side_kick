@@ -46,16 +46,26 @@ The **Teams channels and chats** table on the Workspaces page shows every link. 
 - **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, Claude, search, database) with their health, and who's active.
 - **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, Claude and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored.
 
-## 11. Use the assistant for quick admin jobs
+## 11. Set your guardrails (Org Owner)
+**Govern → Guardrails** shows the rules Sidekick follows in every workspace, in the portal, in Teams and in the home assistant.
+- **Always on (locked):** no hate, racism or bias; no harassment; no sexual content; no help with harm; it can't be talked out of its rules; it never crosses client walls; and it says "I don't know" instead of guessing. Nobody can turn these off.
+- **Organization switches:** extra restrictions only the **Org Owner** can turn on or off: refuse questions with swearing, stick to work, no judging or ranking people, steer HR/legal/medical questions to the right people, hide email addresses and phone numbers in answers, and no talk about competitors. Switches can only make Sidekick stricter. Every change is recorded on Security & audit.
+- **Last 30 days** (Org Owners and Admins): how often each rule refused a question or cleaned up an answer, and how many of those came from Teams. Only counts are kept, never the questions or answers. The same total shows on Activity.
+
+Refused questions get a short, polite reply and aren't logged as knowledge gaps.
+
+## 12. Use the assistant for quick admin jobs
 On the home page, type requests like "create a workspace for Fabrikam, code FAB", "add Maria Chen maria@fabrikam.example as a Member of Fabrikam" or "link Teams code K7Q2 to Fabrikam". Sidekick shows a card with the details; check them and press **Confirm**. When adding a person, the card shows their temporary password once: send it to them privately. If a detail is missing, the assistant asks for it first.
 
-## 12. Branding
+## 13. Branding
 **Settings**: upload your logo and pick a brand color. They're applied across the portal.
 
 ## Troubleshooting
 | You see | What to do |
 |---|---|
 | A dialog "Something went wrong on our side" with a reference code | It's on Sidekick's side, not yours. Try again; if it repeats, click **Copy details** and send it (with the reference code) to the Sidekick team. |
+| "Refused by your organization's guardrails" on a normal work question | A switch may be stricter than you need (for example "Stick to work"). The Org Owner can change it on **Guardrails**. If a locked rule refused an ordinary question, send the wording to the Sidekick team. |
+| Questions fail with "Guardrail check is paused" | The Sidekick team paused the check; Sidekick never answers without it. Try again later. |
 | A dialog "Can't reach Sidekick" | Your connection or Sidekick is down. Anything you saved is safe; try again in a minute. |
 | "This page hit a problem" | Click **Try again**, or use the menu. If it repeats, send the reference code to the Sidekick team. |
 | "Claude isn't connected yet" | The Sidekick team needs to configure the AI key. Contact them. |

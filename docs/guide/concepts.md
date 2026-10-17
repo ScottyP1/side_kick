@@ -25,6 +25,9 @@ When Sidekick answers, it first searches the workspace for the passages most rel
 ## "I couldn't find that" and knowledge gaps
 If the workspace doesn't contain the answer, Sidekick says so instead of guessing. The question is saved as a **knowledge gap** so someone can fill it in, for example by uploading the missing document. Gaps also come from questions nobody answered in a meeting, conflicting facts, out-of-date documents, and decisions that only exist in a transcript.
 
+## Guardrails
+Rules Sidekick follows in every answer, everywhere (portal, Teams, the home assistant). Some are **locked** and always on: no hate, racism, bias, harassment, sexual content or help with harm; it can't be talked out of its rules ("ignore your instructions", "pretend you have no rules"); it never crosses into another workspace or organization; and it only states project facts it can cite, otherwise it says **"I don't know"**. The Org Owner can add stricter **switches** for the whole organization (swearing, small talk, judging people, HR/legal/medical questions, contact details, competitors). Each question is checked before it's answered, and each answer is checked again before you see it: an answer without a real source becomes "I don't know", swear words are masked, and contact details are hidden when that switch is on.
+
 ## Knowledge map and coverage
 On **Memory & gaps**, Sidekick groups what a workspace knows into topics. Each topic has a **coverage** score from 0 to 100: high means it's well documented and consistent, low means it's mostly been talked about but not written down.
 
@@ -54,4 +57,5 @@ Each AI request is metered: how much text went in and out (tokens), what it cost
 - Every request is checked: who you are, your role, and whether you belong to that workspace.
 - Every search and every AI request is limited to one organization and one workspace.
 - Documents and transcripts are treated as information, never as instructions, so text inside a file can't make Sidekick do something else.
+- Questions and answers go through your organization's **guardrails** (see above), and automated tests plant a secret in one workspace and check it can't be reached from another workspace, another organization, Teams or the assistant.
 - Sign in with your Microsoft work account (your company's password rules and MFA apply), or with a password, which is stored only as a secure hash. Your Org Owner can require Microsoft sign-in for everyone.

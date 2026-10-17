@@ -15,7 +15,7 @@ type P = {
   processing: { tenant: string; failed_docs: number; failed_meetings: number; unanswered: number; questions: number }[];
   appErrors: { ref: string; status: number; method: string | null; route: string | null; message: string; created_at: string }[];
 };
-const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant" };
+const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check" };
 const sec = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 function Table({ title, rows, label }: { title: string; rows: G[]; label: (n: string) => string }) {

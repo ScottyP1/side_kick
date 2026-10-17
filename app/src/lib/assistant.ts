@@ -24,12 +24,15 @@
  *   Console, so the assistant explains that instead.
  *
  * Every call is metered as the "assist" feature (Usage page) and can be paused with its kill switch.
+ * The organization's guardrails apply here too: each message is checked first, and the reply is cleaned
+ * (swearing masked, contact details hidden when that switch is on) before it's shown.
  */
 import "server-only";
 import { z } from "zod";
 import { canEdit, isAdmin, workspaceIdsFor, type User } from "./auth";
 import { all, get } from "./db";
 import { structured } from "./claude";
+import { cleanOutput, getGuardSettings, MESSAGES, recordGuard, screenQuestion, type GuardPlace } from "./guardrails";
 
 /** Pages the assistant can send someone to, with who may see each (mirrors the sidebar in shell.tsx). */
 export const PAGES: Record<string, { label: string; href: string; who?: (u: User) => boolean }> = {
@@ -42,6 +45,7 @@ export const PAGES: Record<string, { label: string; href: string; who?: (u: User
   memory: { label: "Memory & gaps", href: "/memory" },
   connectors: { label: "Connectors", href: "/connectors" },
   users: { label: "Users & access", href: "/users", who: isAdmin },
+  guardrails: { label: "Guardrails", href: "/guardrails" },
   activity: { label: "Activity", href: "/activity", who: isAdmin },
   audit: { label: "Security & audit", href: "/audit", who: isAdmin },
   settings: { label: "Settings", href: "/settings" },
@@ -166,13 +170,13 @@ export function checkAction(user: User, a: ProposedAction | null, workspaces: { 
  */
 const GUIDE = `
 Sidekick is an AI teammate for Microsoft Teams used by delivery teams on client engagements.
-Pages (sidebar): Overview (home), Usage & billing, AI models & agent, Workspaces, Knowledge & docs (upload documents, Ask Sidekick with cited sources), Meetings (import Teams .vtt / Word / text transcripts; Sidekick writes the summary, decisions, action items, open questions), Memory & gaps (knowledge map: topics with a 0-100 coverage score, gaps, conflicts, action-item tracker), Connectors, Users & access, Activity (traces, waterfall, messages, audit trail), Security & audit, Settings.
+Pages (sidebar): Overview (home), Usage & billing, AI models & agent, Workspaces, Knowledge & docs (upload documents, Ask Sidekick with cited sources), Meetings (import Teams .vtt / Word / text transcripts; Sidekick writes the summary, decisions, action items, open questions), Memory & gaps (knowledge map: topics with a 0-100 coverage score, gaps, conflicts, action-item tracker), Connectors, Users & access, Guardrails (rules Sidekick always follows: a locked floor against hate, harassment, sexual content, harm, jailbreaks, crossing client walls and guessing; plus org-wide switches only the Org Owner can change, e.g. refuse swearing, stick to work, no judging people, steer HR/legal/medical questions, hide contact details, no competitor talk; admins see counts of how often each rule fired), Activity (traces, waterfall, messages, audit trail), Security & audit, Settings.
 Workspaces: one per client engagement; walls mean people only see workspaces they belong to (admins see all in their org). Each document is Internal or Shareable; when client guests are present only Shareable documents are used.
 Roles: Org Owner and Org Admin (everything: people, workspaces, Teams links, settings, Activity), Billing Admin (usage and billing only), Member (works in their workspaces: upload, import meetings, ask, refresh map), Viewer (read-only).
 Teams: add the Sidekick app to a chat or channel, write "@Sidekick link" and it posts a link code; an admin enters the code here (or asks this assistant) to link it to a workspace. Then "@Sidekick <question>" answers with sources, and processed meetings post a notes card with Assign / Done buttons on action items. "@Sidekick help" lists commands. Sidekick only reads messages that mention it.
 Problems: errors show a dialog with a reference code like K7Q2-9XM4; share it with the Sidekick team, or admins can search it on Activity.
 New organizations (a new client company using Sidekick) are created by the Sidekick team in the Owner Console, not from inside an organization; this assistant can't do that.
-Sign-in is email and password today; Microsoft (Entra ID) sign-in comes next.
+Sign-in: email and password, or Microsoft (Entra ID) once the Org Owner connects it on Settings (it can also be required, which turns passwords off).
 `.trim();
 
 /**
@@ -184,6 +188,13 @@ Sign-in is email and password today; Microsoft (Entra ID) sign-in comes next.
  * @param history the last few turns, so follow-ups like "call it Fabrikam" work
  */
 export async function assist(user: User, message: string, history: Turn[]): Promise<{ reply: string; action: ReadyAction | null }> {
+  const place: GuardPlace = { orgId: user.org_id, workspaceId: null, channel: "assistant" };
+  const settings = await getGuardSettings(user.org_id);
+  const blocked = await screenQuestion({ orgId: user.org_id, workspaceId: null }, settings, message);
+  if (blocked) {
+    await recordGuard(place, "question", blocked, "blocked");
+    return { reply: MESSAGES[blocked], action: null };
+  }
   const ids = await workspaceIdsFor(user);
   const workspaces = ids.length
     ? await all<{ id: string; name: string; code: string | null; docs: number; meetings: number; open_items: number }>(
@@ -240,5 +251,7 @@ Rules:
     effort: "low",
     maxTokens: 2000,
   });
-  return { reply: out.reply, action: checkAction(user, out.action, workspaces) };
+  const reply = cleanOutput(out.reply, settings);
+  for (const f of reply.fired) await recordGuard(place, "answer", f.rule, f.action);
+  return { reply: reply.text, action: checkAction(user, out.action, workspaces) };
 }

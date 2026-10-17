@@ -2,7 +2,7 @@
  * @file The only place Sidekick talks to Claude (Anthropic's AI model).
  *
  * Concepts
- * - **Feature**: each kind of AI work has a name (`ask`, `extract`, `insights`, `assist`) so it can use its own
+ * - **Feature**: each kind of AI work has a name (`ask`, `extract`, `insights`, `assist`, `guard`) so it can use its own
  *   model, be metered separately on the Usage page, and be paused with a kill switch in the Owner Console.
  * - **Structured output**: instead of free text, Claude must reply with JSON matching a Zod schema, so the
  *   app can save answers, decisions and action items without guessing at their shape.
@@ -32,6 +32,9 @@ export const MODELS = {
   ask: process.env.SIDEKICK_MODEL_ASK || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
   insights: process.env.SIDEKICK_MODEL_INSIGHTS || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
   assist: process.env.SIDEKICK_MODEL_ASSIST || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
+  // The guardrail check on every question (see guardrails.ts). A short yes/no judgement, so a smaller
+  // model (SIDEKICK_MODEL_GUARD=claude-haiku-5-5) is a good way to cut its cost.
+  guard: process.env.SIDEKICK_MODEL_GUARD || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
 };
 export type Feature = keyof typeof MODELS;
 
@@ -59,7 +62,14 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
     ctx.orgId, ctx.workspaceId, feature, content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
   );
   if (content.includes("__FAIL__")) throw new HttpError(502, "Claude API error (test): fake failure for testing.");
+  if (feature === "guard") return fakeGuard(content);
   if (feature === "ask") {
+    const question = content.slice(content.lastIndexOf("Question:"));
+    // Test markers: an answer that claims to be found but cites nothing (grounding check), one with
+    // contact details, and one with swearing (answer clean-up).
+    if (question.includes("__UNGROUNDED__")) return { found: true, answer: "The cutover is definitely on Friday.", source_ids: ["S99"] };
+    if (question.includes("__CONTACT__")) return { found: true, answer: "Ask Maria at maria.chen@contoso.example or +1 (555) 010-2233 about the 48 stores [S1].", source_ids: ["S1"] };
+    if (question.includes("__SWEAR__")) return { found: true, answer: "The old runbook was shit, use the new one [S1].", source_ids: ["S1"] };
     const ids = [...content.matchAll(/<source id="(S\d+)"/g)].map((m) => m[1]);
     return { found: ids.length > 0, answer: ids.length ? `Test answer from ${ids.join(", ")} [S1].` : "Not in the sources.", source_ids: ids.slice(0, 2) };
   }
@@ -82,6 +92,25 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
     return { reply: "Test assistant reply.", action: null };
   }
   return { topics: [{ name: "Test topic", summary: "About the test", coverage: 150, key_facts: [], document_titles: [], meeting_titles: [] }], gaps: [] };
+}
+
+/**
+ * Test-mode guardrail check: refuses on a few test phrases, honoring which switches are on (they are
+ * listed in the content), so tests can check that switches really change what's refused.
+ */
+function fakeGuard(content: string) {
+  const active = content.match(/<active_switches>(.*?)<\/active_switches>/)?.[1] ?? "";
+  const q = (content.match(/<question>([\s\S]*)<\/question>/)?.[1] ?? "").toLowerCase();
+  const tests: [string, RegExp, boolean][] = [
+    ["hate", /__hate__/, true],
+    ["other_data", /\bother (client|workspace)s?\b/, true],
+    ["judging_people", /\b(rank|rate)\b.*\b(people|consultants?|employees?)\b/, active.includes("judging_people")],
+    ["advice", /\b(lawsuit|sue|diagnos\w*)\b/, active.includes("advice")],
+    ["small_talk", /\b(joke|weather|football)\b/, active.includes("small_talk")],
+    ["competitors", /\bcompetitors?\b/, active.includes("competitors")],
+  ];
+  const hit = tests.find(([, re, on]) => on && re.test(q));
+  return hit ? { allowed: false, rule: hit[0] } : { allowed: true, rule: "none" };
 }
 
 let client: Anthropic | null = null;
@@ -125,7 +154,7 @@ type Ctx = { orgId: string; workspaceId: string | null };
  * Server-side fallback ("default") re-runs a policy-declined request on Anthropic's recommended model.
  * Usage is recorded in `finally`, so failed calls are metered too.
  */
-const SPAN_NAMES: Record<Feature, string> = { ask: "Claude: write the answer", extract: "Claude: write meeting notes", insights: "Claude: build the knowledge map", assist: "Claude: in-app assistant" };
+const SPAN_NAMES: Record<Feature, string> = { ask: "Claude: write the answer", extract: "Claude: write meeting notes", insights: "Claude: build the knowledge map", assist: "Claude: in-app assistant", guard: "Claude: guardrail check" };
 export async function structured<S extends z.ZodType>(
   feature: Feature,
   ctx: Ctx,

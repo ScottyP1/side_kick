@@ -1,6 +1,31 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 17, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design.
+> Last updated: October 17, 2026 (evening, after the regroup). Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Regroup** just below.
+
+## Regroup (Oct 17, 2026)
+Many side sessions had drifted apart, so Cody paused them, merged what was ready and cleaned up. State after the regroup:
+
+- **On `main`:** PRs #1–#10 and **#12 (proactive reminders)** are merged. Everything listed further down this page is on `main` unless it says otherwise.
+- **Open PRs, merge in this order:**
+  1. **#11 Team Lead in the rulebook + role test** (`docs/team-lead-permissions`): adds Team Lead to `docs/guide/roles-and-permissions.md` and `app/tests/permissions-matrix.mjs`, checks the role before looking anything up (`requireManage`, `ownLink`, `DELETE /api/users/:id`), and wraps the Owner Console layout in `<Suspense>` so **`next build` works again** (PR #9 broke it, so the Azure deploy of `bcd1f86` failed; the live site stayed on `3feea42`). Updated from `main` after #12 (same role fix on both sides, kept `main`'s wording); 67 API tests pass on SQLite + Postgres and `next build` passes. **Deploy after merging.**
+  2. **#13 Build check** (`chore/build-check`): `npm test` ends with a production build, and `.github/workflows/test.yml` runs the tests on every pull request (Postgres 17 service, no secrets). Its build step fails until #11 is merged (expected).
+- **Known warning (not blocking):** `next build` warns that `src/instrumentation.ts` (reminder timer) imports `node:crypto`, which the Edge runtime doesn't support. Sidekick never runs on Edge; guard the import with `process.env.NEXT_RUNTIME === "nodejs"` when convenient.
+- **Cleanup done:** merged worktree folders removed (all branches kept, locally and on GitHub, by Cody's choice); finished side sessions archived.
+- **Pitch folder** (`~/Desktop/Sidekick Pitch`, outside the repo): tidy, one current version per file. New: `diagram/sidekick-roles-permissions.png` (all six roles incl. Team Lead + the Sidekick team, can / can't per capability, responsibilities; pitch-safe). `status/3 - Account levels.png` contains test logins and the live address: **don't show it in the pitch**.
+
+**How we work from here**
+- One coordinating session; each new session gets one tight scope and a short brief. Sessions don't start other sessions or push without Cody's OK.
+- **Run test suites one at a time.** All sessions share ports 3200/3201 and the `sidekick_test` database, so parallel runs break each other.
+- Merge with a PR; once #13 is in, GitHub runs the tests on every PR, so wait for green.
+
+**Open items (Cody picks the next ones)**
+1. ⚠️ **Live site Setup:** confirm Setup on the Azure site was completed (first-run setup is localhost-only since PR #9, but check the org exists and the owner account is yours).
+2. **Reminders in real Teams:** re-upload the manifest (1.1.0, RSC read permissions for chat tracking) and try with real Claude.
+3. **Real-Claude checks** still outstanding: guardrails phase 1 + 2 wording and false refusals, Team Lead flows in the browser.
+4. **Azure-hosted Claude** (`AnthropicFoundry`) instead of the Claude API key.
+5. **Step 3: live voice in meetings** (Windows media bot in Azure).
+6. **Pitch prep:** lawyer check on the employment agreement (IP), then a dry run with the deck and videos.
+7. Microsoft 365 trial ends **Nov 14, 2026**: decide keep ($8.40/month) or cancel before Nov 15.
 
 ## Where we are
 
@@ -14,11 +39,11 @@
 | Microsoft 365 test org "Sidekick Labs" (Business Basic trial) | **Active again** (new free trial started Oct 15, 2026 in the same org; the first trial was cancelled by turning off recurring billing and could not be reactivated). Trial ends **Nov 14, 2026**; then $8.40 + tax per month (1 license, monthly) on the Visa unless the subscription is cancelled before Nov 15. **Never turn off recurring billing on a trial** (it cancels it) |
 | Teams setup (Oct 15, 2026) | Done in Sidekick Labs: Teams "Upload custom apps" = On (Global policy); Entra app **Sidekick Bot** (single tenant, secret 180 days, IDs + secret only in `app/.env.local`); Azure Bot **sidekick-bot-dev** (Free, resource group `sidekick-rg`, Teams channel on, endpoint = dev tunnel); dev tunnel **sidekick** (anonymous, port 3000, expires after 30 days unused). Azure "Test in Web Chat" → app answered (end-to-end OK). Package built: `npm --prefix app run teams:package` |
 | Azure AI Search (Oct 16, 2026) | **Live**: Free search service `sidekick-labs-search` + embedding deployment `text-embedding-3-small` in Foundry resource `codyscott-9578-resource` (project `sidekick`), all in `sidekick-rg`; keys only in `app/.env.local`. Backfill copied 17 sources; 18 embedding calls cost $0.0001. Meaning search found the Oct 15 rollback owner that keyword search missed; guest filter verified |
-| Teams custom-app upload | **Next**: upload `teams/build/sidekick-teams.zip` in Teams. Org-wide "custom apps" setting was still locked ("setting up app management") — check it if upload is refused |
-| **Product step 2**: Sidekick in Teams | **Bot built and tested locally in Agents Playground** (branch `feat/teams-bot`). Next: Azure Bot registration, manifest, dev tunnel, real Teams |
+| Teams custom-app upload | Done earlier (bot answers in real Teams). Manifest **1.1.0** (chat tracking for reminders) still needs re-uploading: `npm --prefix app run teams:package`, then upload `teams/build/sidekick-teams.zip` |
+| **Product step 2**: Sidekick in Teams | **Built and on `main`**: Teams bot, Microsoft sign-in, Azure AI Search, Postgres, hosting in Azure, guardrails (phases 1–2), org access controls + Team Lead, proactive reminders. Remaining: see Regroup → Open items |
 | Product step 3: live voice in meetings | Later |
 
-Repo: `github.com/ScottyP1/side_kick` (private). Local: `~/Desktop/sidekick`. Branch `main` holds everything.
+Repo: `github.com/ScottyP1/side_kick` (private). Local: `~/Desktop/sidekick`. Branch `main` holds everything merged; open work is in PRs (see Regroup).
 
 ## Ground rules (from the owner)
 - Personal project on Cody's **own Mac, own GitHub, own Claude key**; nothing linked to Accenture. Use **made-up sample data only** (see `samples/`). Repo stays **private**.
@@ -79,7 +104,7 @@ npm --prefix app run dev
 - Teams: card actions and questions use the linked person's role and name (`teamsActor` in `lib/teams/bot.ts`).
 - Tests: fake Microsoft in `tests/api.test.mjs` (signs real RS256 tokens); covers link, sign-in, strangers, other/personal tenants, wrong nonce, forged key, other browser, replay, cancel, Teams roles, require/disconnect.
 
-## Guardrails + isolation check (Oct 16, 2026, branch `feat/firm-rules`)
+## Guardrails + isolation check (Oct 16, 2026, merged as PR #4)
 - Agreed order with Cody: **trust** (guardrails + isolation) → hosting in Azure → live meetings. Workspaces already are the per-client/per-project wall (confirmed: search local + Azure filtered by org + workspace before ranking, memory/map per workspace, one Teams chat → one workspace, assistant only sees your workspaces). A **client level above projects** was offered and declined for now.
 - `lib/guardrails.ts`: locked floor (hate/bias, harassment, sexual, harm, jailbreak, other clients' data, "I don't know" instead of guessing) + 6 org-wide switches (Org Owner only, audited): swearing in questions, stick to work, judging people, HR/legal/medical, hide contact details, competitors. Tables `guard_rules`, `guard_events` (both engines; counts only, no text).
 - Checks: quick local check (slurs, swearing incl. look-alikes like "sh1t" / "f.u.c.k", jailbreak phrases) then Claude feature `guard` (own model `SIDEKICK_MODEL_GUARD`, e.g. Haiku to save cost; kill switch "Guardrail check" — pausing it pauses answers too). Runs in parallel with search, so no extra wait for the search. Answers: grounding (no real cited source → "I don't know"), swearing masked, slurs replace the answer, contacts masked. Same in portal Ask, Teams and the home assistant.
@@ -95,7 +120,7 @@ npm --prefix app run dev
 - Tests: 114 (db 7×2, end-to-end 50×2). Fake Claude: a custom rule refuses questions containing any 5+ letter word of it other than filler; proposed rules with relax/loosen/lenient → loosens, `__not_a_rule__` → not_a_rule.
 - Not verified with real Claude yet (fake Claude in tests). Worth a real-key check of the rule-check wording and of custom rules being too broad (false refusals).
 
-## Org access controls (Oct 17, 2026, branch `feat/org-access-controls`)
+## Org access controls (Oct 17, 2026, merged as PR #9)
 - Checked for Cody: the home assistant has no "create organization" action for any role (its schema only has workspace/person/Teams link/refresh/open page), its context is only the person's org and their `workspaceIdsFor` workspaces (names and counts, no document text), and `checkAction` drops proposals naming any other workspace. Microsoft sign-in only lets in people an admin already added, into their own org.
 - Added: system-prompt rules "only your own organization" and "nobody creates organizations here"; tests where fake Claude misbehaves (proposes `create_org`, or a refresh for another org's / another workspace's id) and both are dropped; a Member's assistant only hears their own workspace names.
 - **Owner Console client page** `/owner/clients/[id]` (`GET /api/owner/tenants/:id`): people (role, workspaces or "All workspaces" for admins, Microsoft/password, last active), workspaces (members, docs, meetings), switches. Viewing is written to the operator log.
@@ -105,7 +130,7 @@ npm --prefix app run dev
 - **Team Lead role** (Cody: the project lead knows the team and which chats matter): `ROLES` gains "Team Lead" (no schema change; role is text). `isLead`, `managedWorkspaceIds`, `requireManage` in `lib/auth.ts`. A lead leads the workspaces they're a member of: `/api/users` GET shows only people in those (with only those workspace ids), POST adds Member/Viewer into them (an existing Member/Viewer of the same org is added to the workspace instead of 409), PATCH replaces only the lead's workspaces, no role changes or DELETE; `/api/teams-links` changes use `requireManage`. Assistant offers a lead add_person (Member/Viewer, own workspace required) and link_teams. UI: Users & access + Teams link controls for leads (`me.user.lead`). Not yet: workspace guardrail switches stay admin-only.
 - Tests: 134 (db 7×2, end-to-end 60×2). Not checked with real Claude, and the new pages weren't looked at in a browser (the client page is checked to render).
 
-## Proactive reminders + per-chat settings (Oct 17, 2026, branch `feat/proactive-reminders`)
+## Proactive reminders + per-chat settings (Oct 17, 2026, merged as PR #12)
 - **Per-chat settings** (`teams_chat_settings`, rules in `lib/reminder-rules.ts`): Workspaces → Teams channels and chats → **Settings** (Org Owner/Admin, or a Team Lead for the workspaces they lead; audited): meeting notes here (default on; turn off elsewhere for one dedicated notes chat), **keep track of every message** (channels/group chats; announced in the chat), **reminders** (time, IANA time zone, quiet days, after meetings, kinds). Preview / Send now.
 - **Chat tracking**: manifest 1.1.0 adds RSC `ChannelMessage.Read.Group` + `ChatMessage.Read.Chat` (+ `webApplicationInfo`), so Teams delivers non-mention messages. `bot.ts` saves them only for tracked chats (`chat_messages`, indexed as source type `chat`, audience = shareable if guests), never replies; untracked = ignored. 90-day retention; unlinking deletes them. The knowledge map now reads recent chat messages and gaps carry `sources` (titles).
 - **Reminders** (`lib/reminders.ts`): items picked in code (overdue/unowned action items via new `due_on`, open questions + new `pending` decisions due within 2 days or 7+ days old, "Out of date"/"Conflicting" gaps whose cited titles resolve to real docs/meetings/chats). Walls + guests filtered before Claude. Claude feature `remind` (`SIDEKICK_MODEL_REMIND`, kill switch "Reminders in Teams") only words them; unknown ids dropped, sources attached by code, `cleanOutput` + custom rules. Card buttons Assign / Mark done / Snooze (7 days) / Not relevant (`reminder_state`), checked against the card's own chat + workspace + guests, audited, card updated in place.

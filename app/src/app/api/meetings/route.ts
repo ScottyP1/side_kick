@@ -31,7 +31,7 @@ export const GET = handle(async (req: Request) => {
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
   if (!canEdit(user)) throw new HttpError(403, "Your role can't import meetings.");
-  await assertEnabled("extract");
+  await assertEnabled("extract", user.org_id);
   const form = await req.formData();
   const ws = await requireWorkspace(user, String(form.get("ws") ?? ""));
   const file = form.get("file");

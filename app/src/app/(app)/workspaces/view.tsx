@@ -2,8 +2,9 @@
 
 /**
  * Workspaces (/workspaces): one workspace per client engagement, plus the Teams channels and chats linked to them.
- * Admins create workspaces and link Teams channels with the code Sidekick shows in Teams, and choose per
- * chat what Sidekick does there (meeting notes, tracking every message, reminders; components/chat-settings.tsx).
+ * Admins create workspaces. Admins, and Team Leads for the workspaces they lead, link Teams channels with the
+ * code Sidekick shows in Teams, and choose per chat what Sidekick does there (meeting notes, tracking every
+ * message, reminders; components/chat-settings.tsx).
  */
 
 import Link from "next/link";
@@ -100,6 +101,8 @@ export default function WorkspacesPage() {
     }
   };
 
+  // Org Owners/Admins and Team Leads link Teams chats (a Team Lead only sees, so only links, their workspaces).
+  const manage = me.user.admin || Boolean(me.user.lead);
   return (
     <>
       <div className="page-head">
@@ -152,7 +155,7 @@ export default function WorkspacesPage() {
             <h2>Teams channels and chats</h2>
             <span className="muted" style={{ fontSize: 12.5 }}>@Sidekick answers there from the linked workspace only. Per chat, choose whether it gets meeting notes, keeps track of every message and posts reminders.</span>
           </div>
-          {me.user.admin && !!list?.length && (
+          {manage && !!list?.length && (
             <button className="btn" onClick={openLink}>
               <Icon n="plus" />
               Link Teams channel
@@ -174,7 +177,7 @@ export default function WorkspacesPage() {
                   <th>Sidekick here</th>
                   <th>Linked</th>
                   <th>Last activity</th>
-                  {me.user.admin && <th />}
+                  {manage && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -185,7 +188,7 @@ export default function WorkspacesPage() {
                     </td>
                     <td>{l.workspace}</td>
                     <td>
-                      {me.user.admin ? (
+                      {manage ? (
                         <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                           <Switch on={!!l.guests} onChange={(v) => setGuests(l, v)} label={`Client guests in ${l.name ?? "this chat"}`} />
                           <span className="muted" style={{ fontSize: 12.5 }}>{l.guests ? "Shareable sources only" : "Internal team"}</span>
@@ -203,7 +206,7 @@ export default function WorkspacesPage() {
                     </td>
                     <td>{fmtDate(l.linked_at)}</td>
                     <td>{fmtDate(l.last_seen_at)}</td>
-                    {me.user.admin && (
+                    {manage && (
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                         <button className="btn" onClick={() => setSettingsFor(l)} style={{ marginRight: 6 }}>Settings</button>
                         <button className="btn" onClick={() => unlink(l)}>Unlink</button>

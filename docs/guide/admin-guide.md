@@ -14,6 +14,8 @@ The first person to open a new Sidekick install sets up the organization and bec
 ## 4. Add people
 **Users & access → Add a person.** Pick their role and the workspaces they can see. Sidekick shows a **temporary password once**: share it with them privately; they must change it at first sign-in. Change roles or workspaces at any time from the same page. If your organization uses Microsoft sign-in, people can ignore the temporary password and use **Sign in with Microsoft** with that same email; the list shows a **Microsoft** badge once they have.
 
+**Team Leads.** Give the person who runs a project the **Team Lead** role and add them to that project's workspace(s). They can then add their own team to those workspaces (as Member or Viewer), take people off, and link the project's Teams chats, from **Users & access**, **Workspaces** or the home assistant, without needing you. If they add someone who already has an account in your organization, that person is simply added to the lead's workspace. Roles, removing people from the organization and new workspaces stay with you.
+
 ## 5. Add documents
 **Knowledge & docs**, in the workspace you want. Drop in PDF, Word (.docx), text, Markdown, CSV or JSON files, up to 25 MB each. Tag each one:
 - **Internal** for team-only material.
@@ -35,7 +37,7 @@ See [Sidekick in Teams](teams-guide.md) for what people see. To link:
 
 The **Teams channels and chats** table on the Workspaces page shows every link. Use the switch to change the client-guests setting, or **Unlink** to stop Sidekick answering and posting there (this also deletes the messages it saved from that chat).
 
-**Settings** (Org Owners and Org Admins) chooses what Sidekick does in each chat; every change is in the audit log:
+**Settings** (Org Owners and Org Admins, and Team Leads for the workspaces they lead) chooses what Sidekick does in each chat; every change is in the audit log:
 - **Meeting notes**: post notes and action items here after each meeting (on by default). Turn it off in the other chats to keep notes in one dedicated chat.
 - **Keep track of every message** (channels and group chats): Sidekick reads every message, keeps it 90 days and uses it for answers, the knowledge map and reminders. It announces the change in the chat. This needs the Sidekick Teams app version 1.1 or later (it asks the team or chat owner for permission to read messages when it's added).
 - **Reminders**: a daily card at the time and time zone you pick, skipping the quiet days, plus one right after each meeting if you want. Choose which kinds: overdue or unowned action items, open questions and decisions, out-of-date documents, sources that disagree. **Preview** shows what the next one would say without posting; **Send now** posts it. The row shows when the last reminder went out (or why it failed).

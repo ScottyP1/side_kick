@@ -2,8 +2,8 @@
  * @file Proactive reminders and chat tracking in Teams: Sidekick nudges the team without being asked.
  *
  * What it does
- * - **Chat settings** (per linked Teams channel or chat; rules in reminder-rules.ts): Org Owners/Admins
- *   choose, per chat, whether Sidekick tracks every message there, gets the meeting notes, and sends
+ * - **Chat settings** (per linked Teams channel or chat; rules in reminder-rules.ts): Org Owners/Admins,
+ *   and Team Leads for the workspaces they lead, choose, per chat, whether Sidekick tracks every message there, gets the meeting notes, and sends
  *   reminders (time, time zone, quiet days, kinds). Every change is audited.
  * - **Chat tracking** (`recordChatMessage`): in a tracked channel or group chat, every message (not only
  *   @mentions) is saved in `chat_messages` and made searchable as a "chat" source, so Ask and the
@@ -34,7 +34,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { all, get, newId, now, run } from "./db";
-import { audit, auditAsSidekick, canEdit, HttpError, isAdmin, requireWorkspace, type User } from "./auth";
+import { audit, auditAsSidekick, canEdit, HttpError, isAdmin, isLead, requireManage, type User } from "./auth";
 import { structured } from "./claude";
 import { answerRules, cleanOutput, getGuardPolicy, recordGuard, type RuleId } from "./guardrails";
 import { assertEnabled, flagEnabled } from "./owner";
@@ -73,8 +73,8 @@ export async function getChatSettings(conv: Pick<TeamsConversation, "id" | "work
 }
 
 /**
- * Saves an admin's changes to one linked chat's settings and audits them. The caller checks that `user`
- * is an Org Owner/Admin who can see the chat's workspace. Throws 400 with a reason if a value is wrong.
+ * Saves a manager's changes to one linked chat's settings and audits them. The caller checks that `user`
+ * may manage the chat's workspace (`managedLinkedChat`). Throws 400 with a reason if a value is wrong.
  * Message tracking can't be turned on in a 1:1 chat (everything there is a question to Sidekick).
  * Returns the new settings and whether tracking was switched (the route then tells the chat in Teams).
  */
@@ -94,14 +94,15 @@ export async function saveChatSettings(user: User, conv: TeamsConversation, chan
 }
 
 /**
- * The linked chat `id` of the signed-in Org Owner/Admin's org, in a workspace they can see; 403/404
- * otherwise. Used by the settings and reminder routes.
+ * The linked chat `id` in the signed-in person's org, if they may manage its workspace: an Org Owner/Admin,
+ * or a Team Lead of that workspace (`requireManage`). 403 for any other role, then 404 for a chat they can't see.
+ * Used by the settings and reminder routes.
  */
-export async function adminLinkedChat(user: User, id: unknown): Promise<TeamsConversation> {
-  if (!isAdmin(user)) throw new HttpError(403, "Only Org Owners and Org Admins can change Teams chat settings.");
+export async function managedLinkedChat(user: User, id: unknown): Promise<TeamsConversation> {
+  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the workspace's Team Lead can change Teams chat settings.");
   const conv = typeof id === "string" && id ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
   if (!conv?.workspace_id) throw new HttpError(404, "Linked Teams channel not found.");
-  await requireWorkspace(user, conv.workspace_id);
+  await requireManage(user, conv.workspace_id);
   return conv;
 }
 

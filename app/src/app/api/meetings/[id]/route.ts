@@ -13,8 +13,11 @@ import { remindAfterMeeting } from "@/lib/reminders";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-async function load(id: string) {
+// `edit`: check edit rights before looking the meeting up, like every other route (role first, then data),
+// so a Viewer is told "not allowed" rather than learning whether a meeting id exists.
+async function load(id: string, edit?: string) {
   const user = await requireUser();
+  if (edit && !canEdit(user)) throw new HttpError(403, edit);
   const m = await get<{ id: string; workspace_id: string; title: string }>("SELECT * FROM meetings WHERE id = ? AND org_id = ?", id, user.org_id);
   if (!m) throw new HttpError(404, "Meeting not found.");
   await requireWorkspace(user, m.workspace_id);
@@ -30,8 +33,7 @@ export const GET = handle(async (_req: Request, { params }: Ctx) => {
 
 // Retry processing after a failure (for example, before the API key was added).
 export const POST = handle(async (_req: Request, { params }: Ctx) => {
-  const { user, m } = await load((await params).id);
-  if (!canEdit(user)) throw new HttpError(403, "Your role can't reprocess meetings.");
+  const { user, m } = await load((await params).id, "Your role can't reprocess meetings.");
   await run("DELETE FROM items WHERE meeting_id = ?", m.id);
   await run("DELETE FROM action_items WHERE meeting_id = ?", m.id);
   await removeIndexed(m.id);
@@ -46,8 +48,7 @@ export const POST = handle(async (_req: Request, { params }: Ctx) => {
 });
 
 export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
-  const { user, m } = await load((await params).id);
-  if (!canEdit(user)) throw new HttpError(403, "Your role can't delete meetings.");
+  const { user, m } = await load((await params).id, "Your role can't delete meetings.");
   await removeIndexed(m.id);
   await run("DELETE FROM meetings WHERE id = ?", m.id);
   await audit(user, `Deleted meeting “${m.title}”, its notes and transcript`, "Data", m.workspace_id);

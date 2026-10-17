@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS gap_status (
 );
 -- One row per Claude call: tokens, cost in USD, latency and errors. Powers Usage & billing and the Owner Console.
 CREATE TABLE IF NOT EXISTS usage_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, org_id TEXT, workspace_id TEXT, feature TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT, org_id TEXT, workspace_id TEXT, user_id TEXT, feature TEXT NOT NULL,
   model TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
   cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0,
   cost_usd REAL NOT NULL, latency_ms INTEGER NOT NULL, ok INTEGER NOT NULL, created_at TEXT NOT NULL
@@ -145,6 +145,11 @@ CREATE TABLE IF NOT EXISTS owner_sessions (
 -- Global feature switches the owner can flip (kill switches). Missing key = enabled.
 CREATE TABLE IF NOT EXISTS platform_flags (
   key TEXT PRIMARY KEY, enabled INTEGER NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+-- Per-organization feature switches set in the Owner Console (a restriction for one client). Missing row = on.
+CREATE TABLE IF NOT EXISTS org_flags (
+  org_id TEXT NOT NULL, flag_key TEXT NOT NULL, enabled INTEGER NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, flag_key)
 );
 CREATE TABLE IF NOT EXISTS platform_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
@@ -297,6 +302,9 @@ function migrate(conn: DatabaseSync) {
     (conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === col);
   if (!has("orgs", "status")) conn.exec("ALTER TABLE orgs ADD COLUMN status TEXT NOT NULL DEFAULT 'Active'");
   if (!has("usage_events", "error")) conn.exec("ALTER TABLE usage_events ADD COLUMN error TEXT");
+  // Who the AI call was for (null for system work and Teams guests), so people can see their own usage.
+  if (!has("usage_events", "user_id")) conn.exec("ALTER TABLE usage_events ADD COLUMN user_id TEXT");
+  conn.exec("CREATE INDEX IF NOT EXISTS usage_events_user_time ON usage_events(org_id, user_id, created_at)");
   // Who asked and where (portal or Teams), for the Activity page's Messages view.
   if (!has("questions", "asked_by")) conn.exec("ALTER TABLE questions ADD COLUMN asked_by TEXT");
   if (!has("questions", "channel")) conn.exec("ALTER TABLE questions ADD COLUMN channel TEXT");

@@ -47,6 +47,8 @@ type TraceState = {
   orgId: string | null;
   workspaceId: string | null;
   actor: string | null;
+  /** The signed-in person's user id (null for system work and Teams guests); usage rows record it. */
+  userId: string | null;
   spans: SpanRecord[];
   dbQueries: number;
   dbMs: number;
@@ -67,12 +69,18 @@ const newId = () => crypto.randomBytes(8).toString("hex");
 const RETENTION_DAYS = 30;
 
 /** Fills in who and where, as soon as it's known (after sign-in, after the workspace check). */
-export function traceScope(scope: { orgId?: string | null; workspaceId?: string | null; actor?: string | null }) {
+export function traceScope(scope: { orgId?: string | null; workspaceId?: string | null; actor?: string | null; userId?: string | null }) {
   const t = store.getStore()?.trace;
   if (!t) return;
   if (scope.orgId !== undefined && scope.orgId) t.orgId = scope.orgId;
   if (scope.workspaceId !== undefined && scope.workspaceId) t.workspaceId = scope.workspaceId;
   if (scope.actor !== undefined && scope.actor) t.actor = scope.actor;
+  if (scope.userId !== undefined && scope.userId) t.userId = scope.userId;
+}
+
+/** The user id of the person this work is for (set by `traceScope`), or null. Used to tie AI usage to a person. */
+export function traceUserId(): string | null {
+  return store.getStore()?.trace.userId ?? null;
 }
 
 /** Marks the trace as failed with an HTTP status and (optionally) the reference code the person saw. */
@@ -135,7 +143,7 @@ export async function withTrace<T>(
   if (store.getStore() && !root.detached) return span(root.kind ?? "request", root.name, fn);
   const t: TraceState = {
     id: newId(), name: root.name, channel: root.channel, startedAt: Date.now(), orgId: root.orgId ?? null, workspaceId: root.workspaceId ?? null,
-    actor: root.actor ?? null, spans: [], dbQueries: 0, dbMs: 0, status: "ok", httpStatus: null, error: null, ref: null,
+    actor: root.actor ?? null, userId: null, spans: [], dbQueries: 0, dbMs: 0, status: "ok", httpStatus: null, error: null, ref: null,
   };
   const rootSpan: SpanRecord = { id: newId(), parentId: null, kind: root.kind ?? "request", name: root.name, start: 0, duration: 0, status: "ok", attrs: {} };
   t.spans.push(rootSpan);

@@ -9,15 +9,18 @@ Your company's Sidekick account. Everything in it (people, workspaces, documents
 One client engagement, like "Contoso Retail – Cloud Migration". Each workspace has its own documents, meetings, memory and members. **Sidekick only ever searches the workspace you're in**, so an answer for one client can never use another client's material.
 
 ## People and roles
+
+The full rulebook, with every action and which roles may do it, is [Roles and permissions](roles-and-permissions.md).
 | Role | Can do |
 |---|---|
 | **Org Owner** | Everything, including the organization itself |
 | **Org Admin** | People, workspaces, Teams channels, usage and the audit log, across all workspaces |
+| **Team Lead** | Everything a Member can do, plus the people side of the workspaces they lead (the ones they belong to): add people to them as Member or Viewer, take people off them, and link Teams chats to them. Can't create workspaces or organizations, change anyone's role, remove people from the organization, or see other workspaces |
 | **Billing Admin** | Usage and billing only |
 | **Member** | Work inside the workspaces they belong to: upload, import meetings, ask, update action items |
 | **Viewer** | Read-only inside the workspaces they belong to |
 
-Owners and Admins see every workspace. Everyone else sees only the workspaces they've been added to.
+Owners and Admins see every workspace. Everyone else, Team Leads included, sees only the workspaces they've been added to. Only an Org Owner or Org Admin can make someone a Team Lead.
 
 The workspace you're in shows at the top of the pages that belong to one workspace (**Knowledge & docs**, **Meetings**, **Memory & gaps**). If you're in just one workspace it's a plain label; if you're in two or more it's a small menu to switch between them. Org-wide pages (Overview, Usage & billing, Users & access, Activity, Security & audit, Settings and the rest) don't show a workspace at all.
 
@@ -53,7 +56,7 @@ When **client guests are present** (in a meeting marked "Client guests attended"
 Sidekick can be added to Teams channels and chats. Each channel or chat is **linked to one workspace** by an admin, and Sidekick only answers from that workspace there. See [Sidekick in Teams](teams-guide.md).
 
 ## The in-app assistant
-The chat box under the crystal ball on the home page. Ask it how Sidekick works ("how do I import a meeting?", "what can a Viewer do?") or ask it to do something: create a workspace, add a person, link a Teams chat, refresh a knowledge map, or open a page. While it thinks, the dust inside the ball swirls and the reply bubble shows what it's working on. It only offers what your role allows, and it never changes anything by itself: it shows a card with exactly what will happen, and nothing happens until you press **Confirm** (Cancel leaves everything as it was). Confirmed actions are recorded in the audit log like any other. For questions about a project's content, use **Ask Sidekick** on Knowledge & docs, which answers from your sources with citations. New client organizations are set up by the Sidekick team, not from the assistant.
+The chat box under the crystal ball on the home page. Ask it how Sidekick works ("how do I import a meeting?", "what can a Viewer do?") or ask it to do something: create a workspace, add a person, link a Teams chat, refresh a knowledge map, or open a page. While it thinks, the dust inside the ball swirls and the reply bubble shows what it's working on. It only offers what your role allows, and it never changes anything by itself: it shows a card with exactly what will happen, and nothing happens until you press **Confirm** (Cancel leaves everything as it was). Confirmed actions are recorded in the audit log like any other. For questions about a project's content, use **Ask Sidekick** on Knowledge & docs, which answers from your sources with citations. It only knows **your** organization and the workspaces you can use (names and counts, never document text), so it can't tell you about another client. Nobody can create a new client organization from the assistant, whatever their role: the Sidekick team sets those up in the Owner Console.
 
 ## Audit log
 Sign-ins, access changes, uploads, deletions, Teams links and every action Sidekick takes on its own are recorded on **Security & audit**, with who did it and when.

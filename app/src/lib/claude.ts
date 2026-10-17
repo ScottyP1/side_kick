@@ -22,7 +22,7 @@ import type { z } from "zod";
 import { HttpError } from "./auth";
 import { now, run } from "./db";
 import { assertEnabled } from "./owner";
-import { span, spanAttrs } from "./trace";
+import { span, spanAttrs, traceUserId } from "./trace";
 
 // One place to choose models. Defaults to Claude Opus 5.5 everywhere; override per feature in .env.local
 // (e.g. SIDEKICK_MODEL_ASK=claude-sonnet-5-5) to trade quality for cost. In step 2 this client is swapped
@@ -60,9 +60,9 @@ export const FAKE_CLAUDE = process.env.SIDEKICK_FAKE_CLAUDE === "1" && process.e
  */
 async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<unknown> {
   await run(
-    `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
-     VALUES (?, ?, ?, 'fake-claude', 0, 0, 0, 0, ?, ?, ?)`,
-    ctx.orgId, ctx.workspaceId, feature, content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
+    `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
+     VALUES (?, ?, ?, ?, 'fake-claude', 0, 0, 0, 0, ?, ?, ?)`,
+    ctx.orgId, ctx.workspaceId, traceUserId(), feature, content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
   );
   if (content.includes("__FAIL__")) throw new HttpError(502, "Claude API error (test): fake failure for testing.");
   if (feature === "guard") return fakeGuard(content);
@@ -100,12 +100,25 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<
     };
   }
   if (feature === "assist") {
-    // Understands two test phrases: "create workspace <name>" and "add <name> <email>"; anything else gets a plain reply.
+    // Understands a few test phrases: "create workspace <name>", "add <name> <email>", "which workspaces"
+    // (lists the workspace names it was given), and two that act like a model breaking its rules: anything
+    // about a new organization proposes a made-up "create_org" action, and "refresh map <id>" uses that id
+    // as given. checkAction must drop both when they aren't allowed. Anything else gets a plain reply.
     const msg = content.match(/<message>([\s\S]*)<\/message>/)?.[1].trim() ?? "";
+    const blank = { name: null, code: null, email: null, role: null, workspace_ids: [], guests: null, page: null };
+    if (/\b(new|create|add|start)\b.*\b(organi[sz]ation|org)\b/i.test(msg)) return { reply: "Creating organization.", action: { ...blank, type: "create_org", name: "Rogue Org" } };
+    const refresh = msg.match(/^refresh map (\S+)$/i);
+    if (refresh) return { reply: "Here's what I'll do: refresh that map.", action: { ...blank, type: "refresh_map", workspace_ids: [refresh[1]] } };
+    if (/^which workspaces/i.test(msg)) {
+      const ctxJson = content.match(/<context>([\s\S]*?)<\/context>/)?.[1] ?? "{}";
+      const names = (JSON.parse(ctxJson).workspaces ?? []).map((w: { name: string }) => w.name);
+      return { reply: `Your workspaces: ${names.join(", ") || "none"}.`, action: null };
+    }
     const ws = msg.match(/^create (?:a )?workspace (?:called |named )?(.+)$/i);
     if (ws) return { reply: `Here's what I'll do: create “${ws[1]}”. Press Confirm.`, action: { type: "create_workspace", name: ws[1], code: null, email: null, role: null, workspace_ids: [], guests: null, page: null } };
-    const person = msg.match(/^add (.+?) (\S+@\S+)$/i);
-    if (person) return { reply: `Here's what I'll do: add ${person[1]}. Press Confirm.`, action: { type: "add_person", name: person[1], code: null, email: person[2], role: "Member", workspace_ids: [], guests: null, page: null } };
+    // "add <name> <email> [as <role>] [to <workspace id>]"
+    const person = msg.match(/^add (.+?) (\S+@\S+)(?: as (Org Admin|Team Lead|Billing Admin|Member|Viewer))?(?: to (\S+))?$/i);
+    if (person) return { reply: `Here's what I'll do: add ${person[1]}. Press Confirm.`, action: { type: "add_person", name: person[1], code: null, email: person[2], role: person[3] ?? "Member", workspace_ids: person[4] ? [person[4]] : [], guests: null, page: null } };
     return { reply: "Test assistant reply.", action: null };
   }
   // Knowledge map: one "Out of date" gap citing the first document and the newest meeting or chat in the
@@ -216,7 +229,7 @@ async function structuredCall<S extends z.ZodType>(
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
 ): Promise<z.infer<S>> {
-  await assertEnabled(feature);
+  await assertEnabled(feature, ctx.orgId);
   if (FAKE_CLAUDE) return fakeClaude(feature, ctx, opts.content) as z.infer<S>;
   const model = MODELS[feature];
   const started = Date.now();
@@ -255,10 +268,11 @@ async function structuredCall<S extends z.ZodType>(
   } finally {
     spanAttrs({ input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cached_tokens: usage.cache_read_input_tokens, cost_usd: Number(costOf(model, usage).toFixed(6)) });
     await run(
-      `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ctx.orgId,
       ctx.workspaceId,
+      traceUserId(),
       feature,
       model,
       usage.input_tokens,

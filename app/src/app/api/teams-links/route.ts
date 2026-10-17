@@ -1,12 +1,13 @@
 /**
  * GET/POST/PATCH/DELETE /api/teams-links: which Teams channels and chats are linked to which workspace.
- * Linking uses the code Sidekick shows in Teams (see lib/teams/bot.ts). Listing: workspace members; changes: Org Owners and Org Admins.
+ * Linking uses the code Sidekick shows in Teams (see lib/teams/bot.ts). Listing: workspace members; changes:
+ * Org Owners and Org Admins, or a Team Lead for the workspaces they lead.
  * The list includes each chat's settings (tracking, notes, reminders; see lib/reminders.ts) and its last
  * reminder. Unlinking also forgets the messages Sidekick saved from that chat and its settings.
  */
 import { after } from "next/server";
 import { handle, readJson, requireText } from "@/lib/api";
-import { audit, HttpError, isAdmin, requireUser, requireWorkspace, workspaceIdsFor, type User } from "@/lib/auth";
+import { audit, HttpError, isAdmin, isLead, requireManage, requireUser, workspaceIdsFor, type User } from "@/lib/auth";
 import { all, get, now, run } from "@/lib/db";
 import { helpCard } from "@/lib/teams/cards";
 import { normalizeCode, postCard, type TeamsConversation } from "@/lib/teams/bot";
@@ -37,9 +38,9 @@ export const GET = handle(async () => {
 
 // Link a Teams channel/chat to a workspace using the code Sidekick showed in Teams.
 export const POST = handle(async (req: Request) => {
-  const user = await requireAdmin();
+  const user = await requireUser();
   const body = await readJson<{ code?: string; ws?: string; guests?: boolean }>(req);
-  const ws = await requireWorkspace(user, body.ws);
+  const ws = await requireManage(user, body.ws);
   const code = normalizeCode(requireText(body.code, "Link code", 20));
   const conv = code
     ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE link_code = ? AND code_expires_at > ? AND workspace_id IS NULL", code, now())
@@ -64,7 +65,7 @@ export const POST = handle(async (req: Request) => {
 
 // Change whether client guests are in the conversation (guests only get Shareable sources).
 export const PATCH = handle(async (req: Request) => {
-  const user = await requireAdmin();
+  const user = await requireUser();
   const body = await readJson<{ id?: string; guests?: boolean }>(req);
   const conv = await ownLink(user, body.id);
   await run("UPDATE teams_conversations SET guests = ? WHERE id = ?", body.guests ? 1 : 0, conv.id);
@@ -73,7 +74,7 @@ export const PATCH = handle(async (req: Request) => {
 });
 
 export const DELETE = handle(async (req: Request) => {
-  const user = await requireAdmin();
+  const user = await requireUser();
   const conv = await ownLink(user, new URL(req.url).searchParams.get("id"));
   await run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL WHERE id = ?", conv.id);
   const forgotten = await forgetChat(conv.id);
@@ -82,15 +83,12 @@ export const DELETE = handle(async (req: Request) => {
   return { ok: true };
 });
 
-async function requireAdmin() {
-  const user = await requireUser();
-  if (!isAdmin(user)) throw new HttpError(403, "Only Org Owners and Org Admins can link Teams channels.");
-  return user;
-}
-
+/** A linked conversation in a workspace this user may manage (404 / 403 otherwise). */
 async function ownLink(user: User, id: string | null | undefined): Promise<TeamsConversation> {
+  // Role first, so other roles always get a plain 403 whichever chat they name.
+  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the workspace's Team Lead can do this.");
   const conv = id ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
   if (!conv) throw new HttpError(404, "Linked Teams channel not found.");
-  await requireWorkspace(user, conv.workspace_id);
+  await requireManage(user, conv.workspace_id);
   return conv;
 }

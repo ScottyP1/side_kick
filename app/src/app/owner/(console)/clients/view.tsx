@@ -2,8 +2,10 @@
 
 /**
  * Clients (/owner/clients): every client organization with its users, usage and errors; add a client or pause one.
+ * Click a client's name to see its people and workspaces and set restrictions for it (clients/[id]).
  */
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Icon, Modal, Pill, usd, useReportError, useToast } from "@/components/ui";
 
@@ -99,7 +101,7 @@ export default function ClientsPage() {
                 {list?.map((t) => (
                   <tr key={t.id}>
                     <td>
-                      <b>{t.name}</b>
+                      <Link href={`/owner/clients/${t.id}`}><b>{t.name}</b></Link>
                       <div className="muted" style={{ fontSize: 12.5 }}>{t.owner_email ?? "—"} · since {fmtDate(t.created_at)}</div>
                     </td>
                     <td><Pill kind={t.status === "Active" ? "good" : "bad"}>{t.status === "Active" ? "Active" : "Paused"}</Pill></td>

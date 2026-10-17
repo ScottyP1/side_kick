@@ -116,7 +116,7 @@ export class HttpError extends Error {
 export async function requireUser(roles?: readonly Role[]): Promise<User> {
   const user = await currentUser();
   if (!user) throw new HttpError(401, "Sign in to continue.");
-  traceScope({ orgId: user.org_id, actor: user.name });
+  traceScope({ orgId: user.org_id, actor: user.name, userId: user.id });
   if (roles && !roles.includes(user.role)) throw new HttpError(403, "Your role doesn't allow this. Ask an Org Admin.");
   return user;
 }

@@ -213,7 +213,10 @@ async function teamsActor(conv: TeamsConversation, a: InboundActivity): Promise<
         WHERE u.org_id = ? AND u.entra_oid = ? AND o.entra_tenant_id = ?`,
       conv.org_id, a.from.aadObjectId, tenant,
     );
-    if (person) return person;
+    if (person) {
+      traceScope({ userId: person.id });
+      return person;
+    }
   }
   return {
     id: `teams:${a.from.aadObjectId ?? a.from.id}`,

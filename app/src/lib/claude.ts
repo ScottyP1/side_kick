@@ -22,7 +22,7 @@ import type { z } from "zod";
 import { HttpError } from "./auth";
 import { now, run } from "./db";
 import { assertEnabled } from "./owner";
-import { span, spanAttrs } from "./trace";
+import { span, spanAttrs, traceUserId } from "./trace";
 
 // One place to choose models. Defaults to Claude Opus 5.5 everywhere; override per feature in .env.local
 // (e.g. SIDEKICK_MODEL_ASK=claude-sonnet-5-5) to trade quality for cost. In step 2 this client is swapped
@@ -57,9 +57,9 @@ export const FAKE_CLAUDE = process.env.SIDEKICK_FAKE_CLAUDE === "1" && process.e
  */
 async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<unknown> {
   await run(
-    `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
-     VALUES (?, ?, ?, 'fake-claude', 0, 0, 0, 0, ?, ?, ?)`,
-    ctx.orgId, ctx.workspaceId, feature, content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
+    `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
+     VALUES (?, ?, ?, ?, 'fake-claude', 0, 0, 0, 0, ?, ?, ?)`,
+    ctx.orgId, ctx.workspaceId, traceUserId(), feature, content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
   );
   if (content.includes("__FAIL__")) throw new HttpError(502, "Claude API error (test): fake failure for testing.");
   if (feature === "guard") return fakeGuard(content);
@@ -228,10 +228,11 @@ async function structuredCall<S extends z.ZodType>(
   } finally {
     spanAttrs({ input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cached_tokens: usage.cache_read_input_tokens, cost_usd: Number(costOf(model, usage).toFixed(6)) });
     await run(
-      `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ctx.orgId,
       ctx.workspaceId,
+      traceUserId(),
       feature,
       model,
       usage.input_tokens,

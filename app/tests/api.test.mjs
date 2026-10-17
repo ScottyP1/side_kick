@@ -18,6 +18,7 @@ import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { EVERYONE, MATRIX } from "./permissions-matrix.mjs";
 
 const APP = path.resolve(import.meta.dirname, "..");
 const ENGINE = process.env.TEST_DB === "postgres" ? "postgres" : "sqlite";
@@ -852,6 +853,48 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
 
 /* ---------- Microsoft sign-in (Entra ID) ---------- */
 const errorOf = (r) => decodeURIComponent(r.to?.searchParams.get("error") ?? "");
+
+const billing = client();
+
+test(`[${ENGINE}] permission matrix: every role gets exactly the access the roles guide promises`, async () => {
+  const b = await admin("POST", "/api/users", { name: "Bea Billing", email: "billing@test.local", role: "Billing Admin", workspaces: [s.wsA] });
+  assert.equal(b.status, 200, JSON.stringify(b.body));
+  assert.equal((await billing("POST", "/api/auth/login", { email: "billing@test.local", password: b.body.tempPassword })).status, 200);
+  const as = { owner: admin, admin: orgAdmin, billing, member, viewer };
+  const wrong = [];
+  for (const row of MATRIX) {
+    for (const role of EVERYONE) {
+      const allowed = row.allow.includes(role);
+      if (allowed && row.skipAllowed) continue;
+      const url = row.url(s);
+      let r;
+      if (row.form) {
+        const fd = new FormData();
+        for (const [k, v] of Object.entries(row.form(s))) fd.append(k, v);
+        r = await as[role](row.method, url, undefined, { form: fd });
+      } else {
+        r = await as[role](row.method, url, typeof row.body === "function" ? row.body(s) : row.body);
+      }
+      const got = r.status === 403 ? "refused" : r.status === 401 ? "signed out" : "allowed";
+      if (got !== (allowed ? "allowed" : "refused")) wrong.push(`${role} → ${row.what} (${row.method} ${url}): expected ${allowed ? "allowed" : "refused"}, got ${r.status}`);
+    }
+  }
+  assert.deepEqual(wrong, [], "permission mismatches:\n" + wrong.join("\n"));
+  // AI use on the home page: the company total for the billing roles, only their own for everyone else.
+  const org = (await admin("GET", "/api/overview")).body.stats;
+  for (const role of EVERYONE) {
+    const st = (await as[role]("GET", "/api/overview")).body.stats;
+    const wholeOrg = ["owner", "admin", "billing"].includes(role);
+    assert.equal(st.spendScope, wholeOrg ? "org" : "you", `${role} spend scope`);
+    if (wholeOrg) assert.equal(st.aiCallsMonth, org.aiCallsMonth, `${role} sees the company total`);
+  }
+  const before = (await member("GET", "/api/overview")).body.stats.aiCallsMonth;
+  await admin("POST", "/api/assistant", { message: "How do I import a meeting?" });
+  assert.equal((await member("GET", "/api/overview")).body.stats.aiCallsMonth, before, "someone else's AI call isn't counted as the member's");
+  await member("POST", "/api/assistant", { message: "How do I import a meeting?" });
+  assert.ok((await member("GET", "/api/overview")).body.stats.aiCallsMonth > before, "the member's own AI call is counted for them");
+  assert.ok((await member("GET", "/api/overview")).body.stats.aiCallsMonth < (await admin("GET", "/api/overview")).body.stats.aiCallsMonth, "a member's own use is less than the company total");
+});
 
 test(`[${ENGINE}] Microsoft: no sign-in until the Org Owner connects the organization's tenant`, async () => {
   const r = await microsoftSignIn(client(), { tid: TENANT, oid: "oid-admin", email: "admin@test.local", name: "Test Admin" });

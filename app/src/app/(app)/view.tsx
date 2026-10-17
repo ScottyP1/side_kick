@@ -50,10 +50,8 @@ export default function OverviewPage() {
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">{me.org.name}</div>
-          <h1>
-            {greet}, {first}
-          </h1>
+          <div className="eyebrow">Overview</div>
+          <h1>{me.org.name}</h1>
           <p>Here&apos;s what Sidekick knows and what needs attention across your workspaces.</p>
         </div>
         <div className="actions">
@@ -62,7 +60,7 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <LiveOrb admin={me.user.admin} />
+      <LiveOrb admin={me.user.admin} greeting={`${greet}, ${first}`} />
 
       <div className="grid g4" style={{ marginTop: 16 }}>
         <Link className="kpi" href="/meetings" style={{ textDecoration: "none" }}>

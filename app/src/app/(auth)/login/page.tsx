@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Sign in (/login) to the client portal.
+ * Sign in (/login) to the client portal: "Sign in with Microsoft" (when set up; see lib/entra.ts) or email
+ * and password. Problems from the Microsoft round trip come back as `?error=…` and are shown here.
  */
 
 import Link from "next/link";
@@ -14,12 +15,18 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [needsSetup, setNeedsSetup] = useState(false);
+  const [microsoft, setMicrosoft] = useState(false);
 
   useEffect(() => {
-    api<{ needsSetup: boolean }>("/api/auth/setup").then((r) => {
+    // Read after mount: the page is static, and the error comes back from Microsoft in the address.
+    const back = new URLSearchParams(location.search).get("error");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (back) setError(back);
+    api<{ needsSetup: boolean; microsoft: boolean }>("/api/auth/setup").then((r) => {
       if (r.needsSetup) location.href = "/setup";
       setNeedsSetup(r.needsSetup);
-    }).catch(() => {});
+      setMicrosoft(r.microsoft);
+    }).catch((e) => setError(e instanceof Error ? e.message : "Couldn't reach Sidekick."));
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -48,6 +55,15 @@ export default function LoginPage() {
           <h1>Sign in</h1>
           <p className="muted" style={{ margin: "4px 0 0" }}>Your AI teammate for Teams meetings.</p>
         </div>
+        {microsoft && (
+          <>
+            <a className="btn ms-btn" href="/api/auth/microsoft/start">
+              <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022" /><rect x="11" y="1" width="9" height="9" fill="#7fba00" /><rect x="1" y="11" width="9" height="9" fill="#00a4ef" /><rect x="11" y="11" width="9" height="9" fill="#ffb900" /></svg>
+              Sign in with Microsoft
+            </a>
+            <div className="or-line"><span>or use your email</span></div>
+          </>
+        )}
         <div className="field">
           <label htmlFor="email">Work email</label>
           <input id="email" className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
@@ -59,7 +75,6 @@ export default function LoginPage() {
         {error && <p className="err" role="alert">{error}</p>}
         <button className="btn primary" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         {needsSetup && <Link href="/setup">Set up your organization</Link>}
-        <span className="muted" style={{ fontSize: 12.5 }}>Microsoft sign-in (Entra ID) arrives in step 2.</span>
       </form>
     </div>
   );

@@ -29,7 +29,7 @@ import { App, toThreadedConversationId, type HttpRouteHandler, type IHttpServerA
 import { stripMentionsText, type IMessageActivityInput } from "@microsoft/teams.api";
 import type { IAdaptiveCard } from "@microsoft/teams.cards";
 import { all, get, now, run } from "../db";
-import { audit, HttpError, type User } from "../auth";
+import { audit, canEdit, HttpError, type User } from "../auth";
 import { ask } from "../sidekick";
 import { span, traceFailed, traceScope, withTrace } from "../trace";
 import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, VERBS, type ActionItemInput } from "./cards";
@@ -195,16 +195,35 @@ const workspaceName = async (conv: TeamsConversation) =>
 /** True if the owner paused this organization in the Owner Console; Sidekick then stops answering in Teams. */
 const orgPaused = async (orgId: string) => (await get<{ status: string }>("SELECT status FROM orgs WHERE id = ?", orgId))?.status === "Suspended";
 
-// Teams users aren't portal users yet (Entra ID sign-in comes later in step 2). Inside a linked
-// channel they act as a Member of that one workspace, which is all ask() and the card actions need.
-const teamsMember = (conv: TeamsConversation, from: InboundActivity["from"]): User => ({
-  id: `teams:${from.aadObjectId ?? from.id}`,
-  org_id: conv.org_id!,
-  name: `${from.name ?? "Teams user"} (Teams)`,
-  email: "",
-  role: "Member",
-  must_change_password: 0,
-});
+/**
+ * Who sent a Teams activity, as Sidekick sees them.
+ * - If their Microsoft account (`aadObjectId`) belongs to a Sidekick person in this organization, and the
+ *   message comes from the Microsoft tenant the org connected (Settings → Microsoft sign-in), it's that
+ *   person, with their own name and role (so a Viewer can ask but not change action items). The account
+ *   id is saved the first time they sign in to the portal with Microsoft (lib/entra.ts).
+ * - Otherwise they're a guest of the linked chat: they act as a Member of that one workspace (being in
+ *   the linked Teams chat is what lets them ask), shown as "<name> (Teams)".
+ * Teams requests are signed by Microsoft (checked in handleTeamsRequest), so the ids can be trusted.
+ */
+async function teamsActor(conv: TeamsConversation, a: InboundActivity): Promise<User> {
+  const tenant = a.conversation.tenantId ?? a.channelData?.tenant?.id;
+  if (a.from.aadObjectId && tenant && conv.org_id) {
+    const person = await get<User>(
+      `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password FROM users u JOIN orgs o ON o.id = u.org_id
+        WHERE u.org_id = ? AND u.entra_oid = ? AND o.entra_tenant_id = ?`,
+      conv.org_id, a.from.aadObjectId, tenant,
+    );
+    if (person) return person;
+  }
+  return {
+    id: `teams:${a.from.aadObjectId ?? a.from.id}`,
+    org_id: conv.org_id!,
+    name: `${a.from.name ?? "Teams user"} (Teams)`,
+    email: "",
+    role: "Member",
+    must_change_password: 0,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Activity handlers                                                   */
@@ -237,14 +256,16 @@ function registerHandlers(app: App) {
     }
     if (await orgPaused(conv.org_id!)) return void (await send("Sidekick is paused for this organization. Contact the Sidekick team."));
     if (question.length > 1000) return void (await send("That question is too long for me (max 1,000 characters)."));
+    const asker = await teamsActor(conv, activity);
+    traceScope({ actor: asker.name });
 
     await send({ type: "typing" });
     // Teams expects a reply to its request within a few seconds; Claude can take longer, so the
     // answer is sent as a follow-up message after this request has already been acknowledged.
     after(() =>
-      withTrace({ name: "Teams answer", channel: "teams", orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user", detached: true }, async () => {
+      withTrace({ name: "Teams answer", channel: "teams", orgId: conv.org_id, workspaceId: conv.workspace_id, actor: asker.name, detached: true }, async () => {
         try {
-          const result = await ask(teamsMember(conv, activity.from), conv.workspace_id!, question, conv.guests === 1);
+          const result = await ask(asker, conv.workspace_id!, question, conv.guests === 1, "teams");
           const card = answerCard(question, result, (await workspaceName(conv)) ?? "Workspace");
           await span("teams", "Send the answer card to Teams", () => reply(card));
         } catch (e) {
@@ -271,7 +292,8 @@ function registerHandlers(app: App) {
       String(data?.itemId ?? ""), conv.org_id, conv.workspace_id,
     );
     if (!item) return fail("I couldn't find that action item in this workspace.");
-    const actor = teamsMember(conv, activity.from);
+    const actor = await teamsActor(conv, activity);
+    if (!canEdit(actor)) return fail(`Your Sidekick role (${actor.role}) can't change action items. Ask a Member or an Org Admin.`);
     if (verb === VERBS.assign) {
       const owner = String(data?.owner ?? "").trim().slice(0, 120);
       if (!owner) return fail("Type a name to assign it to.");

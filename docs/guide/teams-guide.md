@@ -29,6 +29,9 @@ On an action-item card:
 
 Changes show on the card for everyone, in the portal's tracker, and in the audit log under your name.
 
+## Who you are in Teams
+Once you've signed in to the Sidekick portal with Microsoft, Sidekick recognises you in Teams too: your questions and card clicks count under your Sidekick name and role. A **Viewer** can ask questions but can't assign or close action items. People in a linked chat who don't have a Sidekick account can still ask and use the cards, for that chat's workspace only.
+
 ## Commands
 | Type | Does |
 |---|---|

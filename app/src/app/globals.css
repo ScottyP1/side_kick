@@ -303,7 +303,10 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 /* ---------- Home: live orb + assistant (components/live-orb.tsx, components/assistant.tsx) ---------- */
 .live-orb{overflow:hidden}
 .orb-stage{position:relative;height:300px;background:radial-gradient(ellipse at center,color-mix(in srgb,var(--accent) 10%,transparent),transparent 62%)}
-.orb-core{position:absolute;left:50%;top:50%;width:320px;height:320px;transform:translate(-50%,-50%)}
+.orb-stage{height:350px}
+.orb-greeting{position:absolute;left:0;right:0;top:14px;margin:0;text-align:center;font-family:var(--f-display);font-size:26px;font-weight:650;letter-spacing:-.01em;color:var(--fg);z-index:1;pointer-events:none;animation:greetIn 1.6s cubic-bezier(.2,.7,.2,1) both .25s}
+@keyframes greetIn{from{opacity:0;transform:translateY(8px);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+.orb-core{position:absolute;left:50%;top:calc(50% + 22px);width:300px;height:300px;transform:translate(-50%,-50%)}
 .orb-canvas{width:100%;height:100%;display:block}
 .orb-fallback{width:72%;height:72%;margin:14%;border-radius:50%;background:radial-gradient(circle at 35% 30%,color-mix(in srgb,#fff 35%,var(--viz-3)),var(--accent) 45%,var(--viz-1) 100%);box-shadow:0 0 60px color-mix(in srgb,var(--accent) 45%,transparent);animation:orbBreathe 6s ease-in-out infinite}
 @keyframes orbBreathe{50%{transform:scale(1.04);filter:brightness(1.08)}}
@@ -316,6 +319,9 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .assist-msg{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 .assist-msg.user{align-items:flex-end}
 .assist-bubble{max-width:85%;padding:8px 12px;border-radius:12px;background:var(--sunken);line-height:1.45;white-space:pre-wrap;display:inline-flex;gap:8px;align-items:center}
+.assist-thinking-label{display:inline-block;background:linear-gradient(90deg,var(--muted) 0%,var(--fg) 50%,var(--muted) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:thinkIn .5s cubic-bezier(.2,.7,.2,1) both,shimmer 1.8s linear infinite}
+@keyframes thinkIn{from{opacity:0;transform:translateY(5px);filter:blur(2px)}to{opacity:1;transform:none;filter:none}}
+@keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
 .assist-msg.user .assist-bubble{background:var(--accent);color:var(--accent-fg)}
 .assist-input{display:flex;gap:8px}
 .assist-input .input{flex:1}
@@ -332,5 +338,10 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .assist-card .actions{display:flex;gap:6px}
 .assist-secret{font-family:var(--f-mono,ui-monospace,monospace);background:var(--sunken);padding:4px 8px;border-radius:6px;user-select:all}
 .good-text{color:var(--good)}
-@media (max-width:720px){.orb-stage{height:230px}.orb-core{width:240px;height:240px}.assist-bubble,.assist-card{max-width:100%}}
-@media (prefers-reduced-motion:reduce){.orb-fallback{animation:none}}
+@media (max-width:720px){.orb-stage{height:280px}.orb-greeting{font-size:21px}.orb-core{width:220px;height:220px}.assist-bubble,.assist-card{max-width:100%}}
+@media (prefers-reduced-motion:reduce){.orb-fallback,.orb-greeting,.assist-thinking-label{animation:none}.assist-thinking-label{color:var(--muted);background:none}}
+
+/* ---------- Sign-in: Microsoft button ---------- */
+.ms-btn{justify-content:center;gap:10px;padding:9px 12px;font-weight:600;text-decoration:none;color:var(--fg)}
+.or-line{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12.5px}
+.or-line::before,.or-line::after{content:"";flex:1;height:1px;background:var(--line)}

@@ -50,6 +50,28 @@ async function logAppError(ref: string, status: number, req: unknown, e: unknown
 }
 
 /**
+ * For routes that answer with a redirect instead of JSON (Microsoft sign-in): turns an error into a
+ * message safe to show, recording unexpected ones under a reference code like `handle()` does.
+ */
+export async function errorMessageFor(req: Request, e: unknown): Promise<string> {
+  unstable_rethrow(e);
+  if (e instanceof HttpError) {
+    if (e.status < 500) {
+      traceFailed(e.status, e.message);
+      return e.message;
+    }
+    const ref = newRef();
+    await logAppError(ref, e.status, req, e);
+    traceFailed(e.status, e.message, ref);
+    return `${e.message} (Reference ${ref})`;
+  }
+  const ref = newRef();
+  await logAppError(ref, 500, req, e);
+  traceFailed(500, "Sign-in failed unexpectedly", ref);
+  return `Something went wrong on our side. Try again; if it keeps happening, contact the Sidekick team. (Reference ${ref})`;
+}
+
+/**
  * Wraps a route handler so its return value becomes JSON and thrown errors become clean JSON errors the
  * UI can show. Nothing fails silently:
  * - `HttpError`s (expected problems: not signed in, not allowed, invalid input) return their message.

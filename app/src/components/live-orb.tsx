@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * "Sidekick live" on the home page: the crystal ball (Sidekick itself), a row showing each connection's
+ * "Sidekick live" on the home page: a greeting that fades in above the crystal ball (Sidekick itself), a row showing each connection's
  * health and who's active, and the in-app assistant chat underneath (components/assistant.tsx).
  *
  * What it shows (from GET /api/activity?view=live, refreshed every 5 seconds):
  * - The ball moves faster and glows brighter while Sidekick is working (a request in the last ~20 s, or
- *   while the assistant is writing a reply).
+ *   while the assistant is writing a reply). While the assistant thinks, the dust inside also swirls in
+ *   circles, as if an invisible finger were stirring it (`useThinkingSwirl`).
  * - Each connection (Teams, Claude, search, database) has a dot colored by health: green Healthy, amber
  *   Slow/had errors, red Failing, grey Idle/Not set up. The word is always shown, so color is never the
  *   only signal. Admins also see who's active; everyone else sees a count.
@@ -15,7 +16,7 @@
  * when off-screen, holds still when the person prefers reduced motion, follows light/dark mode, falls back
  * to a CSS gradient without WebGL 2, and a text summary is provided for screen readers.
  */
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import Link from "next/link";
 import { api } from "./ui";
 import CrystalizedBall from "./crystalized-ball/CrystalizedBall";
@@ -97,14 +98,60 @@ function Core({ busy, reduced }: { busy: boolean; reduced: boolean }) {
   );
 }
 
+/**
+ * While `on`, stirs the ball's dust in circles, as if someone were circling a mouse inside it.
+ *
+ * How: the ball (an unmodified React Bits component) already swirls its dust when the pointer moves
+ * over it, by listening to pointer events on the window. This sends it a "ghost pointer" circling the
+ * centre of `target` (about half the ball's radius, a little over one turn a second, wobbling slightly so
+ * it looks alive). The ghost steps aside whenever the person's real mouse is over the ball, and a final
+ * "pointer left" event lets the dust settle when thinking ends. Nothing happens for reduced motion.
+ */
+function useThinkingSwirl(on: boolean, target: RefObject<HTMLElement | null>, reduced: boolean) {
+  useEffect(() => {
+    const el = target.current;
+    if (!on || reduced || !el) return;
+    let raf = 0;
+    let realUntil = 0;
+    const t0 = performance.now();
+    const onReal = (e: PointerEvent) => {
+      if (!e.isTrusted) return;
+      const r = el.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) realUntil = performance.now() + 1200;
+    };
+    window.addEventListener("pointermove", onReal, { passive: true });
+    const step = (now: number) => {
+      raf = requestAnimationFrame(step);
+      if (now < realUntil) return;
+      const r = el.getBoundingClientRect();
+      const t = (now - t0) / 1000;
+      const ballRadius = (0.8 * Math.min(r.width, r.height)) / 2; // matches size={0.8} below
+      const rad = ballRadius * (0.5 + 0.12 * Math.sin(t * 1.7));
+      const a = t * 2 * Math.PI * 1.15;
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: r.left + r.width / 2 + Math.cos(a) * rad, clientY: r.top + r.height / 2 + Math.sin(a) * rad, pointerType: "mouse" }));
+    };
+    raf = requestAnimationFrame(step);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("pointermove", onReal);
+      if (performance.now() >= realUntil) window.dispatchEvent(new PointerEvent("pointerout", { relatedTarget: null })); // let the dust settle
+    };
+  }, [on, target, reduced]);
+}
+
 /* ---------------- The panel: ball, connection health, assistant ---------------- */
 
-/** The home page's live panel. `admin` decides whether names of active people are shown. */
-export function LiveOrb({ admin }: { admin: boolean }) {
+/**
+ * The home page's live panel. `admin` decides whether names of active people are shown; `greeting`
+ * ("Good morning, Cody") fades in above the ball (shown without the fade for reduced motion).
+ */
+export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string }) {
   const [live, setLive] = useState<Live | null>(null);
   const [failed, setFailed] = useState(false);
   const [reduced, setReduced] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const coreRef = useRef<HTMLDivElement>(null);
+  useThinkingSwirl(thinking, coreRef, reduced);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -166,7 +213,8 @@ export function LiveOrb({ admin }: { admin: boolean }) {
       </div>
       <p className="sr-only" aria-live="polite">{summary}</p>
       <div className="orb-stage">
-        <div className="orb-core">
+        {greeting && <p className="orb-greeting">{greeting}</p>}
+        <div className="orb-core" ref={coreRef}>
           <Core busy={busy} reduced={reduced} />
         </div>
       </div>

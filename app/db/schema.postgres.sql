@@ -20,6 +20,13 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TEXT NOT NULL
 );
+-- Microsoft sign-in in progress: one row per "Sign in with Microsoft" click, kept 10 minutes. state is
+-- the random value sent to Microsoft and back; verifier (PKCE) and nonce prove the reply belongs to it.
+-- mode = signin | link (an Org Owner connecting their organization's Microsoft tenant).
+CREATE TABLE IF NOT EXISTS oidc_states (
+  state TEXT PRIMARY KEY, verifier TEXT NOT NULL, nonce TEXT NOT NULL, mode TEXT NOT NULL,
+  user_id TEXT, next_path TEXT, expires_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS workspaces (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id),
   name TEXT NOT NULL, code TEXT, color TEXT NOT NULL, created_at TEXT NOT NULL
@@ -138,3 +145,9 @@ CREATE TABLE IF NOT EXISTS trace_spans (
 -- Columns added after the first release (safe to run on an existing database).
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS asked_by TEXT;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS channel TEXT;
+-- Microsoft (Entra ID) sign-in (see lib/entra.ts).
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS entra_tenant_id TEXT;
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS sso_required INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS entra_oid TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS orgs_entra_tenant ON orgs(entra_tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS users_entra_oid ON users(org_id, entra_oid);

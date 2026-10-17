@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, useToast } from "@/components/ui";
 
-type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; workspaces: string[] };
+type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; microsoft: number; workspaces: string[] };
 const ROLES = ["Org Admin", "Billing Admin", "Member", "Viewer"];
 const ROLE_HELP: [string, string][] = [
   ["Org Owner", "Everything, including deleting the organization"],
@@ -107,7 +107,7 @@ export default function UsersPage() {
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                       <span className="avatar">{p.name.split(" ").map((x) => x[0]).join("").slice(0, 2)}</span>
                       <div style={{ minWidth: 0 }}>
-                        <b>{p.name}</b> {p.must_change_password ? <Pill kind="info">Temporary password</Pill> : null}
+                        <b>{p.name}</b> {p.microsoft ? <Pill kind="good">Microsoft</Pill> : p.must_change_password ? <Pill kind="info">Temporary password</Pill> : null}
                         <div className="muted" style={{ fontSize: 12.5 }}>{p.email}</div>
                       </div>
                     </div>

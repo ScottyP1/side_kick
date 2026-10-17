@@ -9,6 +9,9 @@
  * happen, and only Confirm sends the request, to the same API route the regular page uses (so role
  * checks and the audit log apply as usual). Cancel does nothing. Results and refusals appear in the card;
  * network/server problems also open the problem modal, so nothing fails silently.
+ * While a reply is on its way, the "thinking" bubble steps through short labels ("Reading your
+ * question", "Checking what your role allows"…) so the wait feels alive; screen readers hear one
+ * "Thinking" instead of every label.
  */
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -33,6 +36,32 @@ function suggestionsFor(role: string, admin: boolean): string[] {
   if (role === "Billing Admin") return ["What did we spend on AI this month?", "What can my role do?", "How is cost tracked?"];
   if (role === "Viewer") return ["What can my role do?", "How do I find a decision from a meeting?", "What are knowledge gaps?"];
   return ["How do I import a meeting?", "Refresh the knowledge map", "How do I use Sidekick in Teams?"];
+}
+
+/** What the thinking bubble cycles through, in order (the last one repeats until the reply arrives). */
+const THINKING_LABELS = [
+  "Reading your question",
+  "Checking what your role allows",
+  "Looking through how Sidekick works",
+  "Weighing the options",
+  "Drafting a reply",
+  "Double-checking the details",
+  "Almost there",
+];
+
+/** The animated "thinking" bubble: a spinner and a label that changes every 1.8 seconds. */
+function ThinkingBubble() {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setI((n) => Math.min(n + 1, THINKING_LABELS.length - 1)), 1800);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="assist-bubble muted assist-thinking" role="status" aria-label="Thinking">
+      <Spinner />
+      <span key={i} className="assist-thinking-label" aria-hidden="true">{THINKING_LABELS[i]}…</span>
+    </div>
+  );
 }
 
 /**
@@ -107,7 +136,7 @@ export function Assistant({ onThinking }: { onThinking?: (on: boolean) => void }
           ))}
           {thinking && (
             <div className="assist-msg assistant">
-              <div className="assist-bubble muted"><Spinner /> Thinking…</div>
+              <ThinkingBubble />
             </div>
           )}
         </div>

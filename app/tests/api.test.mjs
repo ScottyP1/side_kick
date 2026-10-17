@@ -3,7 +3,8 @@
  * exercises it like users and Teams would. Nothing real is touched or paid for:
  * - its own data (a temp SQLite folder, or the DATABASE_URL test database, wiped first),
  * - fake Claude (SIDEKICK_FAKE_CLAUDE=1: canned answers, never in production),
- * - Azure search switched off, Teams in local Playground mode with a fake Teams connector.
+ * - Azure search switched off, Teams in local Playground mode with a fake Teams connector,
+ * - a fake Microsoft sign-in service (Entra ID) that signs ID tokens with a key made up for the run.
  *
  * Run with `npm test` (both engines), or one engine:
  *   TEST_DB=sqlite node --test tests/api.test.mjs
@@ -12,6 +13,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
@@ -57,6 +59,60 @@ async function waitForSent(pred, ms = 20000) {
 const cardsOf = (m) => (m.body.attachments ?? []).map((a) => a.content);
 const cardText = (card) => JSON.stringify(card);
 
+/* ---------- fake Microsoft sign-in (Entra ID): authorize is skipped, token + keys are real-shaped ---------- */
+const MS_CLIENT_ID = "test-entra-client";
+const { publicKey: msPublic, privateKey: msPrivate } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+const msJwk = { ...msPublic.export({ format: "jwk" }), kid: "test-key", alg: "RS256", use: "sig" };
+const msCodes = new Map(); // code → { challenge, nonce, claims }
+let MS_BASE;
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+/** An ID token signed like Microsoft's (RS256), for the given tenant and claims. */
+function msIdToken(tid, nonce, claims, key = msPrivate) {
+  const head = b64({ alg: "RS256", kid: "test-key", typ: "JWT" });
+  const now = Math.floor(Date.now() / 1000);
+  const body = b64({ iss: `${MS_BASE}/${tid}/v2.0`, aud: MS_CLIENT_ID, tid, nonce, iat: now, nbf: now, exp: now + 3600, ...claims });
+  return `${head}.${body}.${crypto.sign("sha256", Buffer.from(`${head}.${body}`), key).toString("base64url")}`;
+}
+const microsoft = http.createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    const send = (status, json) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(json));
+    };
+    if (req.url.endsWith("/discovery/v2.0/keys")) return send(200, { keys: [msJwk] });
+    if (req.url.endsWith("/oauth2/v2.0/token")) {
+      const f = new URLSearchParams(body);
+      const c = msCodes.get(f.get("code"));
+      msCodes.delete(f.get("code"));
+      const pkceOk = c && crypto.createHash("sha256").update(f.get("code_verifier") ?? "").digest("base64url") === c.challenge;
+      if (!c || !pkceOk || f.get("client_id") !== MS_CLIENT_ID) return send(400, { error: "invalid_grant" });
+      return send(200, { id_token: msIdToken(c.claims.tid, c.nonce, c.claims, c.key) });
+    }
+    send(404, { error: "not found" });
+  });
+});
+const TENANT = "11111111-2222-4333-8444-555555555555";
+const OTHER_TENANT = "99999999-8888-4777-8666-555555555555";
+
+/**
+ * Signs in with the fake Microsoft: starts the flow like the button does, "signs in" as `claims`
+ * (tid, oid, email, name), and follows Microsoft's redirect back. Returns the final redirect target.
+ * `opts.cheat` lets tests break one piece (nonce, state cookie, key) to check it's refused.
+ */
+async function microsoftSignIn(call, claims, { mode, cheat = {}, replay } = {}) {
+  const start = await call("GET", `/api/auth/microsoft/start${mode === "link" ? "?mode=link" : ""}`);
+  if (start.status !== 307) return { start };
+  const u = new URL(start.location);
+  assert.equal(u.searchParams.get("code_challenge_method"), "S256");
+  const code = crypto.randomUUID();
+  msCodes.set(code, { challenge: u.searchParams.get("code_challenge"), nonce: cheat.nonce ?? u.searchParams.get("nonce"), claims, key: cheat.key });
+  const back = await (cheat.otherBrowser ?? call)("GET", `/api/auth/microsoft/callback?code=${code}&state=${u.searchParams.get("state")}`);
+  if (replay) await call("GET", `/api/auth/microsoft/callback?code=${code}&state=${u.searchParams.get("state")}`);
+  return { start, back, to: back.location ? new URL(back.location) : null };
+}
+
 /* ---------- a tiny HTTP client with its own cookie jar per user ---------- */
 function client() {
   const jar = new Map();
@@ -82,7 +138,7 @@ function client() {
     } catch {
       json = text;
     }
-    return { status: res.status, body: json };
+    return { status: res.status, body: json, location: res.headers.get("location") };
   };
 }
 
@@ -101,6 +157,8 @@ const toBot = (a) => fetch(`${BASE}/api/messages`, { method: "POST", headers: { 
 before(async () => {
   await new Promise((r) => connector.listen(0, "127.0.0.1", r));
   SERVICE_URL = `http://127.0.0.1:${connector.address().port}`;
+  await new Promise((r) => microsoft.listen(0, "127.0.0.1", r));
+  MS_BASE = `http://127.0.0.1:${microsoft.address().port}`;
   tsconfigBefore = fs.readFileSync(path.join(APP, "tsconfig.json"), "utf8");
   const env = {
     ...process.env,
@@ -117,7 +175,13 @@ before(async () => {
     CLIENT_SECRET: "",
     TENANT_ID: "",
     SIDEKICK_PUBLIC_URL: "",
+    // Microsoft sign-in against the fake Microsoft above (ENTRA_LOGIN_BASE is ignored in production).
+    ENTRA_CLIENT_ID: MS_CLIENT_ID,
+    ENTRA_CLIENT_SECRET: "test-entra-secret",
+    ENTRA_TENANT: "organizations",
+    ENTRA_LOGIN_BASE: "",
   };
+  env.ENTRA_LOGIN_BASE = MS_BASE;
   if (ENGINE === "postgres") {
     const dbName = new URL(PG_URL.replace("postgres:///", "postgres://localhost/")).pathname.slice(1);
     execFileSync("dropdb", ["--if-exists", dbName]);
@@ -148,6 +212,7 @@ after(async () => {
     await Promise.race([exited, new Promise((r) => setTimeout(r, 10000))]);
   }
   connector.close();
+  microsoft.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
   fs.rmSync(path.join(APP, `.next-test-${ENGINE}`), { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   if (tsconfigBefore) fs.writeFileSync(path.join(APP, "tsconfig.json"), tsconfigBefore); // next dev edits it
@@ -417,7 +482,7 @@ test(`[${ENGINE}] Activity: failures are traced with their reference code, and T
   assert.equal(failed.length, 1, "the failed meeting import can be found by its reference code");
   assert.equal(failed[0].status, "error");
   const teams = (await admin("GET", "/api/activity?view=traces&channel=teams")).body.traces;
-  assert.ok(teams.some((t) => t.name === "Teams answer" && t.actor === "Test User"));
+  assert.ok(teams.some((t) => t.name === "Teams answer" && t.actor === "Test User (Teams)"));
   const overview = (await admin("GET", "/api/activity?view=overview&days=1")).body;
   assert.ok(overview.kpis.requests > 0 && overview.kpis.teams > 0);
   assert.equal(overview.series.length, 24);
@@ -485,4 +550,96 @@ test(`[${ENGINE}] assistant: plain questions, bad input, signed out, and the kil
   assert.equal(paused.status, 503);
   assert.match(paused.body.error, /paused/);
   assert.equal((await owner("POST", "/api/owner/releases", { key: "assist", enabled: true })).status, 200);
+});
+
+/* ---------- Microsoft sign-in (Entra ID) ---------- */
+const errorOf = (r) => decodeURIComponent(r.to?.searchParams.get("error") ?? "");
+
+test(`[${ENGINE}] Microsoft: no sign-in until the Org Owner connects the organization's tenant`, async () => {
+  const r = await microsoftSignIn(client(), { tid: TENANT, oid: "oid-admin", email: "admin@test.local", name: "Test Admin" });
+  assert.equal(r.to.pathname, "/login");
+  assert.match(errorOf(r), /isn't connected to Sidekick/);
+  assert.equal((await member("GET", "/api/auth/microsoft/start?mode=link")).status, 403, "only Org Owners connect");
+  const linked = await microsoftSignIn(admin, { tid: TENANT, oid: "oid-admin", email: "someone.else@test.local", name: "Test Admin" }, { mode: "link" });
+  assert.equal(linked.to.pathname + linked.to.search, "/settings?microsoft=connected");
+  const status = (await admin("GET", "/api/auth/microsoft")).body;
+  assert.equal(status.connected, true);
+  assert.equal(status.tenantId, TENANT);
+  assert.equal(status.linked, true, "the owner's own account is linked");
+  const other = client();
+  const taken = await microsoftSignIn(other, { tid: TENANT, oid: "x", email: "x@test.local" });
+  assert.match(errorOf(taken), /haven't been added/);
+});
+
+test(`[${ENGINE}] Microsoft: people who were added sign in; strangers, other tenants and personal accounts can't`, async () => {
+  const mia = client();
+  const ok = await microsoftSignIn(mia, { tid: TENANT, oid: "oid-member", email: "MEMBER@test.local", name: "Mia M." });
+  assert.equal(ok.to.pathname, "/", errorOf(ok));
+  const me = (await mia("GET", "/api/me")).body;
+  assert.equal(me.user.email, "member@test.local");
+  assert.equal(me.user.role, "Member", "role comes from Sidekick, not Microsoft");
+  // Matched by account id from now on, even if the email changes at Microsoft.
+  const again = await microsoftSignIn(client(), { tid: TENANT, oid: "oid-member", email: "mia.renamed@test.local" });
+  assert.equal(again.to.pathname, "/");
+  assert.match(errorOf(await microsoftSignIn(client(), { tid: TENANT, oid: "oid-stranger", email: "stranger@test.local" })), /haven't been added/);
+  assert.match(errorOf(await microsoftSignIn(client(), { tid: OTHER_TENANT, oid: "oid-member", email: "member@test.local" })), /isn't connected/);
+  assert.match(errorOf(await microsoftSignIn(client(), { tid: "9188040d-6c67-4c5b-b112-36a304b66dad", oid: "p", email: "member@test.local" })), /Personal Microsoft accounts/);
+  const vic = client();
+  assert.equal((await microsoftSignIn(vic, { tid: TENANT, oid: "oid-viewer", email: "viewer@test.local" })).to.pathname, "/");
+  const users = (await admin("GET", "/api/users")).body.users;
+  assert.equal(users.find((u) => u.email === "viewer@test.local").microsoft, 1);
+});
+
+test(`[${ENGINE}] Microsoft: forged, replayed or cross-browser replies are refused`, async () => {
+  const claims = { tid: TENANT, oid: "oid-member", email: "member@test.local" };
+  assert.match(errorOf(await microsoftSignIn(client(), claims, { cheat: { nonce: "wrong" } })), /doesn't match this browser/);
+  const forger = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+  assert.match(errorOf(await microsoftSignIn(client(), claims, { cheat: { key: forger } })), /couldn't be verified/);
+  const attacker = client();
+  assert.match(errorOf(await microsoftSignIn(client(), claims, { cheat: { otherBrowser: attacker } })), /different browser/);
+  const c = client();
+  const first = await microsoftSignIn(c, claims, { replay: true });
+  assert.equal(first.to.pathname, "/");
+  const back = await c("GET", `/api/auth/microsoft/callback?code=x&state=${new URL(first.start.location).searchParams.get("state")}`);
+  assert.match(decodeURIComponent(new URL(back.location).searchParams.get("error")), /expired|took too long|different browser/);
+  const cancelled = await c("GET", "/api/auth/microsoft/callback?error=access_denied&error_description=AADSTS65004%3A+User+declined");
+  assert.match(decodeURIComponent(new URL(cancelled.location).searchParams.get("error")), /cancelled/);
+});
+
+test(`[${ENGINE}] Microsoft: Teams messages from a linked account use that person's name and role`, async () => {
+  const fromViewer = { from: { id: "teams-vic", name: "Vic in Teams", aadObjectId: "oid-viewer" }, conversation: { id: "conv-1", conversationType: "personal", tenantId: TENANT } };
+  const refused = await (await toBot(activity({ ...fromViewer, type: "invoke", name: "adaptiveCard/action", value: { action: { type: "Action.Execute", verb: "sidekick.action.done", data: { itemId: s.actionA } } } }))).json();
+  assert.match(JSON.stringify(refused), /role \(Viewer\) can't change action items/);
+  const fromMember = { ...fromViewer, from: { id: "teams-mia", name: "Mia in Teams", aadObjectId: "oid-member" } };
+  const done = await (await toBot(activity({ ...fromMember, type: "invoke", name: "adaptiveCard/action", value: { action: { type: "Action.Execute", verb: "sidekick.action.done", data: { itemId: s.actionA } } } }))).json();
+  assert.equal(done.type ?? done.body?.type, "application/vnd.microsoft.card.adaptive");
+  // The same account id from a different tenant is not trusted as that person.
+  const spoof = { ...fromViewer, conversation: { ...fromViewer.conversation, tenantId: OTHER_TENANT } };
+  const asGuest = await (await toBot(activity({ ...spoof, type: "invoke", name: "adaptiveCard/action", value: { action: { type: "Action.Execute", verb: "sidekick.action.reopen", data: { itemId: s.actionA } } } }))).json();
+  assert.equal(asGuest.type ?? asGuest.body?.type, "application/vnd.microsoft.card.adaptive", "treated as a guest Member of the linked chat");
+  const before = sent.length;
+  await toBot(activity({ ...fromViewer, type: "message", text: "When is the wave 2 cutover?" }));
+  await waitForSent((m) => sent.indexOf(m) >= before && cardsOf(m).some((c) => /Sources/.test(cardText(c))));
+  const msgs = (await admin("GET", "/api/activity?view=messages")).body.messages;
+  const mine = msgs.find((m) => m.asked_by === "Vic Viewer");
+  assert.ok(mine, "the question is recorded under the person's Sidekick name");
+  assert.equal(mine.channel, "teams");
+});
+
+test(`[${ENGINE}] Microsoft: requiring it turns passwords off and signs password users out`, async () => {
+  const pw = client();
+  // The viewer still has a password session from earlier; it must end.
+  assert.equal((await viewer("GET", "/api/me")).status, 200);
+  assert.equal((await member("PATCH", "/api/auth/microsoft", { required: true })).status, 403);
+  assert.equal((await admin("PATCH", "/api/auth/microsoft", { required: true })).status, 200);
+  assert.equal((await viewer("GET", "/api/me")).status, 401, "password sessions were ended");
+  assert.equal((await admin("GET", "/api/me")).status, 200, "the owner stays signed in");
+  const refused = await pw("POST", "/api/auth/login", { email: "admin@test.local", password: "correct horse battery" });
+  assert.equal(refused.status, 403);
+  assert.match(refused.body.error, /signs in with Microsoft/);
+  assert.equal((await microsoftSignIn(client(), { tid: TENANT, oid: "oid-viewer", email: "viewer@test.local" })).to.pathname, "/", "Microsoft still works");
+  assert.equal((await admin("PATCH", "/api/auth/microsoft", { required: false })).status, 200);
+  assert.equal((await pw("POST", "/api/auth/login", { email: "admin@test.local", password: "correct horse battery" })).status, 200);
+  assert.equal((await admin("DELETE", "/api/auth/microsoft")).status, 200);
+  assert.equal((await admin("GET", "/api/auth/microsoft")).body.connected, false);
 });

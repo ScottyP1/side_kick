@@ -42,7 +42,7 @@ When **client guests are present** (in a meeting marked "Client guests attended"
 Sidekick can be added to Teams channels and chats. Each channel or chat is **linked to one workspace** by an admin, and Sidekick only answers from that workspace there. See [Sidekick in Teams](teams-guide.md).
 
 ## The in-app assistant
-The chat box under the crystal ball on the home page. Ask it how Sidekick works ("how do I import a meeting?", "what can a Viewer do?") or ask it to do something: create a workspace, add a person, link a Teams chat, refresh a knowledge map, or open a page. It only offers what your role allows, and it never changes anything by itself: it shows a card with exactly what will happen, and nothing happens until you press **Confirm** (Cancel leaves everything as it was). Confirmed actions are recorded in the audit log like any other. For questions about a project's content, use **Ask Sidekick** on Knowledge & docs, which answers from your sources with citations. New client organizations are set up by the Sidekick team, not from the assistant.
+The chat box under the crystal ball on the home page. Ask it how Sidekick works ("how do I import a meeting?", "what can a Viewer do?") or ask it to do something: create a workspace, add a person, link a Teams chat, refresh a knowledge map, or open a page. While it thinks, the dust inside the ball swirls and the reply bubble shows what it's working on. It only offers what your role allows, and it never changes anything by itself: it shows a card with exactly what will happen, and nothing happens until you press **Confirm** (Cancel leaves everything as it was). Confirmed actions are recorded in the audit log like any other. For questions about a project's content, use **Ask Sidekick** on Knowledge & docs, which answers from your sources with citations. New client organizations are set up by the Sidekick team, not from the assistant.
 
 ## Audit log
 Sign-ins, access changes, uploads, deletions, Teams links and every action Sidekick takes on its own are recorded on **Security & audit**, with who did it and when.
@@ -54,4 +54,4 @@ Each AI request is metered: how much text went in and out (tokens), what it cost
 - Every request is checked: who you are, your role, and whether you belong to that workspace.
 - Every search and every AI request is limited to one organization and one workspace.
 - Documents and transcripts are treated as information, never as instructions, so text inside a file can't make Sidekick do something else.
-- Passwords are stored only as secure hashes. In production, sign-in moves to your Microsoft (Entra ID) account.
+- Sign in with your Microsoft work account (your company's password rules and MFA apply), or with a password, which is stored only as a secure hash. Your Org Owner can require Microsoft sign-in for everyone.

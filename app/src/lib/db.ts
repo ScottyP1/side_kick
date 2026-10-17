@@ -54,6 +54,13 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TEXT NOT NULL
 );
+-- Microsoft sign-in in progress: one row per "Sign in with Microsoft" click, kept 10 minutes. state is
+-- the random value sent to Microsoft and back; verifier (PKCE) and nonce prove the reply belongs to it.
+-- mode = signin | link (an Org Owner connecting their organization's Microsoft tenant).
+CREATE TABLE IF NOT EXISTS oidc_states (
+  state TEXT PRIMARY KEY, verifier TEXT NOT NULL, nonce TEXT NOT NULL, mode TEXT NOT NULL,
+  user_id TEXT, next_path TEXT, expires_at TEXT NOT NULL
+);
 -- One workspace per client engagement. code is an optional engagement code; color tags it in the UI.
 CREATE TABLE IF NOT EXISTS workspaces (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id),
@@ -235,6 +242,13 @@ function migrate(conn: DatabaseSync) {
   // Who asked and where (portal or Teams), for the Activity page's Messages view.
   if (!has("questions", "asked_by")) conn.exec("ALTER TABLE questions ADD COLUMN asked_by TEXT");
   if (!has("questions", "channel")) conn.exec("ALTER TABLE questions ADD COLUMN channel TEXT");
+  // Microsoft (Entra ID) sign-in: the org's Microsoft tenant, whether passwords are turned off, and each
+  // person's Microsoft account id (oid), which also identifies them in Teams.
+  if (!has("orgs", "entra_tenant_id")) conn.exec("ALTER TABLE orgs ADD COLUMN entra_tenant_id TEXT");
+  if (!has("orgs", "sso_required")) conn.exec("ALTER TABLE orgs ADD COLUMN sso_required INTEGER NOT NULL DEFAULT 0");
+  if (!has("users", "entra_oid")) conn.exec("ALTER TABLE users ADD COLUMN entra_oid TEXT");
+  conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS orgs_entra_tenant ON orgs(entra_tenant_id)");
+  conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_entra_oid ON users(org_id, entra_oid)");
 }
 
 /**

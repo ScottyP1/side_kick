@@ -8,22 +8,25 @@ The first person to open a new Sidekick install sets up the organization and bec
 ## 2. Create workspaces
 **Workspaces → New workspace.** Create one per client engagement, e.g. "Contoso Retail – Cloud Migration", with an optional engagement code. You're added as a member automatically.
 
-## 3. Add people
-**Users & access → Add a person.** Pick their role and the workspaces they can see. Sidekick shows a **temporary password once**: share it with them privately; they must change it at first sign-in. Change roles or workspaces at any time from the same page. (In production people sign in with their Microsoft account instead.)
+## 3. Turn on Microsoft sign-in (Org Owner)
+**Settings → Microsoft sign-in → Connect with Microsoft**, then sign in with your work account. This connects your organization to your company's Microsoft directory (tenant). From then on, people you've added can use **Sign in with Microsoft**. When everyone is set, switch on **Require Microsoft sign-in**: passwords stop working and anyone signed in with a password is signed out. You must have signed in with Microsoft yourself first, so you can't lock yourself out. **Disconnect** turns it off again (passwords work again).
 
-## 4. Add documents
+## 4. Add people
+**Users & access → Add a person.** Pick their role and the workspaces they can see. Sidekick shows a **temporary password once**: share it with them privately; they must change it at first sign-in. Change roles or workspaces at any time from the same page. If your organization uses Microsoft sign-in, people can ignore the temporary password and use **Sign in with Microsoft** with that same email; the list shows a **Microsoft** badge once they have.
+
+## 5. Add documents
 **Knowledge & docs**, in the workspace you want. Drop in PDF, Word (.docx), text, Markdown, CSV or JSON files, up to 25 MB each. Tag each one:
 - **Internal** for team-only material.
 - **Shareable** for anything fine to use in front of the client.
 
 You can change the tag later; it takes effect immediately.
 
-## 5. Import meetings
+## 6. Import meetings
 **Meetings → Import transcript.** Upload the Teams transcript (`.vtt`), a Word file or paste the text, give it a title and date, and tick **Client guests attended** if the client was there. Notes are ready in about 15–30 seconds. If processing fails (for example, Sidekick was paused), open the meeting and choose **Try again**.
 
 If the workspace has linked Teams channels, Sidekick posts the notes and action items there automatically.
 
-## 6. Link Teams channels
+## 7. Link Teams channels
 See [Sidekick in Teams](teams-guide.md) for what people see. To link:
 1. Someone adds Sidekick to the Teams channel or chat and mentions it (`@Sidekick link`).
 2. Sidekick replies with an 8-character code, valid for 24 hours.
@@ -32,21 +35,21 @@ See [Sidekick in Teams](teams-guide.md) for what people see. To link:
 
 The **Teams channels and chats** table on the Workspaces page shows every link. Use the switch to change the client-guests setting, or **Unlink** to stop Sidekick answering and posting there.
 
-## 7. Keep knowledge healthy
+## 8. Keep knowledge healthy
 **Memory & gaps → Refresh knowledge map** after adding material (Members and Admins can; Viewers and Billing Admins can't, since each refresh is a paid AI request). Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place.
 
-## 8. Watch usage and activity
+## 9. Watch usage and activity
 - **Usage & billing**: AI cost by feature, workspace and day (also open to Billing Admins).
 - **Security & audit**: who did what and when, including everything Sidekick did on its own.
 
-## 9. See what Sidekick is doing (Activity)
+## 10. See what Sidekick is doing (Activity)
 - **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, Claude, search, database) with their health, and who's active.
 - **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, Claude and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored.
 
-## 10. Use the assistant for quick admin jobs
+## 11. Use the assistant for quick admin jobs
 On the home page, type requests like "create a workspace for Fabrikam, code FAB", "add Maria Chen maria@fabrikam.example as a Member of Fabrikam" or "link Teams code K7Q2 to Fabrikam". Sidekick shows a card with the details; check them and press **Confirm**. When adding a person, the card shows their temporary password once: send it to them privately. If a detail is missing, the assistant asks for it first.
 
-## 11. Branding
+## 12. Branding
 **Settings**: upload your logo and pick a brand color. They're applied across the portal.
 
 ## Troubleshooting

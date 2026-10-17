@@ -103,6 +103,7 @@ export const FLAGS = {
   assist: { label: "In-app assistant", help: "The chat box on the home page" },
   guard: { label: "Guardrail check", help: "Checks every question first. Pausing it also pauses answers: Sidekick never answers unchecked" },
   uploads: { label: "Document uploads", help: "New files from any client" },
+  remind: { label: "Reminders in Teams", help: "Daily and after-meeting reminder cards posted to Teams chats" },
 } as const;
 export type FlagKey = keyof typeof FLAGS;
 

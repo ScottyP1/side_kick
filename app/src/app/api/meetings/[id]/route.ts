@@ -9,6 +9,7 @@ import { all, get, run } from "@/lib/db";
 import { removeIndexed } from "@/lib/search";
 import { processMeeting } from "@/lib/sidekick";
 import { postMeetingNotes } from "@/lib/teams/bot";
+import { remindAfterMeeting } from "@/lib/reminders";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -38,7 +39,11 @@ export const POST = handle(async (_req: Request, { params }: Ctx) => {
   await removeIndexed(m.id);
   await run("UPDATE meetings SET status = 'Processing', error = NULL WHERE id = ?", m.id);
   await processMeeting(user, m.id);
-  after(() => postMeetingNotes(user.org_id, m.id).catch((e) => console.error("Teams notes post failed", e)));
+  after(async () => {
+    await postMeetingNotes(user.org_id, m.id).catch((e) => console.error("Teams notes post failed", e));
+    // Then a reminder in the chats that want one after meetings (what's still open from earlier).
+    await remindAfterMeeting(user.org_id, m.id).catch((e) => console.error("Teams reminders after the meeting failed", e));
+  });
   return { ok: true };
 });
 

@@ -59,6 +59,7 @@ async function waitForSent(pred, ms = 20000) {
 }
 const cardsOf = (m) => (m.body.attachments ?? []).map((a) => a.content);
 const cardText = (card) => JSON.stringify(card);
+const TICK_SECRET = crypto.randomBytes(24).toString("hex");
 
 /* ---------- fake Microsoft sign-in (Entra ID): authorize is skipped, token + keys are real-shaped ---------- */
 const MS_CLIENT_ID = "test-entra-client";
@@ -176,6 +177,9 @@ before(async () => {
     CLIENT_SECRET: "",
     TENANT_ID: "",
     SIDEKICK_PUBLIC_URL: "",
+    // The reminder timer is off; tests call its route themselves with this secret.
+    SIDEKICK_SCHEDULER: "off",
+    SIDEKICK_TICK_SECRET: TICK_SECRET,
     // Microsoft sign-in against the fake Microsoft above (ENTRA_LOGIN_BASE is ignored in production).
     ENTRA_CLIENT_ID: MS_CLIENT_ID,
     ENTRA_CLIENT_SECRET: "test-entra-secret",
@@ -1166,4 +1170,172 @@ test(`[${ENGINE}] Microsoft: requiring it turns passwords off and signs password
   assert.equal((await pw("POST", "/api/auth/login", { email: "admin@test.local", password: "correct horse battery" })).status, 200);
   assert.equal((await admin("DELETE", "/api/auth/microsoft")).status, 200);
   assert.equal((await admin("GET", "/api/auth/microsoft")).body.connected, false);
+});
+
+/* ---------- proactive reminders and per-chat settings (lib/reminders.ts) ---------- */
+const GROUP = "conv-group-reminders";
+const groupMsg = (overrides) => activity({ conversation: { id: GROUP, conversationType: "groupChat", tenantId: "tenant-1", name: "Wave 2 team" }, ...overrides });
+const mia = client();
+
+test(`[${ENGINE}] reminders: settings are per chat, Org Owners/Admins only, checked and audited`, async () => {
+  // A fresh Member (earlier password sessions were ended by the Microsoft "require" test).
+  const m = await admin("POST", "/api/users", { name: "Remi Member", email: "remi@test.local", role: "Member", workspaces: [s.wsA] });
+  assert.equal((await mia("POST", "/api/auth/login", { email: "remi@test.local", password: m.body.tempPassword })).status, 200);
+  const before = sent.length;
+  await toBot(groupMsg({ type: "installationUpdate", action: "add" }));
+  const msg = await waitForSent((x) => sent.indexOf(x) >= before && x.url.includes(GROUP) && /Link this chat/.test(cardText(cardsOf(x)[0] ?? {})));
+  const code = cardText(cardsOf(msg)[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+  assert.equal((await admin("POST", "/api/teams-links", { code, ws: s.wsA })).status, 200);
+  const link = (await admin("GET", "/api/teams-links")).body.links.find((l) => l.id === GROUP);
+  assert.deepEqual([link.settings.notes, link.settings.track, link.settings.reminders], [true, false, false], "notes on, tracking and reminders off by default");
+
+  assert.equal((await mia("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { reminders: true } })).status, 403);
+  for (const bad of [{ time: "9am" }, { timeZone: "Mars/Olympus" }, { quietDays: [0, 1, 2, 3, 4, 5, 6] }, { kinds: { actions: false, questions: false, outdated: false, conflicts: false } }, { surprise: true }, { track: "yes" }]) {
+    const r = await admin("PATCH", "/api/teams-links/settings", { id: GROUP, changes: bad });
+    assert.equal(r.status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: "conv-1", changes: { track: true } })).status, 400, "no tracking in 1:1 chats");
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: "nope", changes: { reminders: true } })).status, 404);
+
+  const n = sent.length;
+  const ok = await admin("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { track: true, reminders: true, time: "00:00", timeZone: "UTC", quietDays: [] } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && /keeping track of this chat/.test(cardText(cardsOf(x)[0] ?? {})));
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Wave 2 team.*settings: message tracking on, reminders on, time 00:00/);
+
+  // Team Leads manage the chats of the workspaces they lead, and only those.
+  const leadA = client();
+  const leadB = client();
+  for (const [c, email, ws] of [[leadA, "lead-a@test.local", s.wsA], [leadB, "lead-b@test.local", s.wsB]]) {
+    const u = await admin("POST", "/api/users", { name: `Lead ${ws === s.wsA ? "A" : "B"}`, email, role: "Team Lead", workspaces: [ws] });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    assert.equal((await c("POST", "/api/auth/login", { email, password: u.body.tempPassword })).status, 200);
+  }
+  assert.equal((await leadA("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { afterMeeting: false } })).status, 200);
+  assert.equal((await leadA("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { afterMeeting: true } })).status, 200);
+  assert.equal((await leadA("POST", "/api/reminders", { id: GROUP, action: "preview" })).status, 200);
+  assert.equal((await leadB("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { reminders: false } })).status, 404, "a lead of another workspace can't see it");
+  assert.equal((await leadB("POST", "/api/reminders", { id: GROUP, action: "send" })).status, 404);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Lead A.*reminders after meetings off/);
+});
+
+test(`[${ENGINE}] reminders: a tracked chat's messages are saved and searchable; untracked chats save nothing`, async () => {
+  const before = sent.length;
+  const r = await toBot(groupMsg({ type: "message", text: "Heads up: the zebra migration cutover moved to November 19." }));
+  assert.ok(r.status < 300);
+  const other = await toBot(activity({ type: "message", text: "Untracked chatter about zebra", conversation: { id: "conv-group-untracked", conversationType: "groupChat", tenantId: "tenant-1" } }));
+  assert.ok(other.status < 300);
+  await new Promise((res) => setTimeout(res, 1500));
+  assert.equal(sent.slice(before).filter((x) => x.url.includes(GROUP) || x.url.includes("conv-group-untracked")).length, 0, "no reply to chat that didn't mention Sidekick");
+  const link = (await admin("GET", "/api/teams-links")).body.links.find((l) => l.id === GROUP);
+  assert.equal(link.savedMessages, 1);
+  const ans = await admin("POST", "/api/ask", { ws: s.wsA, question: "zebra migration cutover" });
+  assert.ok(ans.body.sources.some((x) => x.type === "chat" && /Wave 2 team/.test(x.title)), JSON.stringify(ans.body.sources));
+  assert.ok(!JSON.stringify(ans.body).includes("Untracked chatter"));
+  // Mentioning Sidekick in the group chat still gets an answer.
+  const n = sent.length;
+  await toBot(groupMsg({ type: "message", text: "<at>Sidekick</at> When is the wave 2 cutover?", entities: [{ type: "mention", text: "<at>Sidekick</at>", mentioned: { id: "bot", name: "Sidekick" } }] }));
+  await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && cardsOf(x).some((c) => /Sources/.test(cardText(c))));
+});
+
+test(`[${ENGINE}] reminders: every point cites a real source; points and gaps without one are dropped`, async () => {
+  assert.equal((await admin("POST", "/api/memory/refresh", { ws: s.wsA })).status, 200);
+  const preview = async (kinds) => {
+    assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { kinds } })).status, 200);
+    const r = await admin("POST", "/api/reminders", { id: GROUP, action: "preview" });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    return r.body.preview;
+  };
+  const off = { actions: false, questions: false, outdated: false, conflicts: false };
+  const actions = await preview({ ...off, actions: true });
+  assert.ok(actions.points.length >= 1 && actions.points.length <= 6);
+  assert.ok(actions.points.every((p) => p.sources.length > 0), "no point without a source");
+  assert.ok(!JSON.stringify(actions).includes("Made-up point"), "Claude's point about an unknown item was dropped");
+  assert.ok(actions.points.some((p) => /Send the test report/.test(p.text) && /Overdue/.test(p.label)));
+  const questions = await preview({ ...off, questions: true });
+  assert.ok(questions.points.some((p) => /Who owns rollback/.test(p.text)));
+  assert.ok(questions.points.some((p) => /Pick the cutover weekend/.test(p.text) && p.label === "Decision still to make"));
+  const outdated = await preview({ ...off, outdated: true });
+  assert.ok(outdated.points.some((p) => p.label === "Out-of-date document" && p.sources.some((x) => x.type === "document")));
+  assert.equal(await preview({ ...off, conflicts: true }), null, "a conflict citing a source that doesn't exist is dropped");
+  assert.equal((await mia("POST", "/api/reminders", { id: GROUP, action: "preview" })).status, 403);
+  await preview({ actions: true, questions: true, outdated: true, conflicts: true });
+});
+
+test(`[${ENGINE}] reminders: chats with client guests only get shareable items; buttons keep to the chat and workspace`, async () => {
+  const form = new FormData();
+  form.append("ws", s.wsA);
+  form.append("title", "Client sync");
+  form.append("external", "true");
+  form.append("text", "Client: please send the test report.");
+  assert.equal((await admin("POST", "/api/meetings", undefined, { form })).status, 200);
+
+  // Posted while internal: may include internal items.
+  const n = sent.length;
+  const r = await admin("POST", "/api/reminders", { id: GROUP, action: "send" });
+  assert.equal(r.body.status, "posted", JSON.stringify(r.body));
+  const msg = await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {})));
+  const card = cardText(cardsOf(msg)[0]);
+  const verbData = [...card.matchAll(/"verb":"sidekick\.remind\.done","data":\{"runId":"([^"]+)","key":"([^"]+)"\}/g)].map((m) => ({ runId: m[1], key: m[2] }));
+  assert.ok(verbData.length >= 1, card.slice(0, 400));
+  const click = (verb, data, conv = { id: GROUP, conversationType: "groupChat", tenantId: "tenant-1" }) =>
+    toBot(activity({ type: "invoke", name: "adaptiveCard/action", conversation: conv, value: { action: { type: "Action.Execute", verb, data } } })).then((x) => x.json());
+
+  // With guests in the chat: only items from the guest meeting, and internal items can't be changed.
+  assert.equal((await admin("PATCH", "/api/teams-links", { id: GROUP, guests: true })).status, 200);
+  const guestPreview = (await admin("POST", "/api/reminders", { id: GROUP, action: "preview" })).body.preview;
+  assert.ok(guestPreview.points.length >= 1);
+  assert.ok(guestPreview.points.every((p) => p.sources.every((x) => x.title === "Client sync")), JSON.stringify(guestPreview));
+  const internalOne = verbData.find((v) => v.key.startsWith("action:"));
+  assert.match(JSON.stringify(await click("sidekick.remind.done", internalOne)), /internal/);
+  assert.equal((await admin("PATCH", "/api/teams-links", { id: GROUP, guests: false })).status, 200);
+
+  // The same card clicked from another chat (linked to the same workspace) is refused.
+  assert.match(JSON.stringify(await click("sidekick.remind.done", internalOne, { id: "conv-1", conversationType: "personal", tenantId: "tenant-1" })), /couldn't find that reminder/);
+  // From its own chat it works, updates the card in place and is audited.
+  const done = await click("sidekick.remind.done", internalOne);
+  assert.equal(done.type ?? done.body?.type, "application/vnd.microsoft.card.adaptive");
+  assert.match(JSON.stringify(done), /Marked done by Test User/);
+  assert.match(JSON.stringify(await click("sidekick.remind.done", internalOne)), /already handled/);
+  // Snooze hides an item from the next reminders.
+  const other = verbData.find((v) => v.key !== internalOne.key);
+  if (other) {
+    assert.match(JSON.stringify(await click("sidekick.remind.snooze", other)), /Snoozed for a week/);
+    const next = (await admin("POST", "/api/reminders", { id: GROUP, action: "preview" })).body.preview;
+    assert.ok(!(next?.points ?? []).some((p) => p.key === other.key));
+  }
+  assert.ok(!(((await admin("POST", "/api/reminders", { id: GROUP, action: "preview" })).body.preview?.points) ?? []).some((p) => p.key === internalOne.key), "done items aren't reminded again");
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /from a Teams reminder/);
+});
+
+test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; notes only go to chats that take them`, async () => {
+  assert.equal((await fetch(`${BASE}/api/reminders/tick`, { method: "POST" })).status, 404);
+  assert.equal((await fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": "wrong-secret-wrong-secret-wrong" } })).status, 404);
+  const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET } }).then((x) => x.json());
+  assert.equal((await tick()).posted, 1);
+  assert.equal((await tick()).posted, 0, "never twice in the same day");
+
+  // Meeting notes: turn them off for the 1:1 chat, keep them in the group chat.
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: "conv-1", changes: { notes: false } })).status, 200);
+  const n = sent.length;
+  const form = new FormData();
+  form.append("ws", s.wsA);
+  form.append("title", "Notes routing check");
+  form.append("text", "We agreed on the plan.");
+  assert.equal((await admin("POST", "/api/meetings", undefined, { form })).status, 200);
+  await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && /Notes routing check/.test(cardText(cardsOf(x)[0] ?? {})));
+  // The reminder after the meeting follows the notes in the group chat.
+  await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {})));
+  assert.ok(!sent.slice(n).some((x) => x.url.includes("conv-1") && /Notes routing check/.test(JSON.stringify(x.body))), "no notes in the chat that turned them off");
+});
+
+test(`[${ENGINE}] reminders: unlinking a chat forgets its saved messages; the owner's switch pauses reminders`, async () => {
+  assert.equal((await admin("DELETE", `/api/teams-links?id=${GROUP}`)).status, 200);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Deleted 1 saved message from Teams chat “Wave 2 team”/);
+  const ans = await admin("POST", "/api/ask", { ws: s.wsA, question: "zebra migration cutover" });
+  assert.ok(!ans.body.sources.some((x) => x.type === "chat"));
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "remind", enabled: false })).status, 200);
+  const paused = await admin("POST", "/api/reminders", { id: "conv-1", action: "preview" });
+  assert.equal(paused.status, 503);
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "remind", enabled: true })).status, 200);
 });

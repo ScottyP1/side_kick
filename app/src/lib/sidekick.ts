@@ -61,7 +61,7 @@ Rules:
  * If search finds nothing, the answer step isn't called at all (only the guardrail check is).
  */
 export async function ask(user: User, workspaceId: string, question: string, guests: boolean, channel: "portal" | "teams" = "portal") {
-  await assertEnabled("ask");
+  await assertEnabled("ask", user.org_id);
   const place: GuardPlace = { orgId: user.org_id, workspaceId, channel };
   // The workspace's guardrails: org switches plus any it turned on itself, and org-wide + workspace custom rules.
   const policy = await getGuardPolicy(user.org_id, workspaceId);

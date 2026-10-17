@@ -2,7 +2,9 @@
 
 /**
  * Users & access (/users): add people, choose their role and which workspaces they can see, or remove them.
- * Admins only. New people get a temporary password they must change at first sign-in.
+ * Org Owners and Org Admins manage everyone. A Team Lead sees only the people in the workspaces they lead
+ * and can add people to those workspaces (as Member or Viewer) or take them off; roles and removing people
+ * from the organization stay with admins. New people get a temporary password they must change at first sign-in.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -10,10 +12,13 @@ import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, useToast } from "@/components/ui";
 
 type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; microsoft: number; workspaces: string[] };
-const ROLES = ["Org Admin", "Billing Admin", "Member", "Viewer"];
+const ROLES = ["Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"];
+/** Roles a Team Lead can give (same rule as the server: LEAD_ASSIGNABLE_ROLES in lib/auth.ts). */
+const LEAD_ROLES = ["Member", "Viewer"];
 const ROLE_HELP: [string, string][] = [
   ["Org Owner", "Everything, including deleting the organization"],
   ["Org Admin", "People, workspaces, usage and audit log, across all workspaces"],
+  ["Team Lead", "A Member who also adds people to the workspaces they lead (as Member or Viewer), takes them off again, and links Teams chats to those workspaces"],
   ["Billing Admin", "Usage and billing only"],
   ["Member", "Their workspaces: upload documents, import meetings, ask, manage action items"],
   ["Viewer", "Their workspaces, read-only"],
@@ -22,6 +27,8 @@ const ROLE_HELP: [string, string][] = [
 export default function UsersPage() {
   const { me } = useApp();
   const toast = useToast();
+  const lead = !me.user.admin && Boolean(me.user.lead);
+  const roles = lead ? LEAD_ROLES : ROLES;
   const [people, setPeople] = useState<P[] | null>(null);
   const [err, setErr] = useState("");
   const [invite, setInvite] = useState(false);
@@ -39,9 +46,10 @@ export default function UsersPage() {
   const add = async () => {
     setFormErr("");
     try {
-      const r = await api<{ tempPassword: string }>("/api/users", { method: "POST", json: form });
+      const r = await api<{ tempPassword?: string; existing?: boolean }>("/api/users", { method: "POST", json: form });
       setInvite(false);
-      setTemp({ email: form.email, password: r.tempPassword });
+      if (r.tempPassword) setTemp({ email: form.email, password: r.tempPassword });
+      else toast(`${form.email} already had an account: added them to your workspaces`);
       setForm({ name: "", email: "", role: "Member", workspaces: [] });
       load();
     } catch (e) {
@@ -75,7 +83,7 @@ export default function UsersPage() {
         <div>
           <div className="eyebrow">Users & access</div>
           <h1>{people ? `${people.length} ${people.length === 1 ? "person" : "people"}` : "People"}</h1>
-          <p>Add teammates and choose which workspaces they can see. In step 2, people sign in with their Microsoft account and roles can come from Entra ID groups.</p>
+          <p>{lead ? "The people in the workspaces you lead. Add teammates to your workspaces, or take them off; an Org Admin changes roles." : "Add teammates and choose which workspaces they can see. People can sign in with their Microsoft work account once Microsoft sign-in is connected on Settings."}</p>
         </div>
         <div className="actions">
           <button className="btn primary" onClick={() => setInvite(true)}><Icon n="plus" />Add person</button>
@@ -113,7 +121,7 @@ export default function UsersPage() {
                     </div>
                   </td>
                   <td>
-                    {p.role === "Org Owner" ? <b>Org Owner</b> : (
+                    {p.role === "Org Owner" || lead ? <b>{p.role}</b> : (
                       <select className="input" style={{ width: "auto", padding: "4px 8px" }} value={p.role} aria-label={`Role for ${p.name}`} onChange={(e) => patch(p, { role: e.target.value }, `${p.name} is now ${e.target.value}`)}>
                         {ROLES.map((r) => <option key={r}>{r}</option>)}
                       </select>
@@ -123,12 +131,12 @@ export default function UsersPage() {
                     {["Org Owner", "Org Admin"].includes(p.role) ? <span className="muted">All workspaces</span> : (
                       <div className="chips">
                         {p.workspaces.map((w) => <span key={w} className="tag">{wsName(w)}</span>)}
-                        <button className="btn small ghost" onClick={() => setEditWs(p)}>Edit</button>
+                        {(!lead || LEAD_ROLES.includes(p.role)) && <button className="btn small ghost" onClick={() => setEditWs(p)}>Edit</button>}
                       </div>
                     )}
                   </td>
                   <td className="muted">{fmtDate(p.last_active)}</td>
-                  <td className="r">{p.role !== "Org Owner" && p.id !== me.user.id && <button className="btn small ghost" onClick={() => remove(p)}>Remove</button>}</td>
+                  <td className="r">{!lead && p.role !== "Org Owner" && p.id !== me.user.id && <button className="btn small ghost" onClick={() => remove(p)}>Remove</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -146,10 +154,10 @@ export default function UsersPage() {
         </div>
       </div>
       {invite && (
-        <Modal title="Add a person" onClose={() => setInvite(false)} footer={<><button className="btn" onClick={() => setInvite(false)}>Cancel</button><button className="btn primary" onClick={add} disabled={!form.name.trim() || !form.email.trim()}>Add person</button></>}>
+        <Modal title="Add a person" onClose={() => setInvite(false)} footer={<><button className="btn" onClick={() => setInvite(false)}>Cancel</button><button className="btn primary" onClick={add} disabled={!form.name.trim() || !form.email.trim() || (lead && !form.workspaces.length)}>Add person</button></>}>
           <div className="field"><label htmlFor="pname">Name</label><input id="pname" className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
           <div className="field"><label htmlFor="pemail">Work email</label><input id="pemail" className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-          <div className="field"><label htmlFor="prole">Role</label><select id="prole" className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select></div>
+          <div className="field"><label htmlFor="prole">Role</label><select id="prole" className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roles.map((r) => <option key={r}>{r}</option>)}</select></div>
           {!["Org Admin"].includes(form.role) && (
             <div className="field">
               <label>Workspaces</label>

@@ -1,13 +1,53 @@
 /**
- * PATCH /api/owner/tenants/:id: pause or resume a client organization.
- * Who: platform operators only. Logged in the operator log.
+ * GET/PATCH /api/owner/tenants/:id: one client organization in detail, or pause/resume it.
+ * Who: platform operators only (a client account, even an Org Owner, gets 401). Both are logged in the
+ * operator log, so there's a record of every time someone at Sidekick looked at a client's people.
  */
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError } from "@/lib/auth";
-import { get, run } from "@/lib/db";
-import { platformLog, requireOwner } from "@/lib/owner";
+import { all, get, run } from "@/lib/db";
+import { orgFlags, platformLog, requireOwner } from "@/lib/owner";
 
 type Ctx = { params: Promise<{ id: string }> };
+
+/**
+ * The client's details for its Owner Console page: the organization (status, Microsoft sign-in), every
+ * person (role, workspaces, Microsoft-linked, last active), every workspace (members, documents, meetings)
+ * and its feature switches. Never any document or meeting content.
+ */
+export const GET = handle(async (_req: Request, { params }: Ctx) => {
+  const owner = await requireOwner();
+  const org = await get<{ id: string; name: string; status: string; created_at: string; entra_tenant_id: string | null; sso_required: number }>(
+    "SELECT id, name, status, created_at, entra_tenant_id, sso_required FROM orgs WHERE id = ?", (await params).id,
+  );
+  if (!org) throw new HttpError(404, "Organization not found.");
+  const people = await all<{ id: string; name: string; email: string; role: string; microsoft: number; last_active: string | null; created_at: string }>(
+    `SELECT id, name, email, role, CASE WHEN entra_oid IS NULL THEN 0 ELSE 1 END AS microsoft, last_active, created_at
+       FROM users WHERE org_id = ? ORDER BY created_at`, org.id,
+  );
+  const workspaces = await all<{ id: string; name: string; code: string | null; documents: number; meetings: number }>(
+    `SELECT w.id, w.name, w.code,
+       (SELECT COUNT(*) FROM documents d WHERE d.workspace_id = w.id) AS documents,
+       (SELECT COUNT(*) FROM meetings m WHERE m.workspace_id = w.id) AS meetings
+     FROM workspaces w WHERE w.org_id = ? ORDER BY w.name`, org.id,
+  );
+  const members = await all<{ user_id: string; workspace_id: string }>(
+    "SELECT wm.user_id, wm.workspace_id FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id WHERE w.org_id = ?", org.id,
+  );
+  const wsName = new Map(workspaces.map((w) => [w.id, w.name]));
+  await platformLog(owner.name, `Viewed the people and workspaces of ${org.name}`);
+  return {
+    org: { id: org.id, name: org.name, status: org.status, created_at: org.created_at, microsoft_connected: Boolean(org.entra_tenant_id), microsoft_required: org.sso_required === 1 },
+    people: people.map((p) => ({
+      ...p,
+      microsoft: p.microsoft === 1,
+      // Admins see every workspace in their org, so their list is "all" rather than memberships.
+      workspaces: p.role === "Org Owner" || p.role === "Org Admin" ? ["All workspaces"] : members.filter((m) => m.user_id === p.id).map((m) => wsName.get(m.workspace_id)!),
+    })),
+    workspaces: workspaces.map((w) => ({ ...w, members: members.filter((m) => m.workspace_id === w.id).length })),
+    flags: await orgFlags(org.id),
+  };
+});
 
 // Pause or resume a client's access. Suspended orgs can't sign in or use any feature.
 export const PATCH = handle(async (req: Request, { params }: Ctx) => {

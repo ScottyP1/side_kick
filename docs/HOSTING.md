@@ -14,6 +14,7 @@ signed in as CodyScott@SidekickLabs334.onmicrosoft.com. Set up October 16, 2026.
 | Container images | Container Registry `sidekicklabsacr` (Basic) | East US | ~$5/month |
 | Search | AI Search `sidekick-labs-search` (Free), index `sidekick-cloud` (local copies use `sidekick-passages`) | Central US | $0 |
 | Embeddings / Claude via Foundry | `codyscott-9578-resource` | East US 2 | pay per use |
+| Budget freeze | Logic App `sidekick-freeze` + action group `sidekick-freeze-ag` | East US | ~$0 (runs only on alert) |
 | Teams bot registration | Azure Bot `sidekick-bot-dev` (F0, single tenant), endpoint = the live address + `/api/messages` | global | $0 |
 
 Claude itself is still called with the Anthropic API key (not yet via Foundry); set a monthly spend limit
@@ -51,8 +52,12 @@ at 50%, 80% and 100% actual spend and at 100% forecast: `sidekick-total-50` (who
 The older `sidekick-monthly-25` ($25, alerts at 80% / forecast 100%) is still there; delete it in Cost
 Management if the extra early warning isn't wanted. Budget data lags Azure usage by up to a day.
 
-An automatic freeze (budget → action group → Logic App that stops the app and database) is designed but
-not created: it needs an identity with Contributor rights on `sidekick-rg`, so it waits for Cody's OK.
+**Automatic freeze:** when `sidekick-total-50` passes 100% of actual spend, its alert also calls action
+group `sidekick-freeze-ag`, which runs Logic App `sidekick-freeze`. That Logic App stops `sidekick-app`
+and `sidekick-labs-db` (the same as `freeze.sh`). Its managed identity has Contributor on `sidekick-rg`
+only (nothing else in the subscription). Budget data lags real usage by up to a day, so spend can go a
+little past $50 before the freeze runs. Run `./unfreeze.sh` to start things again (and raise the budget
+first if it would trip again). Not test-fired yet, because firing it takes the live app down.
 
 ## Security review (October 16, 2026)
 

@@ -47,6 +47,10 @@ Runs 90 automated tests on **both** databases (SQLite and Postgres): the databas
 - **Activity page** (Org Owners and Admins, like Dynatrace): **Overview** (requests, failures, response times, AI calls and cost, portal vs Teams, busiest operations, requests over time), **Traces** (every request and Teams message; click one for its step-by-step waterfall: search, embeddings, Claude, Teams delivery, database time), **Messages** (what was asked where, answered or not) and the **Audit trail**.
 - Traces store timings, counts, model names and costs, never document text, and are deleted after 30 days. The shape follows OpenTelemetry, so it can later also feed Azure Application Insights.
 
+## Hosting in Azure
+
+Sidekick runs in Azure Container Apps with Postgres; see [docs/HOSTING.md](docs/HOSTING.md) for what runs where, costs, budgets, and the `infra/azure/` scripts to deploy, freeze and unfreeze it.
+
 ## Microsoft sign-in (Entra ID)
 
 - **Sign in with Microsoft** on the sign-in page: people use their Microsoft work account (the one they use for Teams), with their company's own password rules and MFA. Email and password still work unless the Org Owner turns them off.

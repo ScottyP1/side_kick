@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS gap_status (
   PRIMARY KEY (workspace_id, gap_key)
 );
 CREATE TABLE IF NOT EXISTS usage_events (
-  id BIGSERIAL PRIMARY KEY, org_id TEXT, workspace_id TEXT, feature TEXT NOT NULL,
+  id BIGSERIAL PRIMARY KEY, org_id TEXT, workspace_id TEXT, user_id TEXT, feature TEXT NOT NULL,
   model TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
   cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0,
   cost_usd DOUBLE PRECISION NOT NULL, latency_ms INTEGER NOT NULL, ok INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -149,6 +149,9 @@ ALTER TABLE questions ADD COLUMN IF NOT EXISTS channel TEXT;
 ALTER TABLE orgs ADD COLUMN IF NOT EXISTS entra_tenant_id TEXT;
 ALTER TABLE orgs ADD COLUMN IF NOT EXISTS sso_required INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS entra_oid TEXT;
+-- Who each AI call was for (null for system work and Teams guests), so people can see their own usage.
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS user_id TEXT;
+CREATE INDEX IF NOT EXISTS usage_events_user_time ON usage_events(org_id, user_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS orgs_entra_tenant ON orgs(entra_tenant_id);
 CREATE UNIQUE INDEX IF NOT EXISTS users_entra_oid ON users(org_id, entra_oid);
 -- Guardrails (see src/lib/guardrails.ts): the org's switches, and counts of rules that fired (no text).

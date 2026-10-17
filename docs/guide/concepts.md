@@ -9,6 +9,8 @@ Your company's Sidekick account. Everything in it (people, workspaces, documents
 One client engagement, like "Contoso Retail – Cloud Migration". Each workspace has its own documents, meetings, memory and members. **Sidekick only ever searches the workspace you're in**, so an answer for one client can never use another client's material.
 
 ## People and roles
+
+The full rulebook, with every action and which roles may do it, is [Roles and permissions](roles-and-permissions.md).
 | Role | Can do |
 |---|---|
 | **Org Owner** | Everything, including the organization itself |

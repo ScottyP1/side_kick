@@ -24,7 +24,7 @@ import "server-only";
 import { AzureKeyCredential, SearchClient, SearchIndexClient, type SearchIndex } from "@azure/search-documents";
 import { now, run } from "./db";
 import type { Passage } from "./search";
-import { span, spanAttrs } from "./trace";
+import { span, spanAttrs, traceUserId } from "./trace";
 
 const INDEX = process.env.AZURE_SEARCH_INDEX || "sidekick-passages";
 const EMBED_DEPLOYMENT = process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT || "text-embedding-3-small";
@@ -104,9 +104,9 @@ async function embedInner(texts: string[], ctx: { orgId: string | null; workspac
     const json = (await res.json().catch(() => ({}))) as { data?: { embedding: number[]; index: number }[]; usage?: { prompt_tokens?: number }; error?: { message?: string } };
     const tokens = json.usage?.prompt_tokens ?? 0;
     await run(
-      `INSERT INTO usage_events (org_id, workspace_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
-       VALUES (?, ?, 'embed', ?, ?, 0, ?, ?, ?, ?, ?)`,
-      ctx.orgId, ctx.workspaceId, EMBED_DEPLOYMENT, tokens, (tokens * EMBED_PRICE_PER_M) / 1_000_000, Date.now() - started,
+      `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
+       VALUES (?, ?, ?, 'embed', ?, ?, 0, ?, ?, ?, ?, ?)`,
+      ctx.orgId, ctx.workspaceId, traceUserId(), EMBED_DEPLOYMENT, tokens, (tokens * EMBED_PRICE_PER_M) / 1_000_000, Date.now() - started,
       res.ok ? 1 : 0, res.ok ? null : (json.error?.message ?? `HTTP ${res.status}`).slice(0, 500), now(),
     );
     spanAttrs({ tokens: tokens });

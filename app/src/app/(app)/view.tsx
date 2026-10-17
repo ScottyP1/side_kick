@@ -11,7 +11,7 @@ import { LiveOrb } from "@/components/live-orb";
 import { api, fmtDate, Pill, usd, useReportError } from "@/components/ui";
 
 type Overview = {
-  stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; spendMonth: number };
+  stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; spendMonth: number; aiCallsMonth: number; spendScope: "org" | "you" };
   recentMeetings: { id: string; title: string; held_at: string; status: string; workspace: string; color: string; workspace_id: string }[];
   attention: {
     failedDocs: { id: string; name: string; error: string; workspace_id: string }[];
@@ -81,7 +81,7 @@ export default function OverviewPage() {
         <Link className="kpi" href={["Org Owner", "Org Admin", "Billing Admin"].includes(me.user.role) ? "/usage" : "/knowledge"} style={{ textDecoration: "none" }}>
           <span className="eyebrow">Documents</span>
           <span className="v">{s?.documents ?? "—"}</span>
-          <span className="d muted">AI spend this month: {usd(s?.spendMonth ?? 0)}</span>
+          <span className="d muted">{s ? `${s.spendScope === "org" ? "AI spend this month" : "Your AI use this month"}: ${usd(s.spendMonth)}` : "AI spend this month: —"}</span>
         </Link>
       </div>
 

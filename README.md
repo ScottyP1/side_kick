@@ -29,6 +29,10 @@ npm --prefix app test
 
 Runs 90 automated tests on **both** databases (SQLite and Postgres): the database layer, plus end-to-end checks of sign-in, workspace walls, roles, the client-guest filter, uploads, meeting notes, failures, the Teams bot, the in-app assistant, Microsoft sign-in (including forged and replayed replies), kill switches and suspension. They use a throwaway database, a fake Claude (free, canned answers, test mode only), a fake Teams connector and a fake Microsoft sign-in service, so nothing real is touched or paid for. The Postgres half needs Postgres running on this Mac (`brew services start postgresql@17`); without it those are skipped with a warning.
 
+Last, it runs a **production build** (`next build`, the same step as the Docker image and the Azure deploy) in a throwaway build folder, so it works while your dev server is running and never touches `app/data`. The other tests use `next dev`, which allows some things a production build refuses; if the build fails, the run fails and prints the end of the build error. It adds a minute or two; `SKIP_BUILD=1 npm --prefix app test` leaves it out while you iterate, but run the full thing before committing.
+
+On GitHub, every pull request runs the same tests automatically (`.github/workflows/test.yml`, on GitHub's free minutes with its own throwaway Postgres). The result shows as a check on the pull request; don't merge while it's red.
+
 ## Postgres and the container (for hosting in Azure later)
 
 - **Database:** without `DATABASE_URL` the app uses the local SQLite file (`app/data/sidekick.db`). With `DATABASE_URL=postgres://…` it uses Postgres and creates its tables on start (`app/db/schema.postgres.sql`). In production it refuses to run on SQLite, so data can't silently vanish.

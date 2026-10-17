@@ -9,12 +9,14 @@
  * roles get a 400/404 instead of changing anything, except the harmless reads. `skipAllowed` rows only
  * check that the other roles are refused (running them would disconnect or change real settings).
  *
- * Roles: owner = Org Owner, admin = Org Admin, billing = Billing Admin, member = Member, viewer = Viewer.
- * Billing Admins, Members and Viewers are in workspace A only; Org Owners and Org Admins see every workspace.
+ * Roles: owner = Org Owner, admin = Org Admin, lead = Team Lead, billing = Billing Admin, member = Member,
+ * viewer = Viewer. Team Leads, Billing Admins, Members and Viewers are in workspace A only; Org Owners and
+ * Org Admins see every workspace.
  */
-export const EVERYONE = ["owner", "admin", "billing", "member", "viewer"];
+export const EVERYONE = ["owner", "admin", "lead", "billing", "member", "viewer"];
 const ADMINS = ["owner", "admin"];
-const EDITORS = ["owner", "admin", "member"];
+const MANAGERS = ["owner", "admin", "lead"];
+const EDITORS = ["owner", "admin", "lead", "member"];
 const NOPE = "00000000-0000-4000-8000-000000000000";
 
 export const MATRIX = [
@@ -43,11 +45,13 @@ export const MATRIX = [
   { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ["owner", "admin", "billing"] },
   // Running the organization
   { what: "Create workspaces", method: "POST", url: () => "/api/workspaces", body: {}, allow: ADMINS },
-  { what: "See people and roles", method: "GET", url: () => "/api/users", allow: ADMINS },
-  { what: "Add people", method: "POST", url: () => "/api/users", body: {}, allow: ADMINS },
-  { what: "Change or remove a person", method: "PATCH", url: () => `/api/users/${NOPE}`, body: {}, allow: ADMINS },
-  { what: "Link Teams channels and chats", method: "POST", url: () => "/api/teams-links", body: { ws: NOPE }, allow: ADMINS },
-  { what: "Change a Teams link (guests) or unlink it", method: "PATCH", url: () => "/api/teams-links", body: { id: NOPE }, allow: ADMINS },
+  // People and Teams links: admins everywhere, Team Leads only in the workspaces they lead (the walls test that part)
+  { what: "See people (Team Leads: only people in their workspaces)", method: "GET", url: () => "/api/users", allow: MANAGERS },
+  { what: "Add people (Team Leads: only as Member or Viewer, to their workspaces)", method: "POST", url: () => "/api/users", body: {}, allow: MANAGERS },
+  { what: "Change which workspaces a person is in (Team Leads: Members and Viewers in their workspaces)", method: "PATCH", url: () => `/api/users/${NOPE}`, body: {}, allow: MANAGERS },
+  { what: "Remove a person from the organization", method: "DELETE", url: () => `/api/users/${NOPE}`, allow: ADMINS },
+  { what: "Link Teams channels and chats (Team Leads: to their workspaces)", method: "POST", url: () => "/api/teams-links", body: { ws: NOPE }, allow: MANAGERS },
+  { what: "Change a Teams link (guests) or unlink it (Team Leads: in their workspaces)", method: "PATCH", url: () => "/api/teams-links", body: { id: NOPE }, allow: MANAGERS },
   { what: "See the audit log", method: "GET", url: () => "/api/audit", allow: ADMINS },
   { what: "See Activity (traces and performance)", method: "GET", url: () => "/api/activity?view=overview", allow: ADMINS },
   { what: "Change branding (logo, brand color)", method: "PUT", url: () => "/api/settings", body: {}, allow: ADMINS, skipAllowed: true },

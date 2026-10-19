@@ -77,7 +77,7 @@ export default function WorkspacesPage() {
       await load();
       toast(`Linked “${r.name ?? "Teams chat"}”. Sidekick confirmed it in Teams.`);
     } catch (e) {
-      setLinkError(e instanceof Error ? e.message : "Couldn't link the channel.");
+      setLinkError(e instanceof Error ? e.message : "Couldn't link that chat or channel.");
     }
   };
 
@@ -86,7 +86,7 @@ export default function WorkspacesPage() {
       await api("/api/teams-links", { method: "PATCH", json: { id: l.id, guests } });
       await load();
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Couldn't update the channel.");
+      toast(e instanceof Error ? e.message : "Couldn't update that chat or channel.");
     }
   };
 
@@ -97,7 +97,7 @@ export default function WorkspacesPage() {
       await load();
       toast("Unlinked.");
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Couldn't unlink the channel.");
+      toast(e instanceof Error ? e.message : "Couldn't unlink that chat or channel.");
     }
   };
 
@@ -152,26 +152,26 @@ export default function WorkspacesPage() {
       <div className="panel" style={{ marginTop: 16 }}>
         <div className="panel-h">
           <div>
-            <h2>Teams channels and chats</h2>
+            <h2>Teams chats and channels</h2>
             <span className="muted" style={{ fontSize: 12.5 }}>@Sidekick answers there from the linked workspace only. Per chat, choose whether it gets meeting notes, keeps track of every message and posts reminders.</span>
           </div>
           {manage && !!list?.length && (
             <button className="btn" onClick={openLink}>
               <Icon n="plus" />
-              Link Teams channel
+              Link a Teams chat or channel
             </button>
           )}
         </div>
         {!links?.length ? (
           <div className="empty">
-            <span>No Teams channels linked yet. Add Sidekick to a channel or chat in Teams and mention it: it replies with a link code to enter here.</span>
+            <span>Nothing linked yet. Add Sidekick to a Teams group chat or channel and mention it: it replies with a link code to enter here.</span>
           </div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Channel or chat</th>
+                  <th>Chat or channel</th>
                   <th>Workspace</th>
                   <th>Client guests</th>
                   <th>Sidekick here</th>
@@ -244,7 +244,7 @@ export default function WorkspacesPage() {
           </div>
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
             <input type="checkbox" checked={linkForm.guests} onChange={(e) => setLinkForm({ ...linkForm, guests: e.target.checked })} />
-            Client guests are in this channel (answer from Shareable sources only, and don&apos;t post notes from internal meetings)
+            Client guests are in this chat or channel (answer from Shareable sources only, and don&apos;t post notes from internal meetings)
           </label>
           {linkError && <p className="err">{linkError}</p>}
         </Modal>

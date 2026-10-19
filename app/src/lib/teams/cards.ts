@@ -81,7 +81,7 @@ export function linkCard(code: string, kind: string): IAdaptiveCard {
   return card([
     ...header("Sidekick", `Link this ${where} to a workspace`),
     text(`I don't know which client workspace this ${where} belongs to yet, so I can't answer from its documents and meetings.`),
-    text("An Org Admin can link it in the Sidekick portal: **Workspaces → Link Teams channel**, then enter this code:"),
+    text("An Org Admin can link it in the Sidekick portal: **Workspaces → Link a Teams chat or channel**, then enter this code:"),
     text(code, { size: "ExtraLarge", weight: "Bolder", fontType: "Monospace", horizontalAlignment: "Center", spacing: "Medium" }),
     text("The code works for 24 hours. Mention me with **link** to get a new one.", { size: "Small", isSubtle: true }),
   ]);

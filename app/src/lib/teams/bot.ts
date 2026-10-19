@@ -146,27 +146,71 @@ export type TeamsConversation = {
 type InboundActivity = {
   conversation: { id: string; conversationType?: string; tenantId?: string; name?: string };
   serviceUrl?: string;
-  channelData?: { tenant?: { id?: string }; channel?: { name?: string }; team?: { name?: string } };
+  channelData?: { tenant?: { id?: string }; channel?: { id?: string; name?: string }; team?: { id?: string; name?: string } };
   from: { id: string; name?: string; aadObjectId?: string };
 };
 
 // Channel messages arrive as "<channel id>;messageid=<thread>"; the link is for the whole channel.
 export const baseConversationId = (id: string) => id.split(";")[0];
 
+// Shown until Teams tells us the real name. Never written over a real name (see touchConversation).
+const PLACEHOLDER_NAMES: Record<string, string> = { personal: "1:1 chat", groupChat: "Group chat", channel: "Teams channel" };
+const isPlaceholder = (name: string | null | undefined) => !name || Object.values(PLACEHOLDER_NAMES).includes(name);
+
+/**
+ * The conversation's display name from the activity itself, or null when the activity doesn't carry one.
+ * Teams only includes team and channel names on some activities (e.g. when Sidekick is added), and a
+ * group chat only has a name if someone gave it one.
+ */
+function activityName(a: InboundActivity): string | null {
+  const team = a.channelData?.team?.name;
+  const channel = a.channelData?.channel?.name;
+  if (team && channel) return `${team} › ${channel}`;
+  if (a.conversation.conversationType === "channel") return null;
+  return a.conversation.name || null;
+}
+
+/**
+ * Asks Teams for a channel's name ("Team › Channel") when the activity didn't include it. The team's first
+ * channel has no name of its own in Teams' API (it's "General" in the Teams app). Best effort: returns null
+ * if Teams can't be asked (e.g. local Playground) and the placeholder stays.
+ */
+async function lookupChannelName(a: InboundActivity, conversationId: string): Promise<string | null> {
+  const teamId = a.channelData?.team?.id;
+  if (!teamId || !a.serviceUrl || (PLAYGROUND_MODE && !isLocalUrl(a.serviceUrl))) return null;
+  try {
+    return await span("teams", "Look up the channel name in Teams", async () => {
+      const api = (await teams()).app.api.clone({ serviceUrl: a.serviceUrl! });
+      const [team, channels] = await Promise.all([api.teams.getById(teamId), api.teams.getConversations(teamId)]);
+      const channel = channels.find((c) => c.id === conversationId);
+      const channelName = a.channelData?.channel?.name ?? channel?.name ?? (conversationId === teamId || (channel && !channel.name) ? "General" : null);
+      const teamName = a.channelData?.team?.name ?? team.name;
+      return teamName && channelName ? `${teamName} › ${channelName}` : (teamName ?? null);
+    });
+  } catch (e) {
+    console.error("Couldn't look up the Teams channel name", e);
+    return null;
+  }
+}
+
 /**
  * Saves (or refreshes) the conversation an activity came from and returns its row. Keeps the latest
- * service URL and display name, which proactive messages and the Workspaces page need.
+ * service URL, which proactive messages need, and the display name the Workspaces page shows.
+ * Names: a real name from the activity always wins; a channel without one is looked up in Teams once
+ * (while the saved name is still a placeholder); placeholders never overwrite a real name.
  */
 async function touchConversation(a: InboundActivity): Promise<TeamsConversation> {
   const id = baseConversationId(a.conversation.id);
   const kind = a.conversation.conversationType ?? "personal";
-  const team = a.channelData?.team?.name;
-  const channel = a.channelData?.channel?.name;
-  const name = channel ? `${team ? `${team} › ` : ""}${channel}` : (a.conversation.name ?? (kind === "personal" ? "1:1 chat" : "Group chat"));
+  let name = activityName(a);
+  if (!name && kind === "channel") {
+    const saved = await get<{ name: string | null }>("SELECT name FROM teams_conversations WHERE id = ?", id);
+    if (isPlaceholder(saved?.name)) name = await lookupChannelName(a, id);
+  }
   await run(
     `INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET service_url = excluded.service_url, name = COALESCE(excluded.name, teams_conversations.name), last_seen_at = excluded.last_seen_at`,
-    id, a.serviceUrl ?? "", a.conversation.tenantId ?? a.channelData?.tenant?.id ?? null, kind, name, now(), now(),
+     ON CONFLICT(id) DO UPDATE SET service_url = excluded.service_url, name = COALESCE(?, teams_conversations.name), last_seen_at = excluded.last_seen_at`,
+    id, a.serviceUrl ?? "", a.conversation.tenantId ?? a.channelData?.tenant?.id ?? null, kind, name ?? PLACEHOLDER_NAMES[kind] ?? "Teams chat", now(), now(), name,
   );
   return (await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", id))!;
 }

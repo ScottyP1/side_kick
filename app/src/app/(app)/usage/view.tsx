@@ -17,7 +17,7 @@ type U = {
   daily: { day: string; cost: number; calls: number }[];
   models: Record<string, string>;
 };
-const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", remind: "Reminders" };
+const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", remind: "Reminders", embed: "Search embeddings" };
 
 export default function UsagePage() {
   const [u, setU] = useState<U | null>(null);
@@ -30,7 +30,9 @@ export default function UsagePage() {
   const projected = u.period.day ? (u.totals.cost / u.period.day) * u.period.days : 0;
   const maxWs = Math.max(0.0001, ...u.byWorkspace.map((w) => w.cost));
   const maxDay = Math.max(0.0001, ...u.daily.map((d) => d.cost));
-  const month = new Date(u.period.start).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  // The month's start is midnight on the server's clock (UTC in Azure), which is still the previous month
+  // in US time zones; naming the month from its middle is right in every time zone.
+  const month = new Date((Date.parse(u.period.start) + Date.parse(u.period.end)) / 2).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
   return (
     <>

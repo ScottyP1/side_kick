@@ -1,11 +1,21 @@
 # Sidekick in Teams
 
-Sidekick works inside Microsoft Teams channels, group chats and 1:1 chats. It answers from **one client workspace** (the one the channel is linked to), posts meeting notes after each meeting, and, where an admin turned it on, keeps track of the chat and reminds the team about what's still open.
+Sidekick works inside Microsoft Teams group chats, channels and 1:1 chats. It answers from **one client workspace** (the one the chat or channel is linked to), posts meeting notes after each meeting, and, where an admin turned it on, keeps track of the chat and reminds the team about what's still open.
 
-## Getting started in a channel
-1. Add Sidekick to the team or chat (Apps → Sidekick → Add).
-2. Mention it: `@Sidekick link`. If the channel isn't linked yet, Sidekick replies with an 8-character code.
-3. Ask an Org Admin (or the workspace's Team Lead) to enter that code in the Sidekick portal (**Workspaces → Link Teams channel**). Sidekick confirms in the channel when it's done.
+## Getting started
+1. Add Sidekick where your team works:
+   - **Group chat** (including a meeting's chat): open the chat, click **+** or **⋯ → Manage apps** at the top, add **Sidekick**.
+   - **Channel**: on the team, **⋯ → Manage team → Apps**, add **Sidekick**.
+
+   Teams asks the chat or team owner to let Sidekick **read messages** there. Accept it: that's what lets an admin later turn on *Keep track of every message* (Sidekick still only does that once an admin switches it on, and announces it).
+2. Sidekick posts an 8-character link code (or mention it: `@Sidekick link`).
+3. Ask an Org Admin (or the workspace's Team Lead) to enter that code in the Sidekick portal (**Workspaces → Link a Teams chat or channel**). Sidekick confirms in the chat when it's done.
+
+### Group chat or channel?
+Both work the same for Sidekick; use whatever your team already uses.
+- **Group chat**: one running conversation. Sidekick's answers, notes, action-item cards and reminders appear in the chat in order.
+- **Channel**: posts with replies. Meeting notes are a new post and their action items go in that post's thread; reminders are a new post; answers are replies to the post that mentioned Sidekick.
+- A **meeting chat** (the chat of a scheduled Teams meeting) is a group chat to Sidekick, so it's a natural place for that meeting series' notes.
 
 ## Asking questions
 Mention Sidekick with your question:
@@ -23,7 +33,7 @@ Your organization's **guardrails** apply in Teams exactly as in the portal. A qu
 ## Meeting notes
 After a meeting transcript is imported for the workspace, Sidekick posts:
 1. a **notes card**: summary, decisions and questions still open, with **Open in Sidekick** for the full notes;
-2. one **card per action item** (in channels, as replies in the notes thread).
+2. one **card per action item** (in a group chat they follow the notes; in a channel they're replies in the notes post's thread).
 
 On an action-item card:
 - **Assign**: type a name, click Assign. Open items move to *In progress*.
@@ -63,5 +73,5 @@ Once you've signed in to the Sidekick portal with Microsoft, Sidekick recognises
 - It only reads messages that mention it (every message in a 1:1 chat with it), unless an admin turned on **Keep track of every message** for that chat (Sidekick announces it there).
 - Meeting notes go to the chats an admin left notes switched on for (all linked chats by default), so a workspace can keep them in one dedicated notes chat.
 - It only answers from the linked workspace. It never uses other workspaces or other clients' material.
-- In channels marked as having **client guests**, it only uses documents tagged *Shareable*, never posts notes from internal-only meetings there, and only reminds about items whose every source is Shareable.
-- If the channel is unlinked, Sidekick stops answering and posting there until it's linked again.
+- In chats and channels marked as having **client guests**, it only uses documents tagged *Shareable*, never posts notes from internal-only meetings there, and only reminds about items whose every source is Shareable.
+- If the chat or channel is unlinked, Sidekick stops answering and posting there until it's linked again.

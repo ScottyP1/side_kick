@@ -100,7 +100,7 @@ The Teams bot lives in the same app at `/api/messages`. Agents Playground is a l
    It opens http://localhost:56150, a Teams-style chat with Sidekick. Sidekick greets you with an **8-character link code**.
 
 3. Open http://localhost:3100, set up a test organization (made-up details), create a workspace and add the files from `samples/` (mark them Shareable).
-4. **Workspaces → Link Teams channel**: enter the code, pick the workspace, Link. Sidekick confirms in the Playground chat.
+4. **Workspaces → Link a Teams chat or channel**: enter the code, pick the workspace, Link. Sidekick confirms in the Playground chat.
 5. In Playground ask: “Why did we choose Cosmos DB?” You get an answer card with sources.
 6. **Meetings → Import transcript** → `samples/Contoso - Sprint 14 planning.vtt`. The notes card and one card per action item appear in Playground. Type a name and click **Assign**, or **Mark done**: the change shows on the Memory & gaps page.
 7. In Playground, `help` shows the commands and `link` shows which workspace the chat is linked to.
@@ -169,7 +169,7 @@ That writes `teams/build/sidekick-teams.zip` (it passes Microsoft's 62 app-packa
 **5. Upload to Teams**
 - Teams admin center → Teams apps → Setup policies → Global → turn on **Upload custom apps** (it can take a few hours to apply).
 - In Teams: Apps → Manage your apps → Upload an app → **Upload a custom app** → pick the zip → Add to a team/channel.
-- Mention @Sidekick in the channel: it replies with a link code. Enter it at http://localhost:3000 → Workspaces → Link Teams channel.
+- Mention @Sidekick in the channel: it replies with a link code. Enter it at http://localhost:3000 → Workspaces → Link a Teams chat or channel.
 
 ## Demo script (5 minutes)
 

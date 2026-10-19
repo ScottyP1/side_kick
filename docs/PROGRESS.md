@@ -27,6 +27,29 @@ Many side sessions had drifted apart, so Cody paused them, merged what was ready
 6. **Pitch prep:** lawyer check on the employment agreement (IP), then a dry run with the deck and videos.
 7. Microsoft 365 trial ends **Nov 14, 2026**: decide keep ($8.40/month) or cancel before Nov 15.
 
+## Real-world check: status (Oct 18, 2026, branch `fix/real-teams-check`)
+Tried reminders and guardrails with **real Claude** on the live Azure site and **real Teams** (Sidekick Labs, team "Contoso Migration (test)", channel Project). Real-Claude cost of the check: **about $0.49** (Usage page: $0.21 → $0.70 this month; mostly the guardrail check, 74 calls).
+
+**Verified for real**
+- Teams package 1.1.0 uploaded; added to a team; link code → linked from the Workspaces page; Sidekick confirmed in Teams.
+- Chat settings saved (notes, keep track, reminders time/zone/quiet days); "I'm now keeping track of this chat" announced in the channel; a plain (non-mention) channel message was saved.
+- Reminders: Preview (6 sourced points), the **daily timer** posted the card at the chosen time, **Snooze** updated the card in Teams ("Snoozed for a week by …"). Automated browser clicks don't trigger Teams card buttons; real clicks do.
+- Guardrails (portal "Test it" + Ask, ~45 questions): no false refusals on ordinary work questions (incl. "kill the batch jobs", "execute the cutover plan"); judging people, HR/legal/medical, jailbreaks (local + Claude), other clients, strong swearing all refused; workspace-level "stick to work" + "competitors" switches work; loosening custom rules and non-rules refused at save; grounded answers with sources, "I don't know" when missing.
+
+**Fixed on this branch (not deployed yet)**
+- Channel showed as "Group chat": names are now looked up in Teams once and placeholders never overwrite a real name (`touchConversation` in `lib/teams/bot.ts`).
+- Reminders said "Due tomorrow" for an Oct 13 item: meeting-relative due words now carry the meeting date, and the prompt says not to read them as today (`lib/reminders.ts`).
+- Custom rules refused too broadly ("Is the project on budget?" under "don't share budget figures"): the check now refuses only when every useful answer would break the rule.
+- Clearer HR/legal/medical refusal wording; Usage page said "September" in October (month taken from UTC midnight); "embed" feature label.
+- Neutral "chat or channel" wording (portal, link card, guides, README) + a "Group chat or channel?" note in `docs/guide/teams-guide.md`.
+
+**Still left**
+- Card buttons Assign / Mark done / Not relevant, `@Sidekick` answers in Teams (incl. from tracked messages), guardrail refusal in Teams, guests-only-shareable.
+- **Group chats**: not tested (Sidekick Labs has one user; a group chat needs two more people. Option: Cody adds a test user from the trial's licenses).
+- **Meeting chats**: Teams doesn't offer Sidekick for meeting chats, because the package only has a bot. Needs a meeting tab (`configurableTabs` with meeting contexts) in the manifest: a bigger item for Cody to decide. Publishing Sidekick to the org app catalog would also make it show in every chat's app list instead of re-uploading per place.
+- Deploy this branch after merge, then re-check the channel name and the reminder wording.
+- Minor: reminder-kind checkboxes have no accessible labels; the Teams table's Settings button is cut off in narrow windows.
+
 ## Where we are
 
 | Area | Status |

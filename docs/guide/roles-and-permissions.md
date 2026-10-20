@@ -22,7 +22,9 @@ organization) to set up client organizations and watch platform health. It never
 ## Who can do what
 
 ✓ = allowed. Workspace actions also need the person to be in that workspace (Org Owners and Org Admins
-are in all of them). Anything not allowed is refused with "Your role doesn't allow this".
+are in all of them). Anything not allowed is refused with a message naming who can do it, e.g. "Only the
+Org Owner can do this" or "Only Org Owners, Org Admins and Billing Admins can do this". Pages a role can't
+use (Usage & billing, Activity, Security & audit) show the same kind of message instead of their content.
 
 | What | Org Owner | Org Admin | Team Lead | Billing Admin | Member | Viewer |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
@@ -62,6 +64,12 @@ are in all of them). Anything not allowed is refused with "Your role doesn't all
   what exists.
 - **No one makes an Org Owner** from Users & access, and the Org Owner can't be changed or removed there.
   Org Admins can add other Org Admins and make Team Leads.
+- **Nobody changes their own role or removes themselves.** An Org Admin who wants a different role, or to
+  leave, asks the Org Owner or another Org Admin, so nobody locks themselves out by accident.
+- **Temporary passwords first.** Someone added with a temporary password can do nothing but choose a new
+  password (or sign out) until they do; every other request is refused. Signing in with Microsoft clears it.
+- **Password guessing is slowed down.** 5 wrong passwords for one email (or 20 from one network address)
+  in 15 minutes pause password sign-in for 15 minutes. Failed sign-ins and sign-outs go to the audit log.
 - **Team Leads stay inside their workspaces.** They only see, add and take off people in the workspaces
   they lead, can only give the Member or Viewer role, and can't change roles, remove anyone from the
   organization, create workspaces, or open admin pages.

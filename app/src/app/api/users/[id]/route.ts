@@ -2,7 +2,9 @@
  * PATCH/DELETE /api/users/:id: change a person's role or workspaces, or remove them.
  * Who: Org Owners and Org Admins. Nobody can be made Org Owner here. A Team Lead may only change which of
  * *their* workspaces a Member or Viewer is in (their other workspaces stay as they are); changing roles
- * and removing people from the organization stay with admins. Audited.
+ * and removing people from the organization stay with admins. Nobody changes their own role or removes
+ * themselves (so an Org Admin can't lock themselves out by accident; the Org Owner or another Org Admin
+ * does it). Audited.
  */
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, managedWorkspaceIds, requireUser, ROLES, type Role } from "@/lib/auth";
@@ -36,6 +38,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
     throw new HttpError(403, "Team Leads can change which of their workspaces a Member or Viewer is in. Ask an Org Admin to change roles.");
   }
   if (body.role !== undefined) {
+    if (target.id === admin.id && body.role !== target.role) throw new HttpError(403, "You can't change your own role. Ask the Org Owner or another Org Admin.");
     if (!ROLES.includes(body.role as Role) || body.role === "Org Owner") throw new HttpError(400, "Pick a valid role.");
     await run("UPDATE users SET role = ? WHERE id = ?", body.role, target.id);
     await audit(admin, `Changed ${target.name}'s role to ${body.role}`, "Access");
@@ -55,8 +58,14 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
 
 export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
   // Role first (before looking the person up), like every other route.
-  if (!isAdmin(await requireUser())) throw new HttpError(403, "Only Org Owners and Org Admins can remove people from the organization. You can take them off your workspaces instead.");
+  const me = await requireUser();
+  if (!isAdmin(me)) {
+    throw new HttpError(403, isLead(me)
+      ? "Only Org Owners and Org Admins can remove people from the organization. You can take them off your workspaces instead."
+      : "Only Org Owners and Org Admins can remove people from the organization.");
+  }
   const { admin, target } = await load((await params).id);
+  if (target.id === admin.id) throw new HttpError(403, "You can't remove yourself. Ask the Org Owner or another Org Admin.");
   await run("DELETE FROM users WHERE id = ?", target.id);
   await audit(admin, `Removed ${target.name}`, "Access");
   return { ok: true };

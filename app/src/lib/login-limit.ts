@@ -32,7 +32,8 @@ const since = () => new Date(Date.now() - WINDOW_MINUTES * 60_000).toISOString()
 /**
  * The caller's IP address. Behind Azure's front door the real address is the last entry of
  * `X-Forwarded-For` (each proxy appends the address it saw, so earlier entries can be faked by the
- * caller). Returns "" when there's no proxy header (local runs).
+ * caller). Next.js fills the header with the socket address when there's no proxy (local runs). Returns
+ * "" if there's no address at all (then only the per-email limit applies).
  */
 export async function clientIp(): Promise<string> {
   const h = await headers();

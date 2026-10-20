@@ -27,6 +27,10 @@ Many side sessions had drifted apart, so Cody paused them, merged what was ready
 6. **Pitch prep:** lawyer check on the employment agreement (IP), then a dry run with the deck and videos.
 7. Microsoft 365 trial ends **Nov 14, 2026**: decide keep ($8.40/month) or cancel before Nov 15.
 
+## End-to-end test results (Oct 20, 2026)
+Four agents tested the whole portal on isolated copies (~45 findings, none high); fixes split over three branches.
+- **Accounts & security** (`claude/e2e-accounts-245fae`): temporary passwords enforced on the server (only a "Pick your own password" screen until changed); sign-in limit stored in the database (5 wrong passwords per email or 20 per IP in 15 min → 15-minute pause), failed sign-ins and sign-outs audited; Sign out from the avatar menu at phone width (portal + Owner Console) and on the paused screen; confirm before removing a person; the home assistant keeps its conversation when the first workspace is created; refusals name the right role; Activity shows a refusal box; Import meeting hidden for Viewers/Billing Admins; clearer user errors; nobody can change their own role or remove themselves.
+
 ## Real-world check: status (Oct 18, 2026, branch `fix/real-teams-check`)
 Tried reminders and guardrails with **real Claude** on the live Azure site and **real Teams** (Sidekick Labs, team "Contoso Migration (test)", channel Project). Real-Claude cost of the check: **about $0.49** (Usage page: $0.21 → $0.70 this month; mostly the guardrail check, 74 calls).
 

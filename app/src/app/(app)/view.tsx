@@ -55,7 +55,8 @@ export default function OverviewPage() {
           <p>Here&apos;s what Sidekick knows and what needs attention across your workspaces.</p>
         </div>
         <div className="actions">
-          <Link className="btn" href="/meetings">Import meeting</Link>
+          {/* Only roles that can change workspace content import meetings (canEdit in lib/auth.ts). */}
+          {!["Viewer", "Billing Admin"].includes(me.user.role) && <Link className="btn" href="/meetings">Import meeting</Link>}
           <Link className="btn primary" href="/knowledge">Ask Sidekick</Link>
         </div>
       </div>

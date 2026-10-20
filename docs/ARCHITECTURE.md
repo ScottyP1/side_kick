@@ -29,7 +29,8 @@ Browser (client portal, Owner Console)        Microsoft Teams
 |---|---|
 | `lib/db.ts` | The async query API (`all`, `get`, `run`, `tx`) over SQLite (laptop) or Postgres (`DATABASE_URL`); SQLite schema + migrations. Every table with client data has `org_id` and usually `workspace_id` |
 | `db/schema.postgres.sql` | The Postgres schema, mirroring the SQLite one |
-| `lib/auth.ts` | Sessions, roles, `requireUser`, `requireWorkspace` (the workspace wall), audit log |
+| `lib/auth.ts` | Sessions, roles, `requireUser` (also blocks everything but the password change while a temporary password is pending), `requireWorkspace` (the workspace wall), audit log |
+| `lib/login-limit.ts` | Sign-in rate limit: failed password sign-ins per email and per IP, stored in `login_failures` (works across several app copies) |
 | `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification |
 | `lib/owner.ts` | Owner Console sign-in, kill switches (`assertEnabled`), operator log |
 | `lib/trace.ts` | Traces and steps (spans) for every request and Teams message; feeds the Activity page and the home orb |

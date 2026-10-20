@@ -2,7 +2,8 @@
 
 /**
  * AI models & agent (/agent): which Claude model each feature uses, how Sidekick is instructed to behave, and what's ready vs coming next.
- * Models are changed with SIDEKICK_MODEL_* settings in app/.env.local (see lib/claude.ts).
+ * Models are changed by the Sidekick team with SIDEKICK_MODEL_* settings (app/.env.local on the server, see lib/claude.ts);
+ * the page itself tells clients to ask the Sidekick team, since they can't reach the server's settings.
  */
 
 import { useApp } from "@/components/shell";
@@ -41,7 +42,7 @@ export default function AgentPage() {
         <div>
           <div className="eyebrow">AI models & agent</div>
           <h1>How Sidekick thinks</h1>
-          <p>Each feature uses a Claude model you can change in <code>app/.env.local</code>. Your documents and meetings are never used to train any model.</p>
+          <p>Each feature uses the Claude model below. To use a different model for a feature, ask the Sidekick team. Your documents and meetings are never used to train any model.</p>
         </div>
         <div className="actions"><Pill kind={me.claude.configured ? "good" : "warn"}>{me.claude.configured ? "Claude connected" : "Claude not connected"}</Pill></div>
       </div>

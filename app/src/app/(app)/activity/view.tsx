@@ -7,10 +7,11 @@
  *   embeddings, Teams delivery, database time).
  * - Messages: questions asked in the portal and in Teams, and whether Sidekick found the answer.
  * - Audit trail: who did what (the same log as Security & audit).
- * Org Owners and Admins only. Data comes from /api/activity and /api/audit; traces are kept 30 days and
+ * Org Owners and Admins only (other roles get a refusal box). Data comes from /api/activity and /api/audit; traces are kept 30 days and
  * hold timings and counts, never document text.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useApp } from "@/components/shell";
 import { api, fmtTime, Modal, Pill, Spinner, usd, useReportError } from "@/components/ui";
 
 type Overview = {
@@ -37,6 +38,9 @@ const KINDS: Record<string, string> = { request: "Request", search: "Search", ai
 
 export default function ActivityPage() {
   const [tab, setTab] = useState<Tab>("Overview");
+  const { me } = useApp();
+  // Same refusal box as Usage and Security & audit, instead of a spinner that never finishes.
+  if (!me.user.admin) return <div className="callout bad">Only Org Owners and Org Admins can see Activity. Ask one of them if you need it.</div>;
   return (
     <>
       <div className="page-head">

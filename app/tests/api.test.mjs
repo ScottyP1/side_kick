@@ -151,6 +151,20 @@ function client() {
   };
 }
 
+/**
+ * Signs a newly added person in with their temporary password and picks a new one straight away (the app
+ * refuses everything else until they do). Returns the sign-in response.
+ */
+async function firstSignIn(call, email, temp) {
+  const r = await call("POST", "/api/auth/login", { email, password: temp });
+  if (r.status === 200) {
+    const changed = await call("POST", "/api/auth/password", { current: temp, next: NEW_PASSWORD });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+  }
+  return r;
+}
+const NEW_PASSWORD = "a new password 123";
+
 const activity = (overrides) => ({
   id: `act-${Math.random()}`,
   channelId: "msteams",
@@ -258,8 +272,8 @@ test(`[${ENGINE}] admin creates two workspaces and two people (member, viewer) i
   const m = await admin("POST", "/api/users", { name: "Mia Member", email: "member@test.local", role: "Member", workspaces: [s.wsA] });
   const v = await admin("POST", "/api/users", { name: "Vic Viewer", email: "viewer@test.local", role: "Viewer", workspaces: [s.wsA] });
   assert.equal(m.status, 200, JSON.stringify(m.body));
-  assert.equal((await member("POST", "/api/auth/login", { email: "member@test.local", password: m.body.tempPassword })).status, 200);
-  assert.equal((await viewer("POST", "/api/auth/login", { email: "viewer@test.local", password: v.body.tempPassword })).status, 200);
+  assert.equal((await firstSignIn(member, "member@test.local", m.body.tempPassword)).status, 200);
+  assert.equal((await firstSignIn(viewer, "viewer@test.local", v.body.tempPassword)).status, 200);
 });
 
 test(`[${ENGINE}] workspace walls: a member can't see or use a workspace they're not in`, async () => {
@@ -506,7 +520,7 @@ test(`[${ENGINE}] Activity: one organization never sees another's traces`, async
   const other = client();
   const r = await owner("POST", "/api/owner/tenants", { org: "Other Org", name: "Other Admin", email: "other@test.local" });
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  assert.equal((await other("POST", "/api/auth/login", { email: "other@test.local", password: r.body.tempPassword })).status, 200);
+  assert.equal((await firstSignIn(other, "other@test.local", r.body.tempPassword)).status, 200);
   const theirs = (await other("GET", "/api/activity?view=traces")).body.traces;
   assert.ok(theirs.every((t) => t.actor !== "Mia Member" && t.actor !== "Test User"));
   const mine = (await admin("GET", "/api/activity?view=traces")).body.traces;
@@ -580,7 +594,7 @@ test(`[${ENGINE}] assistant: only sees the person's own org and workspaces, and 
   const r = await owner("POST", "/api/owner/tenants", { org: "Northwind Health", name: "Nora North", email: "nora@northwind.test" });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   s.northwind = { id: r.body.id, call: client() };
-  assert.equal((await s.northwind.call("POST", "/api/auth/login", { email: "nora@northwind.test", password: r.body.tempPassword })).status, 200);
+  assert.equal((await firstSignIn(s.northwind.call, "nora@northwind.test", r.body.tempPassword)).status, 200);
   s.northwind.ws = (await s.northwind.call("POST", "/api/workspaces", { name: "Northwind Secret Project" })).body.id;
   assert.ok(s.northwind.ws);
 
@@ -676,7 +690,7 @@ test(`[${ENGINE}] Team Lead: sees and adds people only in the workspaces they le
   const l = await admin("POST", "/api/users", { name: "Leo Lead", email: "lead@test.local", role: "Team Lead", workspaces: [s.wsA] });
   assert.equal(l.status, 200, JSON.stringify(l.body));
   s.leadId = l.body.id;
-  assert.equal((await lead("POST", "/api/auth/login", { email: "lead@test.local", password: l.body.tempPassword })).status, 200);
+  assert.equal((await firstSignIn(lead, "lead@test.local", l.body.tempPassword)).status, 200);
   assert.equal((await lead("GET", "/api/me")).body.user.lead, true);
   // Someone who is only in workspace B, which the lead doesn't lead.
   s.bea = (await admin("POST", "/api/users", { name: "Bea Bee", email: "bea@test.local", role: "Member", workspaces: [s.wsB] })).body.id;
@@ -844,7 +858,7 @@ test(`[${ENGINE}] guardrails: admins see counts per rule (never text); other org
   assert.ok(overview.guardrails.blocked >= 4);
   const other = client();
   const r = await owner("POST", "/api/owner/tenants", { org: "Guard Org", name: "Guard Admin", email: "guard@test.local" });
-  await other("POST", "/api/auth/login", { email: "guard@test.local", password: r.body.tempPassword });
+  await firstSignIn(other, "guard@test.local", r.body.tempPassword);
   assert.equal((await other("GET", "/api/guardrails")).body.summary.total, 0);
   assert.equal((await owner("POST", "/api/owner/releases", { key: "guard", enabled: false })).status, 200);
   const paused = await askA(member, "When is the wave 2 cutover?");
@@ -859,7 +873,7 @@ const askB = (who, question) => who("POST", "/api/ask", { ws: s.wsB, question })
 test(`[${ENGINE}] guardrails: a workspace can be made stricter (Org Owners/Admins), never looser, and it's audited`, async () => {
   const a = await admin("POST", "/api/users", { name: "Ada Admin", email: "orgadmin@test.local", role: "Org Admin", workspaces: [] });
   assert.equal(a.status, 200, JSON.stringify(a.body));
-  assert.equal((await orgAdmin("POST", "/api/auth/login", { email: "orgadmin@test.local", password: a.body.tempPassword })).status, 200);
+  assert.equal((await firstSignIn(orgAdmin, "orgadmin@test.local", a.body.tempPassword)).status, 200);
   const forAdmin = (await orgAdmin("GET", `/api/guardrails?ws=${s.wsB}`)).body;
   assert.equal(forAdmin.canEdit, false, "org switches stay with the Org Owner");
   assert.equal(forAdmin.canManage, true);
@@ -1016,7 +1030,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   // From another organization, even with workspace B's id.
   const other = client();
   const r = await owner("POST", "/api/owner/tenants", { org: "Leak Org", name: "Leak Admin", email: "leak@test.local" });
-  await other("POST", "/api/auth/login", { email: "leak@test.local", password: r.body.tempPassword });
+  await firstSignIn(other, "leak@test.local", r.body.tempPassword);
   for (const url of [`/api/docs?ws=${s.wsB}`, `/api/memory?ws=${s.wsB}`]) assert.equal((await other("GET", url)).status, 404, url);
   assert.equal((await other("POST", "/api/ask", { ws: s.wsB, question: "vault code" })).status, 404);
   // Guardrails: workspace B's settings and rules, and this org's custom rules, are out of reach.
@@ -1053,7 +1067,7 @@ const billing = client();
 test(`[${ENGINE}] permission matrix: every role gets exactly the access the roles guide promises`, async () => {
   const b = await admin("POST", "/api/users", { name: "Bea Billing", email: "billing@test.local", role: "Billing Admin", workspaces: [s.wsA] });
   assert.equal(b.status, 200, JSON.stringify(b.body));
-  assert.equal((await billing("POST", "/api/auth/login", { email: "billing@test.local", password: b.body.tempPassword })).status, 200);
+  assert.equal((await firstSignIn(billing, "billing@test.local", b.body.tempPassword)).status, 200);
   const as = { owner: admin, admin: orgAdmin, lead, billing, member, viewer };
   const wrong = [];
   for (const row of MATRIX) {
@@ -1187,7 +1201,7 @@ const mia = client();
 test(`[${ENGINE}] reminders: settings are per chat, Org Owners/Admins only, checked and audited`, async () => {
   // A fresh Member (earlier password sessions were ended by the Microsoft "require" test).
   const m = await admin("POST", "/api/users", { name: "Remi Member", email: "remi@test.local", role: "Member", workspaces: [s.wsA] });
-  assert.equal((await mia("POST", "/api/auth/login", { email: "remi@test.local", password: m.body.tempPassword })).status, 200);
+  assert.equal((await firstSignIn(mia, "remi@test.local", m.body.tempPassword)).status, 200);
   const before = sent.length;
   await toBot(groupMsg({ type: "installationUpdate", action: "add" }));
   const msg = await waitForSent((x) => sent.indexOf(x) >= before && x.url.includes(GROUP) && /Link this chat/.test(cardText(cardsOf(x)[0] ?? {})));
@@ -1216,7 +1230,7 @@ test(`[${ENGINE}] reminders: settings are per chat, Org Owners/Admins only, chec
   for (const [c, email, ws] of [[leadA, "lead-a@test.local", s.wsA], [leadB, "lead-b@test.local", s.wsB]]) {
     const u = await admin("POST", "/api/users", { name: `Lead ${ws === s.wsA ? "A" : "B"}`, email, role: "Team Lead", workspaces: [ws] });
     assert.equal(u.status, 200, JSON.stringify(u.body));
-    assert.equal((await c("POST", "/api/auth/login", { email, password: u.body.tempPassword })).status, 200);
+    assert.equal((await firstSignIn(c, email, u.body.tempPassword)).status, 200);
   }
   assert.equal((await leadA("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { afterMeeting: false } })).status, 200);
   assert.equal((await leadA("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { afterMeeting: true } })).status, 200);
@@ -1373,4 +1387,96 @@ test(`[${ENGINE}] reminders: unlinking a chat forgets its saved messages; the ow
   const paused = await admin("POST", "/api/reminders", { id: "conv-1", action: "preview" });
   assert.equal(paused.status, 503);
   assert.equal((await owner("POST", "/api/owner/releases", { key: "remind", enabled: true })).status, 200);
+});
+
+/* ---------- Accounts and sign-in (Oct 20, 2026 end-to-end check) ---------- */
+
+test(`[${ENGINE}] temporary password: nothing but the profile, password change and sign-out work until it's changed`, async () => {
+  const fresh = client();
+  const u = await admin("POST", "/api/users", { name: "Tara Temp", email: "temp@test.local", role: "Member", workspaces: [s.wsA] });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  assert.equal((await fresh("POST", "/api/auth/login", { email: "temp@test.local", password: u.body.tempPassword })).status, 200);
+  const me = await fresh("GET", "/api/me");
+  assert.equal(me.status, 200);
+  assert.equal(me.body.user.mustChangePassword, true);
+  for (const [method, url, body] of [["GET", "/api/overview"], ["GET", `/api/docs?ws=${s.wsA}`], ["POST", "/api/ask", { ws: s.wsA, question: "anything" }], ["POST", "/api/assistant", { message: "hi" }]]) {
+    const r = await fresh(method, url, body);
+    assert.equal(r.status, 403, `${method} ${url} must wait for the new password`);
+    assert.match(r.body.error, /Change your temporary password first/);
+  }
+  assert.equal((await fresh("POST", "/api/auth/password", { current: u.body.tempPassword, next: "short" })).status, 400);
+  assert.equal((await fresh("POST", "/api/auth/password", { current: u.body.tempPassword, next: NEW_PASSWORD })).status, 200);
+  assert.equal((await fresh("GET", "/api/me")).body.user.mustChangePassword, false);
+  assert.equal((await fresh("GET", "/api/overview")).status, 200);
+  assert.equal((await fresh("POST", "/api/auth/logout")).status, 200);
+  assert.equal((await fresh("GET", "/api/me")).status, 401);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Tara Temp.*Signed out|Signed out.*Tara Temp/);
+});
+
+test(`[${ENGINE}] sign-in limit: too many wrong passwords pause password sign-in for that email, and it's audited`, async () => {
+  const c = client();
+  const u = await admin("POST", "/api/users", { name: "Gus Guessed", email: "guessed@test.local", role: "Viewer", workspaces: [s.wsA] });
+  assert.equal((await firstSignIn(c, "guessed@test.local", u.body.tempPassword)).status, 200);
+  for (let i = 0; i < 5; i++) assert.equal((await client()("POST", "/api/auth/login", { email: "guessed@test.local", password: `wrong guess ${i}` })).status, 401);
+  const locked = await client()("POST", "/api/auth/login", { email: "guessed@test.local", password: NEW_PASSWORD });
+  assert.equal(locked.status, 429, "even the right password waits");
+  assert.match(locked.body.error, /Too many sign-in attempts/);
+  // Unknown emails are limited the same way, so the limit doesn't reveal which accounts exist.
+  for (let i = 0; i < 5; i++) await client()("POST", "/api/auth/login", { email: "ghost@test.local", password: "wrong" });
+  assert.equal((await client()("POST", "/api/auth/login", { email: "ghost@test.local", password: "wrong" })).status, 429);
+  // Other accounts are unaffected.
+  assert.equal((await client()("POST", "/api/auth/login", { email: "admin@test.local", password: "correct horse battery" })).status, 200);
+  const log = JSON.stringify((await admin("GET", "/api/audit")).body);
+  assert.match(log, /Failed sign-in \(wrong password\)/);
+  assert.match(log, /Password sign-in paused for 15 minutes/);
+});
+
+test(`[${ENGINE}] sign-in limit: one network address can't try many accounts`, async () => {
+  const login = (email, ip, password = "wrong") =>
+    fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify({ email, password }) });
+  for (let i = 0; i < 20; i++) assert.equal((await login(`spray${i}@test.local`, "203.0.113.7")).status, 401);
+  assert.equal((await login("admin@test.local", "203.0.113.7", "correct horse battery")).status, 429, "that address is paused");
+  assert.equal((await login("admin@test.local", "198.51.100.4", "correct horse battery")).status, 200, "other addresses aren't");
+});
+
+/** Adds a person with this role (in workspace A) and signs them in on a fresh client. Returns { call, id }. */
+async function newPerson(name, email, role) {
+  const call = client();
+  const u = await admin("POST", "/api/users", { name, email, role, workspaces: [s.wsA] });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  assert.equal((await firstSignIn(call, email, u.body.tempPassword)).status, 200);
+  return { call, id: u.body.id };
+}
+
+test(`[${ENGINE}] users: clear errors for unknown roles and for Members trying to remove someone`, async () => {
+  const bad = await admin("POST", "/api/users", { name: "X", email: "x-role@test.local", role: "Wizard" });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /isn't a role/);
+  assert.match((await admin("POST", "/api/users", { name: "X", email: "x-role@test.local", role: "Org Owner" })).body.error, /Nobody can be added as Org Owner/);
+  const mem = await newPerson("Moe Member", "moe@test.local", "Member");
+  const tl = await newPerson("Tess Lead", "tess@test.local", "Team Lead");
+  const target = await newPerson("Val Viewer", "val@test.local", "Viewer");
+  const byMember = await mem.call("DELETE", `/api/users/${target.id}`);
+  assert.equal(byMember.status, 403);
+  assert.doesNotMatch(byMember.body.error, /your workspaces/, "a Member has no workspaces to manage");
+  assert.match((await tl.call("DELETE", `/api/users/${target.id}`)).body.error, /take them off your workspaces/);
+  // Role refusals name who can do it.
+  assert.match((await mem.call("GET", "/api/usage")).body.error, /Only Org Owners, Org Admins and Billing Admins/);
+  const adm = await newPerson("Abe Admin", "abe@test.local", "Org Admin");
+  assert.match((await adm.call("PUT", "/api/guardrails", { competitors: true })).body.error, /Only the Org Owner/);
+  s.abe = adm;
+});
+
+test(`[${ENGINE}] users: an Org Admin can't change their own role or remove themselves`, async () => {
+  const { call, id } = s.abe;
+  const demote = await call("PATCH", `/api/users/${id}`, { role: "Member" });
+  assert.equal(demote.status, 403);
+  assert.match(demote.body.error, /can't change your own role/);
+  const leave = await call("DELETE", `/api/users/${id}`);
+  assert.equal(leave.status, 403);
+  assert.match(leave.body.error, /can't remove yourself/);
+  assert.equal((await admin("GET", "/api/users")).body.users.find((p) => p.id === id).role, "Org Admin");
+  // Another admin (here the Org Owner) still can.
+  assert.equal((await admin("PATCH", `/api/users/${id}`, { role: "Member" })).status, 200);
+  assert.equal((await admin("DELETE", `/api/users/${id}`)).status, 200);
 });

@@ -5,6 +5,7 @@
  * Org Owners and Org Admins manage everyone. A Team Lead sees only the people in the workspaces they lead
  * and can add people to those workspaces (as Member or Viewer) or take them off; roles and removing people
  * from the organization stay with admins. New people get a temporary password they must change at first sign-in.
+ * Removing someone asks for confirmation first. Nobody can change their own role or remove themselves here.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -16,7 +17,7 @@ const ROLES = ["Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"];
 /** Roles a Team Lead can give (same rule as the server: LEAD_ASSIGNABLE_ROLES in lib/auth.ts). */
 const LEAD_ROLES = ["Member", "Viewer"];
 const ROLE_HELP: [string, string][] = [
-  ["Org Owner", "Everything, including deleting the organization"],
+  ["Org Owner", "Everything, plus the organization-wide guardrail switches and Microsoft sign-in"],
   ["Org Admin", "People, workspaces, usage and audit log, across all workspaces"],
   ["Team Lead", "A Member who also adds people to the workspaces they lead (as Member or Viewer), takes them off again, and links Teams chats to those workspaces"],
   ["Billing Admin", "Usage and billing only"],
@@ -66,8 +67,12 @@ export default function UsersPage() {
     }
   };
   const remove = async (p: P) => {
+    // Same confirm-first pattern as removing a guardrail rule.
+    if (!window.confirm(`Remove ${p.name} (${p.email}) from the organization? They're signed out and lose access to every workspace. This can't be undone.`)) return;
     try {
       await api(`/api/users/${p.id}`, { method: "DELETE" });
+      // Drop the row now, so it doesn't linger while the list reloads.
+      setPeople((ps) => ps?.filter((x) => x.id !== p.id) ?? ps);
       toast(`${p.name} was removed`);
       load();
     } catch (e) {
@@ -121,7 +126,8 @@ export default function UsersPage() {
                     </div>
                   </td>
                   <td>
-                    {p.role === "Org Owner" || lead ? <b>{p.role}</b> : (
+                    {/* Nobody changes their own role here (the server refuses it too), so an admin can't lock themselves out. */}
+                    {p.role === "Org Owner" || lead || p.id === me.user.id ? <b title={p.id === me.user.id ? "Ask the Org Owner or another Org Admin to change your role" : undefined}>{p.role}</b> : (
                       <select className="input" style={{ width: "auto", padding: "4px 8px" }} value={p.role} aria-label={`Role for ${p.name}`} onChange={(e) => patch(p, { role: e.target.value }, `${p.name} is now ${e.target.value}`)}>
                         {ROLES.map((r) => <option key={r}>{r}</option>)}
                       </select>

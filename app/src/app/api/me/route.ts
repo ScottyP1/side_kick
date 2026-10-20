@@ -9,7 +9,7 @@ import { all, get } from "@/lib/db";
 import { claudeConfigured, MODELS } from "@/lib/claude";
 
 export const GET = handle(async () => {
-  const user = await requireUser();
+  const user = await requireUser(undefined, { allowPendingPassword: true });
   const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", user.org_id);
   const ids = await workspaceIdsFor(user);
   const workspaces = ids.length

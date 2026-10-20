@@ -54,11 +54,24 @@ Tried reminders and guardrails with **real Claude** on the live Azure site and *
 - A message that starts with "@Sidekick" typed as plain text (not picked from Teams' mention list) is answered as a question instead of only being saved. Guide: `docs/guide/teams-guide.md`.
 - 2 new end-to-end tests per engine (fake Teams team API in `tests/api.test.mjs`).
 
+**Group chat check (Oct 20, 2026, live `44ea05b`)**: chat "Wave 2 cutover" (Cody + test users Jojo Boom `JojoBoom@…` and User2 `Tester2@…`, Business Basic trial licenses; passwords only in Cody's password manager).
+- Sidekick added by uploading the 1.1.0 zip into the chat (people icon → Add agents → Manage your apps → Upload an app; searching "Sidekick" there only finds an unrelated store app "Sydekick"). Link card → linked from the portal; the real chat name showed straight away.
+- Tracking + reminders on: "keeping track" notice posted; turning reminders on at 9:35 with a 9:00 time posted that day's reminder right away (2 points, both sourced). Expected, but worth knowing.
+- Real `@Sidekick` mention: answered with sources (Dev Patel owns the rollback, notes the out-of-date runbook). "Is Dev a good performer?" refused politely. Both quote the question.
+- ❌ **Plain messages aren't delivered in the group chat** (0 saved; no trace at all), although they are in the channel. Likely the tenant's resource-specific consent setting for **chats** (separate from teams); my look at the Teams admin center was blocked, so Cody checks: Teams admin center → Teams apps → Manage apps → Actions → Org-wide app settings → resource-specific consent for chats; then remove and re-add Sidekick in the chat so the permission is granted.
+
+**Teams app cleanup (in progress, Oct 20, 2026).** Manage your apps shows two "Sidekick" custom apps and the group chat got its own upload; older packages also pointed at the dev tunnel (the old script read `SIDEKICK_PUBLIC_URL` from `.env.local`). Plan:
+1. ✅ `teams:package` builds a labelled **live** package (1.2.0, Azure address) by default; `--local` for the tunnel (`chore/teams-live-package`).
+2. Cody removes every Sidekick app: Apps → Manage your apps (both entries), the Project channel's team, the Wave 2 cutover chat, and any custom Sidekick in Teams admin center → Manage apps.
+3. Cody checks the tenant's resource-specific consent setting for chats, then uploads `sidekick-teams-live.zip` once to the org app catalog.
+4. Add Sidekick back from "Built for your org" to the Contoso Migration (test) team and Wave 2 cutover; the portal links should survive (they belong to the chat).
+5. Full end-to-end check in both: plain message saved, answer from it, real + plain-text `@Sidekick`, refusal, reminder buttons, channel name (rename Project to send its name).
+
 **Direction: group chats first.** Cody's teams (engineering) talk in Teams **group chats**, one per topic, not channels. So group chats are the main place to test and design for; channels are secondary.
 
 **Still left**
 - `@Sidekick` answers in Teams (incl. from tracked messages) and the guardrail refusal in Teams, with a real mention; guests-only-shareable.
-- **Group chats (priority)**: not tested. A group chat needs at least three people: Cody is adding two test users in Sidekick Labs (Oct 19: Jojo Boom added, Business Basic trial license; passwords in Cody's password manager only, never in the repo). Then: add Sidekick to a group chat, link it, turn on tracking + reminders, re-run the checks above there.
+- **Group chats (priority)**: fix plain-message delivery (above), then re-check tracked messages (save + answer from them, e.g. "cutover moved to Nov 19"), the reminder card buttons, and plain-text "@Sidekick" after deploying `fix/teams-chat-polish`.
 - **Meeting chats**: Teams doesn't offer Sidekick for meeting chats, because the package only has a bot. Needs a meeting tab (`configurableTabs` with meeting contexts) in the manifest: a bigger item for Cody to decide. Publishing Sidekick to the org app catalog would also make it show in every chat's app list instead of re-uploading per place (matters more with many topic group chats).
 - After deploying `fix/teams-chat-polish`: rename the Project channel (or rename it back) so Teams sends the new name, and redo a real `@Sidekick` mention.
 - Minor: reminder-kind checkboxes have no accessible labels; the Teams table's Settings button is cut off in narrow windows.
@@ -75,7 +88,7 @@ Tried reminders and guardrails with **real Claude** on the live Azure site and *
 | Microsoft 365 test org "Sidekick Labs" (Business Basic trial) | **Active again** (new free trial started Oct 15, 2026 in the same org; the first trial was cancelled by turning off recurring billing and could not be reactivated). Trial ends **Nov 14, 2026**; then $8.40 + tax per month (1 license, monthly) on the Visa unless the subscription is cancelled before Nov 15. **Never turn off recurring billing on a trial** (it cancels it) |
 | Teams setup (Oct 15, 2026) | Done in Sidekick Labs: Teams "Upload custom apps" = On (Global policy); Entra app **Sidekick Bot** (single tenant, secret 180 days, IDs + secret only in `app/.env.local`); Azure Bot **sidekick-bot-dev** (Free, resource group `sidekick-rg`, Teams channel on, endpoint = dev tunnel); dev tunnel **sidekick** (anonymous, port 3000, expires after 30 days unused). Azure "Test in Web Chat" → app answered (end-to-end OK). Package built: `npm --prefix app run teams:package` |
 | Azure AI Search (Oct 16, 2026) | **Live**: Free search service `sidekick-labs-search` + embedding deployment `text-embedding-3-small` in Foundry resource `codyscott-9578-resource` (project `sidekick`), all in `sidekick-rg`; keys only in `app/.env.local`. Backfill copied 17 sources; 18 embedding calls cost $0.0001. Meaning search found the Oct 15 rollback owner that keyword search missed; guest filter verified |
-| Teams custom-app upload | Done earlier (bot answers in real Teams). Manifest **1.1.0** (chat tracking for reminders) still needs re-uploading: `npm --prefix app run teams:package`, then upload `teams/build/sidekick-teams.zip` |
+| Teams app package | **1.2.0**: `npm --prefix app run teams:package` builds `teams/build/sidekick-teams-live.zip` (live Azure address); `-- --local` builds the dev-tunnel one. To be uploaded once to the org app catalog (see HOSTING → Teams app package) after the cleanup below |
 | **Product step 2**: Sidekick in Teams | **Built and on `main`**: Teams bot, Microsoft sign-in, Azure AI Search, Postgres, hosting in Azure, guardrails (phases 1–2), org access controls + Team Lead, proactive reminders. Remaining: see Regroup → Open items |
 | Product step 3: live voice in meetings | Later |
 

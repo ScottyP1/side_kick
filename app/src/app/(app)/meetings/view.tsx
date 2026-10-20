@@ -90,7 +90,8 @@ export default function MeetingsPage() {
       setBusy(false);
     }
   };
-  const remove = async (id: string) => {
+  const remove = async (id: string, title: string) => {
+    if (!confirm(`Delete “${title}”? Its notes, action items and transcript are deleted too. This can't be undone.`)) return;
     await api(`/api/meetings/${id}`, { method: "DELETE" });
     toast("Meeting, notes and transcript deleted");
     openMeeting(null);
@@ -120,7 +121,7 @@ export default function MeetingsPage() {
               {canEdit && (
                 <div className="actions">
                   {m!.status === "Failed" && <button className="btn primary" disabled={busy} onClick={() => retry(m!.id)}>{busy ? <><Spinner /> Processing</> : "Try again"}</button>}
-                  <button className="btn danger" onClick={() => remove(m!.id)}>Delete</button>
+                  <button className="btn danger" onClick={() => remove(m!.id, m!.title).catch(reportError)}>Delete</button>
                 </div>
               )}
             </div>

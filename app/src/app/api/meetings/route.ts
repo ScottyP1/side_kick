@@ -46,6 +46,8 @@ export const POST = handle(async (req: Request) => {
   if (!transcript) throw new HttpError(400, "Add a transcript file or paste the transcript text.");
   if (!title) throw new HttpError(400, "Give the meeting a title.");
   const heldAt = String(form.get("held_at") ?? "").trim() || now().slice(0, 10);
+  // Dates sort as text, so anything but a real YYYY-MM-DD date would jump above real meetings.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(heldAt) || isNaN(Date.parse(heldAt))) throw new HttpError(400, "Meeting date must be a date like 2026-10-20.");
   const id = newId();
   await run(
     "INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?)",

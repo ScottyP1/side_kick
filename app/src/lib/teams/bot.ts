@@ -156,6 +156,9 @@ export const baseConversationId = (id: string) => id.split(";")[0];
 // Shown until Teams tells us the real name. Never written over a real name (see touchConversation).
 const PLACEHOLDER_NAMES: Record<string, string> = { personal: "1:1 chat", groupChat: "Group chat", channel: "Teams channel" };
 const isPlaceholder = (name: string | null | undefined) => !name || Object.values(PLACEHOLDER_NAMES).includes(name);
+// Before Oct 2026 the team's first channel was saved as "Team › General" without knowing its real name
+// (it may have been renamed); such a name is looked up once more.
+const isOldGeneralGuess = (name: string | null | undefined, conversationId: string, teamId?: string) => !!name && conversationId === teamId && name.endsWith(" › General");
 
 /**
  * The conversation's display name from the activity itself, or null when the activity doesn't carry one.
@@ -172,8 +175,9 @@ function activityName(a: InboundActivity): string | null {
 
 /**
  * Asks Teams for a channel's name ("Team › Channel") when the activity didn't include it. The team's first
- * channel has no name of its own in Teams' API (it's "General" in the Teams app). Best effort: returns null
- * if Teams can't be asked (e.g. local Playground) and the placeholder stays.
+ * channel has no name in Teams' API: it's "General" unless someone renamed it, so it shows as just the team
+ * name rather than a guess (a later rename event fills in the real name). Best effort: returns null if Teams
+ * can't be asked (e.g. local Playground against a remote service) and the placeholder stays.
  */
 async function lookupChannelName(a: InboundActivity, conversationId: string): Promise<string | null> {
   const teamId = a.channelData?.team?.id;
@@ -183,7 +187,7 @@ async function lookupChannelName(a: InboundActivity, conversationId: string): Pr
       const api = (await teams()).app.api.clone({ serviceUrl: a.serviceUrl! });
       const [team, channels] = await Promise.all([api.teams.getById(teamId), api.teams.getConversations(teamId)]);
       const channel = channels.find((c) => c.id === conversationId);
-      const channelName = a.channelData?.channel?.name ?? channel?.name ?? (conversationId === teamId || (channel && !channel.name) ? "General" : null);
+      const channelName = a.channelData?.channel?.name ?? channel?.name ?? null;
       const teamName = a.channelData?.team?.name ?? team.name;
       return teamName && channelName ? `${teamName} › ${channelName}` : (teamName ?? null);
     });
@@ -205,7 +209,7 @@ async function touchConversation(a: InboundActivity): Promise<TeamsConversation>
   let name = activityName(a);
   if (!name && kind === "channel") {
     const saved = await get<{ name: string | null }>("SELECT name FROM teams_conversations WHERE id = ?", id);
-    if (isPlaceholder(saved?.name)) name = await lookupChannelName(a, id);
+    if (isPlaceholder(saved?.name) || isOldGeneralGuess(saved?.name, id, a.channelData?.team?.id)) name = await lookupChannelName(a, id);
   }
   await run(
     `INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -235,6 +239,15 @@ export const normalizeCode = (code: string) => {
   const c = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
   return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : null;
 };
+
+/**
+ * True if the message starts with "@Sidekick" typed as plain text: easy to do in Teams when the name isn't
+ * picked from the mention list. Teams then delivers it only thanks to the chat-reading permission, without a mention.
+ */
+const PLAIN_MENTION = /^\s*@\s?sidekick\b[\s,:]*/i;
+const startsWithPlainMention = (text: string | undefined) => PLAIN_MENTION.test(plainText(text ?? ""));
+// Teams sends message text as HTML in channels; enough to read the start of it.
+const plainText = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
 
 /** True if the message @mentions Sidekick itself (the activity's recipient is the bot). */
 const mentionsSidekick = (a: { recipient?: { id?: string }; entities?: unknown[] }) =>
@@ -290,7 +303,9 @@ async function teamsActor(conv: TeamsConversation, a: InboundActivity): Promise<
 /**
  * Wires up what Sidekick does for each kind of Teams activity:
  * - `install.add`: Sidekick was added to a channel/chat → greet with the help card, or the link code.
- * - `message`: someone mentioned Sidekick → commands (`help`, `link`) or a question to answer.
+ * - `channelRenamed`: a channel's new name, so the Workspaces page shows it.
+ * - `message`: someone mentioned Sidekick (or started with "@Sidekick" typed as plain text) → commands
+ *   (`help`, `link`) or a question to answer; other messages in tracked chats are only saved.
  * - `card.action`: someone clicked Assign / Mark done / Reopen on an action-item card.
  */
 function registerHandlers(app: App) {
@@ -299,18 +314,29 @@ function registerHandlers(app: App) {
     await send(conv.workspace_id ? helpCard(await workspaceName(conv)) : linkCard(await freshLinkCode(conv), conv.kind));
   });
 
+  // A channel was renamed: Teams says so to the team's bot, with the channel's id and new name.
+  app.on("channelRenamed", async ({ activity }) => {
+    const channel = activity.channelData?.channel;
+    const team = activity.channelData?.team?.name;
+    if (!channel?.id || !channel.name || !team) return;
+    await run("UPDATE teams_conversations SET name = ? WHERE id = ?", `${team} › ${channel.name}`, channel.id);
+  });
+
   // In channels and group chats Teams only delivers messages that @mention Sidekick; in 1:1 chats, every message.
+  // With the chat-reading permission Teams also sends the others; one starting with "@Sidekick" typed as
+  // plain text counts as a question.
   // stripMentionsText removes the "@Sidekick" part so only the question is left.
   // With the resource-specific consent permissions in the manifest, Teams also delivers channel and
   // group-chat messages that don't mention Sidekick: those are only saved (tracked chats) or ignored.
   app.on("message", async ({ activity, send, reply }) => {
     const conv = await touchConversation(activity);
     traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
-    if (conv.kind !== "personal" && !mentionsSidekick(activity)) {
+    const plainMention = conv.kind !== "personal" && !mentionsSidekick(activity) && startsWithPlainMention(activity.text);
+    if (conv.kind !== "personal" && !mentionsSidekick(activity) && !plainMention) {
       if (conv.workspace_id && !(await orgPaused(conv.org_id!))) await recordChatMessage(conv, activity);
       return;
     }
-    const question = (stripMentionsText(activity) ?? "").replace(/\s+/g, " ").trim();
+    const question = (plainMention ? plainText(activity.text ?? "").replace(PLAIN_MENTION, "") : (stripMentionsText(activity) ?? "")).replace(/\s+/g, " ").trim();
     const command = question.toLowerCase().replace(/[^a-z]/g, "");
 
     if (!question || command === "help") return void (await send(helpCard(await workspaceName(conv))));

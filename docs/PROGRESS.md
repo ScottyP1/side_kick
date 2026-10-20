@@ -1,6 +1,6 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 17, 2026 (evening, after the regroup). Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Regroup** just below.
+> Last updated: October 19, 2026 (real-world re-check after deploy). Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Regroup** just below.
 
 ## Regroup (Oct 17, 2026)
 Many side sessions had drifted apart, so Cody paused them, merged what was ready and cleaned up. State after the regroup:
@@ -43,11 +43,24 @@ Tried reminders and guardrails with **real Claude** on the live Azure site and *
 - Clearer HR/legal/medical refusal wording; Usage page said "September" in October (month taken from UTC midnight); "embed" feature label.
 - Neutral "chat or channel" wording (portal, link card, guides, README) + a "Group chat or channel?" note in `docs/guide/teams-guide.md`.
 
+**Re-check after deploy (Oct 19, 2026, live `44ea05b`)**
+- Reminder wording: fixed. The Oct 13 item now reads "it was due the day after the Oct 13 standup" (was "Due tomorrow").
+- Card buttons in real Teams: **Assign, Mark done, Not relevant and Snooze all work** (card updates with "Assigned to / Marked done / Marked not relevant / Snoozed by Cody Scott").
+- Channel name: the lookup now runs on the next message, but shows "Contoso Migration (test) › **General**" for a channel called **Project**. Likely the team's first channel, renamed: Teams' bot API returns no name for it, so the code guesses "General" (`lookupChannelName` in `lib/teams/bot.ts`). Fix options: show only the team name when unsure, or read the name via Graph (needs a `ChannelSettings.Read.Group` RSC permission).
+- `@Sidekick` answers and the Teams refusal: **not checked yet**. Both test posts had "@Sidekick" typed as plain text, not picked from Teams' mention list, so Teams didn't send them as mentions and Sidekick only saved them as tracked messages (correct). Redo with a real mention. Possible improvement: in a tracked chat, treat a message that starts with plain-text "@Sidekick" as a question.
+
+**Fixed on `fix/teams-chat-polish` (not deployed yet)**
+- A team's first channel shows the team name instead of a guessed "General"; old "› General" guesses are looked up once more; a `channelRenamed` event from Teams saves the new name (so renaming the channel, or renaming it back, fixes the live "Project" row).
+- A message that starts with "@Sidekick" typed as plain text (not picked from Teams' mention list) is answered as a question instead of only being saved. Guide: `docs/guide/teams-guide.md`.
+- 2 new end-to-end tests per engine (fake Teams team API in `tests/api.test.mjs`).
+
+**Direction: group chats first.** Cody's teams (engineering) talk in Teams **group chats**, one per topic, not channels. So group chats are the main place to test and design for; channels are secondary.
+
 **Still left**
-- Card buttons Assign / Mark done / Not relevant, `@Sidekick` answers in Teams (incl. from tracked messages), guardrail refusal in Teams, guests-only-shareable.
-- **Group chats**: not tested (Sidekick Labs has one user; a group chat needs two more people. Option: Cody adds a test user from the trial's licenses).
-- **Meeting chats**: Teams doesn't offer Sidekick for meeting chats, because the package only has a bot. Needs a meeting tab (`configurableTabs` with meeting contexts) in the manifest: a bigger item for Cody to decide. Publishing Sidekick to the org app catalog would also make it show in every chat's app list instead of re-uploading per place.
-- Deploy this branch after merge, then re-check the channel name and the reminder wording.
+- `@Sidekick` answers in Teams (incl. from tracked messages) and the guardrail refusal in Teams, with a real mention; guests-only-shareable.
+- **Group chats (priority)**: not tested. A group chat needs at least three people: Cody is adding two test users in Sidekick Labs (Oct 19: Jojo Boom added, Business Basic trial license; passwords in Cody's password manager only, never in the repo). Then: add Sidekick to a group chat, link it, turn on tracking + reminders, re-run the checks above there.
+- **Meeting chats**: Teams doesn't offer Sidekick for meeting chats, because the package only has a bot. Needs a meeting tab (`configurableTabs` with meeting contexts) in the manifest: a bigger item for Cody to decide. Publishing Sidekick to the org app catalog would also make it show in every chat's app list instead of re-uploading per place (matters more with many topic group chats).
+- After deploying `fix/teams-chat-polish`: rename the Project channel (or rename it back) so Teams sends the new name, and redo a real `@Sidekick` mention.
 - Minor: reminder-kind checkboxes have no accessible labels; the Teams table's Settings button is cut off in narrow windows.
 
 ## Where we are

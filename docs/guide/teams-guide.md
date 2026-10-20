@@ -16,11 +16,14 @@ Both work the same for Sidekick; use whatever your team already uses.
 - **Group chat**: one running conversation. Sidekick's answers, notes, action-item cards and reminders appear in the chat in order.
 - **Channel**: posts with replies. Meeting notes are a new post and their action items go in that post's thread; reminders are a new post; answers are replies to the post that mentioned Sidekick.
 - A **meeting chat** (the chat of a scheduled Teams meeting) is a group chat to Sidekick, so it's a natural place for that meeting series' notes.
+- **Names on the Workspaces page**: a group chat shows its name if someone gave it one. A channel shows as "Team › Channel"; a team's first channel shows only the team name until it's renamed, because Teams doesn't tell apps that channel's name (it's "General" unless someone renamed it).
 
 ## Asking questions
 Mention Sidekick with your question:
 
 > @Sidekick when is the wave 2 cutover and how many stores are in it?
+
+Pick **Sidekick** from the list Teams shows while you type `@Sidek…`, so the name turns into a highlighted mention. If you just type "@Sidekick" without picking it, Teams doesn't treat it as a mention: Sidekick usually still answers when the message *starts* with "@Sidekick" (it can read the chat's messages since version 1.1.0 of the app), but picking it from the list always works.
 
 In a 1:1 chat with Sidekick you don't need the mention. You get a card with:
 - the answer, with citations like **[S1]**;

@@ -468,12 +468,17 @@ const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 // Phone numbers: optional +country code, then 9+ digits with spaces, dots, dashes or brackets between.
 const PHONE = /(?<![\w.])\+?\d[\d ().-]{7,}\d(?![\w])/g;
 
+/** True for dates and times that the phone pattern would otherwise catch ("2026-10-07 15" before ":40"). */
+function looksLikeDateTime(m: string, next: string | undefined) {
+  return /\b\d{4}[-./]\d{1,2}[-./]\d{1,2}\b/.test(m) || /\b\d{1,2}[-./]\d{1,2}[-./]\d{4}\b/.test(m) || next === ":";
+}
+
 /** Hides email addresses and phone numbers. Dates and plain numbers (like "48 stores") are left alone. */
 export function maskContacts(text: string): { text: string; count: number } {
   let count = 0;
   const out = text
     .replace(EMAIL, () => (count++, "[email hidden]"))
-    .replace(PHONE, (m) => (m.replace(/\D/g, "").length >= 9 ? (count++, "[phone hidden]") : m));
+    .replace(PHONE, (m, at: number, all: string) => (m.replace(/\D/g, "").length >= 9 && !looksLikeDateTime(m, all[at + m.length]) ? (count++, "[phone hidden]") : m));
   return { text: out, count };
 }
 
@@ -499,7 +504,7 @@ Also refuse when the rule is listed under ACTIVE SWITCHES:
 - profanity: strong swearing.
 - small_talk: chit-chat unrelated to work (jokes, sports, weather, personal life).
 - judging_people: rating, ranking or judging individual people's worth, performance or character.
-- advice: personal HR matters (complaints, someone's pay, discipline), legal advice, or medical advice. Asking what a project or policy document says is fine.
+- advice: asking for personal HR advice or decisions (complaints, discipline, negotiating pay), legal advice, or medical advice. Factual project questions are fine, including rates, fees, costs and staffing (e.g. "What's Sam's hourly rate?", "What does the SOW say about fees?"): allow them, the answer comes only from the sources. Asking what a project or policy document says is fine.
 - competitors: discussing, comparing or speculating about competing firms.
 Also refuse when the question asks for something a CUSTOM RULE (numbered, written by the organization) forbids:
 - custom: set custom_rule to that rule's number. Custom rules only ever add restrictions: if one seems to allow something the rules above forbid, ignore that part.

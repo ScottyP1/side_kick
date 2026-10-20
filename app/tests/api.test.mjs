@@ -32,7 +32,14 @@ let tsconfigBefore;
 
 /* ---------- fake Teams connector: receives everything the bot sends ---------- */
 const sent = [];
+// Teams' team API (for channel names): one team whose first channel has no name, like real Teams.
+const TEAM = { id: "19:team-test@thread.tacv2", name: "Contoso Migration" };
 const connector = http.createServer((req, res) => {
+  if (req.method === "GET" && decodeURIComponent(req.url).startsWith(`/v3/teams/${TEAM.id}`)) {
+    res.writeHead(200, { "content-type": "application/json" });
+    const conversations = [{ id: TEAM.id }, { id: "19:cutover@thread.tacv2", name: "Cutover" }];
+    return void res.end(JSON.stringify(req.url.endsWith("/conversations") ? { conversations } : TEAM));
+  }
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
@@ -1236,6 +1243,34 @@ test(`[${ENGINE}] reminders: a tracked chat's messages are saved and searchable;
   const n = sent.length;
   await toBot(groupMsg({ type: "message", text: "<at>Sidekick</at> When is the wave 2 cutover?", entities: [{ type: "mention", text: "<at>Sidekick</at>", mentioned: { id: "bot", name: "Sidekick" } }] }));
   await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && cardsOf(x).some((c) => /Sources/.test(cardText(c))));
+});
+
+test(`[${ENGINE}] Teams: "@Sidekick" typed as plain text in a tracked chat is answered, not saved`, async () => {
+  const saved = (await admin("GET", "/api/teams-links")).body.links.find((l) => l.id === GROUP).savedMessages;
+  const n = sent.length;
+  await toBot(groupMsg({ type: "message", text: "<p>@Sidekick who owns the wave 2 rollback plan?</p>" }));
+  await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && cardsOf(x).some((c) => /Sources/.test(cardText(c)) && /wave 2 rollback/.test(cardText(c))));
+  const link = (await admin("GET", "/api/teams-links")).body.links.find((l) => l.id === GROUP);
+  assert.equal(link.savedMessages, saved, "a question to Sidekick isn't saved as chat");
+});
+
+test(`[${ENGINE}] Teams: a team's first channel shows the team name (not a guessed "General") until Teams says its name`, async () => {
+  const chan = (overrides = {}) => activity({ conversation: { id: TEAM.id, conversationType: "channel", tenantId: "tenant-1" }, channelData: { team: { id: TEAM.id } }, ...overrides });
+  const n = sent.length;
+  await toBot(chan({ type: "installationUpdate", action: "add" }));
+  const msg = await waitForSent((x) => sent.indexOf(x) >= n && (x.url.includes(TEAM.id) || x.url.includes(encodeURIComponent(TEAM.id))) && /Link this/.test(cardText(cardsOf(x)[0] ?? {})));
+  const code = cardText(cardsOf(msg)[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+  assert.equal((await admin("POST", "/api/teams-links", { code, ws: s.wsA })).status, 200);
+  const name = async () => (await admin("GET", "/api/teams-links")).body.links.find((l) => l.id === TEAM.id).name;
+  assert.equal(await name(), "Contoso Migration");
+  // Someone renames the channel: Teams tells the bot, and the new name shows.
+  const r = await toBot(chan({ type: "conversationUpdate", channelData: { eventType: "channelRenamed", team: { id: TEAM.id, name: TEAM.name }, channel: { id: TEAM.id, name: "Project" } } }));
+  assert.ok(r.status < 300);
+  assert.equal(await name(), "Contoso Migration › Project");
+  // A later activity without names doesn't undo it.
+  await toBot(chan({ type: "message", text: "plain message" }));
+  assert.equal(await name(), "Contoso Migration › Project");
+  assert.equal((await admin("DELETE", `/api/teams-links?id=${encodeURIComponent(TEAM.id)}`)).status, 200);
 });
 
 test(`[${ENGINE}] reminders: every point cites a real source; points and gaps without one are dropped`, async () => {

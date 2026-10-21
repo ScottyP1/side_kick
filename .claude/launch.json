@@ -1,10 +1,99 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "sidekick", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev"], "port": 3000 },
-    { "name": "sidekick-teams", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev:teams"], "port": 3100 },
-    { "name": "sidekick-preview", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev:preview"], "port": 3300 },
-    { "name": "sidekick-preview-2", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev:preview", "--", "--port", "3301"], "port": 3301 },
-    { "name": "agents-playground", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "playground"], "port": 56150 }
+    {
+      "name": "sidekick",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "app",
+        "run",
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "sidekick-teams",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "app",
+        "run",
+        "dev:teams"
+      ],
+      "port": 3100
+    },
+    {
+      "name": "sidekick-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "app",
+        "run",
+        "dev:preview"
+      ],
+      "port": 3300
+    },
+    {
+      "name": "sidekick-preview-2",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "app",
+        "run",
+        "dev:preview",
+        "--",
+        "--port",
+        "3301"
+      ],
+      "port": 3301
+    },
+    {
+      "name": "agents-playground",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "app",
+        "run",
+        "playground"
+      ],
+      "port": 56150
+    },
+    {
+      "name": "e2e-a",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd app && env AZURE_SEARCH_ENDPOINT= AZURE_SEARCH_API_KEY= AZURE_OPENAI_ENDPOINT= AZURE_OPENAI_API_KEY= CLIENT_ID= CLIENT_SECRET= TENANT_ID= SIDEKICK_PUBLIC_URL= SIDEKICK_DATA_DIR=.e2e-data-a NEXT_DIST_DIR=.next-e2e-a SIDEKICK_FAKE_CLAUDE=1 ./node_modules/.bin/next dev --port 3311"
+      ],
+      "port": 3311
+    },
+    {
+      "name": "e2e-b",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd app && env AZURE_SEARCH_ENDPOINT= AZURE_SEARCH_API_KEY= AZURE_OPENAI_ENDPOINT= AZURE_OPENAI_API_KEY= CLIENT_ID= CLIENT_SECRET= TENANT_ID= SIDEKICK_PUBLIC_URL= SIDEKICK_DATA_DIR=.e2e-data-b NEXT_DIST_DIR=.next-e2e-b ./node_modules/.bin/next dev --port 3312"
+      ],
+      "port": 3312
+    },
+    {
+      "name": "e2e-c",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd app && env AZURE_SEARCH_ENDPOINT= AZURE_SEARCH_API_KEY= AZURE_OPENAI_ENDPOINT= AZURE_OPENAI_API_KEY= CLIENT_ID= CLIENT_SECRET= TENANT_ID= SIDEKICK_PUBLIC_URL= SIDEKICK_DATA_DIR=.e2e-data-c NEXT_DIST_DIR=.next-e2e-c SIDEKICK_FAKE_CLAUDE=1 ./node_modules/.bin/next dev --port 3313"
+      ],
+      "port": 3313
+    },
+    {
+      "name": "e2e-d",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd app && env AZURE_SEARCH_ENDPOINT= AZURE_SEARCH_API_KEY= AZURE_OPENAI_ENDPOINT= AZURE_OPENAI_API_KEY= CLIENT_ID= CLIENT_SECRET= TENANT_ID= SIDEKICK_PUBLIC_URL= SIDEKICK_DATA_DIR=.e2e-data-d NEXT_DIST_DIR=.next-e2e-d SIDEKICK_FAKE_CLAUDE=1 ./node_modules/.bin/next dev --port 3314"
+      ],
+      "port": 3314
+    }
   ]
 }

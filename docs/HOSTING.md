@@ -156,3 +156,9 @@ ever scales to zero, runs several copies, or the timer should be visible and ret
 
 Without the right header the route answers 404. Pausing **Reminders in Teams** in the Owner Console stops
 all reminders immediately.
+
+## Self-service sign-up
+Off on every new deploy: `/signup` refuses with "Sign-up isn't open yet" until you open it, so nobody can
+create organizations (and spend Claude credit) on the live site by surprise. To open it, either flip
+**Owner Console → Releases & switches → Self-service sign-up**, or set `SIDEKICK_SIGNUP_OPEN=true` on the
+Container App. The console switch, once flipped, wins over the setting. Payments are test mode only.

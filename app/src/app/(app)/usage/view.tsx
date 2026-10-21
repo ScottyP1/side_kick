@@ -1,12 +1,14 @@
 "use client";
 
 /**
- * Usage & billing (/usage): every Claude request metered: tokens, cost and response time by feature, model,
- * workspace and day. Owners, Admins and Billing Admins.
+ * Usage & billing (/usage): the organization's plan (PlanSection: status, seats, pay / change / cancel), then
+ * every Claude request metered: tokens, cost and response time by feature, model, workspace and day.
+ * Owners, Admins and Billing Admins (only Owners and Billing Admins change the plan).
  */
 
 import { useEffect, useState } from "react";
 import { api, usd } from "@/components/ui";
+import { PlanSection } from "./plan";
 
 type U = {
   period: { start: string; end: string; day: number; days: number };
@@ -46,9 +48,10 @@ export default function UsagePage() {
         <div>
           <div className="eyebrow">Usage & billing</div>
           <h1>{month}</h1>
-          <p>Every Claude request is metered: tokens, cost and response time. Prices are Claude API list prices. Pricing for clients isn&apos;t set yet.</p>
+          <p>Every Claude request is metered: tokens, cost and response time. Prices are Claude API list prices; your plan&apos;s price is separate (below the plan).</p>
         </div>
       </div>
+      <PlanSection />
       <div className="grid g4">
         {[
           ["AI spend this month", usd(u.totals.cost), `On pace for ${usd(projected)}`],

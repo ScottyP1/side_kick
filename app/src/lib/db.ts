@@ -61,6 +61,20 @@ CREATE TABLE IF NOT EXISTS login_failures (
 );
 CREATE INDEX IF NOT EXISTS login_failures_email ON login_failures(email, created_at);
 CREATE INDEX IF NOT EXISTS login_failures_ip ON login_failures(ip, created_at);
+-- Self-service sign-up attempts (lib/signup.ts), for the per-IP sign-up limit. Kept one day.
+CREATE TABLE IF NOT EXISTS signup_attempts (
+  id TEXT PRIMARY KEY, ip TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS signup_attempts_ip ON signup_attempts(ip, created_at);
+-- One subscription per organization (lib/billing.ts): plan (lib/plans.ts), status = trialing | active |
+-- past_due | canceled, and which billing provider holds it (mock today; stripe later, provider_ref = its id).
+-- Organizations without a row are managed by the Sidekick team (no self-service plan) and keep full use.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), plan TEXT NOT NULL, status TEXT NOT NULL,
+  provider TEXT NOT NULL, provider_ref TEXT, trial_ends_at TEXT, current_period_end TEXT,
+  past_due_since TEXT, canceled_at TEXT, access_until TEXT,
+  updated_by TEXT, updated_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
 -- Microsoft sign-in in progress: one row per "Sign in with Microsoft" click, kept 10 minutes. state is
 -- the random value sent to Microsoft and back; verifier (PKCE) and nonce prove the reply belongs to it.
 -- mode = signin | link (an Org Owner connecting their organization's Microsoft tenant).

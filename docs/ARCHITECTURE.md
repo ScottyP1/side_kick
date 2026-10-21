@@ -34,6 +34,10 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification (issuer checked per tenant; single-tenant mode also checks the tenant) |
 | `lib/tenants.ts` | Single- vs multi-tenant mode (`TENANT_ID`), which Sidekick org a Microsoft tenant belongs to, `tieOrgToTenant` (also for the sign-up flow) |
 | `lib/directory.ts` | The customer's Microsoft 365 directory via Microsoft Graph (app permission `User.Read.All`): admin-consent round trip, search, import as Microsoft-sign-in people |
+| `lib/plans.ts` | The plans (Starter/Team/Business: made-up per-person prices, seat and workspace limits), trial/grace lengths and `accessFor` (what a trialing/past_due/canceled subscription allows: full or read-only). Pure, shared by pages and server, unit-tested |
+| `lib/billing.ts` | Subscriptions (`subscriptions` table) behind a billing provider: `mock` (test mode, no payment details ever) now, Stripe later (documented in the file). Pay, change plan, cancel, simulate a failed payment, operator changes; `readOnlyRefusal` (used by `handle()`) |
+| `lib/signup.ts` | Self-service sign-up: org + Org Owner + trial in one transaction, the `signup` switch (**off by default**; opened in the Owner Console or with `SIDEKICK_SIGNUP_OPEN=true`, see `flagDefault` in lib/owner.ts), per-IP limit (`signup_attempts`), the hook for "Sign up with Microsoft" |
+| `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification |
 | `lib/owner.ts` | Owner Console sign-in, kill switches (`assertEnabled`), operator log |
 | `lib/trace.ts` | Traces and steps (spans) for every request and Teams message; feeds the Activity page and the home orb |
 | `lib/api.ts` | `handle()` wrapper: JSON responses, `HttpError` → `{ error }`, reference codes + `app_errors` log for unexpected errors |
@@ -76,6 +80,11 @@ Browser (client portal, Owner Console)        Microsoft Teams
 2. `sendReminder()` claims the chat's slot for that day in `reminder_runs` (unique, so never twice), then `gatherReminders()` picks items **in code**, within the workspace and, for guest chats, Shareable only.
 3. `buildDigest()` has Claude (`remind`) word them; points naming unknown items are dropped, sources are attached by code, `cleanOutput` cleans the text. The card goes out through `postCard()`; its buttons come back to `reminderAction()`.
 
+**Signing up and paying (test mode)**
+1. `/signup` → `POST /api/signup` → `signUp()` (lib/signup.ts): switch on? per-IP limit, fields, unique email; then in one transaction `createOrgWithOwner()` (lib/auth.ts) and `startTrial()` (lib/billing.ts). Audited, operator-logged, traced (`billing` step); the route starts the session and returns the provider's checkout URL.
+2. `/checkout` → **Pay (test mode)** → `POST /api/billing {action:"pay"}` → `pay()` → `provider().completeCheckout()` → `recordPayment()` (status active). A Stripe provider would instead return its own checkout URL and call `recordPayment` from a signed webhook.
+3. Access: `accessFor()` (lib/plans.ts) turns the subscription into full or read-only. Read-only is enforced in `handle()` (changes → 402 via `readOnlyRefusal`, except auth, billing, owner, sign-up, Teams endpoints) and in `assertEnabled()` (lib/owner.ts: new AI work, so Teams and reminders stop too). `/api/me` returns it so the portal shows the notice banner.
+
 **A Teams message**
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
 2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
@@ -89,6 +98,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 - **Guardrails**: anything that answers people (portal, Teams, assistant) goes through `lib/guardrails.ts`: `screenQuestion` before, `cleanOutput` (and `checkGrounding` for sourced answers) after. Refusals use the fixed `MESSAGES`, never Claude-written text. `guard_events` stores rule/where/when only, never text.
 - **Isolation test**: `tests/api.test.mjs` plants a secret in workspace B and checks it can't be reached from workspace A, another org, Teams or the assistant. New routes or surfaces that read workspace data belong in that test.
 - **One path each**: Claude only via `lib/claude.ts`, search only via `lib/search.ts`, so Azure (Foundry, AI Search) can be swapped in later without touching callers.
+- **Billing**: plans and prices only in `lib/plans.ts`; subscription changes only through `lib/billing.ts` (provider first, then the row and the audit log). Never add card, CVC or bank fields: a real provider collects them on its own page.
 - **Audit**: access changes, deletions and anything Sidekick does on its own call `audit()` / `auditAsSidekick()`.
 - **Parameters**: SQL values always go in `?` parameters, never into the SQL string.
 - **Secrets**: only in `app/.env.local` (git-ignored). The Teams bot never runs without token checks in production.

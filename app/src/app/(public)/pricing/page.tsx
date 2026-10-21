@@ -1,20 +1,23 @@
 /**
- * Pricing (/pricing): Sidekick's public landing page. What Sidekick does, the plans from lib/plans.ts with
+ * Pricing (/pricing): part of the public website (the home page is /). What Sidekick does, the plans from lib/plans.ts with
  * their (made-up, test-mode) prices, and a "Start free trial" button per plan that opens /signup with that
  * plan picked; while sign-up isn't open (the default) a note says so and the buttons say "Contact us"
- * (components/signup-status.tsx). No sign-in needed.
+ * (components/signup-status.tsx). Ends with the pricing questions from lib/faq.ts. No sign-in needed.
  */
 import Link from "next/link";
 import type { Metadata } from "next";
+import { FaqList } from "@/components/faq-list";
 import { PublicShell, TestModeBanner } from "@/components/public-shell";
+import { pageMetadata } from "@/lib/site";
 import { SignupClosedNotice, TrialButton } from "@/components/signup-status";
+import { faqFor } from "@/lib/faq";
 import { limitText, PLANS, priceText, TRIAL_DAYS } from "@/lib/plans";
 
-export const metadata: Metadata = { title: "Sidekick: plans and pricing" };
+export const metadata: Metadata = pageMetadata("/pricing");
 
 export default function PricingPage() {
   return (
-    <PublicShell>
+    <PublicShell current="/pricing">
       <div className="page-head">
         <div>
           <div className="eyebrow">Sidekick for Microsoft Teams</div>
@@ -55,6 +58,8 @@ export default function PricingPage() {
           </ul>
         </div>
       </div>
+      <FaqList title="Pricing questions" items={faqFor("pricing")} />
+      <p className="muted" style={{ margin: 0 }}>More answers on the <Link href="/faq">FAQ</Link>.</p>
     </PublicShell>
   );
 }

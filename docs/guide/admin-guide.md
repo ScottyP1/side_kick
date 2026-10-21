@@ -3,6 +3,8 @@
 For **Org Owners** and **Org Admins**: everything needed to set Sidekick up for your organization and keep it running. New to the terms? Read [Concepts](concepts.md) first.
 
 ## 1. First sign-in
+**Where to sign in.** Use **Sign in** at the top of the Sidekick website. Once you're signed in, opening the website's home page takes you straight to your portal home (**Overview**). These guides are also on the website, under **Help**.
+
 **Signing up yourself.** When the Sidekick team has opened sign-up, a company can create its own organization at **/signup** (or **Start free trial** on the **/pricing** page): see [Sign-up, plan and billing](#15-sign-up-plan-and-billing) below.
 
 The first person to open a new Sidekick install sets up the organization and becomes its **Org Owner**. If the Sidekick team onboarded you, sign in with the temporary password they gave you. Sidekick then shows only a **Pick your own password** screen until you choose a new one (at least 12 characters, and not one that has appeared in a known data breach); nothing else works with a temporary password. Signing in with Microsoft instead also counts.

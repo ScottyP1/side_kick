@@ -4,12 +4,13 @@
  */
 import type { Metadata } from "next";
 import { DraftNote, PublicShell } from "@/components/public-shell";
+import { pageMetadata } from "@/lib/site";
 
-export const metadata: Metadata = { title: "Sidekick: privacy policy (draft)" };
+export const metadata: Metadata = pageMetadata("/privacy");
 
 export default function PrivacyPage() {
   return (
-    <PublicShell narrow>
+    <PublicShell narrow current="/privacy">
       <div className="page-head"><div><div className="eyebrow">Privacy policy</div><h1>How Sidekick handles your data</h1><p>Last updated October 20, 2026.</p></div></div>
       <DraftNote />
       <div className="panel"><div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>

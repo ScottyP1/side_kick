@@ -41,7 +41,7 @@ export function useApp() {
 }
 
 const NAV: { g: string; items: [string, string, string, ((m: Me) => boolean)?][] }[] = [
-  { g: "Overview", items: [["/", "Overview", "home"], ["/usage", "Usage & billing", "chart", (m) => ["Org Owner", "Org Admin", "Billing Admin"].includes(m.user.role)], ["/agent", "AI models & agent", "cpu"]] },
+  { g: "Overview", items: [["/home", "Overview", "home"], ["/usage", "Usage & billing", "chart", (m) => ["Org Owner", "Org Admin", "Billing Admin"].includes(m.user.role)], ["/agent", "AI models & agent", "cpu"]] },
   { g: "Manage", items: [["/workspaces", "Groups", "folder"], ["/knowledge", "Knowledge & docs", "doc"], ["/meetings", "Meetings", "video"], ["/memory", "Memory & gaps", "brain"], ["/connectors", "Connectors", "plug"], ["/users", "Users & access", "users", (m) => m.user.admin || Boolean(m.user.lead)]] },
   { g: "Govern", items: [["/guardrails", "Guardrails", "shield"], ["/activity", "Activity", "activity", (m) => m.user.admin], ["/audit", "Security & audit", "lock", (m) => m.user.admin], ["/settings", "Settings", "gear"]] },
 ];
@@ -127,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (me.user.mustChangePassword) return <ChangeTemporaryPassword name={me.user.name} onDone={reload} />;
 
   const items = NAV.map((g) => ({ g: g.g, items: g.items.filter((i) => !i[3] || i[3](me)) })).filter((g) => g.items.length);
-  const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  const active = (href: string) => path.startsWith(href);
   const logout = signOut;
 
   return (
@@ -213,7 +213,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <header className="topbar">
               <div className="mobile-nav">
                 <span className="brand-mark">S</span>
-                <select className="input" value={items.flatMap((g) => g.items).find((i) => active(i[0]))?.[0] ?? "/"} onChange={(e) => (location.href = e.target.value)} aria-label="Page">
+                <select className="input" value={items.flatMap((g) => g.items).find((i) => active(i[0]))?.[0] ?? "/home"} onChange={(e) => (location.href = e.target.value)} aria-label="Page">
                   {items.flatMap((g) => g.items).map(([href, label]) => (
                     <option key={href} value={href}>
                       {label}

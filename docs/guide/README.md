@@ -9,4 +9,6 @@ Plain-language guides for the people who use Sidekick. Start with **Concepts** i
 | [Sidekick in Teams](teams-guide.md) | Everyone in Teams | Asking questions, meeting notes, action-item cards, commands, what Sidekick can and can't see |
 | [Owner Console](owner-guide.md) | The Sidekick operator | The business view (MRR, margin, trials, payments, limits, health), every client's spend and health, onboarding clients, plans, limits and AI credit, the sign-up switch, kill switches |
 
+The first four guides are also published as the website's **help center** (`/docs`, searchable). After editing one, run `npm --prefix app run help:sync` so the app's copy matches (a test checks). Wrap developer-only lines in `<!-- help-center:skip -->` … `<!-- /help-center:skip -->` to keep them off the website. The Owner Console guide is never published.
+
 For developers: [ARCHITECTURE.md](../ARCHITECTURE.md) explains how the code fits together, and [PROGRESS.md](../PROGRESS.md) has current status and next steps.

@@ -18,15 +18,15 @@ team knows and doesn't, inside guardrails each company sets.
 - **Built:** portal (groups, documents, meetings, Ask, memory & gaps, guardrails, roles incl. Team Lead,
   activity, audit, usage), Teams bot (answers, notes, reminders with Assign / Mark done / Snooze / Not
   relevant, chat tracking), Microsoft sign-in, Owner Console (all clients, switches, errors, plans),
-  self-service sign-up with a **test-mode** checkout (off by default), public pricing/privacy/terms/support
-  pages, Indigo design.
+  self-service sign-up with a **test-mode** checkout (off by default), the **public website and help
+  center** (see below), Indigo design.
 - **What's next and who does what:** `docs/PROGRESS.md` → **Roadmap & queue** (the single source of truth).
 
 ## Where things live
 
 | Path | What |
 |---|---|
-| `app/` | The Next.js app: portal, public pages, Owner Console (`/owner`), API, Teams bot (`/api/messages`) |
+| `app/` | The Next.js app: public website (`/`), help center (`/docs`), portal (`/home`), Owner Console (`/owner`), API, Teams bot (`/api/messages`) |
 | `app/src/lib/` | Server logic. Claude only via `claude.ts`, search via `search.ts`, database via `db.ts`, guardrails via `guardrails.ts` |
 | `app/tests/` | End-to-end and database tests (both SQLite and Postgres) |
 | `teams/` | Teams app package: manifest template + icons (`npm --prefix app run teams:package`) |
@@ -51,7 +51,7 @@ team knows and doesn't, inside guardrails each company sets.
    npm --prefix app run dev
    ```
 
-3. Open http://localhost:3000. The first visit asks you to set up your organization; you become the Org Owner.
+3. Open http://localhost:3000 for the public website, then **Sign in**. On a fresh install, sign-in asks you to set up your organization first; you become the Org Owner. Once signed in, `/` takes you straight to your portal home (`/home`).
 
 ## Tests
 
@@ -64,6 +64,28 @@ Runs about 200 automated tests (the exact count is in `CLAUDE.md`) on **both** d
 Last, it runs a **production build** (`next build`, the same step as the Docker image and the Azure deploy) in a throwaway build folder, so it works while your dev server is running and never touches `app/data`. The other tests use `next dev`, which allows some things a production build refuses; if the build fails, the run fails and prints the end of the build error. It adds a minute or two; `SKIP_BUILD=1 npm --prefix app test` leaves it out while you iterate, but run the full thing before committing.
 
 On GitHub, every pull request runs the same tests automatically (`.github/workflows/test.yml`, on GitHub's free minutes with its own throwaway Postgres). The result shows as a check on the pull request; don't merge while it's red.
+
+## Public website and help center
+
+The same app serves the public website to visitors (no sign-in): home (`/`), Features, How it works,
+Security & trust, Pricing (from `lib/plans.ts`), FAQ, the **help center** (`/docs`), Support, Changelog, Privacy
+and Terms, with one header (Sign in / Get started) and footer, light and dark, phone-friendly. Signed-in
+people who open `/` go straight to their portal home (`/home`). Details and the full route list:
+`docs/ARCHITECTURE.md` → Routes.
+
+- **Help center**: the customer guides from `docs/guide/` (concepts, admin, Teams, roles and permissions)
+  as searchable pages. The app keeps a generated copy (the Docker build only sees `app/`): after editing a
+  guide, run `npm --prefix app run help:sync` (a test fails until you do). Lines a guide wraps in
+  `<!-- help-center:skip -->` … `<!-- /help-center:skip -->` stay on GitHub only. The Owner Console guide and
+  developer docs are never published.
+- **FAQ**: `app/src/lib/faq.ts` holds every question and answer (the `/faq` page, plus short sections on Pricing, Security & trust and How it works). Keep it consistent with `docs/guide/`; answers marked `legalReview` are drafts.
+- **Public chat slot**: `components/site-chat-slot.tsx` is the empty, hidden place for a future "Ask about Sidekick" chat (public content and guardrails only).
+- **Changelog**: `app/src/lib/changelog.ts`; add an entry when a customer-visible change ships.
+- **Search engines**: per-page titles, descriptions and link previews, `robots.txt` and `sitemap.xml` (public
+  pages only, addresses from `SIDEKICK_PUBLIC_URL`), and `noindex` on the portal, Owner Console, sign-in and
+  checkout.
+- Everything is self-hosted (no outside scripts, fonts or images), so the enforced Content-Security-Policy
+  holds. Customer quotes and logos on the home page are clearly marked placeholders.
 
 ## Postgres and the container
 
@@ -222,7 +244,7 @@ That writes `teams/build/sidekick-teams-local.zip` (it passes Microsoft's 62 app
 | Meeting notes, Q&A with sources, knowledge map, gaps, action items | Notes chat per group with automatic Teams meeting transcripts; "save to knowledge" cards |
 | Teams: @Sidekick answers, notes, reminders with card buttons, chat tracking | Azure DevOps and Jira connectors |
 | Usage and cost per feature/model; Owner Console (clients, switches, errors, plans) | Support tickets + support assistant; Owner Console business view |
-| Sign-up with test-mode checkout (off by default); public pricing/privacy/terms/support | Full public website & help center; real payments; Teams Store listing; own domain |
+| Sign-up with test-mode checkout (off by default); public website (home, features, security, pricing, changelog, legal) and searchable help center | Real payments; public support articles; Teams Store listing; own domain (`sidekick.ai` website + `app.sidekick.ai` portal) |
 | Hosted on Azure with probes, uptime alerts, logs, backups, runbooks | Live voice in meetings (step 3) |
 
 Local data lives in `app/data/` (SQLite). Use a separate copy for testing (`SIDEKICK_DATA_DIR`, or the

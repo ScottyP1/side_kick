@@ -4,12 +4,13 @@
  */
 import type { Metadata } from "next";
 import { DraftNote, PublicShell } from "@/components/public-shell";
+import { pageMetadata } from "@/lib/site";
 
-export const metadata: Metadata = { title: "Sidekick: terms of use (draft)" };
+export const metadata: Metadata = pageMetadata("/terms");
 
 export default function TermsPage() {
   return (
-    <PublicShell narrow>
+    <PublicShell narrow current="/terms">
       <div className="page-head"><div><div className="eyebrow">Terms of use</div><h1>The rules for using Sidekick</h1><p>Last updated October 20, 2026.</p></div></div>
       <DraftNote />
       <div className="panel"><div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>

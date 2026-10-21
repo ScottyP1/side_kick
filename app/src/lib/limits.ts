@@ -25,6 +25,7 @@ import { get, now, run } from "./db";
 import { activeGroupCount, getSubscription } from "./billing";
 import { withErrorDetails } from "./api";
 import { ENTERPRISE, groupOptions, LIMIT_KEYS, LIMIT_LABEL, limitsWithExtras, limitState, parseCustomLimits, planById, planWithExtras, UNLIMITED, usd, type GroupOption, type LimitKey, type Plan, type PlanLimits } from "./plans";
+import { BRAND } from "./brand";
 
 /** The custom terms the Sidekick team set for one organization (Owner Console). */
 export type OrgTerms = {
@@ -147,7 +148,7 @@ const fmt = (key: LimitKey, n: number) => (key === "meetingHours" || key === "li
  * Not for the AI credit (see lib/credit.ts).
  */
 export async function assertCanAdd(orgId: string, key: Exclude<LimitKey, "aiCreditUsd">, amount = 1) {
-  const { plan, extras, limits } = await orgPlan(orgId);
+  const { plan, extras, limits, terms } = await orgPlan(orgId);
   const limit = limits[key];
   if (limit === null) return;
   const used = (await usageCounts(orgId))[key];
@@ -160,10 +161,11 @@ export async function assertCanAdd(orgId: string, key: Exclude<LimitKey, "aiCred
     : used ? ` and you have ${used}` : "";
   const how = plan?.selfService
     ? "An Org Owner or Billing Admin can move to a bigger plan on Usage & billing."
-    : "Contact the Sidekick team to raise it.";
+    : `Contact the ${BRAND.name} team to raise it.`;
   const keep = key === "meetingHours" || key === "liveMeetingHours" ? " Meeting hours start again on the 1st of next month." : "";
-  // Groups on a self-service plan: say exactly what would make room, cheapest first, with the prices.
-  if (key === "workspaces" && plan?.selfService) {
+  // Groups on a self-service plan: say exactly what would make room, cheapest first, with the prices
+  // (not when the Sidekick team set a custom group limit: extra groups wouldn't change that).
+  if (key === "workspaces" && plan?.selfService && !("workspaces" in terms.limits)) {
     const need = Math.ceil(used + amount);
     const options = groupOptions(plan, extras, need);
     const planLabel = `Your ${planWithExtras(plan, extras)} plan`;
@@ -227,6 +229,6 @@ export async function saveTerms(orgId: string, body: Record<string, unknown>, ow
     orgId, Object.keys(next.limits).length ? JSON.stringify(next.limits) : null, next.aiCreditUsd, next.monthlyPriceUsd, next.partner, next.askPerHour, ownerName, now(),
   );
   const summary = changes.join("; ");
-  await audit({ org_id: orgId, name: "Sidekick team" }, `Set plan terms: ${summary}`, "Billing");
+  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Set plan terms: ${summary}`, "Billing");
   return summary;
 }

@@ -34,6 +34,7 @@ import { get, newId, now, run } from "./db";
 import { DUMMY_HASH, hashPassword, HttpError, verifyPassword } from "./auth";
 import { orgAccess } from "./billing";
 import { setupRefusal } from "./security";
+import { BRAND } from "./brand";
 
 // Owner sessions are shorter than client sessions (12 hours) because the console sees every client.
 export const OWNER_COOKIE = "sk_owner";
@@ -60,7 +61,7 @@ export async function ownerExists() {
  * @param sentCode the `setupCode` from the request body
  * @param message what to tell someone who tried from elsewhere than localhost (no setup code configured)
  */
-export async function assertSetupAllowed(sentCode: unknown, message = "The first owner account can only be created on the machine running Sidekick (localhost).") {
+export async function assertSetupAllowed(sentCode: unknown, message = `The first owner account can only be created on the machine running ${BRAND.name} (localhost).`) {
   const refusal = setupRefusal({
     production: process.env.NODE_ENV === "production",
     code: process.env.SIDEKICK_SETUP_CODE ?? "",
@@ -141,11 +142,11 @@ export async function platformLog(actor: string, action: string) {
 /* ---------- Kill switches ---------- */
 /** Every feature an owner can pause, with the label and help text shown in the Owner Console. */
 export const FLAGS = {
-  ask: { label: "Answering questions", help: "Ask Sidekick in every workspace" },
+  ask: { label: "Answering questions", help: `Ask ${BRAND.name} in every workspace` },
   extract: { label: "Meeting notes", help: "Processing imported transcripts" },
   insights: { label: "Knowledge map", help: "Topics, coverage and gap detection" },
   assist: { label: "In-app assistant", help: "The chat box on the home page" },
-  guard: { label: "Guardrail check", help: "Checks every question first. Pausing it also pauses answers: Sidekick never answers unchecked" },
+  guard: { label: "Guardrail check", help: `Checks every question first. Pausing it also pauses answers: ${BRAND.name} never answers unchecked` },
   uploads: { label: "Document uploads", help: "New files from any client" },
   remind: { label: "Reminders in Teams", help: "Daily and after-meeting reminder cards posted to Teams chats" },
   signup: { label: "Self-service sign-up", help: "New companies creating an organization at /signup (test-mode payment). Off by default: only you add clients", platformOnly: true },
@@ -205,7 +206,7 @@ export class FeatureOffError extends HttpError {
  *   the message just says what happened.
  */
 export async function assertEnabled(key: FlagKey, orgId?: string | null, role?: string | null) {
-  if (!(await flagEnabled(key))) throw new FeatureOffError("paused", `${FLAGS[key].label} is paused by the Sidekick team. Try again later.`);
+  if (!(await flagEnabled(key))) throw new FeatureOffError("paused", `${FLAGS[key].label} is paused by the ${BRAND.name} team. Try again later.`);
   if (orgId && !(await orgFlagEnabled(orgId, key))) {
     throw new FeatureOffError("restricted", restrictedMessage(FLAGS[key].label, role));
   }
@@ -217,9 +218,9 @@ export async function assertEnabled(key: FlagKey, orgId?: string | null, role?: 
 
 /** The wording for a feature turned off for one organization, fitted to who reads it. */
 export function restrictedMessage(label: string, role?: string | null) {
-  const base = `${label} is turned off for your organization by the Sidekick team.`;
+  const base = `${label} is turned off for your organization by the ${BRAND.name} team.`;
   if (!role) return base;
   return role === "Org Owner"
-    ? `${base} To have it turned back on, contact the Sidekick team.`
-    : `${base} Your Org Owner can ask the Sidekick team to turn it back on.`;
+    ? `${base} To have it turned back on, contact the ${BRAND.name} team.`
+    : `${base} Your Org Owner can ask the ${BRAND.name} team to turn it back on.`;
 }

@@ -23,6 +23,7 @@ import { GROUP_DEFAULT_DAYS, MAX_ROLLOFF_DAYS, MIN_GROUP_DAYS } from "@/lib/roll
 import { api, fmtDate, Icon, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
 import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
 import { Avatar, groupHealth, PeoplePicker, type Group, type OrgPerson } from "@/components/groups";
+import { BRAND } from "@/lib/brand";
 
 type Member = { id: string; name: string; email?: string; role: string; microsoft: number };
 type TeamsLink = {
@@ -88,7 +89,7 @@ export default function GroupView() {
         <div>
           {group.client && <div className="eyebrow">{group.client}</div>}
           <h1>{group.name}</h1>
-          <p>{group.leads.some((l) => l.id === me.user.id) ? "You lead this group. Add your people, assign your team's Teams chats and keep the key documents up to date." : "One client team: its people, Teams chats and documents. Sidekick only answers from what's in this group."}</p>
+          <p>{group.leads.some((l) => l.id === me.user.id) ? "You lead this group. Add your people, assign your team's Teams chats and keep the key documents up to date." : `One client team: its people, Teams chats and documents. ${BRAND.name} only answers from what's in this group.`}</p>
         </div>
         <div className="actions"><span title={why}><Pill kind={k}>{label}</Pill></span>{group.code && <span className="tag mono">{group.code}</span>}</div>
       </div>
@@ -250,7 +251,7 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
       const r = await api<{ name: string | null }>("/api/teams-links", { method: "POST", json: { ...form, ws: group.id } });
       setLinking(false);
       await reload();
-      toast(`Assigned “${r.name ?? "Teams chat"}” to ${group.name}. Sidekick confirmed it in Teams.`);
+      toast(`Assigned “${r.name ?? "Teams chat"}” to ${group.name}. ${BRAND.name} confirmed it in Teams.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't assign that chat.");
     }
@@ -264,7 +265,7 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
     }
   };
   const unlink = async (l: TeamsLink) => {
-    if (!confirm(`Unassign “${l.name ?? "this chat"}” from ${group.name}? Sidekick stops answering and posting there, and forgets the messages it saved from it.`)) return;
+    if (!confirm(`Unassign “${l.name ?? "this chat"}” from ${group.name}? ${BRAND.name} stops answering and posting there, and forgets the messages it saved from it.`)) return;
     try {
       await api(`/api/teams-links?id=${encodeURIComponent(l.id)}`, { method: "DELETE" });
       await reload();
@@ -280,16 +281,16 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
         <div className="panel-h">
           <div>
             <h2>Teams chats</h2>
-            <span className="muted" style={{ fontSize: 12.5 }}>In these chats Sidekick answers from {group.name} only. Choose per chat whether it posts meeting notes and reminders.</span>
+            <span className="muted" style={{ fontSize: 12.5 }}>In these chats {BRAND.name} answers from {group.name} only. Choose per chat whether it posts meeting notes and reminders.</span>
           </div>
           {canManage && <button className="btn" onClick={() => { setForm({ code: "", guests: false }); setError(""); setLinking(true); }}><Icon n="plus" />Assign a chat</button>}
         </div>
         {!links.length ? (
-          <div className="empty"><span>{canManage ? "No chats yet. Add Sidekick to your team's Teams chat, mention it with “link”, then assign the chat here with the code it shows." : "No chats yet. The group's Team Lead assigns Teams chats here."}</span></div>
+          <div className="empty"><span>{canManage ? `No chats yet. Add ${BRAND.name} to your team's Teams chat, mention it with “link”, then assign the chat here with the code it shows.` : "No chats yet. The group's Team Lead assigns Teams chats here."}</span></div>
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Chat</th><th>Client guests</th><th>Sidekick here</th><th>Assigned</th><th>Last activity</th>{canManage && <th />}</tr></thead>
+              <thead><tr><th>Chat</th><th>Client guests</th><th>{BRAND.name} here</th><th>Assigned</th><th>Last activity</th>{canManage && <th />}</tr></thead>
               <tbody>
                 {links.map((l) => (
                   <tr key={l.id}>
@@ -329,7 +330,7 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
       {settingsFor && <ChatSettingsModal chat={settingsFor} onClose={() => setSettingsFor(null)} onSaved={() => reload().catch(reportError)} />}
       {linking && (
         <Modal title={`Assign a Teams chat to ${group.name}`} onClose={() => setLinking(false)} footer={<><button className="btn" onClick={() => setLinking(false)}>Cancel</button><button className="btn primary" disabled={!form.code.trim()} onClick={link}>Assign</button></>}>
-          <p className="muted" style={{ marginTop: 0 }}>In Teams, add Sidekick to the chat or channel and mention it with “link”. It replies with an 8-character code.</p>
+          <p className="muted" style={{ marginTop: 0 }}>In Teams, add {BRAND.name} to the chat or channel and mention it with “link”. It replies with an 8-character code.</p>
           <div className="field">
             <label htmlFor="lcode">Code from Teams</label>
             <input id="lcode" className="input mono" placeholder="ABCD-2345" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} autoFocus />
@@ -350,11 +351,11 @@ function Docs({ docs, openDocs }: { docs: Doc[]; openDocs: () => void }) {
   return (
     <div className="panel">
       <div className="panel-h">
-        <div><h2>Documents</h2><span className="muted" style={{ fontSize: 12.5 }}>What Sidekick answers from in this group. Shareable documents may be used in chats with the client.</span></div>
+        <div><h2>Documents</h2><span className="muted" style={{ fontSize: 12.5 }}>What {BRAND.name} answers from in this group. Shareable documents may be used in chats with the client.</span></div>
         <button className="btn primary" onClick={openDocs}><Icon n="upload" />Upload or manage</button>
       </div>
       {!docs.length ? (
-        <div className="empty"><span>No documents yet. Upload specs, plans and runbooks so Sidekick can answer questions about this client.</span></div>
+        <div className="empty"><span>No documents yet. Upload specs, plans and runbooks so {BRAND.name} can answer questions about this client.</span></div>
       ) : (
         <div className="table-wrap">
           <table>
@@ -384,6 +385,7 @@ function Docs({ docs, openDocs }: { docs: Doc[]; openDocs: () => void }) {
 function RollOff({ group, onChanged }: { group: Group; onChanged: () => Promise<void> }) {
   const toast = useToast();
   const [days, setDays] = useState(GROUP_DEFAULT_DAYS);
+  const [today] = useState(() => Date.now());
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState("");
   const path = `/api/workspaces/${encodeURIComponent(group.id)}/rolloff`;
@@ -409,7 +411,7 @@ function RollOff({ group, onChanged }: { group: Group; onChanged: () => Promise<
       setError(e instanceof Error ? e.message : "Couldn't cancel the ending.");
     }
   };
-  const when = new Date(Date.now() + days * 86400_000);
+  const when = new Date(today + days * 86400_000);
   return (
     <div className="panel">
       <div className="panel-h"><h2>When the engagement ends</h2>{group.ending && <Pill kind="bad">Ending</Pill>}</div>

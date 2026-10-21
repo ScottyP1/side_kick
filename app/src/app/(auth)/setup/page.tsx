@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 export default function SetupPage() {
   const [f, setF] = useState({ org: "", name: "", email: "", password: "", setupCode: "" });
@@ -18,7 +19,7 @@ export default function SetupPage() {
     api<{ needsSetup: boolean; needsCode: boolean }>("/api/auth/setup").then((r) => {
       if (!r.needsSetup) location.href = "/login";
       setNeedsCode(r.needsCode);
-    }).catch((e) => setError(e instanceof Error ? e.message : "Couldn't reach Sidekick."));
+    }).catch((e) => setError(e instanceof Error ? e.message : `Couldn't reach ${BRAND.name}.`));
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -46,7 +47,7 @@ export default function SetupPage() {
       <form className="auth-card" onSubmit={submit}>
         <div>
           <div className="eyebrow">First-time setup</div>
-          <h1>Set up Sidekick</h1>
+          <h1>Set up {BRAND.name}</h1>
           <p className="muted" style={{ margin: "4px 0 0" }}>You&apos;ll be the Org Owner. You can add your team afterward.</p>
         </div>
         {field("org", "Organization name")}

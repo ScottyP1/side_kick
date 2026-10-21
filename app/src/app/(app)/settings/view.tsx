@@ -14,6 +14,7 @@ import { TwoStepPanel } from "@/components/two-step";
 import { api, Icon, Pill, Switch, useReportError, useToast } from "@/components/ui";
 import { takeFlash } from "@/lib/flash";
 import { BACKUP_RETENTION_DAYS, ORG_GRACE_DAYS } from "@/lib/rolloff-policy";
+import { BRAND } from "@/lib/brand";
 
 type MsStatus = { configured: boolean; connected: boolean; tenantId: string | null; required: boolean; linked: boolean; canManage: boolean };
 
@@ -50,7 +51,7 @@ function MicrosoftPanel() {
     }
   };
   const disconnect = async () => {
-    if (!confirm("Disconnect Microsoft sign-in? People will need their Sidekick password to sign in.")) return;
+    if (!confirm(`Disconnect Microsoft sign-in? People will need their ${BRAND.name} password to sign in.`)) return;
     try {
       await api("/api/auth/microsoft", { method: "DELETE" });
       toast("Microsoft sign-in disconnected");
@@ -68,15 +69,15 @@ function MicrosoftPanel() {
       </div>
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="muted" style={{ margin: 0 }}>
-          People sign in with the Microsoft work account they use for Teams and Outlook. Sidekick still decides what they can see: they must be added on Users &amp; access first, and their role and workspaces apply as usual.
+          People sign in with the Microsoft work account they use for Teams and Outlook. {BRAND.name} still decides what they can see: they must be added on Users &amp; access first, and their role and workspaces apply as usual.
         </p>
-        {!s.configured && <p className="callout warn" style={{ margin: 0 }}>Microsoft sign-in isn&apos;t set up on this Sidekick yet (the Sidekick team adds the app details).</p>}
+        {!s.configured && <p className="callout warn" style={{ margin: 0 }}>Microsoft sign-in isn&apos;t set up on this {BRAND.name} yet (the {BRAND.name} team adds the app details).</p>}
         {s.configured && s.connected && s.tenantId && <span className="muted" style={{ fontSize: 12.5 }}>Microsoft tenant: <code>{s.tenantId}</code></span>}
         <span style={{ fontSize: 13 }}>Your account: {s.linked ? <Pill kind="good">Linked to Microsoft</Pill> : <Pill>Not linked yet</Pill>}{!s.linked && s.connected && s.configured && <> · <a href="/api/auth/microsoft/start?next=/settings">Sign in with Microsoft to link it</a></>}</span>
         {s.canManage && s.configured && !s.connected && (
           <div>
             <a className="btn primary" href="/api/auth/microsoft/start?mode=link">Connect with Microsoft</a>
-            <span className="hint" style={{ display: "block", marginTop: 6 }}>Sign in with your work account: your company&apos;s Microsoft organization gets connected to this Sidekick organization.</span>
+            <span className="hint" style={{ display: "block", marginTop: 6 }}>Sign in with your work account: your company&apos;s Microsoft organization gets connected to this {BRAND.name} organization.</span>
           </div>
         )}
         {s.canManage && s.connected && (
@@ -89,7 +90,7 @@ function MicrosoftPanel() {
             {!s.required && (
               <span className="callout" style={{ margin: 0, fontSize: 13 }}>
                 Recommended: require Microsoft sign-in. Microsoft then checks every sign-in with your company&apos;s own rules (multi-factor
-                sign-in, Conditional Access), and nobody can guess a Sidekick password. If Microsoft sign-in ever breaks, the Sidekick team
+                sign-in, Conditional Access), and nobody can guess a {BRAND.name} password. If Microsoft sign-in ever breaks, the {BRAND.name} team
                 can let you back in.
               </span>
             )}

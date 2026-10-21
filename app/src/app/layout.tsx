@@ -9,6 +9,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { BRAND } from "@/lib/brand";
 
 const display = localFont({
   src: [
@@ -38,7 +39,7 @@ const mono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Sidekick",
+  title: BRAND.name,
   description: "Your AI teammate for Microsoft Teams meetings",
 };
 

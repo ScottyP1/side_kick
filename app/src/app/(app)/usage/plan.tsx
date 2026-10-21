@@ -52,9 +52,12 @@ export function PlanSection() {
 
   const load = useCallback(() => api<Billing>("/api/billing").then(setB), []);
   useEffect(() => {
-    load().catch(reportError);
-    const n = Number(new URLSearchParams(location.search).get("groups"));
-    if (Number.isInteger(n) && n > 0 && n < 1000) setNeed(n);
+    load()
+      .then(() => {
+        const n = Number(new URLSearchParams(location.search).get("groups"));
+        if (Number.isInteger(n) && n > 0 && n < 1000) setNeed(n);
+      })
+      .catch(reportError);
   }, [load, reportError]);
 
   const act = async (action: "change" | "cancel" | "fail" | "extras", done: string, body: Record<string, unknown> = {}) => {

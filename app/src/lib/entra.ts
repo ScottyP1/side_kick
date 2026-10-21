@@ -40,6 +40,7 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { HttpError } from "./auth";
 import { get, now, run } from "./db";
 import { tenantMode } from "./tenants";
+import { BRAND } from "./brand";
 
 /** Microsoft's sign-in service. Overridable only outside production (for the fake Microsoft in tests). */
 export const LOGIN_BASE =
@@ -99,7 +100,7 @@ const b64url = (b: Buffer) => b.toString("base64url");
  * @param next   where to go afterwards (same-site path)
  */
 export async function startMicrosoftSignIn(req: Request, mode: "signin" | "link", opts: { userId?: string; next?: string | null; loginHint?: string | null } = {}) {
-  if (!entraConfigured()) throw new HttpError(503, "Microsoft sign-in isn't set up on this Sidekick yet. Sign in with your email and password.");
+  if (!entraConfigured()) throw new HttpError(503, `Microsoft sign-in isn't set up on this ${BRAND.name} yet. Sign in with your email and password.`);
   const c = config();
   const state = b64url(crypto.randomBytes(24));
   const verifier = b64url(crypto.randomBytes(32));
@@ -156,7 +157,7 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
     // description goes to the server log for whoever investigates.
     if (q.get("error") !== "access_denied") console.error("Microsoft sign-in error", q.get("error"), (q.get("error_description") ?? "").split("\n")[0].slice(0, 300));
     const code = (q.get("error_description") ?? "").match(/AADSTS\d{3,8}/)?.[0] ?? (q.get("error") ?? "").replace(/[^a-z_]/gi, "").slice(0, 40);
-    throw new HttpError(400, q.get("error") === "access_denied" ? "Microsoft sign-in was cancelled." : `Microsoft didn't sign you in${code ? ` (${code})` : ""}. Try again; if it keeps happening, your IT team may need to approve Sidekick for your organization.`);
+    throw new HttpError(400, q.get("error") === "access_denied" ? "Microsoft sign-in was cancelled." : `Microsoft didn't sign you in${code ? ` (${code})` : ""}. Try again; if it keeps happening, your IT team may need to approve ${BRAND.name} for your organization.`);
   }
   const state = q.get("state") ?? "";
   const code = q.get("code") ?? "";
@@ -199,7 +200,7 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
   if (claims.nonce !== saved.nonce) throw new HttpError(400, "That sign-in reply doesn't match this browser. Try again.");
   if (tid === PERSONAL_TENANT) throw new HttpError(403, "Personal Microsoft accounts can't sign in. Use your work account.");
   // Single-tenant: Microsoft shouldn't issue anyone else a token for this app, but never rely on that alone.
-  if (c.singleTenant && tid.toLowerCase() !== c.singleTenant.toLowerCase()) throw new HttpError(403, "Your Microsoft organization can't sign in to this Sidekick.");
+  if (c.singleTenant && tid.toLowerCase() !== c.singleTenant.toLowerCase()) throw new HttpError(403, `Your Microsoft organization can't sign in to this ${BRAND.name}.`);
   const email = String(claims.email ?? claims.preferred_username ?? "").trim().toLowerCase();
   const oid = String(claims.oid ?? "");
   if (!oid) throw new HttpError(400, "Microsoft's reply didn't include your account id.");

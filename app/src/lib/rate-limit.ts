@@ -14,6 +14,7 @@ import "server-only";
 import { HttpError } from "./auth";
 import { get, newId, now, run } from "./db";
 import { orgTerms } from "./limits";
+import { BRAND } from "./brand";
 
 /** Default questions per person per hour. */
 export const ASK_PER_HOUR = Number(process.env.SIDEKICK_ASK_PER_HOUR) || 60;
@@ -33,5 +34,5 @@ export async function takeHit(bucket: string, limit: number, windowMinutes: numb
 /** One question by this person: refuses with a friendly 429 past the hourly limit. Called by `ask()`. */
 export async function takeQuestion(orgId: string, userId: string) {
   const limit = (await orgTerms(orgId)).askPerHour ?? ASK_PER_HOUR;
-  await takeHit(`ask:${userId}`, limit, 60, `You've asked ${limit} questions in the last hour, which is the most Sidekick takes from one person. Take a short break and ask again in a few minutes.`);
+  await takeHit(`ask:${userId}`, limit, 60, `You've asked ${limit} questions in the last hour, which is the most ${BRAND.name} takes from one person. Take a short break and ask again in a few minutes.`);
 }

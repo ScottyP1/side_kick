@@ -13,6 +13,7 @@ import { listRolloffs } from "@/lib/rolloff";
 import { orgFlags, platformLog, requireOwner } from "@/lib/owner";
 import { creditStatus } from "@/lib/credit";
 import { limitReport, monthStart, orgTerms } from "@/lib/limits";
+import { BRAND } from "@/lib/brand";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -76,7 +77,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   const { status } = await readJson<{ status?: string }>(req);
   if (status !== "Active" && status !== "Suspended") throw new HttpError(400, "Status must be Active or Suspended.");
   await run("UPDATE orgs SET status = ? WHERE id = ?", status, org.id);
-  await audit({ org_id: org.id, name: "Sidekick team" }, status === "Suspended" ? "Paused Sidekick access for this organization" : "Restored Sidekick access", "Access");
+  await audit({ org_id: org.id, name: `${BRAND.name} team` }, status === "Suspended" ? `Paused ${BRAND.name} access for this organization` : `Restored ${BRAND.name} access`, "Access");
   await platformLog(owner.name, `${status === "Suspended" ? "Suspended" : "Reactivated"} ${org.name}`);
   return { ok: true };
 });

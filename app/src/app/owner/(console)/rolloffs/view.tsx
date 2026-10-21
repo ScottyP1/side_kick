@@ -4,7 +4,8 @@
  * Roll-offs (/owner/rolloffs): every client's pending and past roll-offs (lib/rolloff.ts) in one list:
  * groups that are ending, organizations in their grace period after canceling or being ended, and done
  * deletions with their certificate (download as PDF or text; an organization's is only here once it's
- * gone). Pending ones can be **extended** (a new date, 1 to 365 days from today) or **cancelled**. Errors
+ * gone). Pending ones can be **extended** (a new date, 1 to 365 days from today), **deleted now** (on the
+ * timer's next run, for a client who asks for prompt deletion) or **cancelled**. Errors
  * from the scheduled deletion show on the row (it's retried every 5 minutes). Operators only.
  * Data: GET /api/owner/rolloffs, PATCH /api/owner/rolloffs/:id, GET /api/owner/rolloffs/:id/certificate.
  */
@@ -28,6 +29,7 @@ export default function RolloffsPage() {
   const [extend, setExtend] = useState<Row | null>(null);
   const [days, setDays] = useState(30);
   const [cancel, setCancel] = useState<Row | null>(null);
+  const [soon, setSoon] = useState<Row | null>(null);
   const load = useCallback(() => api<{ rolloffs: Row[] }>("/api/owner/rolloffs").then((r) => setRows(r.rolloffs)), []);
   useEffect(() => {
     load().catch(reportError);
@@ -39,6 +41,7 @@ export default function RolloffsPage() {
       toast(done);
       setExtend(null);
       setCancel(null);
+      setSoon(null);
       await load();
     } catch (e) {
       toast(e instanceof Error ? e.message : "That didn't work.");
@@ -70,7 +73,7 @@ export default function RolloffsPage() {
                   <td className="num">{r.status === "done" ? fmtTime(r.closedAt) : fmtDate(r.deleteOn)}{r.readOnlyFrom && r.scope === "org" && r.status === "scheduled" && <div className="muted" style={{ fontSize: 12.5 }}>read-only from {fmtDate(r.readOnlyFrom)}</div>}</td>
                   <td>{r.requestedBy}<div className="muted" style={{ fontSize: 12.5 }}>{fmtDate(r.requestedAt)}</div></td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    {r.status === "scheduled" && <><button className="btn small" onClick={() => { setDays(30); setExtend(r); }}>Extend</button> <button className="btn small ghost" onClick={() => setCancel(r)}>Cancel</button></>}
+                    {r.status === "scheduled" && <><button className="btn small" onClick={() => { setDays(30); setExtend(r); }}>Extend</button> <button className="btn small danger" onClick={() => setSoon(r)}>Delete now</button> <button className="btn small ghost" onClick={() => setCancel(r)}>Cancel</button></>}
                     {r.certificate && <><a className="btn small" href={`/api/owner/rolloffs/${r.id}/certificate?format=pdf`}>Certificate (PDF)</a> <a className="btn small ghost" href={`/api/owner/rolloffs/${r.id}/certificate`}>Text</a></>}
                   </td>
                 </tr>
@@ -86,6 +89,11 @@ export default function RolloffsPage() {
             <input id="days" className="input num" type="number" min={1} max={365} value={days} onChange={(e) => setDays(Math.max(1, Math.min(365, Math.floor(Number(e.target.value) || 1))))} />
           </div>
           <p className="muted" style={{ margin: 0 }}>Now set for {fmtDate(extend.deleteOn)}. Recorded in the client&apos;s audit log and the operator log.</p>
+        </Modal>
+      )}
+      {soon && (
+        <Modal title={`Delete ${soon.scope === "group" ? `“${soon.group}”` : `all of ${soon.org}`} now?`} onClose={() => setSoon(null)} footer={<><button className="btn" onClick={() => setSoon(null)}>Back</button><button className="btn danger solid" onClick={() => patch(soon, { action: "now" }, "Deletes on the timer's next run")}>Delete now</button></>}>
+          <p style={{ margin: 0 }}>The timer deletes it within 5 minutes and writes the deletion certificate. This can&apos;t be undone.</p>
         </Modal>
       )}
       {cancel && (

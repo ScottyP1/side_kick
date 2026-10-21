@@ -8,6 +8,7 @@
  * - `tagSafe`: keeps document text from faking the tags around it in Claude prompts (I6).
  */
 import crypto from "node:crypto";
+import { BRAND } from "./brand";
 
 /** Shortest setup code accepted in `SIDEKICK_SETUP_CODE`, so it can't be guessed. */
 export const MIN_SETUP_CODE = 16;
@@ -50,7 +51,7 @@ export function crossSiteRefusal(req: Request): string | null {
   if (req.method === "GET" || req.method === "HEAD") return null;
   const h = req.headers;
   const fetchSite = h.get("sec-fetch-site");
-  const blocked = "This request came from another website, so Sidekick refused it. Open Sidekick directly and try again.";
+  const blocked = `This request came from another website, so ${BRAND.name} refused it. Open ${BRAND.name} directly and try again.`;
   if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") return blocked;
   const origin = h.get("origin");
   if (!origin) return null;

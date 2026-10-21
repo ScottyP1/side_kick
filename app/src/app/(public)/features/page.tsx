@@ -9,6 +9,7 @@ import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
 import { TeamsDemo } from "@/components/teams-demo";
 import { pageMetadata } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 
 export const metadata: Metadata = pageMetadata("/features");
 
@@ -18,17 +19,17 @@ const GROUPS: { id: string; title: string; lead: string; items: Feature[] }[] = 
   {
     id: "teams",
     title: "In Microsoft Teams",
-    lead: "Where your people already work: group chats, channels and 1:1 chats with Sidekick (meeting chats are coming with automatic meeting notes).",
+    lead: `Where your people already work: group chats, channels and 1:1 chats with ${BRAND.name} (meeting chats are coming with automatic meeting notes).`,
     items: [
-      { icon: "answer", title: "Answers with sources", text: "Mention @Sidekick with a question and get an answer from that client's group, with the documents and meetings it came from.", points: ["Says \"I couldn't find that\" instead of guessing", "Unanswered questions become knowledge gaps to fill", "Follows the chat once a Team Lead assigns it to a group"] },
-      { icon: "notes", title: "Meeting notes and action items", text: "Import a meeting's Teams transcript and Sidekick posts a notes card and one card per action item. Automatic notes after every meeting are coming soon.", points: ["Summary, decisions and open questions", "Owners and due dates on action items", "Assign or mark done right from the card"] },
+      { icon: "answer", title: "Answers with sources", text: `Mention @${BRAND.name} with a question and get an answer from that client's group, with the documents and meetings it came from.`, points: ["Says \"I couldn't find that\" instead of guessing", "Unanswered questions become knowledge gaps to fill", "Follows the chat once a Team Lead assigns it to a group"] },
+      { icon: "notes", title: "Meeting notes and action items", text: `Import a meeting's Teams transcript and ${BRAND.name} posts a notes card and one card per action item. Automatic notes after every meeting are coming soon.`, points: ["Summary, decisions and open questions", "Owners and due dates on action items", "Assign or mark done right from the card"] },
       { icon: "bell", title: "Reminders", text: "A daily check per chat raises what's slipping, so nobody has to chase it.", points: ["Overdue and unowned action items", "Decisions still waiting to be made", "Documents that look out of date or conflict"] },
-      { icon: "people", title: "Team Leads in charge", text: "Only Team Leads and admins can add Sidekick to a chat; anyone else, and it politely leaves.", points: ["@Sidekick add @name to bring someone into the group", "Chats nobody assigns are left after 7 days", "Client guests in a chat only get shareable material"] },
+      { icon: "people", title: "Team Leads in charge", text: `Only Team Leads and admins can add ${BRAND.name} to a chat; anyone else, and it politely leaves.`, points: [`@${BRAND.name} add @name to bring someone into the group`, "Chats nobody assigns are left after 7 days", "Client guests in a chat only get shareable material"] },
     ],
   },
   {
     id: "portal",
-    title: "In the Sidekick portal",
+    title: `In the ${BRAND.name} portal`,
     lead: "A web portal for each organization, with Sign in with Microsoft.",
     items: [
       { icon: "groups", title: "Groups per client", text: "One walled-off group per client engagement, with its client name, engagement code, Team Lead, people and chats.", points: ["Health at a glance: chats, overdue items, leads", "Documents: PDF, Word, text and Teams transcripts", "Searches only the group you're in"] },
@@ -42,7 +43,7 @@ const GROUPS: { id: string; title: string; lead: string; items: Feature[] }[] = 
     lead: "Rules, records and costs, for Org Owners and Org Admins.",
     items: [
       { icon: "shield", title: "Guardrails", text: "A locked safety floor plus switches and custom rules for the whole company or one group.", points: ["Groups can be stricter, never looser", "Test a question against the rules before it matters", "Answers are checked against their sources"] },
-      { icon: "audit", title: "Audit log and activity", text: "Who did what and when, and what Sidekick did step by step (timings and counts, never document text).", points: ["Sign-ins, role changes, links, rule changes", "Reference codes on every error for quick support"] },
+      { icon: "audit", title: "Audit log and activity", text: `Who did what and when, and what ${BRAND.name} did step by step (timings and counts, never document text).`, points: ["Sign-ins, role changes, links, rule changes", "Reference codes on every error for quick support"] },
       { icon: "lock", title: "Roles and access", text: "Six roles from Org Owner to Viewer, Team Leads per group, and Microsoft sign-in you can require.", points: ["Import people from Microsoft 365", "Billing Admins see costs, not content"] },
       { icon: "cloud", title: "Usage and billing", text: "AI use per group and per person, and your plan, in one place.", points: ["Change plan or cancel any time", "Nothing is deleted when a plan lapses: it turns read-only"] },
     ],
@@ -55,7 +56,7 @@ export default function FeaturesPage() {
       <div className="site-wrap site-page-head">
         <span className="site-eyebrow">Features</span>
         <h1>Everything your team needs to remember, in the chat they already use</h1>
-        <p>Sidekick answers, takes the notes and keeps track, separately for every client. Here&apos;s what&apos;s in the box.</p>
+        <p>{BRAND.name} answers, takes the notes and keeps track, separately for every client. Here&apos;s what&apos;s in the box.</p>
       </div>
       {GROUPS.map((g, i) => (
         <section key={g.id} className={`site-section ${i % 2 ? "alt" : ""}`} aria-labelledby={`f-${g.id}`}>

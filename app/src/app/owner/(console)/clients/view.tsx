@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Icon, Modal, Pill, usd, useReportError, useToast } from "@/components/ui";
 import { planById, STATUS_LABEL, type SubStatus } from "@/lib/plans";
+import { BRAND } from "@/lib/brand";
 
 type T = {
   id: string; name: string; status: string; created_at: string; users: number; active_users: number; workspaces: number; documents: number; meetings: number;
@@ -141,7 +142,7 @@ export default function ClientsPage() {
       )}
       {confirm && (
         <Modal title={`Pause ${confirm.name}?`} onClose={() => setConfirm(null)} footer={<><button className="btn" onClick={() => setConfirm(null)}>Cancel</button><button className="btn danger solid" onClick={() => setStatus(confirm, "Suspended")}>Pause access</button></>}>
-          <p style={{ margin: 0 }}>Their {confirm.users} user{confirm.users === 1 ? "" : "s"} won&apos;t be able to use Sidekick until you resume. Their data stays as it is.</p>
+          <p style={{ margin: 0 }}>Their {confirm.users} user{confirm.users === 1 ? "" : "s"} won&apos;t be able to use {BRAND.name} until you resume. Their data stays as it is.</p>
         </Modal>
       )}
     </>

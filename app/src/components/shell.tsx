@@ -9,6 +9,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, Icon, Pill, ToastProvider } from "./ui";
+import { BRAND } from "@/lib/brand";
 
 export type Workspace = { id: string; name: string; code: string | null; color: string };
 export type Me = {
@@ -122,7 +123,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Also offered on the error screen (e.g. organization paused), so nobody is stuck signed in.
   if (error) return <div className="auth-wrap"><div className="auth-card"><h2>Something went wrong</h2><p className="err">{error}</p><div style={{ display: "flex", gap: 8 }}><button className="btn" onClick={() => location.reload()}>Try again</button><button className="btn ghost" onClick={signOut}><Icon n="logout" />Sign out</button></div></div></div>;
-  if (!me) return <div className="auth-wrap"><span className="muted">Loading Sidekick…</span></div>;
+  if (!me) return <div className="auth-wrap"><span className="muted">Loading {BRAND.name}…</span></div>;
   // The server refuses everything else until a temporary password is changed, so show only that.
   if (me.user.mustChangePassword) return <ChangeTemporaryPassword name={me.user.name} onDone={reload} />;
 
@@ -139,13 +140,13 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="brand brand-logo">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={me.branding.logo} alt={me.org.name} />
-                <small>Sidekick · AI teammate</small>
+                <small>{BRAND.name} · AI teammate</small>
               </div>
             ) : (
               <div className="brand">
                 <span className="brand-mark">S</span>
                 <div>
-                  <b>Sidekick</b>
+                  <b>{BRAND.name}</b>
                   <small>{me.org.name}</small>
                 </div>
               </div>
@@ -177,7 +178,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="banner">
                 <Icon n="alert" />
                 <span>
-                  <b>AI answers aren&apos;t set up yet.</b> The Sidekick team needs to finish setting up this server. Uploads and search work already; answers and meeting notes need it.
+                  <b>AI answers aren&apos;t set up yet.</b> The {BRAND.name} team needs to finish setting up this server. Uploads and search work already; answers and meeting notes need it.
                 </span>
               </div>
             )}
@@ -186,8 +187,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Icon n="alert" />
                 <span>
                   {me.credit.level === "warn"
-                    ? <>Your organization has used {me.credit.pct}% of this month&apos;s AI credit. At 100%, Sidekick keeps answering questions but pauses extras like reminders and the knowledge map.</>
-                    : <><b>This month&apos;s AI credit is used up.</b> Sidekick still answers questions; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st.</>}{" "}
+                    ? <>Your organization has used {me.credit.pct}% of this month&apos;s AI credit. At 100%, {BRAND.name} keeps answering questions but pauses extras like reminders and the knowledge map.</>
+                    : <><b>This month&apos;s AI credit is used up.</b> {BRAND.name} still answers questions; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st.</>}{" "}
                   <Link href="/usage">Open Usage &amp; billing</Link>
                 </span>
               </div>
@@ -196,7 +197,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="banner info">
                 <Icon n="check" />
                 <span>
-                  Finish setting up Sidekick: connect Microsoft 365, choose your rules and create your first groups.{" "}
+                  Finish setting up {BRAND.name}: connect Microsoft 365, choose your rules and create your first groups.{" "}
                   <Link href="/get-started">Continue setup</Link>
                 </span>
               </div>
@@ -326,7 +327,7 @@ function ChangeTemporaryPassword({ name, onDone }: { name: string; onDone: () =>
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={submit}>
         <h2>Pick your own password</h2>
-        <p className="muted">Welcome, {name}. You signed in with a temporary password; choose a new one to start using Sidekick.</p>
+        <p className="muted">Welcome, {name}. You signed in with a temporary password; choose a new one to start using {BRAND.name}.</p>
         <div className="field"><label htmlFor="tmp-cur">Temporary password</label><input id="tmp-cur" className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></div>
         <div className="field"><label htmlFor="tmp-new">New password</label><input id="tmp-new" className="input" type="password" autoComplete="new-password" minLength={12} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 12 characters, and not one from a known data breach. A password manager can make one.</span></div>
         {err && <p className="err">{err}</p>}

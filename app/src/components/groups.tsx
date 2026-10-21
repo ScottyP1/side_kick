@@ -12,6 +12,7 @@
  *   no lead, setting up, overdue action items, no documents, or healthy.
  */
 import { Icon } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 /** A group as GET /api/workspaces returns it. */
 export type Group = {
@@ -42,7 +43,7 @@ export function groupHealth(g: Group): [string, string, string] {
   if (!g.leads.length) return ["bad", "No Team Lead", "Nobody runs this group day to day. An admin picks a Team Lead on the group's People tab."];
   if (g.members <= 2 && !g.chats && !g.docs) return ["info", "Setting up", `${g.leads[0].name.split(" ")[0]} hasn't added people, chats or documents yet.`];
   if (g.overdue) return ["warn", `${g.overdue} overdue action item${g.overdue === 1 ? "" : "s"}`, "Action items from meetings are past their due date."];
-  if (!g.docs) return ["warn", "No documents", "Sidekick can only answer from documents and meetings in the group."];
+  if (!g.docs) return ["warn", "No documents", `${BRAND.name} can only answer from documents and meetings in the group.`];
   return ["good", "Healthy", "People, chats and documents are in place."];
 }
 

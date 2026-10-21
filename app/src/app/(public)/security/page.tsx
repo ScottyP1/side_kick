@@ -13,17 +13,18 @@ import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
 import { faqFor } from "@/lib/faq";
 import { pageMetadata } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 
 export const metadata: Metadata = pageMetadata("/security");
 
 const PILLARS: { icon: string; title: string; text: string; draft?: boolean }[] = [
   { icon: "groups", title: "Walls between companies and groups", text: "Nothing is shared between organizations, and each client group is walled off inside yours. Searches stay inside one group." },
-  { icon: "shield", title: "Guardrails on every answer", text: "A locked safety floor plus your own rules, checked before Sidekick answers and again after. If it doesn't know, it says so." },
+  { icon: "shield", title: "Guardrails on every answer", text: `A locked safety floor plus your own rules, checked before ${BRAND.name} answers and again after. If it doesn't know, it says so.` },
   { icon: "lock", title: "Microsoft and two-step sign-in", text: "Sign in with Microsoft (which you can require), or a password plus a passkey or authenticator app." },
-  { icon: "key", title: "Encrypted", text: "HTTPS only, including to the database. Data is encrypted at rest by Azure, and sign-in secrets are encrypted again by Sidekick." },
+  { icon: "key", title: "Encrypted", text: `HTTPS only, including to the database. Data is encrypted at rest by Azure, and sign-in secrets are encrypted again by ${BRAND.name}.` },
   { icon: "audit", title: "An audit log you can read", text: "Sign-ins, role changes, chat links and rule changes are recorded with who and when. Traces hold timings, never document text." },
   { icon: "pulse", title: "Backups and monitoring", text: "Automatic database backups kept for 35 days, health checks, uptime alerts and a reference code on every error." },
-  { icon: "spark", title: "Not used to train AI", text: "Sidekick's AI is Claude, through Anthropic's API, whose commercial terms say API data isn't used for training by default.", draft: true },
+  { icon: "spark", title: "Not used to train AI", text: `${BRAND.name}'s AI is Claude, through Anthropic's API, whose commercial terms say API data isn't used for training by default.`, draft: true },
 ];
 
 export default function SecurityPage() {
@@ -32,7 +33,7 @@ export default function SecurityPage() {
       <div className="site-wrap site-page-head site-center">
         <span className="site-eyebrow">Security &amp; trust</span>
         <h1>Client work stays with the client it belongs to</h1>
-        <p>Firms trust Sidekick with many clients at once, so separation is built into everything it does.</p>
+        <p>Firms trust {BRAND.name} with many clients at once, so separation is built into everything it does.</p>
       </div>
 
       <div className="site-wrap site-stack">
@@ -52,7 +53,7 @@ export default function SecurityPage() {
         <div className="site-wrap">
           <span className="site-eyebrow">How the walls work</span>
           <h2 id="walls-title">Every answer comes from one group</h2>
-          <p className="site-lead">Each Teams chat belongs to exactly one group, and Sidekick searches only that group before it ranks anything. Client guests only get material marked Shareable.</p>
+          <p className="site-lead">Each Teams chat belongs to exactly one group, and {BRAND.name} searches only that group before it ranks anything. Client guests only get material marked Shareable.</p>
           <Walls />
         </div>
       </section>
@@ -62,11 +63,11 @@ export default function SecurityPage() {
           <div>
             <span className="site-eyebrow">Where your data lives</span>
             <h2 id="where-title">In Microsoft Azure</h2>
-            <p className="site-lead" style={{ marginBottom: 12 }}>Sidekick runs entirely in Microsoft Azure. The pages load nothing from other websites: no trackers, ads or third-party scripts.</p>
+            <p className="site-lead" style={{ marginBottom: 12 }}>{BRAND.name} runs entirely in Microsoft Azure. The pages load nothing from other websites: no trackers, ads or third-party scripts.</p>
             <p className="muted" style={{ margin: 0 }}>Org Owners and Org Admins can delete documents, meetings and whole groups at any time. To remove your whole organization, <Link href="/support">contact support</Link>.</p>
           </div>
           <ul className="site-where">
-            <li><SiteIcon name="cloud" /><span><b>The Sidekick app</b><small>Runs in Azure, HTTPS only</small></span></li>
+            <li><SiteIcon name="cloud" /><span><b>The {BRAND.name} app</b><small>Runs in Azure, HTTPS only</small></span></li>
             <li><SiteIcon name="db" /><span><b>Database</b><small>Azure Database for PostgreSQL, encrypted, backed up automatically</small></span></li>
             <li><SiteIcon name="map" /><span><b>Search index</b><small>Azure AI Search, filtered by company and group</small></span></li>
             <li><SiteIcon name="spark" /><span><b>AI answers</b><small>Claude by Anthropic; only the passages one answer needs</small></span></li>

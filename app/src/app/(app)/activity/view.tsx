@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtTime, Modal, Pill, Spinner, usd, useReportError } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Overview = {
   days: number;
@@ -46,7 +47,7 @@ export default function ActivityPage() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Activity</div>
-          <h1>Everything Sidekick did, step by step</h1>
+          <h1>Everything {BRAND.name} did, step by step</h1>
           <p>Requests from the portal and Teams, how long each step took, what failed, and what people asked. Kept for 30 days; no document text is stored here.</p>
         </div>
       </div>
@@ -232,7 +233,7 @@ function TracesTab() {
       {!rows ? (
         <div className="panel-b muted"><Spinner /> Loading traces…</div>
       ) : !shown.length ? (
-        <div className="empty">No traces match. Activity appears here as people use Sidekick in the portal and in Teams.</div>
+        <div className="empty">No traces match. Activity appears here as people use {BRAND.name} in the portal and in Teams.</div>
       ) : (
         <div className="table-wrap">
           <table>

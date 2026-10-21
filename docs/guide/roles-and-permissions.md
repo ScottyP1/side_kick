@@ -51,10 +51,13 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See the plan and subscription (on Usage & billing) | ✓ | ✓ | | ✓ | | |
 | Export usage per group as CSV (AI cost by engagement code, for chargeback) | ✓ | ✓ | | ✓ | | |
 | See the AI credit notice (80% used, used up) | ✓ | ✓ | | ✓ | | |
-| Pay for the plan, change it or cancel it | ✓ | | | ✓ | | |
+| Pay for the plan, change it or its extra groups, or cancel it | ✓ | | | ✓ | | |
 | **Running the organization** | | | | | | |
 | Create groups (workspaces), picking their client, Team Lead and first members | ✓ | ✓ | | | | |
 | Rename a group, change its client or engagement code, delete it (and everything in it) | ✓ | ✓ | | | | |
+| End a group when the engagement ends (read-only, deleted on a date) or cancel that | ✓ | ✓ | | | | |
+| Export a group, or the whole organization's data, as a zip | ✓ | ✓ | | | | |
+| See roll-offs and download deletion certificates | ✓ | ✓ | | | | |
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
 | Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |

@@ -47,6 +47,7 @@ import { span, spanAttrs, traceScope, withTrace } from "./trace";
 import { addDays, applySettingsChanges, dailySlotDue, localTime, parseChatSettings, type ChatSettings, type ReminderKinds } from "./reminder-rules";
 import { noticeCard, reminderCard, VERBS, type ReminderPointInput, type ReminderSource } from "./teams/cards";
 import { postCard, type TeamsConversation } from "./teams/bot";
+import { BRAND } from "./brand";
 
 const PORTAL = () => process.env.SIDEKICK_PUBLIC_URL || "http://localhost:3000";
 /** At most this many points on one card; the rest wait for the next reminder. */
@@ -92,7 +93,7 @@ export async function saveChatSettings(user: User, conv: TeamsConversation, chan
   const current = await getChatSettings(conv);
   const out = applySettingsChanges(current, changes);
   if ("error" in out) throw new HttpError(400, out.error);
-  if (out.settings.track && conv.kind === "personal") throw new HttpError(400, "Message tracking is only for channels and group chats. In a 1:1 chat every message is already a question to Sidekick.");
+  if (out.settings.track && conv.kind === "personal") throw new HttpError(400, `Message tracking is only for channels and group chats. In a 1:1 chat every message is already a question to ${BRAND.name}.`);
   if (!out.changed.length) return { settings: current, trackChanged: false };
   await run(
     `INSERT INTO teams_chat_settings (conversation_id, org_id, workspace_id, json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -121,7 +122,7 @@ export async function announceTracking(conv: TeamsConversation, on: boolean, by:
   await postCard(
     conv,
     on
-      ? noticeCard("I'm now keeping track of this chat", "I'll read the messages here to keep track of decisions, dates and to-dos, and remind the team about what's still open. Only this workspace's team can search what I learn.", `Turned on by ${by}. An Org Admin or the Team Lead can turn it off on the group's page in Sidekick. Messages are kept ${CHAT_RETENTION_DAYS} days.`)
+      ? noticeCard("I'm now keeping track of this chat", "I'll read the messages here to keep track of decisions, dates and to-dos, and remind the team about what's still open. Only this workspace's team can search what I learn.", `Turned on by ${by}. An Org Admin or the Team Lead can turn it off on the group's page in ${BRAND.name}. Messages are kept ${CHAT_RETENTION_DAYS} days.`)
       : noticeCard("I've stopped keeping track of this chat", "I won't read new messages here any more. You can still @mention me with a question.", `Turned off by ${by}.`),
   );
 }
@@ -362,7 +363,7 @@ const DigestSchema = z.object({
   points: z.array(z.object({ item_id: z.string().describe("The id of the item this point is about, e.g. R2"), text: z.string().describe("The reminder in at most 30 words") })),
 });
 
-const REMIND_SYSTEM = `You write short reminder messages that Sidekick posts in a consulting team's Microsoft Teams chat.
+const REMIND_SYSTEM = `You write short reminder messages that ${BRAND.name} posts in a consulting team's Microsoft Teams chat.
 You get a numbered list of items that are still open (overdue or unowned action items, open questions, decisions still to make, out-of-date documents, sources that disagree).
 Rules:
 - Write one point per item you include, at most ${MAX_POINTS}, most urgent first. Each point names exactly one item_id from the list.
@@ -496,7 +497,7 @@ async function postDigest(conv: TeamsConversation, runId: string, digest: Digest
     await postCard(conv, reminderCard({ runId, workspace: ws, intro: digest.intro, points: digest.points, portalUrl: `${PORTAL()}/memory` }));
   } catch (e) {
     console.error(`Couldn't post a reminder to Teams conversation ${conv.id}`, e);
-    throw new HttpError(502, "Couldn't post the reminder in Teams. Check that Sidekick is still in that chat and that the Teams bot is set up.");
+    throw new HttpError(502, `Couldn't post the reminder in Teams. Check that ${BRAND.name} is still in that chat and that the Teams bot is set up.`);
   }
   await run("UPDATE reminder_runs SET status = 'posted' WHERE id = ?", runId);
   await auditAsSidekick(conv.org_id!, `Posted ${digest.points.length} reminder${digest.points.length === 1 ? "" : "s"} to Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}”`, "Agent action", conv.workspace_id);
@@ -649,7 +650,7 @@ export async function reminderAction(conv: TeamsConversation, actor: User, verb:
   const point = digest.points.find((p) => p.key === String(data.key ?? ""));
   if (!point) return { error: "I couldn't find that reminder in this chat." };
   if (conv.guests && !point.shareable) return { error: "That item is internal, so it can't be changed from a chat with client guests." };
-  if (!canEdit(actor)) return { error: `Your Sidekick role (${actor.role}) can't change this. Ask a Member or an Org Admin.` };
+  if (!canEdit(actor)) return { error: `Your ${BRAND.name} role (${actor.role}) can't change this. Ask a Member or an Org Admin.` };
   if (point.status) return { error: "Someone already handled this one." };
 
   const [type, id] = point.key.split(":");

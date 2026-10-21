@@ -27,6 +27,7 @@
  */
 
 /** The plan ids stored in `subscriptions.plan`. */
+import { BRAND } from "./brand";
 export const PLAN_IDS = ["starter", "team", "business", "enterprise"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
@@ -154,7 +155,7 @@ export const ENTERPRISE: Plan = {
   documents: 40000,
   connectors: null,
   aiCreditUsd: 3200,
-  blurb: "Custom limits and price, set up with the Sidekick team.",
+  blurb: `Custom limits and price, set up with the ${BRAND.name} team.`,
   features: ["Unlimited groups, custom limits", "Live in meetings (when available)", "Dedicated database option", "Everything in Business"],
 };
 
@@ -329,22 +330,22 @@ export function accessFor(sub: SubTimes | null | undefined, at: number = Date.no
     const end = until(sub.trial_ends_at);
     if (end > at) {
       const left = Math.max(1, Math.ceil((end - at) / 86400_000));
-      return { mode: "full", notice: `Free trial: ${left} day${left === 1 ? "" : "s"} left. Pay for your plan on Usage & billing to keep using Sidekick after ${day(sub.trial_ends_at!)}.`, reason: null };
+      return { mode: "full", notice: `Free trial: ${left} day${left === 1 ? "" : "s"} left. Pay for your plan on Usage & billing to keep using ${BRAND.name} after ${day(sub.trial_ends_at!)}.`, reason: null };
     }
     return readOnly("the free trial has ended");
   }
   if (sub.status === "past_due") {
     const end = until(sub.past_due_since) + GRACE_DAYS * 86400_000;
-    if (end > at) return { mode: "full", notice: `The last payment failed. Fix it on Usage & billing by ${day(new Date(end).toISOString())}, or Sidekick turns read-only.`, reason: null };
+    if (end > at) return { mode: "full", notice: `The last payment failed. Fix it on Usage & billing by ${day(new Date(end).toISOString())}, or ${BRAND.name} turns read-only.`, reason: null };
     return readOnly("the last payment failed and wasn't fixed in time");
   }
   const end = until(sub.access_until);
-  if (end > at) return { mode: "full", notice: `Your plan is canceled. Sidekick stays fully usable until ${day(sub.access_until!)}, then turns read-only.`, reason: null };
+  if (end > at) return { mode: "full", notice: `Your plan is canceled. ${BRAND.name} stays fully usable until ${day(sub.access_until!)}, then turns read-only.`, reason: null };
   return readOnly("the plan is canceled");
 }
 
 function readOnly(why: string): Access {
-  const reason = `Sidekick is read-only for your organization because ${why}. You can still see everything; an Org Owner or Billing Admin can pay on Usage & billing to turn everything back on.`;
+  const reason = `${BRAND.name} is read-only for your organization because ${why}. You can still see everything; an Org Owner or Billing Admin can pay on Usage & billing to turn everything back on.`;
   return { mode: "read_only", notice: reason, reason };
 }
 
@@ -363,9 +364,9 @@ export type OrgRolloffTimes = { read_only_from: string | null; delete_on: string
 export function withRolloff(access: Access, roll: OrgRolloffTimes | null | undefined, opts: { selfService: boolean }, at: number = Date.now()): Access {
   if (!roll) return access;
   const when = day(roll.delete_on);
-  const keep = opts.selfService ? "To keep it, an Org Owner or Billing Admin can pay again on Usage & billing." : "To keep it, contact the Sidekick team.";
+  const keep = opts.selfService ? "To keep it, an Org Owner or Billing Admin can pay again on Usage & billing." : `To keep it, contact the ${BRAND.name} team.`;
   if (roll.read_only_from && Date.parse(roll.read_only_from) <= at) {
-    const reason = `Sidekick is read-only for your organization${roll.reason ? ` because ${roll.reason}` : ""}, and everything in it will be deleted on ${when}. Org Owners and Org Admins can download everything on Settings → Export your data until then. ${keep}`;
+    const reason = `${BRAND.name} is read-only for your organization${roll.reason ? ` because ${roll.reason}` : ""}, and everything in it will be deleted on ${when}. Org Owners and Org Admins can download everything on Settings → Export your data until then. ${keep}`;
     return { mode: "read_only", notice: reason, reason };
   }
   const base = access.notice ? `${access.notice} ` : "";

@@ -36,6 +36,7 @@ import { HttpError } from "./http-error";
 import { clientIp } from "./login-limit";
 import { traceScope } from "./trace";
 import { isWriteRequest } from "./request-scope";
+import { BRAND } from "./brand";
 
 export const SESSION_COOKIE = "sk_session";
 const SESSION_DAYS = 7;
@@ -141,7 +142,7 @@ export async function currentUser(): Promise<User | null> {
   if (!row.last_seen || Date.now() - new Date(row.last_seen).getTime() > LAST_SEEN_EVERY_MS) {
     await run("UPDATE sessions SET last_seen = ? WHERE token_hash = ?", now(), sha256(token));
   }
-  if (row.org_status === "Suspended") throw new HttpError(403, "This organization's Sidekick access is paused. Contact the Sidekick team.");
+  if (row.org_status === "Suspended") throw new HttpError(403, `This organization's ${BRAND.name} access is paused. Contact the ${BRAND.name} team.`);
   return { id: row.id, org_id: row.org_id, name: row.name, email: row.email, role: row.role, must_change_password: row.must_change_password };
 }
 
@@ -207,7 +208,7 @@ export function onlyRolesMessage(roles: readonly Role[]): string {
 }
 
 /** The refusal while someone still has a temporary password; the portal shows the change-password screen instead. */
-export const PASSWORD_CHANGE_REQUIRED = "Change your temporary password first. Then you can use Sidekick.";
+export const PASSWORD_CHANGE_REQUIRED = `Change your temporary password first. Then you can use ${BRAND.name}.`;
 
 /**
  * The user behind this browser's session, or null, without the paused-organization check. Only for
@@ -302,7 +303,7 @@ export async function audit(user: Pick<User, "org_id" | "name"> | null, action: 
 
 /** Records an action Sidekick took by itself (e.g. writing meeting notes), shown with "Sidekick" as the actor. */
 export async function auditAsSidekick(orgId: string, action: string, kind: string, workspaceId: string | null = null) {
-  await audit({ org_id: orgId, name: "Sidekick" }, action, kind, workspaceId);
+  await audit({ org_id: orgId, name: BRAND.name }, action, kind, workspaceId);
 }
 
 /**

@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Pill, useReportError, useToast } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Step = "welcome" | "microsoft" | "teams" | "rules" | "groups";
 type Preset = "standard" | "strict";
@@ -35,7 +36,7 @@ type Created = { group: string; lead: string; tempPassword?: string; email?: str
 const STEPS: [Step | "done", string, string][] = [
   ["welcome", "Welcome", "Your account is ready"],
   ["microsoft", "Connect Microsoft 365", "Sign in with work accounts"],
-  ["teams", "Add to Teams", "Who gets Sidekick"],
+  ["teams", "Add to Teams", `Who gets ${BRAND.name}`],
   ["rules", "Rules", "Pick a starting point"],
   ["groups", "First groups", "One per client team"],
   ["done", "Done", "What happens next"],
@@ -60,14 +61,14 @@ export default function SetupWizard() {
         if (q.get("microsoft") === "connected") {
           toast("Microsoft 365 connected");
           setAt(1);
-        } else if (q.get("paid")) toast("Payment received. Let's set up Sidekick.");
+        } else if (q.get("paid")) toast(`Payment received. Let's set up ${BRAND.name}.`);
       })
       .catch(reportError);
     api<Billing>("/api/billing").then(setBilling).catch(reportError);
   }, [me.user.admin, load, reportError, toast]);
 
   if (!me.user.admin) {
-    return <div className="panel"><div className="empty"><h2>Setup is for admins</h2><span>Your Org Owner or an Org Admin sets Sidekick up for your organization.</span><Link className="btn" href="/home">Go home</Link></div></div>;
+    return <div className="panel"><div className="empty"><h2>Setup is for admins</h2><span>Your Org Owner or an Org Admin sets {BRAND.name} up for your organization.</span><Link className="btn" href="/home">Go home</Link></div></div>;
   }
   if (!s) return <span className="muted">Loading setup…</span>;
 
@@ -132,15 +133,15 @@ function Welcome({ s, billing, name, onNext }: { s: Setup; billing: Billing | nu
 
   return (
     <>
-      <header><span className="eyebrow">Step 1 of 5</span><h1>Welcome to Sidekick, {name.split(" ")[0]}</h1>
+      <header><span className="eyebrow">Step 1 of 5</span><h1>Welcome to {BRAND.name}, {name.split(" ")[0]}</h1>
         <p>{s.org} is ready. In about 10 minutes you&apos;ll connect Microsoft 365, choose your rules and set up a group for each client team.</p></header>
       <div className="gstats" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
-        <div><span className="eyebrow">Plan</span><span className="v">{plan ?? "Managed"}</span><span className="muted" style={{ fontSize: 12.5 }}>{sub?.status === "trialing" ? `Free trial until ${fmtDate(sub.trial_ends_at)}` : sub ? sub.status === "active" ? "Paid" : sub.status : "By the Sidekick team"}</span></div>
+        <div><span className="eyebrow">Plan</span><span className="v">{plan ?? "Managed"}</span><span className="muted" style={{ fontSize: 12.5 }}>{sub?.status === "trialing" ? `Free trial until ${fmtDate(sub.trial_ends_at)}` : sub ? sub.status === "active" ? "Paid" : sub.status : `By the ${BRAND.name} team`}</span></div>
         <div><span className="eyebrow">Groups</span><span className="v">{s.facts.groups}</span><span className="muted" style={{ fontSize: 12.5 }}>One per client team</span></div>
         <div><span className="eyebrow">Microsoft 365</span><span className="v" style={{ fontSize: 18 }}>{s.facts.microsoftConnected ? "Connected" : "Not yet"}</span><span className="muted" style={{ fontSize: 12.5 }}>For work-account sign-in</span></div>
       </div>
       <div className="ng-two">
-        <div className="callout info"><Icon n="folder" /><div><b>One group per client team.</b> Northwind Bank&apos;s documents and chats stay in the Northwind group. Sidekick never mixes clients.</div></div>
+        <div className="callout info"><Icon n="folder" /><div><b>One group per client team.</b> Northwind Bank&apos;s documents and chats stay in the Northwind group. {BRAND.name} never mixes clients.</div></div>
         <div className="callout info"><Icon n="users" /><div><b>Each group has a Team Lead.</b> They add their people and assign their team&apos;s Teams chats, so you don&apos;t have to.</div></div>
       </div>
       <Foot onNext={onNext} nextLabel="Start setup" />
@@ -153,14 +154,14 @@ function Microsoft({ s, onNext, onSkip, onBack }: { s: Setup; onNext: () => void
   return (
     <>
       <header><span className="eyebrow">Step 2 of 5</span><h1>Connect Microsoft 365</h1>
-        <p>Connect your company&apos;s Microsoft 365 so your people sign in to Sidekick with their work account, with no new passwords. You sign in once with your own work account to connect it.</p></header>
+        <p>Connect your company&apos;s Microsoft 365 so your people sign in to {BRAND.name} with their work account, with no new passwords. You sign in once with your own work account to connect it.</p></header>
       {ok && <div className="callout good"><Icon n="check" /><div><b>Connected.</b> People you add can use <b>Sign in with Microsoft</b>. You can require it later under Settings.</div></div>}
       <div className="panel">
         <div className="panel-h"><h3>What Microsoft asks you to allow, in plain words</h3></div>
         <div className="panel-b" style={{ paddingBlock: 4 }}>
-          <div className="perm"><Icon n="check" /><b>Sign people in with their work account</b><span /><span className="muted">Microsoft confirms who someone is. Sidekick only lets in people you&apos;ve added.</span></div>
-          <div className="perm"><Icon n="check" /><b>See their name and email</b><span /><span className="muted">So Sidekick can match the Microsoft account to the person you added.</span></div>
-          <div className="perm no"><Icon n="x" /><b>Not: email, files, calendars or chats</b><span /><span className="muted">Signing in doesn&apos;t give Sidekick any of these. Teams chats are added separately, chat by chat.</span></div>
+          <div className="perm"><Icon n="check" /><b>Sign people in with their work account</b><span /><span className="muted">Microsoft confirms who someone is. {BRAND.name} only lets in people you&apos;ve added.</span></div>
+          <div className="perm"><Icon n="check" /><b>See their name and email</b><span /><span className="muted">So {BRAND.name} can match the Microsoft account to the person you added.</span></div>
+          <div className="perm no"><Icon n="x" /><b>Not: email, files, calendars or chats</b><span /><span className="muted">Signing in doesn&apos;t give {BRAND.name} any of these. Teams chats are added separately, chat by chat.</span></div>
         </div>
       </div>
       {!ok && (s.canConnectMicrosoft
@@ -180,21 +181,21 @@ function Teams({ onNext, onSkip, onBack }: { onNext: () => void; onSkip: () => v
   );
   return (
     <>
-      <header><span className="eyebrow">Step 3 of 5</span><h1>Add Sidekick to Teams</h1>
-        <p>Your Teams admin makes the Sidekick app available. Sidekick never joins a chat on its own: someone adds it, and it stays silent until a Team Lead assigns that chat to a group here in the portal.</p></header>
-      <div role="radiogroup" aria-label="Who gets Sidekick in Teams" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {choice("leads", "Only Team Leads and admins (recommended)", "Only they can add Sidekick to a chat, so it can't be pulled into chats it shouldn't be in. Everyone in an assigned chat still sees its answers and cards.")}
-        {choice("everyone", "Everyone", "Anyone can add Sidekick to a chat. It still does nothing there until a Team Lead assigns the chat to a group.")}
+      <header><span className="eyebrow">Step 3 of 5</span><h1>Add {BRAND.name} to Teams</h1>
+        <p>Your Teams admin makes the {BRAND.name} app available. {BRAND.name} never joins a chat on its own: someone adds it, and it stays silent until a Team Lead assigns that chat to a group here in the portal.</p></header>
+      <div role="radiogroup" aria-label={`Who gets ${BRAND.name} in Teams`} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {choice("leads", "Only Team Leads and admins (recommended)", `Only they can add ${BRAND.name} to a chat, so it can't be pulled into chats it shouldn't be in. Everyone in an assigned chat still sees its answers and cards.`)}
+        {choice("everyone", "Everyone", `Anyone can add ${BRAND.name} to a chat. It still does nothing there until a Team Lead assigns the chat to a group.`)}
       </div>
       <div className="panel">
         <div className="panel-h"><h3>What your Teams admin does</h3></div>
         <div className="panel-b">
           <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6 }}>
-            <li>In the <b>Teams admin center</b>, open <b>Teams apps → Manage apps</b> and allow <b>Sidekick</b>.</li>
+            <li>In the <b>Teams admin center</b>, open <b>Teams apps → Manage apps</b> and allow <b>{BRAND.name}</b>.</li>
             {who === "leads"
-              ? <li>Under <b>Teams apps → Permission policies</b>, make Sidekick available only to a group with your Team Leads and admins (for example a Microsoft 365 group called “Sidekick Team Leads”).</li>
-              : <li>Leave Sidekick available to everyone in the default permission policy.</li>}
-            <li>Team Leads then add Sidekick to their team&apos;s chats and assign each chat to their group in the portal.</li>
+              ? <li>Under <b>Teams apps → Permission policies</b>, make {BRAND.name} available only to a group with your Team Leads and admins (for example a Microsoft 365 group called “{BRAND.name} Team Leads”).</li>
+              : <li>Leave {BRAND.name} available to everyone in the default permission policy.</li>}
+            <li>Team Leads then add {BRAND.name} to their team&apos;s chats and assign each chat to their group in the portal.</li>
           </ol>
         </div>
       </div>
@@ -230,14 +231,14 @@ function Rules({ s, reload, onNext, onSkip, onBack }: { s: Setup; reload: () => 
   return (
     <>
       <header><span className="eyebrow">Step 4 of 5</span><h1>Rules</h1>
-        <p>Pick a starting point for what Sidekick will and won&apos;t answer. You can change any of it later on the Guardrails page, and make one group stricter than the rest.</p></header>
+        <p>Pick a starting point for what {BRAND.name} will and won&apos;t answer. You can change any of it later on the Guardrails page, and make one group stricter than the rest.</p></header>
       <div className="ng-two" role="radiogroup" aria-label="Starting rules">
         {card("standard", "Standard (recommended)", "Most teams. Sensible limits, nothing in the way.")}
         {card("strict", "Strict", "Regulated clients: banks, health, insurance, public sector.")}
       </div>
       {!s.rules.canChange && <div className="callout info"><Icon n="lock" /><div>Only the Org Owner can change these switches. Your organization uses <b>{s.rules.current === "custom" ? "its own mix" : s.rules.current === "strict" ? "Strict" : "Standard"}</b> today.</div></div>}
       <div className="panel"><div className="table-wrap"><table>
-        <thead><tr><th>What Sidekick does</th><th style={{ textAlign: "center" }}>Standard</th><th style={{ textAlign: "center" }}>Strict</th></tr></thead>
+        <thead><tr><th>What {BRAND.name} does</th><th style={{ textAlign: "center" }}>Standard</th><th style={{ textAlign: "center" }}>Strict</th></tr></thead>
         <tbody>
           <tr><td>Always on: no hate, harassment or harm; never crosses client walls; says “I don&apos;t know” instead of guessing</td><td style={{ textAlign: "center" }}><Icon n="lock" /></td><td style={{ textAlign: "center" }}><Icon n="lock" /></td></tr>
           {keys.map((k) => <tr key={k}><td>{s.rules.labels[k]}</td><td style={{ textAlign: "center" }}>{cell(s.rules.presets.standard[k])}</td><td style={{ textAlign: "center" }}>{cell(s.rules.presets.strict[k])}</td></tr>)}
@@ -339,7 +340,7 @@ function Done({ s, onFinish, onBack }: { s: Setup; onFinish: () => Promise<void>
   const reportError = useReportError();
   const rows: [string, boolean, string][] = [
     ["Microsoft 365", s.facts.microsoftConnected, s.facts.microsoftConnected ? "Connected for work-account sign-in" : "Not connected yet (Settings → Microsoft sign-in)"],
-    ["Teams", s.steps.teams === "done", s.steps.teams === "done" ? "Your Teams admin made Sidekick available" : "Still to do with your Teams admin"],
+    ["Teams", s.steps.teams === "done", s.steps.teams === "done" ? `Your Teams admin made ${BRAND.name} available` : "Still to do with your Teams admin"],
     ["Rules", s.steps.rules === "done", s.rules.current === "custom" ? "Your own mix (Guardrails page)" : `${s.rules.current === "strict" ? "Strict" : "Standard"} starting point`],
     ["Groups", s.facts.groups > 0, s.facts.groups ? `${s.facts.groups} group${s.facts.groups === 1 ? "" : "s"}` : "None yet (Groups → New group)"],
   ];
@@ -349,7 +350,7 @@ function Done({ s, onFinish, onBack }: { s: Setup; onFinish: () => Promise<void>
       <ul className="check-list">
         {rows.map(([t, ok, d]) => <li key={t}><span className={`ck${ok ? " ok" : ""}`}>{ok && <Icon n="check" />}</span><span><b>{t}</b> <span className="muted">· {d}</span></span></li>)}
       </ul>
-      <div className="callout info"><Icon n="users" /><div><b>Next, your Team Leads</b> add their people, add Sidekick to their team&apos;s Teams chats and assign those chats to their group, and upload the key documents. Each group&apos;s page shows its own checklist.</div></div>
+      <div className="callout info"><Icon n="users" /><div><b>Next, your Team Leads</b> add their people, add {BRAND.name} to their team&apos;s Teams chats and assign those chats to their group, and upload the key documents. Each group&apos;s page shows its own checklist.</div></div>
       <div className="wiz-foot">
         <button className="btn" onClick={onBack}><Icon n="back" />Back</button>
         <span style={{ flex: 1 }} />

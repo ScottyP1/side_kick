@@ -22,6 +22,7 @@ import { failureReason, traceFailed, withTrace } from "./trace";
 import { crossSiteRefusal } from "./security";
 import { readOnlyRefusal } from "./billing";
 import { runRequest } from "./request-scope";
+import { BRAND } from "./brand";
 
 /**
  * "/api/meetings/3f2a…" → "/api/meetings/:id", so the Activity page groups requests by operation. Every
@@ -92,7 +93,7 @@ export async function errorMessageFor(req: Request, e: unknown): Promise<string>
   const ref = newRef();
   await logAppError(ref, 500, req, e);
   traceFailed(500, "Sign-in failed unexpectedly", ref);
-  return `Something went wrong on our side. Try again; if it keeps happening, contact the Sidekick team. (Reference ${ref})`;
+  return `Something went wrong on our side. Try again; if it keeps happening, contact the ${BRAND.name} team. (Reference ${ref})`;
 }
 
 const DETAILS = Symbol("sidekick.errorDetails");
@@ -155,10 +156,10 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
         traceFailed(e.status, e.message);
         return NextResponse.json({ ...detailsOf(e), error: e.message }, { status: e.status });
       }
-      if (e instanceof Anthropic.AuthenticationError) return fail(502, "Claude rejected the API key. The Sidekick team needs to update it.");
+      if (e instanceof Anthropic.AuthenticationError) return fail(502, `Claude rejected the API key. The ${BRAND.name} team needs to update it.`);
       if (e instanceof Anthropic.RateLimitError) return fail(429, "Claude is busy right now (rate limit). Wait a minute and try again.");
       if (e instanceof Anthropic.APIError) return fail(502, `Claude couldn't answer right now (${e.status ?? "network"}). Try again in a minute.`);
-      return fail(500, "Something went wrong on our side. Try again; if it keeps happening, contact the Sidekick team.");
+      return fail(500, `Something went wrong on our side. Try again; if it keeps happening, contact the ${BRAND.name} team.`);
     }
     });
 }

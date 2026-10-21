@@ -11,6 +11,7 @@ import { handle, readJson } from "@/lib/api";
 import { HttpError, requireUser } from "@/lib/auth";
 import { tenantOfOrg } from "@/lib/tenants";
 import { managedLinkedChat, announceTracking, saveChatSettings } from "@/lib/reminders";
+import { BRAND } from "@/lib/brand";
 
 export const PATCH = handle(async (req: Request) => {
   const user = await requireUser();
@@ -20,7 +21,7 @@ export const PATCH = handle(async (req: Request) => {
   // remove Sidekick from the chat (POST /api/teams-links/remove).
   const changes = body.changes as { track?: unknown } | undefined;
   if (changes?.track === false && conv.kind !== "personal" && conv.tenant_id && conv.tenant_id === (await tenantOfOrg(user.org_id))) {
-    throw new HttpError(400, "In chats assigned to a group, Sidekick reads every message. To stop that, remove Sidekick from the chat.");
+    throw new HttpError(400, `In chats assigned to a group, ${BRAND.name} reads every message. To stop that, remove ${BRAND.name} from the chat.`);
   }
   const { settings, trackChanged } = await saveChatSettings(user, conv, body.changes);
   if (trackChanged) {

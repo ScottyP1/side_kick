@@ -5,6 +5,7 @@
  */
 
 /** One release: when (ISO date for the <time> tag, and how to show it), a headline and what changed. */
+import { BRAND } from "./brand";
 export type ChangelogEntry = { date: string; label: string; title: string; changes: string[] };
 
 /** Every release, newest first. */
@@ -16,7 +17,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
     changes: [
       "A public website: features, how it works, security & trust, pricing, an FAQ and this changelog.",
       "The help center: the guides are now public pages at /docs, with search.",
-      "A setup wizard after sign-up: connect Microsoft 365, add Sidekick to Teams, pick your rules and create your first groups. A \"Finish setting up\" note takes you back if you leave halfway.",
+      `A setup wizard after sign-up: connect Microsoft 365, add ${BRAND.name} to Teams, pick your rules and create your first groups. A "Finish setting up" note takes you back if you leave halfway.`,
       "Signed-in people who open the website go straight to their portal.",
       "Redesigned How it works (a step-by-step journey with screen previews) and Security & trust (trust pillars, a diagram of the walls, where your data lives), and tidier pricing cards.",
     ],
@@ -28,8 +29,8 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
     changes: [
       "Groups: one page per client team with an overview checklist, people, Teams chats, documents and settings; health labels on every group card; a one-page New group form with the client, Team Lead and first members.",
       "Self-service sign-up (when open) with a free trial, three plans and a test-mode checkout; public pricing, privacy, terms and support pages.",
-      "Any company's Microsoft 365 can use Sidekick: chats wait to be assigned to a group in the portal, people can be imported from Microsoft 365, and Team Leads can type @Sidekick add @name.",
-      "Only Team Leads and admins can add Sidekick to a chat; chats nobody assigns are left after 7 days.",
+      `Any company's Microsoft 365 can use ${BRAND.name}: chats wait to be assigned to a group in the portal, people can be imported from Microsoft 365, and Team Leads can type @${BRAND.name} add @name.`,
+      `Only Team Leads and admins can add ${BRAND.name} to a chat; chats nobody assigns are left after 7 days.`,
       "A new look (Indigo), in light and dark mode.",
       "Security: stricter browser protections, sign-in pauses after repeated wrong passwords, changing your password signs out your other sessions, upload size limits, and an Unlock button for admins.",
       "Fixes: times in chat messages are no longer hidden as if they were phone numbers, questions about rates and fees are answered, and groups can be renamed and deleted.",
@@ -41,7 +42,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
     title: "Reminders and Team Leads",
     changes: [
       "Reminders in Teams chats: overdue and unowned action items, decisions still waiting, and documents that look out of date or conflict.",
-      "Per-chat settings: meeting notes on or off, and whether Sidekick follows the chat.",
+      `Per-chat settings: meeting notes on or off, and whether ${BRAND.name} follows the chat.`,
       "The Team Lead role: runs the people side of the groups they lead and links their chats.",
       "Roles and permissions written down as one rulebook, and checked automatically for every role.",
     ],
@@ -53,7 +54,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
     changes: [
       "Sign in with Microsoft, which an Org Owner can make required.",
       "Guardrails: company-wide switches, stricter rules per group, custom rules and a Test it box.",
-      "Activity: what Sidekick did step by step (timings and counts, never document text), and live status on the home page.",
+      `Activity: what ${BRAND.name} did step by step (timings and counts, never document text), and live status on the home page.`,
       "A home-page assistant for quick admin jobs that changes nothing until you confirm.",
       "Search that understands meaning as well as keywords.",
       "Every error shows a reference code you can send to support.",
@@ -64,10 +65,10 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
     label: "October 15, 2026",
     title: "First version",
     changes: [
-      "The Sidekick portal: workspaces per client, documents, meetings, and answers with sources.",
+      `The ${BRAND.name} portal: workspaces per client, documents, meetings, and answers with sources.`,
       "Meeting notes: summary, decisions, open questions and action items.",
       "A knowledge map with coverage and gaps from unanswered questions.",
-      "Sidekick in Microsoft Teams: answer cards with sources and meeting-notes cards.",
+      `${BRAND.name} in Microsoft Teams: answer cards with sources and meeting-notes cards.`,
       "An audit log and usage per workspace.",
     ],
   },

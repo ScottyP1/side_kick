@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, fmtDate, fmtTime, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { ActionItemsTable, useUpdateAction, type ActionItem } from "@/components/action-items";
+import { BRAND } from "@/lib/brand";
 
 type Topic = { name: string; summary: string; coverage: number; key_facts: string[]; document_titles: string[]; meeting_titles: string[] };
 type Gap = { kind: string; text: string; suggestion: string; topic: string; assignee: string | null };
@@ -85,7 +86,7 @@ export default function MemoryPage() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Memory · {wsName}</div>
-          <h1>What Sidekick knows, and what it doesn&apos;t</h1>
+          <h1>What {BRAND.name} knows, and what it doesn&apos;t</h1>
           <p>Built from this workspace&apos;s meetings and documents. Refresh the knowledge map after adding new material.</p>
         </div>
         <div className="actions" style={{ alignItems: "center" }}>

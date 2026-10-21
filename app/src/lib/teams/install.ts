@@ -29,6 +29,7 @@ import { forgetChat } from "../reminders";
 import { span } from "../trace";
 import { noticeCard } from "./cards";
 import { postCard, type TeamsConversation } from "./bot";
+import { BRAND } from "../brand";
 
 /** How long a chat may wait to be assigned before Sidekick leaves it. */
 export const WAITING_DAYS = 7;
@@ -60,10 +61,10 @@ type Installation = { id: string; teamsApp?: { id?: string; externalId?: string 
 function installBase(conv: TeamsConversation): string {
   if (!conv.tenant_id) throw new HttpError(400, "This chat has no Microsoft organization on record.");
   if (conv.kind !== "channel") return `/v1.0/chats/${encodeURIComponent(conv.id)}`;
-  if (!conv.team_aad_id) throw new HttpError(400, "Teams didn't say which team this channel belongs to. Remove Sidekick in Teams: the team's ⋯ → Manage team → Apps.");
+  if (!conv.team_aad_id) throw new HttpError(400, `Teams didn't say which team this channel belongs to. Remove ${BRAND.name} in Teams: the team's ⋯ → Manage team → Apps.`);
   return `/v1.0/teams/${encodeURIComponent(conv.team_aad_id)}`;
 }
-const DENIED = "Sidekick isn't allowed to remove itself from Teams chats in your organization yet. A Microsoft admin approves it once (Users & access → Approve Sidekick for your organization), or remove Sidekick in Teams yourself.";
+const DENIED = `${BRAND.name} isn't allowed to remove itself from Teams chats in your organization yet. A Microsoft admin approves it once (Users & access → Approve ${BRAND.name} for your organization), or remove ${BRAND.name} in Teams yourself.`;
 
 /**
  * Sidekick's own installation in the chat (or the channel's team), as Graph lists it, or null if it isn't
@@ -82,8 +83,8 @@ async function removeInstallation(conv: TeamsConversation, installationId: strin
 
 const FAREWELL: Record<LeaveReason, (by?: string) => [string, string]> = {
   installer: () => ["I'm leaving this chat", "Only a Team Lead or admin can add me to a chat, so I'm leaving."],
-  stale: () => ["I'm leaving this chat", `Nobody assigned this chat to a group in the Sidekick portal within ${WAITING_DAYS} days, so I'm leaving. A Team Lead can add me again any time.`],
-  removed: (by) => ["I've been removed from this chat", `${by ?? "Someone"} removed me from this chat in the Sidekick portal. I've forgotten the messages I saved here.`],
+  stale: () => ["I'm leaving this chat", `Nobody assigned this chat to a group in the ${BRAND.name} portal within ${WAITING_DAYS} days, so I'm leaving. A Team Lead can add me again any time.`],
+  removed: (by) => ["I've been removed from this chat", `${by ?? "Someone"} removed me from this chat in the ${BRAND.name} portal. I've forgotten the messages I saved here.`],
 };
 
 /**
@@ -96,7 +97,7 @@ const FAREWELL: Record<LeaveReason, (by?: string) => [string, string]> = {
  * @throws only when `opts.strict` is set (portal removal), with Graph's reason
  */
 export async function leaveChat(conv: TeamsConversation, reason: LeaveReason, opts: { by?: Pick<User, "org_id" | "name">; strict?: boolean } = {}): Promise<boolean> {
-  return span("microsoft", "Remove Sidekick from a Teams chat", async () => {
+  return span("microsoft", `Remove ${BRAND.name} from a Teams chat`, async () => {
     // Portal removal: ask Graph first, so a refusal leaves everything as it was and the person sees why.
     const installation = opts.strict ? await findInstallation(conv) : undefined;
     if (!conv.leaving) {
@@ -107,14 +108,14 @@ export async function leaveChat(conv: TeamsConversation, reason: LeaveReason, op
     const forgotten = await forgetChat(conv.id);
     if (opts.by) {
       const where = conv.kind === "channel" ? "channel" : "chat";
-      await audit(opts.by, `Removed Sidekick from Teams ${where} “${conv.name ?? conv.id}”${forgotten ? ` (forgot ${forgotten} saved message${forgotten === 1 ? "" : "s"})` : ""}`, "Access", conv.workspace_id);
+      await audit(opts.by, `Removed ${BRAND.name} from Teams ${where} “${conv.name ?? conv.id}”${forgotten ? ` (forgot ${forgotten} saved message${forgotten === 1 ? "" : "s"})` : ""}`, "Access", conv.workspace_id);
     }
     try {
       const id = installation !== undefined ? installation : await findInstallation(conv);
       if (id) await removeInstallation(conv, id);
     } catch (e) {
       if (opts.strict) throw e;
-      console.error(`Couldn't remove Sidekick from Teams chat ${conv.id} yet`, e instanceof Error ? e.message : e);
+      console.error(`Couldn't remove ${BRAND.name} from Teams chat ${conv.id} yet`, e instanceof Error ? e.message : e);
       return false;
     }
     await run("DELETE FROM teams_conversations WHERE id = ?", conv.id);

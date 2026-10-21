@@ -15,16 +15,17 @@ import { SiteIcon } from "@/components/site-icons";
 import { faqFor } from "@/lib/faq";
 import { TRIAL_DAYS } from "@/lib/plans";
 import { pageMetadata } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 
 export const metadata: Metadata = pageMetadata("/how-it-works");
 
 const STEPS: { icon: string; who: string; title: string; text: string; mock: ReactNode }[] = [
   { icon: "spark", who: "Org Owner", title: "Sign up and pick a plan", text: `Create your organization with your work email. Every plan starts with a ${TRIAL_DAYS}-day free trial.`, mock: <SignupMock /> },
-  { icon: "lock", who: "Your Microsoft admin", title: "Approve Sidekick for Microsoft 365", text: "One approval lets your people sign in with Microsoft and lets you import them from your directory.", mock: <ApproveMock /> },
-  { icon: "teams", who: "Your Teams admin", title: "Install it in Teams", text: "Make the Sidekick app available, ideally to Team Leads and admins: they're the ones who add it to chats.", mock: <InstallMock /> },
+  { icon: "lock", who: "Your Microsoft admin", title: `Approve ${BRAND.name} for Microsoft 365`, text: "One approval lets your people sign in with Microsoft and lets you import them from your directory.", mock: <ApproveMock /> },
+  { icon: "teams", who: "Your Teams admin", title: "Install it in Teams", text: `Make the ${BRAND.name} app available, ideally to Team Leads and admins: they're the ones who add it to chats.`, mock: <InstallMock /> },
   { icon: "groups", who: "Org Owner or Admin", title: "Create a group per client, with its Team Lead", text: "One walled-off group per engagement. The Team Lead runs it day to day and adds the rest of the team.", mock: <GroupMock /> },
-  { icon: "people", who: "Team Lead", title: "Pick the chats", text: "Add Sidekick to the team's group chat, then assign the chat to the group. Until then it reads nothing.", mock: <WaitingChatMock /> },
-  { icon: "answer", who: "Everyone", title: "Ask in Teams", text: "Mention @Sidekick and get an answer from that group's documents and meetings, with its sources.", mock: <AnswerMock /> },
+  { icon: "people", who: "Team Lead", title: "Pick the chats", text: `Add ${BRAND.name} to the team's group chat, then assign the chat to the group. Until then it reads nothing.`, mock: <WaitingChatMock /> },
+  { icon: "answer", who: "Everyone", title: "Ask in Teams", text: `Mention @${BRAND.name} and get an answer from that group's documents and meetings, with its sources.`, mock: <AnswerMock /> },
 ];
 
 const WIZARD = ["Welcome", "Microsoft 365", "Add to Teams", "Rules", "First groups", "Done"];
@@ -79,9 +80,9 @@ export default function HowItWorksPage() {
           <span className="site-eyebrow">Meetings</span>
           <h2 id="meet-title">Meeting notes today, more on the way</h2>
           <div className="site-grid">
-            <div className="site-card"><span className="site-badge-now">Today</span><h3>Notes from transcripts</h3><p>Import a meeting&apos;s Teams transcript and Sidekick posts the notes and action items to the group&apos;s chat.</p></div>
+            <div className="site-card"><span className="site-badge-now">Today</span><h3>Notes from transcripts</h3><p>Import a meeting&apos;s Teams transcript and {BRAND.name} posts the notes and action items to the group&apos;s chat.</p></div>
             <div className="site-card"><span className="site-badge-soon">Coming soon</span><h3>Automatic notes</h3><p>Notes after every meeting without importing anything, including in the meeting&apos;s own chat.</p></div>
-            <div className="site-card"><span className="site-badge-soon">Coming soon · Enterprise</span><h3>Sidekick in the meeting</h3><p>Sidekick joins the call live to answer and take notes as you talk.</p></div>
+            <div className="site-card"><span className="site-badge-soon">Coming soon · Enterprise</span><h3>{BRAND.name} in the meeting</h3><p>{BRAND.name} joins the call live to answer and take notes as you talk.</p></div>
           </div>
         </div>
       </section>
@@ -89,7 +90,7 @@ export default function HowItWorksPage() {
       <div className="site-wrap site-narrow site-stack">
         <FaqList title="Setup questions" items={faqFor("how-it-works")} />
         <div className="callout info" role="note">
-          <span>Every detail is in the <Link href="/docs/admin-guide">admin guide</Link> and <Link href="/docs/teams-guide">Sidekick in Teams</Link>.</span>
+          <span>Every detail is in the <Link href="/docs/admin-guide">admin guide</Link> and <Link href="/docs/teams-guide">{BRAND.name} in Teams</Link>.</span>
         </div>
         <div className="site-band">
           <div>

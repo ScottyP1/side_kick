@@ -22,12 +22,13 @@
 import "server-only";
 import crypto from "node:crypto";
 import { HttpError } from "./http-error";
+import { BRAND } from "./brand";
 
 const PREFIX = "enc1";
 
 /** Thrown when a secret must be sealed or opened but no usable master key is configured. Answers 503. */
 export class SecretKeyMissingError extends HttpError {
-  constructor(message = "This needs SIDEKICK_ENCRYPTION_KEY, which isn't set on this server yet. The Sidekick team adds it (see docs/HOSTING.md).") {
+  constructor(message = `This needs SIDEKICK_ENCRYPTION_KEY, which isn't set on this server yet. The ${BRAND.name} team adds it (see docs/HOSTING.md).`) {
     super(503, message);
   }
 }

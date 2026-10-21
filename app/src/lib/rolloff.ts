@@ -143,7 +143,7 @@ export async function scheduleGroupRolloff(user: User, workspaceId: string, days
       // Unlinked, but not "waiting": Sidekick stays in the chat (so cancelling can relink it) until the deletion.
       await run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL WHERE workspace_id = ? AND org_id = ?", workspaceId, user.org_id);
     });
-    await tellChats(chats, `“${ws.name}” has ended`, `This group's engagement has ended, so I've stopped answering and taking notes here. Everything I kept for it will be deleted on ${dateText(deleteOn)}. Ask your Sidekick admin if you need anything from it before then.`);
+    await tellChats(chats, `“${ws.name}” has ended`, `This group's engagement has ended, so I've stopped answering and taking notes here. Everything I kept for it will be deleted on ${dateText(deleteOn)}. Ask your ${BRAND.name} admin if you need anything from it before then.`);
     await audit(user, `Set group “${ws.name}” to end: read-only now, everything deleted on ${dateText(deleteOn)}${chats.length ? `; unlinked ${chats.length} Teams chat${chats.length === 1 ? "" : "s"}` : ""}`, "Data", workspaceId);
     return (await get<Rolloff>("SELECT * FROM rolloffs WHERE id = ?", id))!;
   }, { days });
@@ -229,6 +229,21 @@ export async function rescheduleRolloff(id: string, days: unknown, ownerName: st
   return (await get<Rolloff>("SELECT * FROM rolloffs WHERE id = ?", id))!;
 }
 
+/**
+ * The Sidekick team brings a pending roll-off forward to **now** (Owner Console → Roll-offs → Delete now),
+ * e.g. when a client asks for prompt deletion: the timer deletes it on its next run (within 5 minutes).
+ * Audited on both sides.
+ */
+export async function deleteSoon(id: string, ownerName: string): Promise<Rolloff> {
+  const r = await get<Rolloff>("SELECT * FROM rolloffs WHERE id = ?", id);
+  if (!r || r.status !== "scheduled") throw new HttpError(404, "No scheduled roll-off with that id.");
+  await run("UPDATE rolloffs SET delete_on = ?, error = NULL WHERE id = ? AND status = 'scheduled'", now(), id);
+  const what = r.scope === "group" ? `group “${r.workspace_name}”` : "the organization's data";
+  await audit({ org_id: r.org_id, name: `${BRAND.name} team` }, `Brought the deletion of ${what} forward to now`, "Data", r.workspace_id);
+  await platformLog(ownerName, `${r.org_name}: deletion of ${what} brought forward to now`);
+  return (await get<Rolloff>("SELECT * FROM rolloffs WHERE id = ?", id))!;
+}
+
 /* ---------- Deleting, with a certificate ---------- */
 
 const n = async (sql: string, ...p: string[]) => Number((await get<{ n: number | string }>(sql, ...p))?.n ?? 0);
@@ -254,10 +269,10 @@ const KEPT_GROUP = [
   "AI usage and cost records and activity timings for billing, which hold no document text.",
 ];
 const KEPT_ORG = [
-  "This certificate and a minimal record of the deletion (organization name, dates, who asked), kept by the Sidekick team as proof of deletion and for billing history.",
+  `This certificate and a minimal record of the deletion (organization name, dates, who asked), kept by the ${BRAND.name} team as proof of deletion and for billing history.`,
   "Nothing else with the organization's id is kept: not its people, groups, documents, Teams links, settings, usage details or audit log.",
 ];
-const backupLine = () => `Deleted data also leaves the database backups as they age out, within ${BACKUP_RETENTION_DAYS} days of the deletion. Backups can't be searched or used by Sidekick.`;
+const backupLine = () => `Deleted data also leaves the database backups as they age out, within ${BACKUP_RETENTION_DAYS} days of the deletion. Backups can't be searched or used by ${BRAND.name}.`;
 
 /** Writes the certificate on a roll-off row (creating a done row when there was no schedule). */
 async function closeWithCertificate(r: Partial<Rolloff> & { org_id: string; org_name: string; scope: "group" | "org" }, cert: Certificate) {

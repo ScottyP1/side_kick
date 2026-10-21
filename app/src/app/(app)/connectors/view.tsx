@@ -9,6 +9,7 @@
 
 import { useApp } from "@/components/shell";
 import { Pill } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; desc: string; live?: boolean }[] = [
   { name: "Document upload", g: "Available now", mono: "⇪", bg: "var(--accent)", desc: "PDF, Word, text, Teams transcripts", live: true },
@@ -40,7 +41,7 @@ export default function ConnectorsPage() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Connectors</div>
-          <h1>Give Sidekick access to your tools</h1>
+          <h1>Give {BRAND.name} access to your tools</h1>
           <p>Uploads, transcript import and Teams chats and channels work today. The other tools are planned; each will connect with its own sign-in (no passwords stored).</p>
           {planText && <p className="muted">{planText}</p>}
         </div>

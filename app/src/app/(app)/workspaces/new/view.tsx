@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, ApiError, Icon, useReportError, useToast } from "@/components/ui";
 import { Avatar, PeoplePicker, type OrgPerson } from "@/components/groups";
+import { BRAND } from "@/lib/brand";
 
 const LEADABLE = ["Team Lead", "Member", "Viewer"];
 
@@ -130,7 +131,7 @@ export default function NewGroupPage() {
             <span className="n">4</span>
             <div className="body">
               <h2>Teams chats</h2>
-              <span className="hint">After you create the group, its Team Lead adds Sidekick to the team&apos;s Teams chats and assigns them to this group from the group page. Sidekick stays silent in a chat until it&apos;s assigned.</span>
+              <span className="hint">After you create the group, its Team Lead adds {BRAND.name} to the team&apos;s Teams chats and assigns them to this group from the group page. {BRAND.name} stays silent in a chat until it&apos;s assigned.</span>
             </div>
           </section>
         </div>

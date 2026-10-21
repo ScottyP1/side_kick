@@ -104,7 +104,7 @@ async function groupEntries(orgId: string, workspaceId: string, prefix: string):
     ? new Map((await all<{ id: string; name: string | null }>(`SELECT id, name FROM teams_conversations WHERE id IN (${convIds.map(() => "?").join(",")})`, ...convIds)).map((c) => [c.id, c.name]))
     : new Map<string, string | null>();
   const chatMd = [`# Teams chats of ${ws.name}`, ""];
-  if (!convIds.length) chatMd.push("Sidekick didn't keep any Teams chat messages for this group (only chats an admin chose to track are kept, for 90 days).");
+  if (!convIds.length) chatMd.push(`${BRAND.name} didn't keep any Teams chat messages for this group (only chats an admin chose to track are kept, for 90 days).`);
   for (const id of convIds) {
     const mine = messages.filter((m) => m.conversation_id === id);
     chatMd.push(`## ${names.get(id) ?? "Teams chat"}`, "", `${mine.length} saved message${mine.length === 1 ? "" : "s"}, ${day(mine[0].sent_at)} to ${day(mine[mine.length - 1].sent_at)}.`, "");

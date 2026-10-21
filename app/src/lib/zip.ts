@@ -28,7 +28,7 @@ function dosTime(d: Date) {
  * (Windows), at most 100 characters, never empty.
  */
 export function safeName(name: string, fallback = "untitled"): string {
-  const clean = name.replace(/[\u0000-\u001f<>:"/\\|?*]+/g, " ").replace(/\.{2,}/g, ".").replace(/\s+/g, " ").trim().replace(/^\.+/, "").slice(0, 100).trim();
+  const clean = name.replace(/[\u0000-\u001f<>:"/\\|?*]+/g, " ").replace(/\.{2,}/g, "").replace(/\s+/g, " ").replace(/^[.\s]+/, "").slice(0, 100).trim();
   return clean || fallback;
 }
 

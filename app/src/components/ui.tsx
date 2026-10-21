@@ -6,6 +6,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { BRAND } from "@/lib/brand";
 
 /* ---------- API helper: JSON in/out, readable errors, nothing fails silently ---------- */
 
@@ -55,7 +56,7 @@ export async function api<T = unknown>(url: string, init?: RequestInit & { json?
       body: json !== undefined ? JSON.stringify(json) : rest.body,
     });
   } catch {
-    const e = new ApiError(0, "Can't reach Sidekick. Check your internet connection; if it's fine, Sidekick may be restarting. Try again in a minute.", "network");
+    const e = new ApiError(0, `Can't reach ${BRAND.name}. Check your internet connection; if it's fine, ${BRAND.name} may be restarting. Try again in a minute.`, "network");
     raiseProblem(e);
     throw e;
   }
@@ -64,7 +65,7 @@ export async function api<T = unknown>(url: string, init?: RequestInit & { json?
     window.location.href = url.startsWith("/api/owner") ? "/owner/login" : "/login";
   }
   if (!res.ok) {
-    const message = data?.error ?? (res.status >= 500 ? `Sidekick had a problem answering (error ${res.status}). Try again in a minute.` : `Request failed (${res.status}).`);
+    const message = data?.error ?? (res.status >= 500 ? `${BRAND.name} had a problem answering (error ${res.status}). Try again in a minute.` : `Request failed (${res.status}).`);
     // The server says when a 503 is a deliberate pause or restriction (lib/owner.ts FeatureOffError).
     const kind: ProblemKind =
       data?.kind === "restricted" || data?.kind === "credit" ? "restricted" : data?.kind === "paused" || (res.status === 503 && /paused/i.test(message)) ? "paused" : res.status >= 500 ? "server" : "request";
@@ -137,9 +138,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 const PROBLEM_TITLES: Record<Exclude<ProblemKind, "request" | "restricted">, string> = {
-  network: "Can't reach Sidekick",
+  network: `Can't reach ${BRAND.name}`,
   server: "Something went wrong on our side",
-  paused: "Paused by the Sidekick team",
+  paused: `Paused by the ${BRAND.name} team`,
 };
 
 /**
@@ -197,7 +198,7 @@ function ProblemProvider({ children }: { children: ReactNode }) {
           </div>
           <p className="muted" style={{ margin: 0 }}>
             {kind === "network" && "Your work isn't lost: anything you saved before this is safe. Check your connection, then try again."}
-            {kind === "server" && "This is on our side, not something you did. Try again; if it keeps happening, send the details below to your Sidekick contact."}
+            {kind === "server" && `This is on our side, not something you did. Try again; if it keeps happening, send the details below to your ${BRAND.name} contact.`}
             {kind === "paused" && "This is temporary and intentional, for example during maintenance. Your data is safe. Try again later."}
           </p>
           {problem.e.ref && (

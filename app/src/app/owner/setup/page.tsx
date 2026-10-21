@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 export default function OwnerSetupPage() {
   const [f, setF] = useState({ name: "", email: "", password: "", setupCode: "" });
@@ -20,7 +21,7 @@ export default function OwnerSetupPage() {
         if (!r.needsSetup) window.location.assign("/owner/login");
         setNeedsCode(r.needsCode);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't reach Sidekick."));
+      .catch((e) => setError(e instanceof Error ? e.message : `Couldn't reach ${BRAND.name}.`));
   }, []);
 
   const submit = async (e: React.FormEvent) => {

@@ -32,6 +32,7 @@ import { audit, HttpError, sessionUser, type Role, type User } from "./auth";
 import { get, now, run } from "./db";
 import { accessFor, EXTRA_GROUP, limitsWithExtras, MAX_EXTRA_GROUPS, monthlyPrice, PERIOD_DAYS, planById, planWithExtras, TRIAL_DAYS, STATUS_LABEL, usd, withRolloff, type Access, type PlanId, type SubStatus } from "./plans";
 import { cancelOrgRolloff, scheduleOrgRolloff, ORG_GRACE_DAYS } from "./rolloff";
+import { BRAND } from "./brand";
 
 /** Roles that may pay, change the plan or cancel (others may still see the plan on Usage & billing). */
 export const BILLING_ROLES: readonly Role[] = ["Org Owner", "Billing Admin"];
@@ -84,7 +85,7 @@ const mockProvider: BillingProvider = {
 export function provider(): BillingProvider {
   const id = process.env.BILLING_PROVIDER || "mock";
   if (id === "mock") return mockProvider;
-  throw new HttpError(501, "Card payments aren't set up yet (only test mode). Contact the Sidekick team.");
+  throw new HttpError(501, `Card payments aren't set up yet (only test mode). Contact the ${BRAND.name} team.`);
 }
 
 /* ---------- Reading ---------- */
@@ -164,7 +165,7 @@ const planName = (id: PlanId) => planById(id)!.name;
  */
 export function requirePlan(plan: unknown, opts: { operator?: boolean } = {}): PlanId {
   const p = planById(plan);
-  if (p && !p.selfService && !opts.operator) throw new HttpError(400, "Enterprise is set up with the Sidekick team. Contact them, or pick Starter, Team or Business.");
+  if (p && !p.selfService && !opts.operator) throw new HttpError(400, `Enterprise is set up with the ${BRAND.name} team. Contact them, or pick Starter, Team or Business.`);
   if (!p) throw new HttpError(400, opts.operator ? "Pick a plan: Starter, Team, Business or Enterprise." : "Pick one of the plans: Starter, Team or Business.");
   return p.id;
 }
@@ -203,7 +204,7 @@ async function assertFits(orgId: string, plan: PlanId, extras: number) {
 export function requireExtras(n: unknown): number {
   if (n === undefined || n === null) return 0;
   if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > MAX_EXTRA_GROUPS) {
-    throw new HttpError(400, `Extra groups must be a whole number from 0 to ${MAX_EXTRA_GROUPS}. For more, the Sidekick team sets up Enterprise.`);
+    throw new HttpError(400, `Extra groups must be a whole number from 0 to ${MAX_EXTRA_GROUPS}. For more, the ${BRAND.name} team sets up Enterprise.`);
   }
   return n;
 }
@@ -211,7 +212,7 @@ export function requireExtras(n: unknown): number {
 /** The subscription, or 404 when the organization has none (managed by the Sidekick team). */
 async function requireSubscription(orgId: string): Promise<Subscription> {
   const sub = await getSubscription(orgId);
-  if (!sub) throw new HttpError(404, "Your organization's plan is managed by the Sidekick team. Contact them to change it.");
+  if (!sub) throw new HttpError(404, `Your organization's plan is managed by the ${BRAND.name} team. Contact them to change it.`);
   return sub;
 }
 
@@ -267,14 +268,14 @@ export async function changePlan(user: User, plan: PlanId, extras?: number) {
  */
 export async function setExtraGroups(user: User, extras: number) {
   const sub = await requireSubscription(user.org_id);
-  if (!planById(sub.plan)?.selfService) throw new HttpError(400, "Extra groups are for the self-service plans. On Enterprise, the Sidekick team sets your limits.");
+  if (!planById(sub.plan)?.selfService) throw new HttpError(400, `Extra groups are for the self-service plans. On Enterprise, the ${BRAND.name} team sets your limits.`);
   if (extras === sub.extra_groups) throw new HttpError(400, `You already have ${extras} extra group${extras === 1 ? "" : "s"}.`);
   await changePlan(user, sub.plan, extras);
 }
 
 /**
  * Cancels the plan. Sidekick stays fully usable until the end of what was paid for (or the trial), then
- * turns read-only; nothing is deleted. Paying again undoes it.
+ * turns read-only for `ORG_GRACE_DAYS`, and then everything is deleted (lib/rolloff.ts). Paying again undoes it.
  */
 export async function cancel(user: User) {
   const sub = await requireSubscription(user.org_id);
@@ -332,7 +333,7 @@ export async function setByOwner(orgId: string, change: { plan?: PlanId; status?
   const extras = change.extras ?? sub?.extra_groups ?? 0;
   if (change.extras !== undefined) await run("UPDATE subscriptions SET extra_groups = ? WHERE org_id = ?", extras, orgId);
   const summary = `${planWithExtras(planById(plan)!, planById(plan)!.selfService ? extras : 0)} plan, ${STATUS_LABEL[status]}`;
-  await audit({ org_id: orgId, name: "Sidekick team" }, `Set the plan to ${summary}`, "Billing");
+  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Set the plan to ${summary}`, "Billing");
   if (status === "canceled" && change.status) {
     await scheduleOrgRolloff(orgId, { readOnlyFrom: t, deleteOn: inDays(ORG_GRACE_DAYS), reason: "the plan was canceled", by: ownerName });
   } else if (status !== "canceled") {

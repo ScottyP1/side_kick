@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 import { SITE_NAV } from "@/lib/site";
 import { SiteChatSlot } from "./site-chat-slot";
 import "./public-site.css";
+import { BRAND } from "@/lib/brand";
 
 /**
  * Shown on every public page around `children`.
@@ -30,9 +31,9 @@ export function PublicShell({ children, narrow, current, layout }: { children: R
       <a className="site-skip" href="#main">Skip to content</a>
       <header className="site-head">
         <div className="site-head-in">
-          <Link href="/" className="site-brand" aria-label="Sidekick home">
+          <Link href="/" className="site-brand" aria-label={`${BRAND.name} home`}>
             <span className="brand-mark" aria-hidden="true">S</span>
-            Sidekick
+            {BRAND.name}
           </Link>
           <nav className="site-nav" aria-label="Main">
             {SITE_NAV.map((l) => <Link key={l.href} href={l.href} aria-current={here(l.href)}>{l.label}</Link>)}
@@ -81,7 +82,7 @@ function SiteFooter() {
     <footer className="site-foot">
       <div className="site-foot-in">
         <div>
-          <Link href="/" className="site-brand" aria-label="Sidekick home"><span className="brand-mark" aria-hidden="true">S</span>Sidekick</Link>
+          <Link href="/" className="site-brand" aria-label={`${BRAND.name} home`}><span className="brand-mark" aria-hidden="true">S</span>{BRAND.name}</Link>
           <p>The AI teammate for client teams in Microsoft Teams. A personal project, not a company. <Link href="/security">Powered by Claude</Link>.</p>
         </div>
         {cols.map(([title, links]) => (
@@ -111,7 +112,7 @@ export function TestModeBanner() {
   return (
     <div className="callout info" role="note">
       <span>
-        <b>Test mode.</b> No money moves and Sidekick never asks for card or bank details. Prices are made up while pricing is decided.
+        <b>Test mode.</b> No money moves and {BRAND.name} never asks for card or bank details. Prices are made up while pricing is decided.
       </span>
     </div>
   );

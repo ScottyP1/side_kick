@@ -45,11 +45,17 @@ export const MATRIX = [
   { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ["owner", "admin", "billing"] },
   { what: "See the plan and subscription", method: "GET", url: () => "/api/billing", allow: ["owner", "admin", "billing"] },
   { what: "Export usage per group (CSV, for chargeback)", method: "GET", url: () => "/api/usage/export?months=1", allow: ["owner", "admin", "billing"] },
-  { what: "Pay, change the plan or cancel it", method: "POST", url: () => "/api/billing", body: { action: "nope" }, allow: ["owner", "billing"] },
+  { what: "Pay, change the plan or extra groups, or cancel it", method: "POST", url: () => "/api/billing", body: { action: "nope" }, allow: ["owner", "billing"] },
   // Running the organization
   { what: "Create workspaces", method: "POST", url: () => "/api/workspaces", body: {}, allow: ADMINS },
   { what: "Rename a workspace or change its engagement code", method: "PATCH", url: () => `/api/workspaces/${NOPE}`, body: {}, allow: ADMINS },
   { what: "Delete a workspace and everything in it", method: "DELETE", url: () => `/api/workspaces/${NOPE}`, allow: ADMINS },
+  { what: "End a group (roll-off)", method: "POST", url: () => `/api/workspaces/${NOPE}/rolloff`, body: {}, allow: ADMINS },
+  { what: "Cancel a group's ending", method: "DELETE", url: () => `/api/workspaces/${NOPE}/rolloff`, allow: ADMINS },
+  { what: "Export a group (zip)", method: "GET", url: () => `/api/workspaces/${NOPE}/export`, allow: ADMINS },
+  { what: "Export the whole organization's data (zip)", method: "GET", url: () => "/api/export", allow: ADMINS },
+  { what: "See roll-offs and deletion certificates", method: "GET", url: () => "/api/rolloffs", allow: ADMINS },
+  { what: "Download a deletion certificate", method: "GET", url: () => `/api/rolloffs/${NOPE}/certificate`, allow: ADMINS },
   // People and Teams links: admins everywhere, Team Leads only in the workspaces they lead (the walls test that part)
   { what: "See people (Team Leads: only people in their workspaces)", method: "GET", url: () => "/api/users", allow: MANAGERS },
   { what: "Add people (Team Leads: only as Member or Viewer, to their workspaces)", method: "POST", url: () => "/api/users", body: {}, allow: MANAGERS },

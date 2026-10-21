@@ -10,6 +10,7 @@
  * - Headings: a line starting with "# " is printed larger and bold.
  */
 import "server-only";
+import { BRAND } from "./brand";
 
 const PAGE_W = 595; // A4 in points
 const PAGE_H = 842;
@@ -54,7 +55,7 @@ export function textPdf(title: string, lines: string[]): Buffer {
   add(""); // pages, filled in below
   add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
   add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-  add(`<< /Title (${pdfText(title)}) /Producer (Sidekick) >>`);
+  add(`<< /Title (${pdfText(title)}) /Producer (${BRAND.name}) >>`);
   const kids: number[] = [];
   for (const page of pages) {
     let y = PAGE_H - MARGIN;

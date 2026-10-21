@@ -2,11 +2,13 @@
 
 /**
  * Sign in (/login) to the client portal: "Sign in with Microsoft" (when set up; see lib/entra.ts) or email
- * and password. Problems from the Microsoft round trip come back as `?error=…` and are shown here.
+ * and password. Problems from the Microsoft round trip come back as `?error=…` and are shown here. With
+ * two-step sign-in on, a correct password leads to the second step (components/two-step.tsx).
  */
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { SecondStepForm } from "@/components/two-step";
 import { api } from "@/components/ui";
 
 export default function LoginPage() {
@@ -16,6 +18,8 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [microsoft, setMicrosoft] = useState(false);
+  // Set when the password was right and the account has two-step sign-in: its methods.
+  const [secondStep, setSecondStep] = useState<("totp" | "passkey")[] | null>(null);
 
   useEffect(() => {
     // Read after mount: the page is static, and the error comes back from Microsoft in the address.
@@ -34,13 +38,26 @@ export default function LoginPage() {
     setBusy(true);
     setError("");
     try {
-      await api("/api/auth/login", { method: "POST", json: { email, password } });
+      const r = await api<{ secondStep?: { methods: ("totp" | "passkey")[] } }>("/api/auth/login", { method: "POST", json: { email, password } });
+      if (r.secondStep) {
+        setSecondStep(r.secondStep.methods);
+        setBusy(false);
+        return;
+      }
       location.href = "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
       setBusy(false);
     }
   };
+
+  if (secondStep) {
+    return (
+      <div className="auth-wrap">
+        <SecondStepForm base="/api/auth/mfa" methods={secondStep} onDone={() => (location.href = "/")} onCancel={() => { setSecondStep(null); setPassword(""); }} />
+      </div>
+    );
+  }
 
   return (
     <div className="auth-wrap">

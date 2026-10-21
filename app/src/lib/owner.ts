@@ -36,8 +36,6 @@ export type Owner = { id: string; name: string; email: string; must_change_passw
 /** The refusal while an owner still has a temporary password; the sign-in page shows the change step instead. */
 export const OWNER_PASSWORD_CHANGE_REQUIRED = "Change your temporary password first. Then you can use the Owner Console.";
 
-/** Owner Console passwords are longer than portal ones (12, not 10), because the console sees every client. */
-export const OWNER_MIN_PASSWORD = 12;
 
 const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 

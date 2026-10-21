@@ -157,6 +157,9 @@ The next sign-in must pick a new password before anything else works.
 - **Owner Console** account instead: put `--owner` in front of the email. If there's no owner account yet
   on the live site (the first one can otherwise only be made on localhost), this creates it; add
   `--name "Your name"` to set the name.
+- Lost your phone **and** your backup codes (two-step sign-in)? Add `--reset-2fa` at the end: it also
+  removes the account's authenticator app, passkeys and backup codes (audited). Set them up again once
+  you're in. Without it, two-step sign-in stays on and is asked after the temporary password.
 - If your organization has **Require Microsoft sign-in** on and Microsoft sign-in is what's broken, add
   `--allow-password` at the end: it also turns that setting off (audited). Turn it back on in Settings
   once you're in.
@@ -172,5 +175,5 @@ The next sign-in must pick a new password before anything else works.
 npm --prefix app run reset-password -- you@example.com
 ```
 
-Same options (`--owner`, `--name`, `--allow-password`). Someone else in your organization locked out? An
+Same options (`--owner`, `--name`, `--allow-password`, `--reset-2fa`). Someone else in your organization locked out? An
 Org Owner or Org Admin can also just remove and re-add them on Users & access, without this script.

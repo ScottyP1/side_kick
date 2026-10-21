@@ -23,7 +23,7 @@ import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 
-export type SpanKind = "request" | "search" | "ai" | "embed" | "teams" | "index" | "file" | "guard" | "remind";
+export type SpanKind = "request" | "search" | "ai" | "embed" | "teams" | "index" | "file" | "guard" | "remind" | "auth";
 export type Channel = "portal" | "teams" | "system";
 type Attrs = Record<string, string | number | boolean | null>;
 

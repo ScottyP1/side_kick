@@ -3,7 +3,8 @@
  */
 import { handle, readJson, requireText } from "@/lib/api";
 import { HttpError } from "@/lib/auth";
-import { assertLocalRequest, createOwner, OWNER_MIN_PASSWORD, ownerExists, platformLog, startOwnerSession } from "@/lib/owner";
+import { assertLocalRequest, createOwner, ownerExists, platformLog, startOwnerSession } from "@/lib/owner";
+import { assertGoodPassword } from "@/lib/passwords";
 
 export const GET = handle(async () => ({ needsSetup: !await ownerExists() }));
 
@@ -15,7 +16,7 @@ export const POST = handle(async (req: Request) => {
   const name = requireText(body.name, "Your name", 120);
   const email = requireText(body.email, "Email", 200);
   const password = requireText(body.password, "Password", 200);
-  if (password.length < OWNER_MIN_PASSWORD) throw new HttpError(400, `Use a password with at least ${OWNER_MIN_PASSWORD} characters for the owner account.`);
+  await assertGoodPassword(password, { email });
   const id = await createOwner(name, email, password);
   await startOwnerSession(id);
   await platformLog(name, "Created the owner account");

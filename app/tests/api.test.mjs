@@ -4,7 +4,8 @@
  * - its own data (a temp SQLite folder, or the DATABASE_URL test database, wiped first),
  * - fake Claude (SIDEKICK_FAKE_CLAUDE=1: canned answers, never in production),
  * - Azure search switched off, Teams in local Playground mode with a fake Teams connector,
- * - a fake Microsoft sign-in service (Entra ID) that signs ID tokens with a key made up for the run.
+ * - a fake Microsoft sign-in service (Entra ID) that signs ID tokens with a key made up for the run,
+ * - a fake breached-password list (Have I Been Pwned's range API) that knows a few test passwords.
  *
  * Run with `npm test` (both engines), or one engine:
  *   TEST_DB=sqlite node --test tests/api.test.mjs
@@ -103,6 +104,17 @@ const microsoft = http.createServer((req, res) => {
     send(404, { error: "not found" });
   });
 });
+/* ---------- fake Have I Been Pwned (range API): these passwords count as breached ---------- */
+const BREACHED = ["breached password 1", "Password1234!"];
+const pwned = http.createServer((req, res) => {
+  const prefix = req.url.split("/range/")[1]?.toUpperCase() ?? "";
+  const lines = BREACHED.map((p) => crypto.createHash("sha1").update(p).digest("hex").toUpperCase())
+    .filter((h) => h.startsWith(prefix))
+    .map((h) => `${h.slice(5)}:42`);
+  res.writeHead(200, { "content-type": "text/plain" });
+  res.end([...lines, "0000000000000000000000000000000000A:0"].join("\r\n"));
+});
+
 const TENANT = "11111111-2222-4333-8444-555555555555";
 const OTHER_TENANT = "99999999-8888-4777-8666-555555555555";
 
@@ -183,6 +195,7 @@ before(async () => {
   SERVICE_URL = `http://127.0.0.1:${connector.address().port}`;
   await new Promise((r) => microsoft.listen(0, "127.0.0.1", r));
   MS_BASE = `http://127.0.0.1:${microsoft.address().port}`;
+  await new Promise((r) => pwned.listen(0, "127.0.0.1", r));
   tsconfigBefore = fs.readFileSync(path.join(APP, "tsconfig.json"), "utf8");
   const env = {
     ...process.env,
@@ -207,7 +220,9 @@ before(async () => {
     ENTRA_CLIENT_SECRET: "test-entra-secret",
     ENTRA_TENANT: "organizations",
     ENTRA_LOGIN_BASE: "",
+    PWNED_PASSWORDS_URL: "",
   };
+  env.PWNED_PASSWORDS_URL = `http://127.0.0.1:${pwned.address().port}`;
   env.ENTRA_LOGIN_BASE = MS_BASE;
   if (ENGINE === "postgres") {
     const dbName = new URL(PG_URL.replace("postgres:///", "postgres://localhost/")).pathname.slice(1);
@@ -240,6 +255,7 @@ after(async () => {
   }
   connector.close();
   microsoft.close();
+  pwned.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
   fs.rmSync(path.join(APP, `.next-test-${ENGINE}`), { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   if (tsconfigBefore) fs.writeFileSync(path.join(APP, "tsconfig.json"), tsconfigBefore); // next dev edits it
@@ -1903,4 +1919,233 @@ test(`[${ENGINE}] Owner Console sign-in is rate limited like the portal's`, asyn
   // The operator's reset clears the lock.
   const r = await resetPassword("--owner", "owner@test.local");
   assert.equal((await client()("POST", "/api/owner/auth/login", { email: "owner@test.local", password: r.password })).status, 200);
+});
+
+/* ---------- sign-in security: password rules, sessions, two-step sign-in (lib/passwords.ts, lib/mfa.ts) ---------- */
+/** The current 6-digit code for a base32 secret (RFC 6238), `offset` steps of 30 seconds from now. */
+function totp(secret, offset = 0) {
+  const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0, value = 0;
+  const key = [];
+  for (const ch of secret) {
+    value = (value << 5) | B32.indexOf(ch);
+    bits += 5;
+    if (bits >= 8) { key.push((value >>> (bits - 8)) & 255); bits -= 8; }
+  }
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + offset));
+  const h = crypto.createHmac("sha1", Buffer.from(key)).update(msg).digest();
+  const o = h[h.length - 1] & 15;
+  return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+/** Minimal CBOR encoder (maps, ints, byte strings, text), enough for a WebAuthn attestation. */
+function cbor(v) {
+  const head = (major, n) => (n < 24 ? Buffer.from([(major << 5) | n]) : n < 256 ? Buffer.from([(major << 5) | 24, n]) : Buffer.from([(major << 5) | 25, n >> 8, n & 255]));
+  if (typeof v === "number") return v >= 0 ? head(0, v) : head(1, -1 - v);
+  if (typeof v === "string") return Buffer.concat([head(3, Buffer.byteLength(v)), Buffer.from(v)]);
+  if (Buffer.isBuffer(v)) return Buffer.concat([head(2, v.length), v]);
+  if (v instanceof Map) return Buffer.concat([head(5, v.size), ...[...v].flatMap(([k, x]) => [cbor(k), cbor(x)])]);
+  return cbor(new Map(Object.entries(v)));
+}
+
+/**
+ * A fake passkey (a software authenticator with an ES256 key), for localhost. `register(options)` and
+ * `sign(options)` return the JSON a browser's WebAuthn API would give @simplewebauthn/browser.
+ */
+function fakePasskey() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const jwk = publicKey.export({ format: "jwk" });
+  const id = crypto.randomBytes(16);
+  let counter = 0;
+  const rpHash = (rpId) => crypto.createHash("sha256").update(rpId).digest();
+  const clientData = (type, challenge) => Buffer.from(JSON.stringify({ type, challenge, origin: BASE, crossOrigin: false }));
+  const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+  return {
+    register(options) {
+      const cose = cbor(new Map([[1, 2], [3, -7], [-1, 1], [-2, Buffer.from(jwk.x, "base64url")], [-3, Buffer.from(jwk.y, "base64url")]]));
+      const authData = Buffer.concat([rpHash(options.rp.id), Buffer.from([0x45]), u32(counter), Buffer.alloc(16), Buffer.from([0, id.length]), id, cose]);
+      const attestationObject = cbor(new Map([["fmt", "none"], ["attStmt", new Map()], ["authData", authData]]));
+      return {
+        id: id.toString("base64url"), rawId: id.toString("base64url"), type: "public-key", clientExtensionResults: {}, authenticatorAttachment: "platform",
+        response: { clientDataJSON: clientData("webauthn.create", options.challenge).toString("base64url"), attestationObject: attestationObject.toString("base64url"), transports: ["internal"] },
+      };
+    },
+    sign(options, { otherOrigin } = {}) {
+      counter += 1;
+      const authData = Buffer.concat([rpHash(options.rpId), Buffer.from([0x05]), u32(counter)]);
+      const cd = otherOrigin
+        ? Buffer.from(JSON.stringify({ type: "webauthn.get", challenge: options.challenge, origin: otherOrigin, crossOrigin: false }))
+        : clientData("webauthn.get", options.challenge);
+      const signature = crypto.sign("sha256", Buffer.concat([authData, crypto.createHash("sha256").update(cd).digest()]), privateKey);
+      return {
+        id: id.toString("base64url"), rawId: id.toString("base64url"), type: "public-key", clientExtensionResults: {},
+        response: { clientDataJSON: cd.toString("base64url"), authenticatorData: authData.toString("base64url"), signature: signature.toString("base64url") },
+      };
+    },
+  };
+}
+
+test(`[${ENGINE}] passwords: at least 12 characters, not breached, not the email; a change signs out everywhere else`, async () => {
+  const pat = await newPerson("Pat Password", "pat@test.local", "Member");
+  const otherBrowser = client();
+  assert.equal((await otherBrowser("POST", "/api/auth/login", { email: "pat@test.local", password: NEW_PASSWORD })).status, 200);
+  const change = (next) => pat.call("POST", "/api/auth/password", { current: NEW_PASSWORD, next });
+  assert.match((await change("eleven char")).body.error, /at least 12 characters/);
+  assert.match((await change("breached password 1")).body.error, /known data breach/);
+  assert.match((await change("pat@test.local")).body.error, /email address/);
+  assert.match((await change(NEW_PASSWORD)).body.error, /different from the current one/);
+  assert.equal((await change("pat's long new password")).status, 200);
+  assert.equal((await otherBrowser("GET", "/api/me")).status, 401, "the other browser was signed out");
+  assert.equal((await pat.call("GET", "/api/me")).status, 200, "this browser stays signed in");
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Changed password \(signed out 1 other session\)/);
+  s.pat = { ...pat, password: "pat's long new password" };
+});
+
+test(`[${ENGINE}] sessions: people see only their own, and can sign out one or all others`, async () => {
+  const { call, password } = s.pat;
+  const b = client();
+  const c = client();
+  for (const x of [b, c]) assert.equal((await x("POST", "/api/auth/login", { email: "pat@test.local", password })).status, 200);
+  const list = (await call("GET", "/api/auth/sessions")).body.sessions;
+  assert.equal(list.length, 3);
+  assert.equal(list.filter((x) => x.current).length, 1);
+  assert.ok(list.every((x) => x.id.length === 16 && x.device && x.started), JSON.stringify(list));
+  // Another person can't end Pat's sessions, even with the id.
+  s.oli = await newPerson("Oli Other", "oli@test.local", "Member");
+  const target = list.find((x) => !x.current).id;
+  assert.equal((await s.oli.call("DELETE", "/api/auth/sessions", { id: target })).status, 404);
+  assert.ok(!(await s.oli.call("GET", "/api/auth/sessions")).body.sessions.some((x) => x.id === target));
+  assert.equal((await call("DELETE", "/api/auth/sessions", { id: target })).status, 200);
+  assert.equal((await call("GET", "/api/auth/sessions")).body.sessions.length, 2);
+  const all = await call("DELETE", "/api/auth/sessions", {});
+  assert.equal(all.body.ended, 1);
+  assert.equal((await b("GET", "/api/me")).status, 401);
+  assert.equal((await c("GET", "/api/me")).status, 401);
+  assert.equal((await call("GET", "/api/me")).status, 200);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Signed out everywhere else \(1 session\)/);
+});
+
+test(`[${ENGINE}] two-step sign-in: authenticator app, one-time codes, backup codes, and turning it off`, async () => {
+  const { call, password } = s.pat;
+  assert.deepEqual((await call("GET", "/api/auth/mfa/status")).body, { factors: [], backupCodesLeft: 0 });
+  const setup = (await call("POST", "/api/auth/mfa/totp-start", {})).body;
+  assert.match(setup.uri, /^otpauth:\/\/totp\/Sidekick%3Apat%40test\.local\?secret=/);
+  assert.match(setup.qr, /^data:image\/png;base64,/);
+  assert.equal((await call("POST", "/api/auth/mfa/totp-confirm", { id: setup.id, code: "000000" === totp(setup.secret) ? "111111" : "000000" })).status, 400);
+  const usedCode = totp(setup.secret);
+  const on = await call("POST", "/api/auth/mfa/totp-confirm", { id: setup.id, code: usedCode });
+  assert.equal(on.status, 200, JSON.stringify(on.body));
+  assert.equal(on.body.backupCodes.length, 10);
+  // Signing in now needs the code: the password alone starts no session.
+  const b = client();
+  const first = await b("POST", "/api/auth/login", { email: "pat@test.local", password });
+  assert.deepEqual(first.body, { ok: true, secondStep: { methods: ["totp"] } });
+  assert.equal((await b("GET", "/api/me")).status, 401);
+  assert.equal((await b("POST", "/api/auth/mfa/verify", { code: "12345" })).status, 400);
+  // The code used when turning it on can't be used again; the next one (30 seconds on) can.
+  assert.equal((await b("POST", "/api/auth/mfa/verify", { code: usedCode })).status, 400, "a code works only once");
+  assert.equal((await b("POST", "/api/auth/mfa/verify", { code: totp(setup.secret, 1) })).status, 200);
+  assert.equal((await b("GET", "/api/me")).status, 200);
+  // Without the challenge cookie there's nothing to verify.
+  assert.equal((await client()("POST", "/api/auth/mfa/verify", { code: totp(setup.secret, 1) })).status, 401);
+  // A backup code works once.
+  const c = client();
+  await c("POST", "/api/auth/login", { email: "pat@test.local", password });
+  assert.equal((await c("POST", "/api/auth/mfa/verify", { code: on.body.backupCodes[0].toUpperCase() })).status, 200);
+  const d = client();
+  await d("POST", "/api/auth/login", { email: "pat@test.local", password });
+  assert.equal((await d("POST", "/api/auth/mfa/verify", { code: on.body.backupCodes[0] })).status, 400, "a used backup code fails");
+  assert.equal((await call("GET", "/api/auth/mfa/status")).body.backupCodesLeft, 9);
+  // Five wrong codes end that sign-in attempt (on another person, as they also pause password sign-in).
+  const wes = await newPerson("Wes Wrong", "wes@test.local", "Viewer");
+  const wesSetup = (await wes.call("POST", "/api/auth/mfa/totp-start", {})).body;
+  assert.equal((await wes.call("POST", "/api/auth/mfa/totp-confirm", { id: wesSetup.id, code: totp(wesSetup.secret) })).status, 200);
+  const e = client();
+  await e("POST", "/api/auth/login", { email: "wes@test.local", password: NEW_PASSWORD });
+  for (let i = 0; i < 4; i++) assert.equal((await e("POST", "/api/auth/mfa/verify", { code: "999999" })).status, 400);
+  assert.equal((await e("POST", "/api/auth/mfa/verify", { code: "999999" })).status, 401);
+  assert.equal((await e("POST", "/api/auth/mfa/verify", { code: totp(wesSetup.secret, 1) })).status, 401, "sign in again with the password");
+  assert.equal((await client()("POST", "/api/auth/login", { email: "wes@test.local", password: NEW_PASSWORD })).status, 429, "wrong codes count towards the sign-in limit");
+  const log = JSON.stringify((await admin("GET", "/api/audit")).body);
+  assert.match(log, /Turned on two-step sign-in \(authenticator app\)/);
+  assert.match(log, /Signed in \(password \+ authenticator code\)/);
+  assert.match(log, /Signed in \(password \+ backup code\)/);
+  assert.match(log, /Failed sign-in \(wrong two-step code\)/);
+  // Someone else can't remove Pat's factor; Pat needs the password to.
+  const factor = (await call("GET", "/api/auth/mfa/status")).body.factors[0];
+  assert.equal((await s.oli.call("POST", "/api/auth/mfa/remove", { id: factor.id, password: "not oli's password" })).status, 400);
+  assert.equal((await s.oli.call("POST", "/api/auth/mfa/remove", { id: factor.id, password: NEW_PASSWORD })).status, 404, "only your own");
+  assert.equal((await call("POST", "/api/auth/mfa/remove", { id: factor.id, password: "wrong" })).status, 400);
+  assert.equal((await call("POST", "/api/auth/mfa/backup-codes", { password: "wrong" })).status, 400);
+  assert.equal((await call("POST", "/api/auth/mfa/backup-codes", { password })).body.backupCodes.length, 10);
+  const off = await call("POST", "/api/auth/mfa/remove", { id: factor.id, password });
+  assert.equal(off.body.twoStepOff, true);
+  assert.deepEqual((await call("GET", "/api/auth/mfa/status")).body, { factors: [], backupCodesLeft: 0 });
+  assert.deepEqual((await client()("POST", "/api/auth/login", { email: "pat@test.local", password })).body, { ok: true });
+});
+
+test(`[${ENGINE}] two-step sign-in: passkeys work only on Sidekick's own address`, async () => {
+  const { call, password } = s.pat;
+  const key = fakePasskey();
+  const options = (await call("POST", "/api/auth/mfa/passkey-options", {})).body;
+  assert.equal(options.rp.id, "localhost");
+  const added = await call("POST", "/api/auth/mfa/passkey-add", { response: key.register(options), label: "Test laptop" });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  assert.equal(added.body.backupCodes.length, 10, "first factor: backup codes");
+  // The same challenge can't be used twice.
+  assert.equal((await call("POST", "/api/auth/mfa/passkey-add", { response: key.register(options), label: "Again" })).status, 400);
+  const b = client();
+  assert.deepEqual((await b("POST", "/api/auth/login", { email: "pat@test.local", password })).body.secondStep, { methods: ["passkey"] });
+  const signIn = (await b("POST", "/api/auth/mfa/signin-options", {})).body.options;
+  assert.equal(signIn.allowCredentials.length, 1);
+  assert.equal((await b("POST", "/api/auth/mfa/verify", { passkey: key.sign(signIn, { otherOrigin: "https://sidekick-login.example" }) })).status, 400, "a look-alike site's answer is refused");
+  assert.equal((await b("POST", "/api/auth/mfa/verify", { passkey: fakePasskey().sign(signIn) })).status, 400, "an unknown passkey is refused");
+  assert.equal((await b("POST", "/api/auth/mfa/verify", { passkey: key.sign(signIn) })).status, 200);
+  assert.equal((await b("GET", "/api/me")).status, 200);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Signed in \(password \+ passkey\)/);
+  const status = (await call("GET", "/api/auth/mfa/status")).body;
+  assert.equal(status.factors[0].label, "Test laptop");
+  assert.ok(status.factors[0].lastUsed);
+  s.patKey = key;
+});
+
+test(`[${ENGINE}] reset-password --reset-2fa: removes two-step sign-in for someone who lost their phone`, async () => {
+  const r = await resetPassword("pat@test.local", "--reset-2fa");
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /Two-step sign-in removed/);
+  const c = client();
+  assert.deepEqual((await c("POST", "/api/auth/login", { email: "pat@test.local", password: r.password })).body, { ok: true });
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Removed Pat Password's two-step sign-in/);
+});
+
+test(`[${ENGINE}] Owner Console: two-step sign-in with an authenticator app, then the temporary-password step`, async () => {
+  const reset = await resetPassword("--owner", "owner@test.local");
+  const o = client();
+  await o("POST", "/api/owner/auth/login", { email: "owner@test.local", password: reset.password });
+  const pw = "the owner's second long password";
+  assert.equal((await o("POST", "/api/owner/auth/password", { current: reset.password, next: "breached password 1" })).status, 400);
+  assert.equal((await o("POST", "/api/owner/auth/password", { current: reset.password, next: pw })).status, 200);
+  assert.equal((await s.oli.call("GET", "/api/owner/auth/mfa/status")).status, 401, "client accounts can't reach it");
+  const setup = (await o("POST", "/api/owner/auth/mfa/totp-start", {})).body;
+  assert.match(setup.uri, /Sidekick%20Owner%20Console/);
+  const on = await o("POST", "/api/owner/auth/mfa/totp-confirm", { id: setup.id, code: totp(setup.secret) });
+  assert.equal(on.body.backupCodes.length, 10);
+  const b = client();
+  const first = await b("POST", "/api/owner/auth/login", { email: "owner@test.local", password: pw });
+  assert.deepEqual(first.body.secondStep, { methods: ["totp"] });
+  assert.equal((await b("GET", "/api/owner/overview")).status, 401);
+  // A portal second-step cookie doesn't work for the console, and the reverse.
+  assert.equal((await b("POST", "/api/auth/mfa/verify", { code: totp(setup.secret, 1) })).status, 401);
+  const done = await b("POST", "/api/owner/auth/mfa/verify", { code: totp(setup.secret, 1) });
+  assert.deepEqual(done.body, { ok: true, mustChange: false });
+  assert.equal((await b("GET", "/api/owner/overview")).status, 200);
+  // After an operator reset (keeping two-step), the code comes first, then the new password.
+  const again = await resetPassword("--owner", "owner@test.local");
+  const c = client();
+  assert.ok((await c("POST", "/api/owner/auth/login", { email: "owner@test.local", password: again.password })).body.secondStep);
+  assert.equal((await c("POST", "/api/owner/auth/mfa/verify", { code: totp(setup.secret, -1) })).status, 400, "an older code than the last one used is refused");
+  const v = await c("POST", "/api/owner/auth/mfa/verify", { code: on.body.backupCodes[0] });
+  assert.deepEqual(v.body, { ok: true, mustChange: true });
+  assert.equal((await c("GET", "/api/owner/overview")).status, 403);
 });

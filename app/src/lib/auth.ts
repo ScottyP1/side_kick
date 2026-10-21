@@ -20,13 +20,19 @@
  *   Until they pick their own, `requireUser` refuses every request except the few that opt in with
  *   `allowPendingPassword` (/api/me, the password change); signing out doesn't need a check. Microsoft sign-in clears it.
  * - **Sign-in limit**: password guessing is slowed down in lib/login-limit.ts.
+ * - **Two-step sign-in**: people who add an authenticator app or a passkey (lib/mfa.ts) need it after
+ *   their password before a session starts. New passwords follow lib/passwords.ts.
+ * - **Where you're signed in**: each session remembers when and from which browser and network address it
+ *   started, and when it was last used, so people can see their sessions and sign the others out
+ *   (`listSessions`, `endOtherSessions`). A password change signs out every other session.
  *
  * Production replaces passwords with Microsoft (Entra ID) sign-in; roles and walls stay the same.
  */
 import "server-only";
 import crypto from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { all, get, newId, now, run } from "./db";
+import { clientIp } from "./login-limit";
 import { traceScope } from "./trace";
 
 export const SESSION_COOKIE = "sk_session";
@@ -66,12 +72,21 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 
 const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
+/** How often a session's "last used" time is written (not on every request, to save database writes). */
+const LAST_SEEN_EVERY_MS = 5 * 60_000;
 
-/** Signs a user in: creates a session row and sets the `sk_session` cookie (httpOnly, 7 days). */
+/**
+ * Signs a user in: creates a session row (with when, the browser and the network address) and sets the
+ * `sk_session` cookie (httpOnly, 7 days). Callers must have checked the password and any second step.
+ */
 export async function startSession(userId: string) {
   const token = crypto.randomBytes(32).toString("base64url");
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
-  await run("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)", sha256(token), userId, expires.toISOString());
+  const userAgent = ((await headers()).get("user-agent") ?? "").slice(0, 300);
+  await run(
+    "INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen, user_agent, ip) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    sha256(token), userId, expires.toISOString(), now(), now(), userAgent || null, (await clientIp()) || null,
+  );
   await run("UPDATE users SET last_active = ? WHERE id = ?", now(), userId);
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -97,14 +112,58 @@ export async function endSession() {
 export async function currentUser(): Promise<User | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const row = await get<User & { expires_at: string; org_status: string }>(
-    `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password, s.expires_at, o.status AS org_status
+  const row = await get<User & { expires_at: string; org_status: string; last_seen: string | null }>(
+    `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password, s.expires_at, s.last_seen, o.status AS org_status
        FROM sessions s JOIN users u ON u.id = s.user_id JOIN orgs o ON o.id = u.org_id WHERE s.token_hash = ?`,
     sha256(token),
   );
   if (!row || new Date(row.expires_at) < new Date()) return null;
+  if (!row.last_seen || Date.now() - new Date(row.last_seen).getTime() > LAST_SEEN_EVERY_MS) {
+    await run("UPDATE sessions SET last_seen = ? WHERE token_hash = ?", now(), sha256(token));
+  }
   if (row.org_status === "Suspended") throw new HttpError(403, "This organization's Sidekick access is paused. Contact the Sidekick team.");
   return { id: row.id, org_id: row.org_id, name: row.name, email: row.email, role: row.role, must_change_password: row.must_change_password };
+}
+
+/** One place someone is signed in, as shown on Settings. `id` is a short public handle, never the token. */
+export type SessionInfo = { id: string; current: boolean; started: string | null; lastUsed: string | null; device: string; ip: string | null };
+
+/** "Chrome on Mac"-style name for a browser's user-agent text (best effort; "Unknown browser" otherwise). */
+export function describeDevice(userAgent: string | null): string {
+  const ua = userAgent ?? "";
+  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : /node|undici/i.test(ua) ? "Script" : "";
+  const os = /iPhone|iPad/.test(ua) ? "iPhone/iPad" : /Android/.test(ua) ? "Android" : /Mac OS X|Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
+  if (!browser && !os) return "Unknown browser";
+  return [browser || "Browser", os && `on ${os}`].filter(Boolean).join(" ");
+}
+
+/** Everywhere this user is signed in (unexpired sessions), newest use first, marking this browser's. */
+export async function listSessions(user: Pick<User, "id">): Promise<SessionInfo[]> {
+  const mine = (await cookies()).get(SESSION_COOKIE)?.value;
+  const rows = await all<{ token_hash: string; created_at: string | null; last_seen: string | null; user_agent: string | null; ip: string | null; expires_at: string }>(
+    "SELECT token_hash, created_at, last_seen, user_agent, ip, expires_at FROM sessions WHERE user_id = ? AND expires_at > ?",
+    user.id,
+    now(),
+  );
+  return rows
+    .map((r) => ({ id: r.token_hash.slice(0, 16), current: Boolean(mine) && r.token_hash === sha256(mine!), started: r.created_at, lastUsed: r.last_seen, device: describeDevice(r.user_agent), ip: r.ip }))
+    .sort((a, b) => Number(b.current) - Number(a.current) || String(b.lastUsed ?? "").localeCompare(String(a.lastUsed ?? "")));
+}
+
+/** Signs this user out everywhere except this browser. Returns how many sessions ended. */
+export async function endOtherSessions(userId: string): Promise<number> {
+  const mine = (await cookies()).get(SESSION_COOKIE)?.value;
+  const r = await run("DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?", userId, mine ? sha256(mine) : "");
+  return r.changes;
+}
+
+/** Ends one of this user's sessions by its public id (from `listSessions`). Returns false if there's no such session. */
+export async function endSessionById(userId: string, id: string): Promise<boolean> {
+  const rows = await all<{ token_hash: string }>("SELECT token_hash FROM sessions WHERE user_id = ?", userId);
+  const hit = id.length === 16 ? rows.find((r) => r.token_hash.startsWith(id)) : undefined;
+  if (!hit) return false;
+  await run("DELETE FROM sessions WHERE token_hash = ?", hit.token_hash);
+  return true;
 }
 
 /**

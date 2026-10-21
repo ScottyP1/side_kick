@@ -4,11 +4,14 @@
  * failures for one email or from one IP address it answers 429 for a while, even with the right password.
  * Failures and the lockout go to the operator log. Answers `{ ok, mustChange }`: with `mustChange` the owner
  * has a temporary password (scripts/reset-password.mjs) and must pick a new one (POST /api/owner/auth/password)
- * before anything else in the console works.
+ * before anything else in the console works. With two-step sign-in on (lib/mfa.ts), a correct password
+ * answers `{ ok, secondStep: { methods } }` instead and the page finishes with POST /api/owner/auth/mfa/verify.
  */
 import { handle, readJson } from "@/lib/api";
 import { HttpError } from "@/lib/auth";
 import { clearSignInFailures, clientIp, LOCKED_MESSAGE, recordSignInFailure, signInLocked, WINDOW_MINUTES } from "@/lib/login-limit";
+import { secondFactorMethods, startSecondStep } from "@/lib/mfa";
+import { setSecondStepCookie } from "@/lib/mfa-routes";
 import { checkOwnerPassword, platformLog, startOwnerSession } from "@/lib/owner";
 
 export const POST = handle(async (req: Request) => {
@@ -22,6 +25,11 @@ export const POST = handle(async (req: Request) => {
     await platformLog("System", `Failed Owner Console sign-in${ip ? ` from ${ip}` : ""}`);
     if (lockedNow) await platformLog("System", `Owner Console sign-in paused for ${WINDOW_MINUTES} minutes for that email after too many wrong passwords`);
     throw new HttpError(401, "That email and password don't match an owner account.");
+  }
+  const methods = await secondFactorMethods("owner", owner.id);
+  if (methods.length) {
+    await setSecondStepCookie("owner", await startSecondStep("owner", owner.id));
+    return { ok: true, secondStep: { methods } };
   }
   await clearSignInFailures(key);
   await startOwnerSession(owner.id);

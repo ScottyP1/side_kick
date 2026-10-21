@@ -5,6 +5,8 @@
 //   npm run reset-password -- <email> --allow-password also turn off "Require Microsoft sign-in" for their org
 //   npm run reset-password -- --owner <email>          an Owner Console account (creates the first one if
 //                                                      there is none yet; --name "<Your name>" names it)
+//   … --reset-2fa                                      also remove two-step sign-in (authenticator app,
+//                                                      passkeys, backup codes), e.g. after losing the phone
 //
 // Which database: DATABASE_URL (Postgres) when set, otherwise the laptop's SQLite file
 // (SIDEKICK_DATA_DIR/sidekick.db, default app/data). For the live Azure database use
@@ -16,6 +18,7 @@
 //   written to a file, log or the database (only its scrypt hash is stored, the same format as lib/auth.ts);
 // - marks it temporary, so the next sign-in must pick a new password before anything else works;
 // - signs that account out everywhere (deletes its sessions) and clears its failed sign-in count;
+// - with --reset-2fa, removes the account's two-step sign-in so it can be set up again after signing in;
 // - writes an entry to the organization's audit log (portal) or the operator log (Owner Console).
 // Who may run it: only someone who already has the database (DATABASE_URL, or the laptop's data folder),
 // which is full control anyway; there is deliberately no web route that can do this.
@@ -44,10 +47,11 @@ const option = (name) => {
 };
 const forOwner = flag("--owner");
 const allowPassword = flag("--allow-password");
+const reset2fa = flag("--reset-2fa");
 const ownerName = option("--name");
 const email = String(args[0] ?? "").trim().toLowerCase();
 if (!/^[^\s@]+@[^\s@]+$/.test(email) || args.length !== 1) {
-  console.error("Usage: npm run reset-password -- <email> [--allow-password]   or   npm run reset-password -- --owner <email> [--name \"Your name\"]");
+  console.error("Usage: npm run reset-password -- <email> [--allow-password] [--reset-2fa]   or   npm run reset-password -- --owner <email> [--name \"Your name\"] [--reset-2fa]");
   process.exit(2);
 }
 
@@ -136,6 +140,17 @@ async function open() {
 }
 
 const db = await open();
+
+/**
+ * Removes two-step sign-in for one account when --reset-2fa was given (the tables may not exist yet on an
+ * older database). Returns true if anything was removed.
+ */
+async function clearTwoStep(kind, id) {
+  if (!reset2fa || !(await db.hasColumn("mfa_factors", "id"))) return false;
+  const had = await db.get("SELECT COUNT(*) AS n FROM mfa_factors WHERE account_kind = ? AND account_id = ?", kind, id);
+  for (const table of ["mfa_factors", "mfa_backup_codes", "mfa_challenges"]) await db.run(`DELETE FROM ${table} WHERE account_kind = ? AND account_id = ?`, kind, id);
+  return Number(had?.n ?? 0) > 0;
+}
 const nowIso = () => new Date().toISOString();
 const password = temporaryPassword();
 let done;
@@ -170,6 +185,12 @@ async function resetUser() {
       "INSERT INTO audit_log (org_id, actor, action, kind, workspace_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       user.org_id, ACTOR, `Reset ${user.name}'s password to a temporary one and signed them out everywhere`, "Sign-in", null, nowIso(),
     );
+    if (await clearTwoStep("user", user.id)) {
+      await db.run(
+        "INSERT INTO audit_log (org_id, actor, action, kind, workspace_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        user.org_id, ACTOR, `Removed ${user.name}'s two-step sign-in (authenticator app, passkeys, backup codes)`, "Sign-in", null, nowIso(),
+      );
+    }
     if (ssoRequired && allowPassword) {
       await db.run("UPDATE orgs SET sso_required = 0 WHERE id = ?", user.org_id);
       await db.run(
@@ -179,6 +200,7 @@ async function resetUser() {
     }
   });
   const lines = [`Reset: ${user.name} <${email}>, ${user.role} of “${user.org_name}”. Signed out everywhere.`];
+  if (reset2fa) lines.push("Two-step sign-in removed: set it up again in Settings once you're in.");
   if (ssoRequired && allowPassword) lines.push("“Require Microsoft sign-in” is now off for this organization, so the password works. Turn it back on in Settings once you're in.");
   else if (ssoRequired) lines.push("⚠ This organization requires Microsoft sign-in, so passwords are refused. Use “Sign in with Microsoft”, or run again with --allow-password to turn that off.");
   return lines;
@@ -199,7 +221,9 @@ async function resetOwner() {
       await db.run("DELETE FROM owner_sessions WHERE admin_id = ?", owner.id);
       await db.run("DELETE FROM login_failures WHERE email = ?", `owner:${email}`);
       await db.run("INSERT INTO platform_log (actor, action, created_at) VALUES (?, ?, ?)", ACTOR, `Reset ${owner.name}'s Owner Console password to a temporary one and signed them out everywhere`, nowIso());
-      return [`Reset: Owner Console account ${owner.name} <${email}>. Signed out everywhere.`];
+      const removed = await clearTwoStep("owner", owner.id);
+      if (removed) await db.run("INSERT INTO platform_log (actor, action, created_at) VALUES (?, ?, ?)", ACTOR, `Removed ${owner.name}'s two-step sign-in`, nowIso());
+      return [`Reset: Owner Console account ${owner.name} <${email}>. Signed out everywhere.`, ...(reset2fa ? ["Two-step sign-in removed: set it up again on Security once you're in."] : [])];
     }
     const name = ownerName?.trim() || email.split("@")[0];
     await db.run(

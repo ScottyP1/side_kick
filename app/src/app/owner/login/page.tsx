@@ -3,10 +3,12 @@
 /**
  * Owner Console sign-in (/owner/login), separate from client sign-in. After a password reset from the
  * command line (scripts/reset-password.mjs) the sign-in answers `mustChange`, and this page asks for a new
- * password (POST /api/owner/auth/password) before opening the console.
+ * password (POST /api/owner/auth/password) before opening the console. With two-step sign-in on, a correct
+ * password leads to the second step first (components/two-step.tsx).
  */
 
 import { useEffect, useState } from "react";
+import { SecondStepForm } from "@/components/two-step";
 import { api } from "@/components/ui";
 
 export default function OwnerLoginPage() {
@@ -16,6 +18,7 @@ export default function OwnerLoginPage() {
   const [busy, setBusy] = useState(false);
   // Set after signing in with a temporary password: the page then asks for a new one.
   const [mustChange, setMustChange] = useState(false);
+  const [secondStep, setSecondStep] = useState<("totp" | "passkey")[] | null>(null);
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
 
@@ -30,7 +33,12 @@ export default function OwnerLoginPage() {
     setBusy(true);
     setError("");
     try {
-      const r = await api<{ mustChange?: boolean }>("/api/owner/auth/login", { method: "POST", json: { email, password } });
+      const r = await api<{ mustChange?: boolean; secondStep?: { methods: ("totp" | "passkey")[] } }>("/api/owner/auth/login", { method: "POST", json: { email, password } });
+      if (r.secondStep) {
+        setSecondStep(r.secondStep.methods);
+        setBusy(false);
+        return;
+      }
       if (r.mustChange) {
         setMustChange(true);
         setBusy(false);
@@ -57,13 +65,26 @@ export default function OwnerLoginPage() {
     }
   };
 
+  if (secondStep && !mustChange) {
+    return (
+      <div className="auth-wrap">
+        <SecondStepForm
+          base="/api/owner/auth/mfa"
+          methods={secondStep}
+          onDone={(r) => (r.mustChange ? setMustChange(true) : window.location.assign("/owner"))}
+          onCancel={() => { setSecondStep(null); setPassword(""); }}
+        />
+      </div>
+    );
+  }
+
   if (mustChange) {
     return (
       <div className="auth-wrap">
         <form className="auth-card" onSubmit={change}>
           <div>
             <h1>Pick a new password</h1>
-            <p className="muted" style={{ margin: "4px 0 0" }}>You signed in with a temporary password. Choose your own (at least 12 characters) to open the Owner Console. A password manager can make one for you.</p>
+            <p className="muted" style={{ margin: "4px 0 0" }}>You signed in with a temporary password. Choose your own (at least 12 characters, not one from a known data breach) to open the Owner Console. A password manager can make one for you.</p>
           </div>
           <div className="field">
             <label htmlFor="next">New password</label>

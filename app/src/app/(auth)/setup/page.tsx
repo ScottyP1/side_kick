@@ -49,7 +49,7 @@ export default function SetupPage() {
         {field("org", "Organization name")}
         {field("name", "Your name", "text", undefined, "name")}
         {field("email", "Work email", "email", undefined, "username")}
-        {field("password", "Password", "password", "At least 10 characters.", "new-password")}
+        {field("password", "Password", "password", "At least 12 characters, and not one from a known data breach.", "new-password")}
         {error && <p className="err" role="alert">{error}</p>}
         <button className="btn primary" type="submit" disabled={busy}>{busy ? "Creating…" : "Create organization"}</button>
       </form>

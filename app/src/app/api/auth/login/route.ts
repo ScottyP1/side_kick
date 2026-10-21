@@ -5,10 +5,15 @@
  * Rate limited (lib/login-limit.ts): after too many failures for one email or from one IP address, sign-in
  * is refused with 429 for a while, even with the right password. Failed sign-ins on a real account and the
  * lockout itself go to that organization's audit log.
+ * Two-step sign-in (lib/mfa.ts): if the account has an authenticator app or passkey, a correct password
+ * doesn't start a session yet. It answers `{ ok, secondStep: { methods } }` and sets a 5-minute challenge
+ * cookie; the sign-in page then finishes with POST /api/auth/mfa/verify.
  */
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, startSession, verifyPassword } from "@/lib/auth";
 import { get } from "@/lib/db";
+import { secondFactorMethods, startSecondStep } from "@/lib/mfa";
+import { setSecondStepCookie } from "@/lib/mfa-routes";
 import { clearSignInFailures, clientIp, LOCKED_MESSAGE, recordSignInFailure, signInLocked, WINDOW_MINUTES } from "@/lib/login-limit";
 
 export const POST = handle(async (req: Request) => {
@@ -30,6 +35,12 @@ export const POST = handle(async (req: Request) => {
     throw new HttpError(401, "That email and password don't match. Check them and try again.");
   }
   if (user.sso_required === 1) throw new HttpError(403, "Your organization signs in with Microsoft. Use “Sign in with Microsoft”.");
+  const methods = await secondFactorMethods("user", user.id);
+  if (methods.length) {
+    // The failure count is cleared only once the second step passes, so code guessing stays limited too.
+    await setSecondStepCookie("user", await startSecondStep("user", user.id));
+    return { ok: true, secondStep: { methods } };
+  }
   await clearSignInFailures(email);
   await startSession(user.id);
   await audit(user, "Signed in", "Sign-in");

@@ -6,11 +6,14 @@
  * and can add people to those workspaces (as Member or Viewer) or take them off; roles and removing people
  * from the organization stay with admins. New people get a temporary password they must change at first sign-in.
  * Removing someone asks for confirmation first. Nobody can change their own role or remove themselves here.
+ * After "Approve Sidekick for your organization" Microsoft comes back here with `?microsoft=approved`, or
+ * `?error=1` with the reason in a one-time cookie (lib/flash.ts), shown as a note.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, useToast } from "@/components/ui";
+import { takeFlash } from "@/lib/flash";
 
 type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; microsoft: number; signin_locked?: boolean; workspaces: string[] };
 const ROLES = ["Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"];
@@ -42,6 +45,13 @@ export default function UsersPage() {
   useEffect(() => {
     load();
   }, [load]);
+  // The result of the Microsoft admin-approval round trip (the reason never travels in the address).
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.get("microsoft") === "approved") toast("Sidekick is approved for your organization's Microsoft directory");
+    if (q.has("error")) toast(takeFlash("Approving Sidekick in Microsoft didn't finish. Try again."), "error");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const wsName = (id: string) => me.workspaces.find((w) => w.id === id)?.name ?? "Workspace";
 
   const add = async () => {

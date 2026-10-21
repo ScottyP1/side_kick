@@ -33,6 +33,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/login-limit.ts` | Sign-in rate limit: failed password sign-ins per email and per IP, stored in `login_failures` (works across several app copies) |
 | `lib/security.ts` | Small security checks with no I/O, unit-tested: one-time setup rule (`SIDEKICK_SETUP_CODE` in production), the cross-site request (CSRF) check `handle()` runs on every change, Word "zip bomb" size check, prompt tag escaping |
 | `lib/flash.ts` | One-time messages from a server redirect to the page (Microsoft sign-in errors), in a short-lived cookie instead of the address |
+| `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification (issuer checked per tenant; single-tenant mode also checks the tenant) |
+| `lib/tenants.ts` | Single- vs multi-tenant mode (`TENANT_ID`), which Sidekick org a Microsoft tenant belongs to, `tieOrgToTenant` (also for the sign-up flow) |
+| `lib/directory.ts` | The customer's Microsoft 365 directory via Microsoft Graph (app permission `User.Read.All`): admin-consent round trip, search, import as Microsoft-sign-in people |
 | `lib/plans.ts` | The plans (Starter/Team/Business: made-up per-person prices, seat and workspace limits), trial/grace lengths and `accessFor` (what a trialing/past_due/canceled subscription allows: full or read-only). Pure, shared by pages and server, unit-tested |
 | `lib/billing.ts` | Subscriptions (`subscriptions` table) behind a billing provider: `mock` (test mode, no payment details ever) now, Stripe later (documented in the file). Pay, change plan, cancel, simulate a failed payment, operator changes; `readOnlyRefusal` (used by `handle()`) |
 | `lib/signup.ts` | Self-service sign-up: org + Org Owner + trial in one transaction, the `signup` switch (**off by default**; opened in the Owner Console or with `SIDEKICK_SIGNUP_OPEN=true`, see `flagDefault` in lib/owner.ts), per-IP limit (`signup_attempts`), the hook for "Sign up with Microsoft" |
@@ -50,7 +53,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/guard-text.ts` | The quick guardrail text checks with no I/O (slurs, jailbreaks, swearing, loosening and too-broad rules, masking contact details but not dates), unit-tested in `tests/db.test.mjs` |
 | `lib/excerpt.ts` | Plain-text source excerpts for answers, taken from the part of a passage that matches the question |
 | `lib/workspaces.ts` | Unique workspace names, renaming, and deleting a workspace with everything scoped to it (both engines, plus Azure search) |
-| `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
+| `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards; tenant check, waiting chats |
+| `lib/teams/install.ts` | Who may add Sidekick to a chat (Team Leads/admins), and Sidekick leaving chats through Graph (refused installer, 7 days unassigned, removed in the portal) |
+| `lib/teams/members.ts` | `@Sidekick add` / `remove @name`: who may, who can be added, auditing |
 | `lib/reminders.ts` | Per-chat settings (notes, tracking, reminders), saving tracked chat messages, building reminder digests (items picked in code, worded by Claude feature `remind`, every point with a source) and their card buttons |
 | `lib/reminder-rules.ts` | Plain rules for chat settings and reminder timing (defaults, validation, time zones, quiet days); no I/O, unit-tested |
 | `instrumentation.ts` | Starts the in-app timer that calls `POST /api/reminders/tick` every 5 minutes (off with `SIDEKICK_SCHEDULER=off`) |
@@ -85,8 +90,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 **A Teams message**
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
 2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
-3. Unlinked conversation → link-code card. Linked → typing indicator now, answer card after the request returns.
-4. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
+3. `tenantGate`: in multi-tenant mode an activity from a Microsoft tenant no Sidekick org is tied to gets the sign-up card and nothing is stored.
+4. Unlinked conversation in a tied tenant (channel/group chat): on install the installer must be a Team Lead/admin (else Sidekick leaves, install.ts); it then waits to be assigned in the portal, and Sidekick reads, saves and answers nothing there (mentions get the "not set up yet" notice). Elsewhere (untied tenant, 1:1) the link-code card. Assigned via the picker → every message is tracked. Linked → `add`/`remove @name` commands (members.ts), or typing indicator now and the answer card after the request returns.
+5. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
 
 ## Rules every change must keep
 - **Walls**: filter every query by `org_id`, and by a workspace id that went through `requireWorkspace` (or a linked Teams conversation). Never trust an id from the request on its own.

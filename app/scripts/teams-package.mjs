@@ -9,6 +9,11 @@
 // Live address: SIDEKICK_LIVE_URL if set, otherwise asked from Azure (`az login` needed), like deploy.sh.
 // Local address: SIDEKICK_PUBLIC_URL (the dev tunnel). CLIENT_ID and SIDEKICK_PUBLIC_URL are read from the
 // environment or app/.env.local; nothing secret is read or written.
+// Entra app in webApplicationInfo: ENTRA_CLIENT_ID (the multi-tenant sign-in/directory app) when set, else the
+// bot's app. Microsoft ties the Teams app's resource-specific and "self" installation permissions to that app,
+// which is how Sidekick may remove itself from a chat (lib/teams/install.ts, docs/TEAMS-MULTITENANT.md).
+// Public website (store listing: website, privacy /privacy and terms /terms pages): SIDEKICK_WEBSITE_URL if
+// set (e.g. a custom domain), otherwise the app's own address, which serves those pages.
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -23,7 +28,7 @@ const env = { ...process.env };
 const envFile = path.join(root, "app/.env.local");
 if (fs.existsSync(envFile)) {
   for (const line of fs.readFileSync(envFile, "utf8").split("\n")) {
-    const m = line.match(/^\s*(CLIENT_ID|SIDEKICK_PUBLIC_URL|SIDEKICK_LIVE_URL)\s*=\s*"?([^"\s#]*)"?/);
+    const m = line.match(/^\s*(CLIENT_ID|ENTRA_CLIENT_ID|SIDEKICK_PUBLIC_URL|SIDEKICK_LIVE_URL|SIDEKICK_WEBSITE_URL)\s*=\s*"?([^"\s#]*)"?/);
     if (m && !env[m[1]]) env[m[1]] = m[2];
   }
 }
@@ -55,12 +60,29 @@ try {
 }
 if (publicUrl.protocol !== "https:") fail("The app's address must start with https:// (Teams only accepts https).");
 
+let websiteUrl = publicUrl;
+if (env.SIDEKICK_WEBSITE_URL) {
+  try {
+    websiteUrl = new URL(env.SIDEKICK_WEBSITE_URL);
+  } catch {
+    fail("SIDEKICK_WEBSITE_URL isn't a valid URL.");
+  }
+  if (websiteUrl.protocol !== "https:") fail("SIDEKICK_WEBSITE_URL must start with https://.");
+}
+
 const template = fs.readFileSync(path.join(src, "manifest.template.json"), "utf8");
 const manifest = template
+  .replaceAll("{{AAD_APP_ID}}", (env.ENTRA_CLIENT_ID || botId).toLowerCase())
   .replaceAll("{{BOT_ID}}", botId.toLowerCase())
   .replaceAll("{{PUBLIC_URL}}", publicUrl.origin)
-  .replaceAll("{{PUBLIC_HOST}}", publicUrl.host);
-const { version } = JSON.parse(manifest); // also fails early on a broken template
+  .replaceAll("{{PUBLIC_HOST}}", publicUrl.host)
+  .replaceAll("{{WEBSITE_URL}}", websiteUrl.origin)
+  .replaceAll("{{WEBSITE_HOST}}", websiteUrl.host);
+const parsed = JSON.parse(manifest); // also fails early on a broken template
+const { version } = parsed;
+// Teams refuses duplicate valid domains.
+parsed.validDomains = [...new Set(parsed.validDomains)];
+const manifestOut = JSON.stringify(parsed, null, 2);
 
 // Each flavor is staged in its own folder (both have a manifest.json) and zipped next to the other.
 const stage = path.join(out, flavor);
@@ -70,7 +92,7 @@ fs.rmSync(path.join(out, zip), { force: true });
 // Leftovers of the old unlabeled package (before Oct 20, 2026): ambiguous about where it points, so removed.
 for (const old of ["sidekick-teams.zip", "manifest.json", "color.png", "outline.png"]) fs.rmSync(path.join(out, old), { force: true });
 fs.mkdirSync(stage, { recursive: true });
-fs.writeFileSync(path.join(stage, "manifest.json"), manifest);
+fs.writeFileSync(path.join(stage, "manifest.json"), manifestOut);
 for (const icon of ["color.png", "outline.png"]) fs.copyFileSync(path.join(src, icon), path.join(stage, icon));
 execFileSync("zip", ["-q", path.join(out, zip), "manifest.json", "color.png", "outline.png"], { cwd: stage });
 

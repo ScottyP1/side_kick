@@ -5,7 +5,7 @@
  * could send a link that shows their own words on Sidekick's real sign-in page ("call this number to unlock
  * your account"). Now the server puts the text in a short-lived cookie (URL-encoded by Next.js), which another website can't set, and
  * the address only says *that* there is a message (`?error=1`). The page reads the cookie once and deletes it.
- * Security review L4, Oct 2026. Used by the Microsoft callback, /login and /settings. No secrets go in here.
+ * Security review L4, Oct 2026. Used by the Microsoft callback and admin-consent routes, /login, /settings and /users. No secrets go in here.
  */
 
 /** The cookie holding the message (readable by the page, 2 minutes, whole site). */

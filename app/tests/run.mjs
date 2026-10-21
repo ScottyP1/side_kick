@@ -1,10 +1,14 @@
 /**
  * `npm test`: runs every automated test, on both database engines.
  *   1. Database-layer tests (tests/db.test.mjs) on SQLite, then Postgres.
- *   2. End-to-end API tests (tests/api.test.mjs) on SQLite, then Postgres.
+ *   2. End-to-end API tests (tests/api.test.mjs, single-tenant Teams) on SQLite, then Postgres.
+ *   2b. Multi-tenant Microsoft/Teams tests (tests/teams-multitenant.test.mjs, a second app copy on ports
+ *       3210/3211) on SQLite, then Postgres.
  *   3. Production build (`next build`), the same step the Docker image and the Azure deploy run. The tests
  *      above use `next dev`, which lets through some errors only a production build reports (for example a
  *      page that needs a <Suspense> boundary under cacheComponents), so this catches them before a deploy does.
+ * Several worktrees can run at once with their own ports and database: TEST_PORT / TEST_MT_PORT (defaults
+ * 3200/3201 and 3210/3211) and TEST_DATABASE_URL.
  * Postgres tests use TEST_DATABASE_URL (default postgres:///sidekick_test, a database on this Mac that is
  * wiped first). If no Postgres is running, those are skipped with a warning; set REQUIRE_POSTGRES=1 to fail
  * instead (use that in CI). Nothing here touches app/data or any real service: the build uses its own
@@ -53,6 +57,8 @@ if (pgOk) {
 
 step("End-to-end API · SQLite", ["--test", "--test-timeout=300000", "tests/api.test.mjs"], { TEST_DB: "sqlite" });
 if (pgOk) step("End-to-end API · Postgres", ["--test", "--test-timeout=300000", "tests/api.test.mjs"], { TEST_DB: "postgres", TEST_DATABASE_URL: PG_URL });
+step("Multi-tenant Teams · SQLite", ["--test", "--test-timeout=300000", "tests/teams-multitenant.test.mjs"], { TEST_DB: "sqlite" });
+if (pgOk) step("Multi-tenant Teams · Postgres", ["--test", "--test-timeout=300000", "tests/teams-multitenant.test.mjs"], { TEST_DB: "postgres", TEST_DATABASE_URL: PG_URL });
 
 /**
  * Runs `next build` like the Docker image does, in a throwaway build folder (NEXT_DIST_DIR) so it never

@@ -225,8 +225,6 @@ CREATE TABLE IF NOT EXISTS reminder_state (
 -- Reminders: due dates as real dates (YYYY-MM-DD).
 ALTER TABLE action_items ADD COLUMN IF NOT EXISTS due_on TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS due_on TEXT;
--- Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
-ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS client TEXT;
 -- Setup wizard progress per organization (lib/setup.ts): which steps are done or skipped, and when it finished.
 CREATE TABLE IF NOT EXISTS org_setup (
   org_id TEXT PRIMARY KEY REFERENCES orgs(id), json TEXT NOT NULL, completed_at TEXT, updated_at TEXT NOT NULL
@@ -243,3 +241,5 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   past_due_since TEXT, canceled_at TEXT, access_until TEXT,
   updated_by TEXT, updated_at TEXT NOT NULL, created_at TEXT NOT NULL
 );
+-- Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS client TEXT;

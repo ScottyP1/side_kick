@@ -6,9 +6,11 @@
  *   they chose), and a subscription on the chosen plan in its free trial (lib/billing.ts `startTrial`), all
  *   in one transaction, plus its setup-wizard progress (lib/setup.ts) so the wizard follows checkout. The
  *   route then signs them in and sends them to checkout.
- * - **Switch**: the Sidekick team can turn self-service sign-up off in the Owner Console (Releases &
- *   switches → "Self-service sign-up", key `signup` in lib/owner.ts). Off = only the Sidekick team adds
- *   clients, as before.
+ * - **Switch**: self-service sign-up is **off by default** (a fresh install or deploy refuses it), so
+ *   strangers can't create organizations that use real Claude credit until the Sidekick team decides to.
+ *   Open it in the Owner Console (Releases & switches → "Self-service sign-up", key `signup` in
+ *   lib/owner.ts) or with `SIDEKICK_SIGNUP_OPEN=true` on the deploy; the Owner Console switch, once
+ *   flipped, wins over the env var. Closed = only the Sidekick team adds clients.
  * - **Sign-up limit**: like the sign-in limit (lib/login-limit.ts), stored in the database so it holds
  *   across app copies: at most `SIGNUP_LIMIT` attempts (successful or not) per IP address per
  *   `SIGNUP_WINDOW_MINUTES`. Stops one machine creating many organizations or probing which emails exist.
@@ -35,8 +37,8 @@ export const SIGNUP_LIMIT = 5;
 /** How long attempts count. */
 export const SIGNUP_WINDOW_MINUTES = 60;
 
-/** Shown when sign-up is switched off in the Owner Console. */
-export const SIGNUP_CLOSED = "Self-service sign-up is closed right now. Contact the Sidekick team to get an organization set up.";
+/** Shown when sign-up isn't open (the default) or was switched off in the Owner Console. */
+export const SIGNUP_CLOSED = "Self-service sign-up isn't open yet. Contact the Sidekick team (see Support) to get an organization set up.";
 
 /** What the sign-up form sends. */
 export type SignUpInput = {

@@ -33,7 +33,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/login-limit.ts` | Sign-in rate limit: failed password sign-ins per email and per IP, stored in `login_failures` (works across several app copies) |
 | `lib/plans.ts` | The plans (Starter/Team/Business: made-up per-person prices, seat and workspace limits), trial/grace lengths and `accessFor` (what a trialing/past_due/canceled subscription allows: full or read-only). Pure, shared by pages and server, unit-tested |
 | `lib/billing.ts` | Subscriptions (`subscriptions` table) behind a billing provider: `mock` (test mode, no payment details ever) now, Stripe later (documented in the file). Pay, change plan, cancel, simulate a failed payment, operator changes; `readOnlyRefusal` (used by `handle()`) |
-| `lib/signup.ts` | Self-service sign-up: org + Org Owner + trial in one transaction, the Owner Console switch (`signup` flag), per-IP limit (`signup_attempts`), the hook for "Sign up with Microsoft" |
+| `lib/signup.ts` | Self-service sign-up: org + Org Owner + trial in one transaction, the `signup` switch (**off by default**; opened in the Owner Console or with `SIDEKICK_SIGNUP_OPEN=true`, see `flagDefault` in lib/owner.ts), per-IP limit (`signup_attempts`), the hook for "Sign up with Microsoft" |
 | `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification |
 | `lib/owner.ts` | Owner Console sign-in, kill switches (`assertEnabled`), operator log |
 | `lib/trace.ts` | Traces and steps (spans) for every request and Teams message; feeds the Activity page and the home orb |

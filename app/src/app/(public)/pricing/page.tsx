@@ -1,11 +1,13 @@
 /**
  * Pricing (/pricing): Sidekick's public landing page. What Sidekick does, the plans from lib/plans.ts with
  * their (made-up, test-mode) prices, and a "Start free trial" button per plan that opens /signup with that
- * plan picked. No sign-in needed.
+ * plan picked; while sign-up isn't open (the default) a note says so and the buttons say "Contact us"
+ * (components/signup-status.tsx). No sign-in needed.
  */
 import Link from "next/link";
 import type { Metadata } from "next";
 import { PublicShell, TestModeBanner } from "@/components/public-shell";
+import { SignupClosedNotice, TrialButton } from "@/components/signup-status";
 import { limitText, PLANS, priceText, TRIAL_DAYS } from "@/lib/plans";
 
 export const metadata: Metadata = { title: "Sidekick: plans and pricing" };
@@ -24,6 +26,7 @@ export default function PricingPage() {
           </p>
         </div>
       </div>
+      <SignupClosedNotice />
       <TestModeBanner />
       <div className="grid g3">
         {PLANS.map((p) => (
@@ -37,7 +40,7 @@ export default function PricingPage() {
               </ul>
               <span className="faint" style={{ fontSize: 12.5 }}>{limitText(p.seats)} people · {limitText(p.workspaces)} workspaces · {priceText(p)}</span>
               <span style={{ flex: 1 }} />
-              <Link className={`btn ${p.id === "team" ? "primary" : ""}`} href={`/signup?plan=${p.id}`}>Start free trial</Link>
+              <TrialButton plan={p.id} primary={p.id === "team"} />
             </div>
           </div>
         ))}

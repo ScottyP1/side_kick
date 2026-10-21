@@ -391,7 +391,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":
 
 const S = {
   screen: "wizard", step: 0,
-  m365: false, notAdmin: false, install: "all", preset: "standard",
+  m365: false, notAdmin: false, install: "leads", preset: "standard",
   wizGroups: [{ name: "Payments Platform", client: "Northwind Bank", lead: "priya" }, { name: "Patient Portal", client: "Fabrikam Health", lead: "tom" }],
   filter: "all",
   groups: [
@@ -514,6 +514,7 @@ function wM365() {
       <div class="perm">${ic("check")}<b>See your company directory (names, job titles, email)</b><span></span><span class="muted">So you can pick group leaders and members from a list instead of typing them.</span></div>
       <div class="perm">${ic("check")}<b>Read chats that Sidekick has been added to</b><span></span><span class="muted">Everything in chats where someone adds Sidekick on purpose, once the chat is linked to a group. It can't see any other chat.</span></div>
       <div class="perm">${ic("check")}<b>Read meeting transcripts of those chats' meetings</b><span></span><span class="muted">To write meeting notes and action items.</span></div>
+      <div class="perm">${ic("check")}<b>Remove itself from a chat</b><span></span><span class="muted">So Sidekick can leave chats nobody assigned to a group, or that you remove it from.</span></div>
       <div class="perm no">${ic("x")}<b>Never: email, OneDrive, calendars or chats it isn't in</b><span></span><span class="muted">Sidekick doesn't ask for these, so it can't read them.</span></div>
     </div></div>
     ${ok ? "" : `<div class="row">
@@ -531,7 +532,8 @@ function wTeams() {
   return `<header><span class="eyebrow">Step 3 of 6</span><h1>Add Sidekick to Teams</h1>
     <p>This puts Sidekick in your people's Teams app list. It doesn't join any chat by itself: someone has to add it to a chat first.</p></header>
     <div class="stack" role="radiogroup" aria-label="Who gets Sidekick in Teams">
-      ${c("all", "Everyone at " + ORG.name + " (recommended)", "Anyone can add Sidekick to a chat. Only people in a group can use that group's knowledge.")}
+      ${c("leads", "Only Team Leads and admins (recommended)", "Only they can add Sidekick to a chat, so it can't be pulled into chats it shouldn't be in. Members still see its answers and cards in assigned chats.")}
+      ${c("all", "Everyone at " + ORG.name, "Anyone can add Sidekick to a chat. It still stays silent there until a Team Lead assigns the chat in the portal.")}
       ${c("some", "Only some people", "Pick Microsoft 365 groups or people. Good for a pilot with one or two client teams.")}
     </div>
     ${S.install === "some" ? `<div class="panel"><div class="panel-b stack"><span class="lbl" style="font-weight:500">Who gets it</span>
@@ -573,7 +575,7 @@ function wGroups() {
 }
 function wDone() {
   const items = [
-    ["Microsoft 365 connected", S.m365 ? "Approved for " + ORG.domain : "Waiting for your IT admin"], ["Sidekick added to Teams", S.install === "all" ? "For everyone" : "For selected people"],
+    ["Microsoft 365 connected", S.m365 ? "Approved for " + ORG.domain : "Waiting for your IT admin"], ["Sidekick added to Teams", S.install === "all" ? "For everyone" : S.install === "leads" ? "For Team Leads and admins" : "For selected people"],
     ["Rules", PRESET[S.preset].name + " starting point"], ["Groups created", S.wizGroups.filter(g => g.name).map(g => g.client ? g.client : g.name).join(", ") || "None yet"],
   ];
   return `<header><span class="eyebrow">Step 6 of 6</span><h1>You're set up</h1><p>Here's what happens next, and what's left for you.</p></header>
@@ -736,16 +738,16 @@ function chatToggles(c, key) {
   return `<div class="toggles">${t("notes", "Meeting notes", "Post notes and action items after meetings")}${t("remind", "Daily reminders", "Overdue items and open questions, once a day")}</div><p class="small muted" style="margin-top:8px">${ic("eye")} Once linked, Sidekick reads every message in this chat (it says so in the chat). Unlinking deletes what it saved.</p>`;
 }
 function leadChats() {
-  return `${S.waiting.length ? `<div class="panel raised"><div class="panel-h" style="background:var(--hand-soft);border-radius:var(--r) var(--r) 0 0"><span style="color:var(--hand)">${ic("bell")}</span><div><h3>Chats waiting for a group</h3><p class="small muted">Someone on your team added Sidekick to these Teams chats, but nobody has said which group they're for yet. Pick the ones that belong to Payments Platform. Until you do, Sidekick doesn't read or save anything in them.</p></div></div>
+  return `${S.waiting.length ? `<div class="panel raised"><div class="panel-h" style="background:var(--hand-soft);border-radius:var(--r) var(--r) 0 0"><span style="color:var(--hand)">${ic("bell")}</span><div><h3>Chats waiting for a group</h3><p class="small muted">Someone added Sidekick to these Teams chats. Chats are only ever assigned here in the portal, never from Teams. Until you assign one, Sidekick reads nothing, saves nothing and answers nothing there. If nobody assigns a chat within 7 days, Sidekick leaves it on its own.</p></div></div>
     ${S.waiting.map((c, i) => `<div class="chatc"><span class="chat-ic">${ic("chat")}</span><div>
       <div class="row"><h3>${esc(c.name)}</h3>${c.guests ? `<span class="pill hand">${c.guests} client guests</span>` : ""}</div>
       <p class="small muted">${c.kind} · ${c.people} people · Sidekick added by ${esc(c.by)} ${c.when}</p>
       ${c.guests ? `<p class="small" style="margin-top:6px">${ic("guest")} People from northwindbank.example are in this chat, so Sidekick will only use documents marked <b>Shareable</b> here.</p>` : ""}
       ${chatToggles(c, "w" + i)}
-      <div class="row" style="margin-top:12px"><button class="btn primary" data-act="link" data-i="${i}">${ic("check")}Add to Payments Platform</button><button class="btn" data-act="notmine" data-i="${i}">Not this group</button><span class="spacer"></span><span class="small faint">Not linked: Sidekick stays quiet here</span></div>
-    </div></div>`).join("")}</div>` : `<div class="callout good">${ic("check")}<div>No chats waiting. When someone adds Sidekick to a new chat, it shows up here and Sidekick asks in the chat too.</div></div>`}
-    <div class="panel"><div class="panel-h"><h3>Linked chats</h3><span class="small muted">${S.linked.length}</span><span class="spacer"></span><span class="small muted">To add one: add Sidekick to the chat in Teams</span></div>
-    ${S.linked.map((c, i) => `<div class="chatc"><span class="chat-ic">${ic("chat")}</span><div><div class="row"><h3>${esc(c.name)}</h3>${c.guests ? `<span class="pill hand">${c.guests} client guests</span>` : ""}<span class="spacer"></span><button class="btn sm ghost">Unlink</button></div>
+      <div class="row" style="margin-top:12px"><button class="btn primary" data-act="link" data-i="${i}">${ic("check")}Add to Payments Platform</button><button class="btn" data-act="notmine" data-i="${i}">${ic("x")}Remove Sidekick from this chat</button><span class="spacer"></span><span class="small muted">Leaves on its own in ${7 - i * 2} days</span></div>
+    </div></div>`).join("")}</div>` : `<div class="callout good">${ic("check")}<div>No chats waiting. When someone adds Sidekick to a new chat, it shows up here for you to assign.</div></div>`}
+    <div class="panel"><div class="panel-h"><h3>Linked chats</h3><span class="small muted">${S.linked.length}</span><span class="spacer"></span><span class="small muted">To add one: add Sidekick to the chat in Teams, then assign it here</span></div>
+    ${S.linked.map((c, i) => `<div class="chatc"><span class="chat-ic">${ic("chat")}</span><div><div class="row"><h3>${esc(c.name)}</h3>${c.guests ? `<span class="pill hand">${c.guests} client guests</span>` : ""}<span class="spacer"></span><button class="btn sm ghost">Unassign</button><button class="btn sm ghost">Remove Sidekick</button></div>
       <p class="small muted">${c.kind} · ${c.people} people</p>${chatToggles(c, "l" + i)}</div></div>`).join("")}</div>`;
 }
 function leadDocs() {
@@ -774,7 +776,7 @@ function teams() {
   let thread = "";
   if (sc === "welcome") thread = `<div class="sys">Sidekick sent you a message</div>` + bot(`<div class="acard"><div class="stripe"></div><div class="ah"><span class="eyebrow">Northwind Bank</span><h3>You're the Team Lead of Payments Platform</h3></div>
     <div class="ab"><p>Alex Rivera set up this group for your client team. Three things to do, about 5 minutes:</p>
-    <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px"><li><b>Add your people.</b> In any chat with them type <span class="mono">@Sidekick add @name</span>.</li><li><b>Add me to your team's chats</b>, then pick “Payments Platform” on the card I post.</li><li><b>Upload the key documents</b> (specs, plans, runbooks) in the portal.</li></ol></div>
+    <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px"><li><b>Add your people.</b> In any chat with them type <span class="mono">@Sidekick add @name</span>.</li><li><b>Add me to your team's chats</b>, then assign them to Payments Platform in the portal.</li><li><b>Upload the key documents</b> (specs, plans, runbooks) in the portal.</li></ol></div>
     <div class="aa"><button class="btn primary sm" data-go="lead">Open my group</button><button class="btn sm" data-act="scene" data-v="add">Show me how</button></div></div>`);
   if (sc === "add") {
     thread = person("priya", `${mention("@Sidekick")} add ${mention("@Maria Lopez")} ${mention("@Dev Patel")}`, true);
@@ -788,34 +790,35 @@ function teams() {
   }
   if (sc === "newchat") {
     thread = `<div class="sys">Priya Natarajan added Sidekick to the chat</div>`;
-    thread += bot(st.linked ? `<div class="acard"><div class="stripe good"></div><div class="ah"><h3>This chat is now part of Payments Platform</h3><span class="small muted">Linked by Priya Natarajan</span></div>
-        <div class="ab"><div class="cmds"><span class="muted">Meeting notes</span><b>On</b><span class="muted">Daily reminders</span><b>On</b><span class="muted">Reads this chat</span><b>Every message, from now on</b></div></div>
-        <div class="aa"><button class="btn sm" data-go="lead">Change in the portal</button></div></div>`
-      : `<div class="acard"><div class="stripe"></div><div class="ah"><h3>Which group is this chat for?</h3></div>
-        <div class="ab"><p>Hi, I'm Sidekick. Pick a group so I know which documents and meetings to answer from. Once you do, I'll read everything in this chat to keep notes and answer questions. Until then I won't read or save anything here.</p>
-        <p class="small muted">Only Team Leads and admins can pick. It also shows in the portal under Chats waiting.</p></div>
-        <div class="aa"><button class="btn primary sm" data-act="sst" data-k="linked">Payments Platform · Northwind Bank</button><button class="btn sm">Another group…</button><button class="btn sm ghost">Not a work chat</button></div></div>`);
-    if (st.linked) thread += person("maria", `${mention("@Sidekick")} when is the wave 2 cutover?`);
+    thread += bot(`<div class="acard"><div class="stripe warn"></div><div class="ah"><h3>I'm not set up for this chat yet</h3></div>
+      <div class="ab"><p>Hi, I'm Sidekick. A Team Lead needs to assign this chat to a group in the Sidekick portal. Until then I won't read, save or answer anything here.</p>
+      <p class="small muted">If nobody assigns it within 7 days, I'll leave the chat.</p></div></div>`);
+    if (st.linked) {
+      thread += `<div class="sys">Priya Natarajan assigned this chat to Payments Platform in the Sidekick portal</div>`;
+      thread += bot(`<div class="acard"><div class="stripe good"></div><div class="ah"><h3>This chat is now part of Payments Platform</h3><span class="small muted">Northwind Bank · assigned by Priya Natarajan in the portal</span></div>
+        <div class="ab"><div class="cmds"><span class="muted">Meeting notes</span><b>On</b><span class="muted">Daily reminders</span><b>On</b><span class="muted">Reads this chat</span><b>Every message, from now on</b></div></div></div>`);
+      thread += person("maria", `${mention("@Sidekick")} when is the wave 2 cutover?`);
+    }
   }
   if (sc === "notlead") {
     thread = person("dev", `${mention("@Sidekick")} add ${mention("@Chen Wei")}`);
     thread += bot(`<div class="acard"><div class="ah" style="padding-top:12px"><h3>Only the Team Lead can add people</h3></div><div class="ab"><p>Priya Natarajan leads Payments Platform. I can ask her for you.</p>${st.asked ? `<p class="small" style="color:var(--good)">${ic("check")} Asked Priya. You'll get a message when it's done.</p>` : ""}</div>
       ${st.asked ? "" : `<div class="aa"><button class="btn primary sm" data-act="sst" data-k="asked">Ask Priya to add Chen</button></div>`}</div>`);
   }
-  const chats = [["welcome", "Sidekick", "You're the Team Lead of…"], ["add", "Payments core team", "Sidekick: Added 2 people…"], ["newchat", "Payments – sprint 14 standup", "Sidekick: Which group is…"], ["notlead", "Payments core team", "Dev: @Sidekick add…"]];
+  const chats = [["welcome", "Sidekick", "You're the Team Lead of…"], ["add", "Payments core team", "Sidekick: Added 2 people…"], ["newchat", "Payments – sprint 14 standup", "Sidekick: I'm not set up for…"], ["notlead", "Payments core team", "Dev: @Sidekick add…"]];
   return `<div class="content" style="margin:0 auto">
     <div class="page-head"><div><h1>In Teams</h1><p>What a Team Lead does without opening the portal. Sidekick's cards use the product palette; the rest is a rough sketch of Teams.</p></div></div>
     <div class="row"><div class="seg" role="group" aria-label="Scene">${Object.entries(SCENES).map(([k, [l]]) => `<button aria-pressed="${sc === k}" data-act="scene" data-v="${k}">${l}</button>`).join("")}</div></div>
     <div class="teams"><div class="t-rail">${["Chat", "Teams", "Calendar", "Apps"].map((x, i) => `<i class="${i === 0 ? "on" : ""}">${ic(["chat", "users", "video", "plug"][i])}</i>`).join("")}</div>
       <div class="t-list"><h4>Chat</h4>${chats.map(([k, n, last]) => `<button class="t-chat ${k === sc ? "on" : ""}" data-act="scene" data-v="${k}">${k === "welcome" ? `<span class="bot-av" style="width:28px;height:28px;font-size:12px">S</span>` : `<span class="av" style="background:var(--teams-me);color:var(--teams)">${ic("users")}</span>`}<div><b style="font-weight:500">${esc(n)}</b><span>${esc(last)}</span></div></button>`).join("")}</div>
-      <div class="t-main"><div class="t-head"><b>${esc(SCENES[sc][1])}</b><span class="small muted">${SCENES[sc][2]}</span><span class="spacer"></span>${st && Object.keys(st).length ? `<button class="btn sm ghost" data-act="sreset">Replay</button>` : ""}</div>
+      <div class="t-main"><div class="t-head"><b>${esc(SCENES[sc][1])}</b><span class="small muted">${SCENES[sc][2]}</span><span class="spacer"></span>${sc === "newchat" && !st.linked ? `<button class="btn sm" data-act="sst" data-k="linked">Simulate: Priya assigns it in the portal</button>` : ""}${st && Object.keys(st).length ? `<button class="btn sm ghost" data-act="sreset">Replay</button>` : ""}</div>
         <div class="t-thread">${thread}</div>
         <div class="t-compose"><div>Type a message</div></div></div></div>
     <div class="panel"><div class="panel-h"><h3>What leads can type in Teams</h3></div><div class="panel-b"><div class="cmds">
       <span class="mono">@Sidekick add @name</span><span>Add people to this chat's group (Team Lead or admin)</span>
       <span class="mono">@Sidekick remove @name</span><span>Take someone off the group</span>
       <span class="mono">@Sidekick members</span><span>List who's in the group</span>
-      <span class="mono">@Sidekick link</span><span>Show or pick which group this chat belongs to</span>
+      <span class="mono">@Sidekick link</span><span>Show which group this chat belongs to (assigning is done in the portal)</span>
       <span class="mono">@Sidekick &lt;question&gt;</span><span>Ask anything; answers come with sources</span></div></div></div>
   </div>`;
 }
@@ -903,7 +906,7 @@ document.addEventListener("click", e => {
       case "tab": S.tab = v; break;
       case "toggle": setPath(a.dataset.key, !getPath(a.dataset.key)); break;
       case "link": { const c = S.waiting.splice(i, 1)[0]; S.linked.push(c); S.groups[0].waiting = S.waiting.length; S.groups[0].chats++; toast(`“${c.name}” is now part of Payments Platform. Sidekick said so in the chat.`); break; }
-      case "notmine": { const c = S.waiting.splice(i, 1)[0]; S.groups[0].waiting = S.waiting.length; toast(`“${c.name}” moved back to the admins' list. Sidekick stays quiet there.`); break; }
+      case "notmine": { const c = S.waiting.splice(i, 1)[0]; S.groups[0].waiting = S.waiting.length; toast(`Sidekick left “${c.name}” and posted a short goodbye there.`); break; }
       case "addopen": S.addOpen = !S.addOpen; S.add = { members: new Set(), q: "", dept: "All" }; break;
       case "addsave": S.add.members.forEach(id => S.members.push([id, "Member", "Added in the portal by Priya"])); toast(`Added ${S.add.members.size} people. They'll get a hello from Sidekick in Teams.`); S.addOpen = false; break;
       case "mremove": { const m = S.members.splice(i, 1)[0]; toast(`${P[m[0]].name} was taken off Payments Platform.`); break; }

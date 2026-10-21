@@ -50,3 +50,5 @@ next-env.d.ts
 /devTools/
 /.next-preview/
 /.preview-data/
+/.e2e-data-*/
+/.next-e2e-*/

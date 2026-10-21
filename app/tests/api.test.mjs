@@ -1510,7 +1510,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
 async function dbExec(sql) {
   if (ENGINE === "postgres") return void (await promisify(execFile)("psql", [PG_URL, "-tAc", sql], { timeout: 20000 }));
   const { DatabaseSync } = await import("node:sqlite");
-  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"));
+  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { timeout: 10000 });
   try {
     db.exec(sql);
   } finally {
@@ -2090,7 +2090,7 @@ test(`[${ENGINE}] assistant button: on every portal and public page, never in th
 async function dbValue(sql) {
   if (ENGINE === "postgres") return (await promisify(execFile)("psql", [PG_URL, "-tAc", sql], { timeout: 20000 })).stdout.trim();
   const { DatabaseSync } = await import("node:sqlite");
-  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { readOnly: true });
+  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { readOnly: true, timeout: 10000 });
   try {
     return String(Object.values(db.prepare(sql).get() ?? {})[0] ?? "");
   } finally {
@@ -2105,7 +2105,7 @@ async function rows(table, col, id) {
     return Number(stdout.trim());
   }
   const { DatabaseSync } = await import("node:sqlite");
-  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { readOnly: true });
+  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { readOnly: true, timeout: 10000 });
   try {
     return Number(db.prepare(sql).get().n);
   } finally {

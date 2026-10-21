@@ -253,7 +253,7 @@ const toBot = (a) => fetch(`${BASE}/api/messages`, { method: "POST", headers: { 
 async function count(sql) {
   if (ENGINE === "postgres") return Number(execFileSync("psql", [PG_URL, "-tAc", sql], { encoding: "utf8" }).trim());
   const { DatabaseSync } = await import("node:sqlite");
-  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { readOnly: true });
+  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { readOnly: true, timeout: 10000 });
   try {
     return Number(Object.values(db.prepare(sql).get())[0]);
   } finally {

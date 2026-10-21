@@ -468,7 +468,9 @@ function sqlite(): DatabaseSync {
       throw new Error("No database configured: set DATABASE_URL to a PostgreSQL database (or SIDEKICK_ALLOW_SQLITE=1 for a single-machine demo).");
     }
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    globalThis.__sidekickDb = new DatabaseSync(DB_PATH);
+    // Wait up to 5 s for a lock held by another process on the same file (scripts such as reset-password, or a
+    // test changing a row), instead of failing at once with "database is locked".
+    globalThis.__sidekickDb = new DatabaseSync(DB_PATH, { timeout: 5000 });
   }
   // Apply the schema and migrations on first use, and again whenever they change while the server keeps
   // running (a code reload in development keeps the old connection, which would miss new tables/columns).

@@ -234,6 +234,8 @@ const ICONS: Record<string, string> = {
   refresh: "M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6",
   logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
+  check: "M5 12.5l4.5 4.5L19 7.5",
+  chat: "M4 5h16v11H9l-5 4z",
 };
 export const Icon = ({ n }: { n: string }) => (
   <svg className="ico" viewBox="0 0 24 24" aria-hidden="true">

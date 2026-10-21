@@ -118,7 +118,7 @@ export async function announceTracking(conv: TeamsConversation, on: boolean, by:
   await postCard(
     conv,
     on
-      ? noticeCard("I'm now keeping track of this chat", "I'll read the messages here to keep track of decisions, dates and to-dos, and remind the team about what's still open. Only this workspace's team can search what I learn.", `Turned on by ${by}. An Org Admin can turn it off on the Workspaces page in Sidekick. Messages are kept ${CHAT_RETENTION_DAYS} days.`)
+      ? noticeCard("I'm now keeping track of this chat", "I'll read the messages here to keep track of decisions, dates and to-dos, and remind the team about what's still open. Only this workspace's team can search what I learn.", `Turned on by ${by}. An Org Admin or the Team Lead can turn it off on the group's page in Sidekick. Messages are kept ${CHAT_RETENTION_DAYS} days.`)
       : noticeCard("I've stopped keeping track of this chat", "I won't read new messages here any more. You can still @mention me with a question.", `Turned off by ${by}.`),
   );
 }

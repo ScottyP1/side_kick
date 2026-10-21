@@ -22,6 +22,8 @@ import { removeWorkspaceIndex } from "./search";
 /** Longest workspace name and engagement code, in characters. */
 export const MAX_NAME = 120;
 export const MAX_CODE = 40;
+/** Longest client name (the company a group works for), in characters. */
+export const MAX_CLIENT = 120;
 
 /**
  * Throws 409 when another workspace in the org already has this name (case-insensitive).

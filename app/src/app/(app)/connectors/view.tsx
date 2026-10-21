@@ -2,7 +2,7 @@
 
 /**
  * Connectors (/connectors): the tools Sidekick will read from (Outlook, SharePoint, Jira, ...).
- * Uploads, transcript import and Teams (chats and channels linked on the Workspaces page) work today; the
+ * Uploads, transcript import and Teams (chats and channels assigned on each group's page) work today; the
  * other tools are planned and will each connect with their own sign-in.
  */
 
@@ -12,7 +12,7 @@ const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; de
   { name: "Document upload", g: "Available now", mono: "⇪", bg: "var(--accent)", desc: "PDF, Word, text, Teams transcripts", live: true },
   { name: "Teams transcripts", g: "Available now", mono: "T", bg: "#5B5FC7", desc: "Import .vtt or .docx from meeting recaps", live: true },
   { name: "Outlook", g: "Microsoft 365", mono: "O", bg: "#0F6CBD", desc: "Calendar and email" },
-  { name: "Teams chats and channels", g: "Available now", mono: "T", bg: "#5B5FC7", desc: "Link them on the Workspaces page", live: true },
+  { name: "Teams chats and channels", g: "Available now", mono: "T", bg: "#5B5FC7", desc: "Assign them on each group's page", live: true },
   { name: "SharePoint", g: "Microsoft 365", mono: "S", bg: "#038387", desc: "Sites and document libraries" },
   { name: "OneDrive", g: "Microsoft 365", mono: "OD", bg: "#0364B8", desc: "Shared files and folders" },
   { name: "Planner", g: "Microsoft 365", mono: "P", bg: "#31752F", desc: "Tasks and plans" },

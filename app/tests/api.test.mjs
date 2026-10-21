@@ -925,6 +925,72 @@ test(`[${ENGINE}] Team Lead: the assistant only offers what a lead may do`, asyn
   assert.equal((await admin("POST", "/api/assistant", { message: `add Tia Tee tia@test.local as Team Lead to ${s.wsA}` })).body.action?.request.body.role, "Team Lead", "admins can make Team Leads");
 });
 
+/* ---------- Groups: a workspace with a client, a Team Lead and members (/api/workspaces, .../members) ---------- */
+
+test(`[${ENGINE}] groups: creating one sets the client, Team Lead and first members in one go; admin only, audited`, async () => {
+  const gina = (await admin("POST", "/api/users", { name: "Gina Group", email: "gina@test.local", role: "Member", workspaces: [] })).body.id;
+  const hal = (await admin("POST", "/api/users", { name: "Hal Helper", email: "hal@test.local", role: "Viewer", workspaces: [] })).body.id;
+  const adminId = (await admin("GET", "/api/me")).body.user.id;
+  assert.equal((await lead("POST", "/api/workspaces", { name: "Lead Group", lead: gina })).status, 403, "Team Leads can't create groups");
+  assert.equal((await admin("POST", "/api/workspaces", { name: "Bad Lead", lead: adminId })).status, 400, "an Org Owner can't be a group's Team Lead");
+  assert.equal((await admin("POST", "/api/workspaces", { name: "Ghost", lead: "no-such-person" })).status, 404);
+  assert.equal((await admin("POST", "/api/workspaces", { name: "Ghost", members: [gina, "no-such-person"] })).status, 404);
+  assert.ok(!(await admin("GET", "/api/workspaces")).body.workspaces.some((w) => ["Bad Lead", "Ghost"].includes(w.name)), "nothing half-created");
+
+  const r = await admin("POST", "/api/workspaces", { name: "Payments Platform", client: "Northwind Bank", code: "NWB-1", lead: gina, members: [hal, gina] });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  s.wsG = r.body.id;
+  const g = (await admin("GET", "/api/workspaces")).body.workspaces.find((w) => w.id === s.wsG);
+  assert.equal(g.client, "Northwind Bank");
+  assert.deepEqual(g.leads.map((l) => l.name), ["Gina Group"]);
+  assert.equal(g.members, 3, "the creator, the lead and one member");
+  assert.equal(g.chats, 0);
+  assert.equal(g.overdue, 0);
+  const people = (await admin("GET", "/api/users")).body.users;
+  assert.equal(people.find((u) => u.id === gina).role, "Team Lead", "picking a Member as lead makes them a Team Lead");
+  assert.equal(people.find((u) => u.id === hal).role, "Viewer", "members keep their role");
+
+  assert.equal((await admin("PATCH", `/api/workspaces/${s.wsG}`, { client: "Northwind Bank plc" })).status, 200);
+  assert.equal((await admin("GET", "/api/workspaces")).body.workspaces.find((w) => w.id === s.wsG).client, "Northwind Bank plc");
+  assert.equal((await admin("PATCH", `/api/workspaces/${s.wsG}`, { client: "x".repeat(121) })).status, 400);
+  const log = JSON.stringify((await admin("GET", "/api/audit")).body);
+  assert.match(log, /Created workspace “Payments Platform” for Northwind Bank/);
+  assert.match(log, /Changed Gina Group's role to Team Lead/);
+  assert.match(log, /Made Gina Group Team Lead of “Payments Platform”/);
+  assert.match(log, /client of “Payments Platform” from Northwind Bank to Northwind Bank plc/);
+});
+
+test(`[${ENGINE}] groups: members see who's in their group; admins and its Team Lead add and remove people`, async () => {
+  const people = (await admin("GET", "/api/users")).body.users;
+  const id = (email) => people.find((u) => u.email === email).id;
+  const seen = await member("GET", `/api/workspaces/${s.wsA}/members`);
+  assert.equal(seen.status, 200);
+  assert.equal(seen.body.canManage, false);
+  assert.ok(seen.body.members.some((m) => m.name === "Leo Lead"));
+  assert.ok(seen.body.members.every((m) => m.email === undefined), "emails only for people who manage the group");
+  assert.ok((await lead("GET", `/api/workspaces/${s.wsA}/members`)).body.members.every((m) => m.email), "the lead sees emails");
+  assert.equal((await member("GET", `/api/workspaces/${s.wsB}/members`)).status, 404, "not their group");
+  assert.equal((await member("POST", `/api/workspaces/${s.wsA}/members`, { users: [id("bea@test.local")] })).status, 403);
+  assert.equal((await viewer("DELETE", `/api/workspaces/${s.wsA}/members?user=${id("member@test.local")}`)).status, 403);
+
+  // The lead of A adds a Member, can't add an Org Owner or touch a group they don't lead.
+  assert.equal((await lead("POST", `/api/workspaces/${s.wsA}/members`, { users: [] })).status, 400);
+  assert.equal((await lead("POST", `/api/workspaces/${s.wsA}/members`, { users: [(await admin("GET", "/api/me")).body.user.id] })).status, 403);
+  assert.equal((await lead("POST", `/api/workspaces/${s.wsB}/members`, { users: [id("bea@test.local")] })).status, 404);
+  assert.equal((await lead("POST", `/api/workspaces/${s.wsG}/members`, { users: [id("bea@test.local")] })).status, 404, "another lead's group");
+  const add = await lead("POST", `/api/workspaces/${s.wsA}/members`, { users: [id("bea@test.local")] });
+  assert.equal(add.status, 200, JSON.stringify(add.body));
+  assert.equal(add.body.added, 1);
+  assert.equal((await lead("POST", `/api/workspaces/${s.wsA}/members`, { users: [id("bea@test.local")] })).body.added, 0, "adding twice changes nothing");
+  // ...and takes her off again, but not themselves.
+  assert.equal((await lead("DELETE", `/api/workspaces/${s.wsA}/members?user=${s.leadId}`)).status, 403);
+  assert.equal((await lead("DELETE", `/api/workspaces/${s.wsA}/members?user=${id("bea@test.local")}`)).status, 200);
+  assert.equal((await lead("DELETE", `/api/workspaces/${s.wsA}/members?user=${id("bea@test.local")}`)).status, 404, "already off");
+  const bea = (await admin("GET", "/api/users")).body.users.find((u) => u.email === "bea@test.local");
+  assert.deepEqual(bea.workspaces, [s.wsB], "her other group is untouched");
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Took Bea Bee off “Workspace A”/);
+});
+
 /* ---------- Guardrails (lib/guardrails.ts) and the workspace isolation check ---------- */
 const askA = (who, question, extra = {}) => who("POST", "/api/ask", { ws: s.wsA, question, ...extra });
 
@@ -1210,6 +1276,11 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await member("GET", `/api/guardrails?ws=${s.wsB}`)).status, 404);
   assert.ok(!/ZEBRA/.test(JSON.stringify((await member("GET", "/api/guardrails")).body)), "a member of A never sees B's rules");
   await admin("DELETE", `/api/guardrails/rules?id=${ruleB}`);
+  // Groups: another org can't list, add to or take people off workspace B.
+  assert.equal((await other("GET", `/api/workspaces/${s.wsB}/members`)).status, 404);
+  assert.equal((await other("POST", `/api/workspaces/${s.wsB}/members`, { users: [(await other("GET", "/api/me")).body.user.id] })).status, 404);
+  assert.equal((await other("DELETE", `/api/workspaces/${s.wsB}/members?user=${s.bea}`)).status, 404);
+  assert.equal((await other("POST", "/api/workspaces", { name: "Steal", lead: s.bea })).status, 404, "can't make someone from another org a lead");
   const theirWs = (await other("POST", "/api/workspaces", { name: "Leak WS" })).body.id;
   assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "vault code ZEBRA-7731" })));
   // From a Teams chat linked to workspace A.

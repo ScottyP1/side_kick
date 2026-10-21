@@ -1,0 +1,952 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sidekick Onboarding Mockup</title>
+<!--
+  Sidekick onboarding, groups and palette mockup (Phase 1 design, not app code).
+  One self-contained, clickable page for Cody to review before anything changes in the app:
+    1. Onboarding wizard after sign-up (Welcome → Microsoft 365 → Teams → Rules → First groups → Done)
+    2. Groups overview (the upgraded Workspaces page)
+    3. New group, all in one place (basics, Team Lead, members from the directory, chats, rules)
+    4. A Team Lead's view of their group (members, chats waiting to be picked, documents)
+    5. What the Team Lead does in Teams (@Sidekick add, the chat picker card, a non-lead trying)
+    6. Palette comparison with live WCAG contrast numbers
+  Two palettes ("navy" and "indigo") × light/dark, switched from the bar at the top.
+  The CSS tokens below are the proposal for app/src/app/globals.css (Phase 2).
+  All names and companies are made up (Contoso, Northwind, Fabrikam, ...). No real data.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: mockup control bar on top; under it either the wizard (centred, stepper + card) or the app frame (navy rail + work area). */
+/* Palette A "navy" (default): deep navy rail, Microsoft-style blue accent. */
+:root{
+  --bg:#f4f6fa; --surface:#ffffff; --sunken:#eef1f6; --line:#dbe1ea; --fg:#0f1a2e; --muted:#4f5d73; --faint:#68748a;
+  --accent:#1d4ed8; --accent-strong:#1a43bb; --accent-soft:#e4ecfc; --accent-fg:#ffffff;
+  --rail:#0c1b33; --rail-fg:#c3cde0; --rail-active:#1a2c4f; --rail-line:#ffffff1a;
+  --hand:#9a5300; --hand-soft:#fcefd9;
+  --good:#13743a; --good-soft:#e1f3e7; --warn:#8a5800; --warn-soft:#fbf0d6; --bad:#b42318; --bad-soft:#fbe4e1; --info:#1e5aa8; --info-soft:#e2ecf8;
+  --teams:#5b5fc7; --teams-bg:#f5f5f5; --teams-panel:#ffffff; --teams-me:#e8ebfa; --teams-line:#e1e1e1;
+  --shadow:0 1px 2px rgba(15,26,46,.06), 0 6px 20px rgba(15,26,46,.06);
+  --f-display:"Instrument Sans","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --r:10px;
+}
+/* Palette B "indigo": graphite rail, indigo accent (sits next to Teams' own purple). */
+:root[data-palette="indigo"]{
+  --bg:#f6f6f9; --surface:#ffffff; --sunken:#efeff4; --line:#e0e0e8; --fg:#17171f; --muted:#55576a; --faint:#6c6f83;
+  --accent:#4f46e5; --accent-strong:#4338ca; --accent-soft:#ecebfd; --accent-fg:#ffffff;
+  --rail:#1b1b26; --rail-fg:#c8c8d8; --rail-active:#2c2c3e; --rail-line:#ffffff1a;
+  --info:#1d5fc4; --info-soft:#e2ebfa;
+  --shadow:0 1px 2px rgba(23,23,31,.06), 0 6px 20px rgba(23,23,31,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0b1220; --surface:#121b2d; --sunken:#182338; --line:#26334d; --fg:#e6ebf4; --muted:#9eabc2; --faint:#8592a9;
+    --accent:#82a8ff; --accent-strong:#a3bfff; --accent-soft:#1b2b4f; --accent-fg:#0a1530;
+    --rail:#070d18; --rail-fg:#b0bcd3; --rail-active:#15233f; --rail-line:#ffffff14;
+    --hand:#f2a93b; --hand-soft:#3a2a12;
+    --good:#5fcf8a; --good-soft:#14301f; --warn:#f0b452; --warn-soft:#34290f; --bad:#ff8a7f; --bad-soft:#3d1a18; --info:#8fb8f5; --info-soft:#172846;
+    --teams:#7f85f5; --teams-bg:#1f1f1f; --teams-panel:#292929; --teams-me:#2f3150; --teams-line:#3a3a3a;
+    --shadow:0 1px 2px rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+  :root[data-palette="indigo"]:not([data-theme="light"]){
+    --bg:#101016; --surface:#17171f; --sunken:#1e1e29; --line:#2d2d3b; --fg:#ececf3; --muted:#a3a4b8; --faint:#8a8ca2;
+    --accent:#a7a3ff; --accent-strong:#c4c1ff; --accent-soft:#28264d; --accent-fg:#16133d;
+    --rail:#0b0b10; --rail-fg:#b9b9cc; --rail-active:#232333;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b1220; --surface:#121b2d; --sunken:#182338; --line:#26334d; --fg:#e6ebf4; --muted:#9eabc2; --faint:#8592a9;
+  --accent:#82a8ff; --accent-strong:#a3bfff; --accent-soft:#1b2b4f; --accent-fg:#0a1530;
+  --rail:#070d18; --rail-fg:#b0bcd3; --rail-active:#15233f; --rail-line:#ffffff14;
+  --hand:#f2a93b; --hand-soft:#3a2a12;
+  --good:#5fcf8a; --good-soft:#14301f; --warn:#f0b452; --warn-soft:#34290f; --bad:#ff8a7f; --bad-soft:#3d1a18; --info:#8fb8f5; --info-soft:#172846;
+  --teams:#7f85f5; --teams-bg:#1f1f1f; --teams-panel:#292929; --teams-me:#2f3150; --teams-line:#3a3a3a;
+  --shadow:0 1px 2px rgba(0,0,0,.35);
+  color-scheme:dark;
+}
+:root[data-palette="indigo"][data-theme="dark"]{
+  --bg:#101016; --surface:#17171f; --sunken:#1e1e29; --line:#2d2d3b; --fg:#ececf3; --muted:#a3a4b8; --faint:#8a8ca2;
+  --accent:#a7a3ff; --accent-strong:#c4c1ff; --accent-soft:#28264d; --accent-fg:#16133d;
+  --rail:#0b0b10; --rail-fg:#b9b9cc; --rail-active:#232333;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3,h4{font-family:var(--f-display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:24px;font-weight:700} h2{font-size:17px;font-weight:600} h3{font-size:15px;font-weight:600} h4{font-size:13.5px;font-weight:600}
+p{margin:0}
+.muted{color:var(--muted)} .faint{color:var(--faint)} .small{font-size:12.5px}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:12.5px}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.stack{display:flex;flex-direction:column;gap:12px}
+.spacer{flex:1}
+.ico{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* Mockup control bar (not part of the product) */
+.mock{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--surface);border-bottom:1px solid var(--line);padding:8px 16px;display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap}
+.mock .tag-mock{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;background:var(--hand-soft);color:var(--hand);padding:2px 8px;border-radius:5px;font-weight:500}
+.mock nav{display:flex;gap:2px;flex-wrap:wrap;min-width:0}
+.mock nav button{border:0;background:transparent;padding:5px 10px;border-radius:6px;cursor:pointer;color:var(--muted);font-weight:500;font-size:13px}
+.mock nav button:hover{color:var(--fg);background:var(--sunken)}
+.mock nav button[aria-current="true"]{background:var(--accent-soft);color:var(--accent)}
+.mock .opts{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 13px;cursor:pointer;font-weight:500;white-space:nowrap;text-decoration:none;color:var(--fg)}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn.primary:hover{background:var(--accent-strong);border-color:var(--accent-strong)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--accent)}
+.btn.ghost:hover{background:var(--accent-soft)}
+.btn.sm{padding:4px 10px;font-size:12.5px}
+.btn.lg{padding:10px 18px;font-size:15px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;padding:5px 11px;cursor:pointer;border-right:1px solid var(--line);font-size:13px;color:var(--muted)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
+.panel.raised{box-shadow:var(--shadow)}
+.panel-h{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.panel-b{padding:18px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:2px 9px;border-radius:99px;white-space:nowrap;background:var(--sunken);color:var(--muted)}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.nodot::before{display:none}
+.pill.good{background:var(--good-soft);color:var(--good)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.info{background:var(--info-soft);color:var(--info)} .pill.hand{background:var(--hand-soft);color:var(--hand)} .pill.accent{background:var(--accent-soft);color:var(--accent)}
+.tag{font-size:11.5px;border:1px solid var(--line);border-radius:5px;padding:0 6px;color:var(--muted);white-space:nowrap}
+.av{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:inline-grid;place-items:center;font-weight:600;font-size:11px;flex:none;border:2px solid var(--surface)}
+.av.lg{width:36px;height:36px;font-size:13px}
+.avs{display:flex}.avs .av+.av{margin-left:-8px}
+.input{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:8px 11px;width:100%}
+select.input{padding:7px 9px}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label,.field .lbl{font-weight:500;font-size:13px}
+.hint{font-size:12.5px;color:var(--muted)}
+.switch{position:relative;width:36px;height:20px;flex:none;border-radius:99px;background:var(--line);border:0;cursor:pointer;transition:background .15s;padding:0}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--surface);transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.switch[aria-checked="true"]{background:var(--accent)}
+.switch[aria-checked="true"]::after{transform:translateX(16px);background:var(--accent-fg)}
+.switch:disabled{opacity:.5;cursor:not-allowed}
+.check{width:18px;height:18px;accent-color:var(--accent);flex:none;margin:0}
+.callout{display:flex;gap:10px;padding:12px 14px;border-radius:8px;background:var(--info-soft);color:var(--fg);font-size:13.5px}
+.callout .ico{color:var(--info);margin-top:2px}
+.callout.hand{background:var(--hand-soft)} .callout.hand .ico{color:var(--hand)}
+.callout.good{background:var(--good-soft)} .callout.good .ico{color:var(--good)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:9px 14px;border-bottom:1px solid var(--line);background:var(--sunken);white-space:nowrap}
+td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.tw{overflow-x:auto}
+.toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:500;box-shadow:var(--shadow);z-index:50;max-width:calc(100% - 32px)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+
+/* ---------- Wizard ---------- */
+.wiz{max-width:1080px;margin:0 auto;padding-block:32px 64px;padding-inline:16px;display:grid;grid-template-columns:250px minmax(0,1fr);gap:28px}
+.wiz-side{display:flex;flex-direction:column;gap:20px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-mark{width:32px;height:32px;border-radius:8px;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font-family:var(--f-display);font-weight:700;font-size:16px}
+.brand b{font-family:var(--f-display);font-size:16px}
+.brand small{display:block;font-size:11.5px;color:var(--muted)}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.steps li{display:flex;gap:12px;align-items:flex-start;padding:9px 0;position:relative}
+.steps li:not(:last-child)::after{content:"";position:absolute;left:13px;top:38px;bottom:-4px;width:2px;background:var(--line)}
+.steps li.done:not(:last-child)::after{background:var(--accent)}
+.steps .n{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--muted);background:var(--surface);flex:none}
+.steps li.done .n{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.steps li.now .n{border-color:var(--accent);color:var(--accent)}
+.steps button{all:unset;cursor:pointer;display:flex;flex-direction:column;padding-top:3px}
+.steps button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+.steps b{font-weight:600;font-size:13.5px}
+.steps li:not(.now):not(.done) b{color:var(--muted);font-weight:500}
+.steps small{color:var(--muted);font-size:12px}
+.wiz-card{padding:32px;display:flex;flex-direction:column;gap:22px}
+.wiz-card > header{display:flex;flex-direction:column;gap:6px}
+.wiz-card > header p{color:var(--muted);max-width:620px;font-size:15px}
+.wiz-foot{display:flex;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:20px;flex-wrap:wrap}
+.choice{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border:1px solid var(--line);border-radius:9px;cursor:pointer;background:var(--surface);text-align:left;width:100%}
+.choice:hover{border-color:var(--faint)}
+.choice[aria-checked="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:color-mix(in srgb,var(--accent-soft) 45%,var(--surface))}
+.choice .radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--faint);flex:none;margin-top:2px;display:grid;place-items:center}
+.choice[aria-checked="true"] .radio{border-color:var(--accent)}
+.choice[aria-checked="true"] .radio::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.perm{display:grid;grid-template-columns:22px minmax(0,1fr);gap:4px 10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.perm:last-child{border-bottom:0}
+.perm .ico{color:var(--good);margin-top:3px}
+.perm.no .ico{color:var(--bad)}
+.ms-btn{display:inline-flex;align-items:center;gap:10px;background:var(--fg);color:var(--bg);border:0;border-radius:7px;padding:11px 18px;font-weight:600;cursor:pointer}
+.ms-logo{display:grid;grid-template-columns:8px 8px;gap:2px}
+.ms-logo i{width:8px;height:8px;display:block}
+.presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.cmp td:nth-child(n+2),.cmp th:nth-child(n+2){text-align:center;width:110px}
+.yes{color:var(--good);font-weight:600} .no-cell{color:var(--faint)}
+.gr-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.1fr) 34px;gap:10px;align-items:end}
+
+/* ---------- App frame ---------- */
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:calc(100vh - 49px)}
+.rail{background:var(--rail);color:var(--rail-fg);padding:18px 12px;display:flex;flex-direction:column;gap:16px}
+.rail .brand{padding:0 8px;color:#fff}
+.rail .brand b{color:#f4f7fc}
+.rail .brand small{color:var(--rail-fg)}
+.rail .brand-mark{background:#ffffff;color:var(--rail)}
+.org-pick{margin:0 4px;padding:8px 10px;border:1px solid var(--rail-line);border-radius:8px;font-size:12.5px;display:flex;align-items:center;gap:8px}
+.org-pick b{color:#f4f7fc;font-weight:600}
+.nav{display:flex;flex-direction:column;gap:1px}
+.nav .g{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;opacity:.6;padding:12px 10px 4px}
+.nav button{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:6px;font-size:13.5px}
+.nav button:hover{background:var(--rail-active);color:#fff}
+.nav button[aria-current="page"]{background:var(--rail-active);color:#fff;font-weight:500}
+.nav button:focus-visible{outline:2px solid #fff}
+.nav .count{margin-left:auto;font-size:11px;background:var(--hand);color:#1a1205;border-radius:99px;padding:0 7px;font-weight:600}
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:12px;padding:11px 28px;border-bottom:1px solid var(--line);background:var(--surface);flex-wrap:wrap}
+.search{flex:1;min-width:160px;max-width:420px;display:flex;align-items:center;gap:8px;background:var(--sunken);border:1px solid var(--line);border-radius:7px;padding:6px 10px;color:var(--muted)}
+.search input{border:0;background:transparent;outline:0;width:100%}
+.content{padding:24px 28px 56px;display:flex;flex-direction:column;gap:20px;max-width:1280px;width:100%}
+.crumbs{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.crumbs button{all:unset;cursor:pointer;color:var(--accent)}
+.page-head{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.page-head > div:first-child{flex:1;min-width:240px}
+.page-head p{color:var(--muted);margin-top:4px;max-width:640px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.stats > div{background:var(--surface);padding:14px 18px;display:flex;flex-direction:column;gap:2px}
+.stats .v{font-family:var(--f-display);font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15}
+.stats .v.hand{color:var(--hand)}
+
+/* Group cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.gcard{display:flex;flex-direction:column;cursor:pointer;text-align:left;transition:border-color .12s, box-shadow .12s}
+.gcard:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));box-shadow:var(--shadow)}
+.gcard .top{padding:16px 18px 12px;display:flex;flex-direction:column;gap:6px}
+.gcard .lead{display:flex;align-items:center;gap:10px;padding:0 18px 14px}
+.gcard .nums{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}
+.gcard .nums div{padding:10px 0;text-align:center;border-right:1px solid var(--line)}
+.gcard .nums div:last-child{border-right:0}
+.gcard .nums b{display:block;font-family:var(--f-display);font-size:17px;font-variant-numeric:tabular-nums}
+.gcard .nums span{font-size:11.5px;color:var(--muted)}
+.gcard .foot{display:flex;align-items:center;gap:8px;padding:10px 18px;border-top:1px solid var(--line);background:var(--sunken);border-radius:0 0 var(--r) var(--r);font-size:12.5px;color:var(--muted)}
+.gcard.newc{border-style:dashed;align-items:center;justify-content:center;min-height:200px;color:var(--accent);font-weight:600;gap:8px;background:transparent}
+
+/* New group */
+.ng{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+.sec{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px 14px;padding:22px}
+.sec + .sec{border-top:1px solid var(--line)}
+.sec .n{width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:600;font-size:12px}
+.sec .n.ok{background:var(--accent);color:var(--accent-fg)}
+.sec .body{display:flex;flex-direction:column;gap:14px;min-width:0}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.picker{border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.picker-h{display:flex;gap:8px;padding:10px;border-bottom:1px solid var(--line);background:var(--sunken);flex-wrap:wrap;align-items:center}
+.picker-h .search{background:var(--surface);max-width:none}
+.plist{max-height:300px;overflow-y:auto}
+.prow{display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.prow:last-child{border-bottom:0}
+.prow:hover{background:var(--sunken)}
+.prow .who{flex:1;min-width:0}
+.prow .who b{font-weight:500;display:block}
+.prow .who span{font-size:12px;color:var(--muted)}
+.prow.on{background:color-mix(in srgb,var(--accent-soft) 55%,var(--surface))}
+.summary{position:sticky;top:64px}
+.summary dl{margin:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 12px;font-size:13px}
+.summary dt{color:var(--muted)}
+.summary dd{margin:0;font-weight:500;text-align:right;min-width:0;overflow-wrap:anywhere}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 6px 3px 3px;border:1px solid var(--line);border-radius:99px;font-size:12.5px;background:var(--surface)}
+.chip .av{width:20px;height:20px;font-size:9px;border:0}
+.chip button{all:unset;cursor:pointer;color:var(--muted);padding:0 3px}
+
+/* Lead view */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tabs button{border:0;background:transparent;padding:10px 14px;cursor:pointer;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;gap:6px;align-items:center;white-space:nowrap}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.tabs .count{font-size:11px;background:var(--hand-soft);color:var(--hand);border-radius:99px;padding:0 7px;font-weight:600}
+.as-chip{display:inline-flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border-radius:99px;background:var(--sunken);border:1px solid var(--line);font-size:12.5px}
+.chatc{display:grid;grid-template-columns:40px minmax(0,1fr);gap:4px 14px;padding:18px}
+.chatc + .chatc{border-top:1px solid var(--line)}
+.chat-ic{width:40px;height:40px;border-radius:9px;background:var(--sunken);display:grid;place-items:center;color:var(--muted)}
+.toggles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}
+.tg{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px}
+.tg b{font-weight:500;font-size:13px;display:block}
+.tg span{font-size:12px;color:var(--muted)}
+.drop{border:2px dashed var(--line);border-radius:10px;padding:26px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center;color:var(--muted)}
+.check-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:2px}
+.check-list li{display:flex;gap:10px;align-items:center;padding:7px 0}
+.ck{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;border:2px solid var(--line)}
+.ck.ok{background:var(--good);border-color:var(--good);color:var(--surface)}
+.ck .ico{width:12px;height:12px;stroke-width:3}
+
+/* Teams sketch (approximates the Teams look; Sidekick's palette only shows on Sidekick's own cards) */
+.teams{display:grid;grid-template-columns:56px 250px minmax(0,1fr);border:1px solid var(--teams-line);border-radius:10px;overflow:hidden;background:var(--teams-bg);min-height:620px;font-family:"Segoe UI",var(--f-body)}
+.t-rail{background:var(--teams-bg);border-right:1px solid var(--teams-line);display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.t-rail i{width:34px;height:34px;border-radius:7px;display:grid;place-items:center;color:var(--muted);font-style:normal;font-size:10px}
+.t-rail i.on{color:var(--teams);background:var(--teams-panel)}
+.t-list{background:var(--teams-bg);border-right:1px solid var(--teams-line);padding:12px 8px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.t-list h4{padding:4px 8px 10px;font-family:"Segoe UI",var(--f-body);font-size:16px}
+.t-chat{display:flex;gap:10px;align-items:center;padding:8px;border-radius:6px;font-size:13px;cursor:pointer;border:0;background:transparent;text-align:left;width:100%}
+.t-chat.on{background:var(--teams-panel)}
+.t-chat .av{border:0}
+.t-chat span{display:block;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t-chat > div{min-width:0}
+.t-main{background:var(--teams-panel);display:flex;flex-direction:column;min-width:0}
+.t-head{padding:12px 18px;border-bottom:1px solid var(--teams-line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.t-head b{font-size:15px}
+.t-thread{flex:1;padding:18px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
+.msg{display:grid;grid-template-columns:32px minmax(0,1fr);gap:10px;max-width:620px}
+.msg.me{align-self:flex-end;grid-template-columns:minmax(0,1fr)}
+.msg .meta{font-size:12px;color:var(--muted);margin-bottom:3px}
+.bubble{background:var(--teams-bg);padding:9px 12px;border-radius:6px;font-size:14px}
+.msg.me .bubble{background:var(--teams-me)}
+.mention{color:var(--teams);font-weight:600}
+.sys{align-self:center;font-size:12px;color:var(--muted);padding:2px 10px;border-radius:99px;background:var(--teams-bg)}
+.bot-av{width:32px;height:32px;border-radius:7px;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font-family:var(--f-display);font-weight:700}
+.acard{background:var(--surface);border:1px solid var(--teams-line);border-radius:8px;overflow:hidden;font-family:var(--f-body)}
+.acard .ah{padding:12px 14px 4px;display:flex;flex-direction:column;gap:4px}
+.acard .ab{padding:4px 14px 12px;display:flex;flex-direction:column;gap:8px;font-size:13.5px}
+.acard .aa{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
+.acard .stripe{height:4px;background:var(--accent)}
+.acard .stripe.warn{background:var(--warn)} .acard .stripe.good{background:var(--good)}
+.t-compose{border-top:1px solid var(--teams-line);padding:12px 18px}
+.t-compose div{border:1px solid var(--teams-line);border-radius:6px;padding:9px 12px;color:var(--muted);background:var(--teams-panel);font-size:13.5px}
+.cmds{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;font-size:13px}
+
+/* Palette page */
+.pal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.sw{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.sw div{height:44px;border-radius:6px;border:1px solid var(--line);display:flex;align-items:flex-end;padding:3px 5px;font-size:10px;font-family:var(--f-mono)}
+.ratio-ok{color:var(--good);font-weight:600} .ratio-bad{color:var(--bad);font-weight:600}
+
+@media (max-width:900px){
+  .ng{grid-template-columns:minmax(0,1fr)} .summary{position:static}
+  .teams{grid-template-columns:minmax(0,1fr)} .t-rail,.t-list{display:none}
+  .pal-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .rail{flex-direction:row;align-items:center;padding:10px 16px;overflow-x:auto;gap:12px}
+  .rail .org-pick,.rail .nav .g{display:none}
+  .nav{flex-direction:row}
+  .nav button{white-space:nowrap}
+  .rail .brand small{display:none}
+  .topbar{padding:10px 16px} .content{padding:20px 16px 48px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:760px){
+  .wiz{grid-template-columns:minmax(0,1fr);padding-top:20px}
+  .steps{flex-direction:row;overflow-x:auto;gap:4px}
+  .steps li{flex-direction:column;align-items:center;min-width:64px;text-align:center}
+  .steps li::after{display:none}
+  .steps small{display:none}
+  .wiz-card{padding:20px}
+  .presets,.two,.toggles{grid-template-columns:minmax(0,1fr)}
+  .gr-row{grid-template-columns:minmax(0,1fr)}
+  .sec{grid-template-columns:minmax(0,1fr);padding:18px}
+  .sec .n{display:none}
+  .sw{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+</style>
+</head>
+<body>
+<div class="mock" role="region" aria-label="Mockup controls">
+  <span class="tag-mock">MOCKUP</span>
+  <nav id="mocknav" aria-label="Mockup screens"></nav>
+  <div class="opts">
+    <div class="seg" role="group" aria-label="Palette" id="palseg">
+      <button data-pal="navy">A · Navy</button><button data-pal="indigo">B · Indigo (chosen)</button>
+    </div>
+    <div class="seg" role="group" aria-label="Light or dark" id="themeseg">
+      <button data-th="system">Auto</button><button data-th="light">Light</button><button data-th="dark">Dark</button>
+    </div>
+  </div>
+</div>
+<div id="stage"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+/* ---------- Sample data (all fictional) ---------- */
+const ORG = { name: "Contoso Consulting", domain: "contoso.example", owner: "Alex Rivera" };
+const PEOPLE = [
+  ["priya","Priya Natarajan","Engineering Manager","Engineering"],["maria","Maria Lopez","Senior Developer","Engineering"],
+  ["dev","Dev Patel","Developer","Engineering"],["sam","Sam Okafor","QA Lead","Engineering"],["lena","Lena Fischer","Business Analyst","Delivery"],
+  ["tom","Tom Becker","Solution Architect","Engineering"],["aisha","Aisha Khan","Developer","Engineering"],["jonas","Jonas Weber","DevOps Engineer","Engineering"],
+  ["chen","Chen Wei","Data Engineer","Engineering"],["rosa","Rosa Alvarez","Project Manager","Delivery"],["kofi","Kofi Mensah","UX Designer","Design"],
+  ["hannah","Hannah Lee","Developer","Engineering"],["omar","Omar Haddad","Security Engineer","Engineering"],["grace","Grace Kim","Scrum Master","Delivery"],
+  ["luis","Luis Moreno","Developer","Engineering"],["nina","Nina Petrova","Test Analyst","Engineering"],["ben","Ben Carter","Delivery Director","Delivery"],
+  ["yuki","Yuki Tanaka","Product Designer","Design"]
+].map(([id,name,title,dept]) => ({ id, name, title, dept, email: id + "@" + ORG.domain }));
+const P = Object.fromEntries(PEOPLE.map(p => [p.id, p]));
+const ini = n => n.split(" ").map(w => w[0]).slice(0,2).join("");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+const S = {
+  screen: "wizard", step: 0,
+  m365: false, notAdmin: false, install: "leads", preset: "standard",
+  wizGroups: [{ name: "Payments Platform", client: "Northwind Bank", lead: "priya" }, { name: "Patient Portal", client: "Fabrikam Health", lead: "tom" }],
+  filter: "all",
+  groups: [
+    { id:"nw", name:"Payments Platform", client:"Northwind Bank", lead:"priya", members:9, chats:3, waiting:3, docs:42, meetings:11, strict:true, active:"2 hours ago" },
+    { id:"fh", name:"Patient Portal", client:"Fabrikam Health", lead:"tom", members:7, chats:2, waiting:0, docs:18, meetings:6, strict:true, active:"yesterday" },
+    { id:"cr", name:"Cloud Migration", client:"Contoso Retail", lead:"rosa", members:12, chats:4, waiting:0, docs:63, meetings:24, overdue:3, active:"20 minutes ago" },
+    { id:"wg", name:"Claims Assistant", client:"Woodgrove Insurance", lead:"omar", members:5, chats:1, waiting:0, docs:0, meetings:2, active:"3 days ago" },
+    { id:"ta", name:"Crew Scheduling App", client:"Tailspin Air", lead:"grace", members:1, chats:0, waiting:0, docs:0, meetings:0, active:"just created" },
+  ],
+  ng: { name:"", client:"", code:"", lead:null, leadQ:"", members:new Set(), roles:{}, q:"", dept:"All", chats:new Set(), strict:false, guests:true },
+  tab: "chats",
+  waiting: [
+    { id:"w1", name:"Payments – sprint 14 standup", kind:"Group chat", people:8, by:"Priya Natarajan", when:"2 hours ago", guests:0, notes:true, track:false, remind:true },
+    { id:"w2", name:"Northwind ↔ Contoso API review", kind:"Group chat", people:11, by:"Maria Lopez", when:"yesterday", guests:3, notes:true, track:false, remind:false },
+    { id:"w3", name:"Friday lunch plans", kind:"Group chat", people:14, by:"Dev Patel", when:"3 days ago", guests:0, notes:false, track:false, remind:false },
+  ],
+  linked: [
+    { name:"Payments core team", kind:"Group chat", people:9, notes:true, track:true, remind:true, guests:0 },
+    { name:"Northwind steering (client)", kind:"Group chat", people:7, notes:true, track:false, remind:false, guests:4 },
+  ],
+  members: [
+    ["priya","Team Lead","Set up by Alex Rivera"],["maria","Member","Added in Teams by Priya"],["dev","Member","Added in Teams by Priya"],
+    ["sam","Member","Added in the portal by Priya"],["lena","Viewer","Added in Teams by Priya"],["jonas","Member","Imported from the Teams team"],
+    ["hannah","Member","Imported from the Teams team"],["luis","Member","Imported from the Teams team"],["kofi","Viewer","Added in the portal by Alex"],
+  ],
+  docs: [
+    ["Payments API spec v3.pdf","Shareable","Uploaded by Maria","Oct 14","Ready"],["Northwind security requirements.pdf","Shareable","SharePoint: Payments site","Oct 9","Ready"],
+    ["Sprint 14 plan.docx","Internal","Uploaded by Priya","Oct 18","Ready"],["Cutover runbook.docx","Internal","SharePoint: Payments site","Oct 2","Out of date?"],
+    ["Architecture overview.pptx","Shareable","Uploaded by Tom","Sep 27","Ready"],
+  ],
+  addOpen: false, add: { members:new Set(), q:"", dept:"All" },
+  scene: "add", sceneState: {},
+};
+
+/* ---------- Icons ---------- */
+const PATHS = {
+  check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>', x:'<path d="M6 6l12 12M18 6L6 18"/>', plus:'<path d="M12 5v14M5 12h14"/>',
+  arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>', back:'<path d="M19 12H5M11 6l-6 6 6 6"/>', search:'<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>',
+  users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.8a3.5 3.5 0 010 6.4M18 14.8c1.8.7 3 2.4 3.5 5.2"/>',
+  chat:'<path d="M4 5h16v11H9l-5 4z"/>', doc:'<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>', video:'<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/>',
+  shield:'<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/>', home:'<path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/>', folder:'<path d="M3 6h7l2 2h9v11H3z"/>',
+  brain:'<path d="M9 4a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 002 5 3 3 0 006 0V4zM15 4a3 3 0 013 3 3 3 0 012 5 3 3 0 01-2 5 3 3 0 01-6 0"/>', plug:'<path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 01-12 0zM12 18v3"/>',
+  chart:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>', activity:'<path d="M3 12h4l3-8 4 16 3-8h4"/>', info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+  teams:'<rect x="3" y="6" width="11" height="12" rx="2"/><path d="M6.5 10h4M8.5 10v5"/><circle cx="18.5" cy="7.5" r="2.5"/><path d="M16 11h5v5a2.5 2.5 0 01-5 0"/>',
+  upload:'<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>', star:'<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>', guest:'<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-3.5 3.6-5.5 7-5.5s6 2 7 5.5"/><path d="M18 3l3 3M21 3l-3 3"/>',
+  mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>', bell:'<path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"/><path d="M10 20a2 2 0 004 0"/>', eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+};
+const ic = (n, cls = "") => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${PATHS[n] || ""}</svg>`;
+const av = (id, cls = "") => { const p = P[id]; return `<span class="av ${cls}" title="${esc(p ? p.name : id)}">${esc(p ? ini(p.name) : id)}</span>`; };
+const sw = (key, on, label, disabled) => `<button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(label)}" data-act="toggle" data-key="${key}" ${disabled ? "disabled" : ""}></button>`;
+const msLogo = `<span class="ms-logo" aria-hidden="true"><i style="background:#f25022"></i><i style="background:#7fba00"></i><i style="background:#00a4ef"></i><i style="background:#ffb900"></i></span>`;
+
+/* ---------- 1. Onboarding wizard ---------- */
+const STEPS = [
+  ["Welcome","Your account is ready"],["Connect Microsoft 365","Admin approves once"],["Add to Teams","Who gets Sidekick"],
+  ["Rules & permissions","Pick a starting point"],["First groups","One per client"],["Done","What happens next"],
+];
+const PRESET = {
+  standard: { name:"Standard", for:"Most teams. Sensible limits, nothing in the way." },
+  strict: { name:"Strict", for:"Regulated clients: banks, health, insurance, public sector." },
+};
+const RULES = [
+  ["Always on: no hate, harassment, harm; never crosses client walls; says “I don't know” instead of guessing", true, true, true],
+  ["Send HR, legal and medical questions to the right people", true, true],
+  ["No judging or ranking people", true, true],
+  ["Stick to work topics", false, true],
+  ["Hide email addresses and phone numbers in answers", false, true],
+  ["Refuse questions with swearing", false, true],
+  ["No talk about competitors", false, true],
+];
+const PERMS = [
+  ["Team Leads can add people to their group from Teams", true, true],
+  ["Team Leads can link chats to their group", true, true],
+    ["Chats with client guests only see documents marked Shareable", true, true, true],
+];
+
+function wizard() {
+  const s = S.step;
+  const side = `<aside class="wiz-side">
+    <div class="brand"><div class="brand-mark">S</div><div><b>Sidekick</b><small>${esc(ORG.name)} · setup</small></div></div>
+    <ol class="steps">${STEPS.map(([t, d], i) => `<li class="${i < s ? "done" : i === s ? "now" : ""}">
+      <span class="n">${i < s ? ic("check") : i + 1}</span>
+      <button data-act="step" data-i="${i}" ${i > s + 1 ? "disabled" : ""} aria-current="${i === s ? "step" : "false"}"><b>${t}</b><small>${d}</small></button></li>`).join("")}</ol>
+    <p class="small muted">You can stop at any point. Setup stays where you left it, under <b>Settings → Setup</b>.</p>
+  </aside>`;
+  const body = [wWelcome, wM365, wTeams, wRules, wGroups, wDone][s]();
+  return `<div class="wiz">${side}<section class="panel raised wiz-card" aria-live="polite">${body}</section></div>`;
+}
+const foot = (nextLabel = "Continue", opts = {}) => `<div class="wiz-foot">
+  ${S.step > 0 ? `<button class="btn" data-act="prev">${ic("back")}Back</button>` : ""}
+  <span class="spacer"></span>
+  ${opts.skip ? `<button class="btn ghost" data-act="next">${opts.skip}</button>` : ""}
+  <button class="btn primary" data-act="next" ${opts.disabled ? "disabled" : ""}>${nextLabel}${ic("arrow")}</button></div>`;
+
+function wWelcome() {
+  return `<header><span class="eyebrow">Step 1 of 6</span><h1>Welcome to Sidekick, Alex</h1>
+    <p>Your account for ${esc(ORG.name)} is ready. In about 10 minutes you'll connect Microsoft 365, choose your rules and set up a group for each client team.</p></header>
+    <div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+      <div><span class="eyebrow">Plan</span><span class="v">Team</span><span class="small muted">Free for 14 days</span></div>
+      <div><span class="eyebrow">Seats</span><span class="v num">50</span><span class="small muted">Change any time</span></div>
+      <div><span class="eyebrow">Your role</span><span class="v">Org Owner</span><span class="small muted">You can do everything</span></div>
+    </div>
+    <div class="stack">
+      <h3>How Sidekick fits your company</h3>
+      <div class="two">
+        <div class="callout">${ic("folder")}<div><b>One group per client team.</b> Northwind Bank's documents and chats stay in the Northwind group. Sidekick never mixes clients.</div></div>
+        <div class="callout">${ic("star")}<div><b>Each group has a Team Lead.</b> They add their people and pick their chats, right from Teams. You don't have to do it for them.</div></div>
+      </div>
+    </div>
+    ${foot("Start setup")}`;
+}
+function wM365() {
+  const ok = S.m365;
+  return `<header><span class="eyebrow">Step 2 of 6</span><h1>Connect Microsoft 365</h1>
+    <p>Sidekick works inside your company's Microsoft 365. Someone who is a Microsoft 365 admin at ${esc(ORG.name)} approves it once, for everyone. Nobody else will be asked.</p></header>
+    ${ok ? `<div class="callout good">${ic("check")}<div><b>Connected.</b> Approved by Alex Rivera for ${ORG.domain}. We found <b>${PEOPLE.length} people</b> in your directory; you'll pick leaders and members from them.</div></div>` : ""}
+    <div class="panel"><div class="panel-h"><h3>What Microsoft will ask you to approve, in plain words</h3></div><div class="panel-b" style="padding-block:4px">
+      <div class="perm">${ic("check")}<b>Sign in with your work account</b><span></span><span class="muted">Your people use their Microsoft login. No new passwords.</span></div>
+      <div class="perm">${ic("check")}<b>See your company directory (names, job titles, email)</b><span></span><span class="muted">So you can pick group leaders and members from a list instead of typing them.</span></div>
+      <div class="perm">${ic("check")}<b>Read chats that Sidekick has been added to</b><span></span><span class="muted">Everything in chats where someone adds Sidekick on purpose, once the chat is linked to a group. It can't see any other chat.</span></div>
+      <div class="perm">${ic("check")}<b>Read meeting transcripts of those chats' meetings</b><span></span><span class="muted">To write meeting notes and action items.</span></div>
+      <div class="perm">${ic("check")}<b>Remove itself from a chat</b><span></span><span class="muted">So Sidekick can leave chats nobody assigned to a group, or that you remove it from.</span></div>
+      <div class="perm no">${ic("x")}<b>Never: email, OneDrive, calendars or chats it isn't in</b><span></span><span class="muted">Sidekick doesn't ask for these, so it can't read them.</span></div>
+    </div></div>
+    ${ok ? "" : `<div class="row">
+      <button class="ms-btn" data-act="m365">${msLogo}Approve in Microsoft 365</button>
+      <button class="btn ghost" data-act="notadmin">I'm not the Microsoft 365 admin</button></div>`}
+    ${S.notAdmin && !ok ? `<div class="panel"><div class="panel-b stack">
+      <h4>Send this link to your IT admin</h4><p class="muted small">It opens the same approval screen. We'll email you when they've approved it, and you can carry on with the other steps meanwhile.</p>
+      <div class="row"><input class="input mono" id="adminlink" readonly value="https://sidekick.example/approve/contoso-7f3k2"><button class="btn" data-act="copy">Copy link</button></div>
+      <div class="row"><input class="input" id="adminemail" placeholder="it-admin@contoso.example" style="max-width:320px"><button class="btn">${ic("mail")}Email it for me</button></div>
+    </div></div>` : ""}
+    ${foot("Continue", { disabled: !ok && !S.notAdmin })}`;
+}
+function wTeams() {
+  const c = (v, t, d) => `<button class="choice" role="radio" aria-checked="${S.install === v}" data-act="install" data-v="${v}"><span class="radio"></span><span><b>${t}</b><br><span class="muted small">${d}</span></span></button>`;
+  return `<header><span class="eyebrow">Step 3 of 6</span><h1>Add Sidekick to Teams</h1>
+    <p>This puts Sidekick in your people's Teams app list. It doesn't join any chat by itself: someone has to add it to a chat first.</p></header>
+    <div class="stack" role="radiogroup" aria-label="Who gets Sidekick in Teams">
+      ${c("leads", "Only Team Leads and admins (recommended)", "Only they can add Sidekick to a chat. If anyone else adds it, Sidekick says so and leaves straight away. Members still see its answers and cards in assigned chats.")}
+      ${c("all", "Everyone at " + ORG.name, "Anyone can add Sidekick to a chat. It still stays silent there until a Team Lead assigns the chat in the portal.")}
+      ${c("some", "Only some people", "Pick Microsoft 365 groups or people. Good for a pilot with one or two client teams.")}
+    </div>
+    ${S.install === "some" ? `<div class="panel"><div class="panel-b stack"><span class="lbl" style="font-weight:500">Who gets it</span>
+      <div class="chips"><span class="chip"><span class="av">DE</span>Delivery (34 people)<button aria-label="Remove">${ic("x")}</button></span><span class="chip"><span class="av">EN</span>Engineering (112 people)<button aria-label="Remove">${ic("x")}</button></span></div>
+      <div class="search">${ic("search")}<input placeholder="Add a group or person"></div></div></div>` : ""}
+    <div class="callout">${ic("info")}<div>We'll publish Sidekick to your Teams app list now, using the approval from step 2. If your Teams admin blocks new apps, we'll show you the one setting to change.</div></div>
+    ${foot("Add to Teams")}`;
+}
+function wRules() {
+  const p = S.preset;
+  const card = (v) => `<button class="choice" role="radio" aria-checked="${p === v}" data-act="preset" data-v="${v}"><span class="radio"></span><span><b>${PRESET[v].name}${v === "standard" ? " (recommended)" : ""}</b><br><span class="muted small">${PRESET[v].for}</span></span></button>`;
+  const cell = (on, locked) => on ? `<span class="yes">${locked ? ic("lock") : ic("check")}</span>` : `<span class="no-cell">Off</span>`;
+  const col = (r) => `<td>${cell(r[1], r[3])}</td><td>${cell(r[2], r[3])}</td>`;
+  const hl = v => p === v ? ' style="color:var(--accent)"' : "";
+  return `<header><span class="eyebrow">Step 4 of 6</span><h1>Rules & permissions</h1>
+    <p>Pick a starting point. You can change any of this later under Guardrails, and make a single group stricter than the rest.</p></header>
+    <div class="presets" role="radiogroup" aria-label="Starting rules">${card("standard")}${card("strict")}</div>
+    <div class="panel"><div class="tw"><table class="cmp">
+      <thead><tr><th>What Sidekick does</th><th${hl("standard")}>Standard</th><th${hl("strict")}>Strict</th></tr></thead>
+      <tbody>${RULES.map(r => `<tr><td>${r[0]}</td>${col(r)}</tr>`).join("")}
+      <tr><th colspan="3">What Team Leads may do</th></tr>
+      ${PERMS.map(r => `<tr><td>${r[0]}</td>${col(r)}</tr>`).join("")}</tbody></table></div></div>
+    <p class="small muted">${ic("lock")} Locked rules are always on for every company. Later you can add your own rules in plain words, like “Never quote day rates”.</p>
+    ${foot("Use " + PRESET[p].name)}`;
+}
+function wGroups() {
+  const opts = (sel) => PEOPLE.map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)} · ${esc(x.title)}</option>`).join("");
+  return `<header><span class="eyebrow">Step 5 of 6</span><h1>Create your first groups</h1>
+    <p>A group is one client team: its people, its Teams chats and its documents. Add one for each client you work with now. You only need a name and a Team Lead here.</p></header>
+    <div class="stack">${S.wizGroups.map((g, i) => `<div class="gr-row">
+      <div class="field"><label for="wg-n${i}">Group name</label><input class="input" id="wg-n${i}" data-wg="${i}" data-f="name" value="${esc(g.name)}" placeholder="e.g. Payments Platform"></div>
+      <div class="field"><label for="wg-c${i}">Client</label><input class="input" id="wg-c${i}" data-wg="${i}" data-f="client" value="${esc(g.client)}" placeholder="e.g. Northwind Bank"></div>
+      <div class="field"><label for="wg-l${i}">Team Lead</label><select class="input" id="wg-l${i}" data-wg="${i}" data-f="lead"><option value="">Pick from your directory…</option>${opts(g.lead)}</select></div>
+      <button class="btn sm ghost" data-act="wgdel" data-i="${i}" aria-label="Remove this group" style="height:36px">${ic("x")}</button></div>`).join("")}
+      <div><button class="btn" data-act="wgadd">${ic("plus")}Add another group</button></div>
+    </div>
+    <div class="callout">${ic("teams")}<div>Each Team Lead gets a message from Sidekick in Teams explaining what to do: add their people, add Sidekick to their chats, upload key documents. You can add members yourself later too.</div></div>
+    ${foot("Create " + S.wizGroups.filter(g => g.name).length + " groups", { skip: "Skip for now" })}`;
+}
+function wDone() {
+  const items = [
+    ["Microsoft 365 connected", S.m365 ? "Approved for " + ORG.domain : "Waiting for your IT admin"], ["Sidekick added to Teams", S.install === "all" ? "For everyone" : S.install === "leads" ? "For Team Leads and admins" : "For selected people"],
+    ["Rules", PRESET[S.preset].name + " starting point"], ["Groups created", S.wizGroups.filter(g => g.name).map(g => g.client ? g.client : g.name).join(", ") || "None yet"],
+  ];
+  return `<header><span class="eyebrow">Step 6 of 6</span><h1>You're set up</h1><p>Here's what happens next, and what's left for you.</p></header>
+    <ul class="check-list">${items.map(([t, d]) => `<li><span class="ck ok">${ic("check")}</span><span><b>${t}</b> <span class="muted">· ${esc(d)}</span></span></li>`).join("")}</ul>
+    <div class="two">
+      <div class="panel"><div class="panel-b stack"><span class="eyebrow">Your Team Leads, in Teams</span>
+        <p>${S.wizGroups.filter(g => g.lead).map(g => esc(P[g.lead].name.split(" ")[0])).join(" and ") || "Your leads"} just got a welcome message from Sidekick. Then they add their people with <span class="mono">@Sidekick add @name</span> and pick which chats belong to their group.</p>
+        <button class="btn" data-go="teams" data-scene="welcome">See what Priya sees ${ic("arrow")}</button></div></div>
+      <div class="panel"><div class="panel-b stack"><span class="eyebrow">Still to do, when you like</span>
+        <ul class="check-list small"><li><span class="ck"></span>Invite a Billing Admin</li><li><span class="ck"></span>Add your own rules (e.g. “Never quote day rates”)</li><li><span class="ck"></span>Connect SharePoint for documents</li></ul></div></div>
+    </div>
+    <div class="wiz-foot"><button class="btn" data-act="prev">${ic("back")}Back</button><span class="spacer"></span><button class="btn primary lg" data-go="groups">Go to Groups ${ic("arrow")}</button></div>`;
+}
+
+/* ---------- App frame ---------- */
+const NAV = [
+  ["Overview", [["home","Overview"],["chart","Usage & billing"]]],
+  ["Manage", [["folder","Groups","groups"],["doc","Knowledge & docs"],["video","Meetings"],["brain","Memory & gaps"],["plug","Connectors"],["users","People & roles"]]],
+  ["Govern", [["shield","Guardrails"],["activity","Activity"],["lock","Security & audit"],["gear","Settings"]]],
+];
+/** Pages a Team Lead doesn't see (same rules as the app's shell today). */
+const ADMIN_ONLY = ["Usage & billing", "Activity", "Security & audit"];
+function frame(inner, who = "admin") {
+  const waiting = S.waiting.length;
+  const asLead = who === "lead";
+  return `<div class="app"><aside class="rail">
+    <div class="brand"><div class="brand-mark">S</div><div><b>Sidekick</b><small>${esc(ORG.name)}</small></div></div>
+    <nav class="nav" aria-label="Main">${NAV.map(([g, items]) => `<div class="g">${g}</div>` + items.filter(([, l]) => !asLead || !ADMIN_ONLY.includes(l)).map(([i, l, k]) =>
+      `<button ${k ? `data-go="${asLead ? "lead" : "groups"}"` : ""} aria-current="${k ? "page" : "false"}">${ic(i)}${asLead && k ? "My groups" : l}${k && waiting ? `<span class="count">${waiting}</span>` : ""}</button>`).join("")).join("")}</nav>
+  </aside><div class="main">
+    <div class="topbar"><div class="search">${ic("search")}<input placeholder="Search groups, people, documents" aria-label="Search"></div><span class="spacer"></span>
+      ${asLead ? `<span class="as-chip">${av("priya")}Priya Natarajan · Team Lead</span>` : `<span class="as-chip"><span class="av">AR</span>Alex Rivera · Org Owner</span>`}</div>
+    <div class="content">${inner}</div></div></div>`;
+}
+
+/* ---------- 2. Groups overview ---------- */
+function health(g) {
+  if (g.waiting) return ["hand", g.waiting + " chats to sort", "Sidekick was added to new chats. " + P[g.lead].name.split(" ")[0] + " picks which belong here."];
+  if (g.members <= 1 && !g.chats) return ["info", "Setting up", P[g.lead].name.split(" ")[0] + " hasn't added people or chats yet. Welcome message sent " + g.active + "."];
+  if (g.overdue) return ["warn", g.overdue + " overdue actions", "Action items from meetings are past their due date."];
+  if (!g.docs) return ["warn", "No documents", "Sidekick can only answer from documents and meetings in the group."];
+  return ["good", "Healthy", "People, chats and documents are in place."];
+}
+function groups() {
+  const G = S.groups;
+  const shown = G.filter(g => S.filter === "all" ? true : S.filter === "attention" ? ["hand","warn"].includes(health(g)[0]) : health(g)[0] === "info");
+  const sum = (k) => G.reduce((a, g) => a + (g[k] || 0), 0);
+  const fb = (v, t) => `<button aria-pressed="${S.filter === v}" data-act="filter" data-v="${v}">${t}</button>`;
+  return frame(`
+    <div class="page-head"><div><h1>Groups</h1><p>One group per client team. Each has its own people, Teams chats and documents, and Sidekick never mixes them.</p></div>
+      <div class="row"><button class="btn">${ic("users")}People & roles</button><button class="btn primary" data-go="new">${ic("plus")}New group</button></div></div>
+    <div class="stats">
+      <div><span class="eyebrow">Groups</span><span class="v num">${G.length}</span><span class="small muted">${G.filter(g => g.strict).length} on Strict rules</span></div>
+      <div><span class="eyebrow">People in groups</span><span class="v num">${sum("members")}</span><span class="small muted">of 50 seats</span></div>
+      <div><span class="eyebrow">Teams chats linked</span><span class="v num">${sum("chats")}</span><span class="small muted">across all groups</span></div>
+      <div><span class="eyebrow">Chats waiting</span><span class="v num hand">${sum("waiting")}</span><span class="small muted">Leads pick their group</span></div>
+    </div>
+    <div class="row"><div class="seg" role="group" aria-label="Show">${fb("all", "All")}${fb("attention", "Needs attention")}${fb("setup", "Setting up")}</div><span class="spacer"></span><span class="small muted">Sorted by last activity</span></div>
+    <div class="cards">${shown.map(g => { const [k, t, why] = health(g); const L = P[g.lead];
+      return `<article class="panel gcard" tabindex="0" role="button" data-go="${g.id === "nw" ? "lead" : "groups"}" aria-label="Open ${esc(g.client)} ${esc(g.name)}">
+        <div class="top"><div class="row"><span class="eyebrow">${esc(g.client)}</span><span class="spacer"></span><span class="pill ${k}" title="${esc(why)}">${t}</span></div>
+          <h3>${esc(g.name)}</h3></div>
+        <div class="lead">${av(g.lead, "lg")}<div><b style="font-weight:500">${esc(L.name)}</b><div class="small muted">Team Lead</div></div><span class="spacer"></span>
+          <div class="avs">${PEOPLE.slice(1, 1 + Math.min(3, g.members - 1)).map(p => av(p.id)).join("")}</div></div>
+        <div class="nums"><div><b>${g.members}</b><span>people</span></div><div><b>${g.chats}</b><span>chats</span></div><div><b>${g.docs}</b><span>docs</span></div><div><b>${g.meetings}</b><span>meetings</span></div></div>
+        <div class="foot">${g.strict ? `<span class="tag">Strict rules</span>` : `<span class="tag">Standard rules</span>`}<span class="spacer"></span>Active ${g.active}</div>
+      </article>`; }).join("")}
+      ${S.filter === "all" ? `<button class="panel gcard newc" data-go="new">${ic("plus")}New group</button>` : ""}</div>`);
+}
+
+/* ---------- 3. New group ---------- */
+function directoryPicker(ctx) {
+  const st = ctx === "ng" ? S.ng : S.add;
+  const exclude = ctx === "add" ? new Set(S.members.map(m => m[0])) : new Set([S.ng.lead]);
+  const depts = ["All", "Engineering", "Delivery", "Design"];
+  const q = st.q.toLowerCase();
+  const list = PEOPLE.filter(p => !exclude.has(p.id) && (st.dept === "All" || p.dept === st.dept) && (!q || (p.name + p.title + p.email).toLowerCase().includes(q)));
+  return `<div class="picker" id="picker-${ctx}">
+    <div class="picker-h"><div class="search" style="flex:1">${ic("search")}<input id="pq-${ctx}" data-pq="${ctx}" value="${esc(st.q)}" placeholder="Search ${PEOPLE.length} people in Microsoft 365" aria-label="Search directory"></div>
+      <select class="input" style="width:auto" data-pd="${ctx}" aria-label="Department">${depts.map(d => `<option ${d === st.dept ? "selected" : ""}>${d}</option>`).join("")}</select>
+      <button class="btn sm" data-act="importteam" data-ctx="${ctx}">${ic("teams")}Import a Teams team</button></div>
+    <div class="plist" id="plist-${ctx}">${list.length ? list.map(p => { const on = st.members.has(p.id);
+      return `<label class="prow ${on ? "on" : ""}"><input type="checkbox" class="check" data-pick="${ctx}" value="${p.id}" ${on ? "checked" : ""}>${av(p.id)}<span class="who"><b>${esc(p.name)}</b><span>${esc(p.title)} · ${esc(p.email)}</span></span><span class="tag">${p.dept}</span></label>`; }).join("")
+      : `<div class="panel-b muted">Nobody matches “${esc(st.q)}”. Guests from outside ${ORG.domain} can't be members; they can still ask in a linked chat.</div>`}</div>
+    <div class="picker-h" style="border-top:1px solid var(--line);border-bottom:0"><span class="small"><b>${st.members.size}</b> selected</span><span class="spacer"></span>
+      ${st.members.size ? `<button class="btn sm ghost" data-act="clearpick" data-ctx="${ctx}">Clear</button>` : ""}</div>
+  </div>`;
+}
+function newGroup() {
+  const n = S.ng;
+  const lq = n.leadQ.toLowerCase();
+  const leads = PEOPLE.filter(p => !lq || p.name.toLowerCase().includes(lq) || p.title.toLowerCase().includes(lq)).slice(0, 5);
+  const freeChats = [["Tailspin crew app – kickoff", 6, 0], ["Woodgrove pilot (client)", 9, 2], ["Platform guild", 23, 0]];
+  const ok = { b: n.name && n.client, l: !!n.lead, m: n.members.size > 0, c: true, r: true };
+  return frame(`
+    <div class="crumbs"><button data-go="groups">Groups</button>›<span>New group</span></div>
+    <div class="page-head"><div><h1>New group</h1><p>Everything in one place. Only the name, client and Team Lead are required; the lead can add people and chats from Teams later.</p></div></div>
+    <div class="ng"><div class="panel">
+      <section class="sec"><span class="n ${ok.b ? "ok" : ""}">${ok.b ? ic("check") : 1}</span><div class="body"><h2>Basics</h2>
+        <div class="two"><div class="field"><label for="ng-name">Group name</label><input class="input" id="ng-name" data-ng="name" value="${esc(n.name)}" placeholder="e.g. Mobile Banking App"></div>
+          <div class="field"><label for="ng-client">Client</label><input class="input" id="ng-client" data-ng="client" value="${esc(n.client)}" placeholder="e.g. Northwind Bank" list="clients"><datalist id="clients">${[...new Set(S.groups.map(g => g.client))].map(c => `<option value="${esc(c)}">`).join("")}</datalist></div></div>
+        <div class="field" style="max-width:260px"><label for="ng-code">Engagement code <span class="muted">(optional)</span></label><input class="input mono" id="ng-code" data-ng="code" value="${esc(n.code)}" placeholder="NWB-2026-014"></div></div></section>
+      <section class="sec"><span class="n ${ok.l ? "ok" : ""}">${ok.l ? ic("check") : 2}</span><div class="body"><div><h2>Team Lead</h2><p class="hint">Runs the group day to day: adds and removes people, picks chats, uploads documents. Can't see other groups.</p></div>
+        ${n.lead ? `<div class="row"><span class="chip" style="padding:4px 10px 4px 4px">${av(n.lead)}<b style="font-weight:500">${esc(P[n.lead].name)}</b> · ${esc(P[n.lead].title)}</span><button class="btn sm ghost" data-act="unlead">Change</button></div>`
+        : `<div class="picker"><div class="picker-h"><div class="search" style="flex:1">${ic("search")}<input id="ng-leadq" data-lq="1" value="${esc(n.leadQ)}" placeholder="Search by name or job title" aria-label="Search for a Team Lead"></div></div>
+          <div class="plist" id="leadlist">${leads.map(p => `<button class="prow" style="width:100%;border-left:0;border-right:0;border-top:0;background:transparent;text-align:left" data-act="lead" data-v="${p.id}">${av(p.id)}<span class="who"><b>${esc(p.name)}</b><span>${esc(p.title)}</span></span><span class="btn sm">Make lead</span></button>`).join("")}</div></div>`}</div></section>
+      <section class="sec"><span class="n ${ok.m ? "ok" : ""}">${ok.m ? ic("check") : 3}</span><div class="body"><div><h2>Members <span class="muted" style="font-weight:400;font-size:13px">(optional)</span></h2><p class="hint">Pick from your Microsoft 365 directory, or import a whole Teams team. ${n.lead ? esc(P[n.lead].name.split(" ")[0]) : "The lead"} can add more from Teams with <span class="mono">@Sidekick add @name</span>.</p></div>
+        ${directoryPicker("ng")}
+        ${n.members.size ? `<div class="tw"><table><thead><tr><th>Person</th><th>Role in this group</th></tr></thead><tbody>${[...n.members].map(id => `<tr><td><div class="row">${av(id)}${esc(P[id].name)}</div></td><td><select class="input" style="width:auto" data-role="${id}" aria-label="Role for ${esc(P[id].name)}"><option ${n.roles[id] !== "Viewer" ? "selected" : ""}>Member</option><option ${n.roles[id] === "Viewer" ? "selected" : ""}>Viewer</option></select></td></tr>`).join("")}</tbody></table></div>` : ""}</div></section>
+      <section class="sec"><span class="n">4</span><div class="body"><div><h2>Teams chats <span class="muted" style="font-weight:400;font-size:13px">(optional)</span></h2><p class="hint">Chats Sidekick is already in but that don't belong to a group yet. Anything you skip, the lead can pick later.</p></div>
+        ${freeChats.map(([c, ppl, g], i) => `<label class="prow" style="border:1px solid var(--line);border-radius:8px"><input type="checkbox" class="check" data-chat="${i}" ${n.chats.has(i) ? "checked" : ""}><span class="chat-ic" style="width:32px;height:32px">${ic("chat")}</span><span class="who"><b>${esc(c)}</b><span>${ppl} people${g ? ` · <span style="color:var(--hand)">${g} client guests</span>` : ""}</span></span></label>`).join("")}</div></section>
+      <section class="sec"><span class="n">5</span><div class="body"><h2>Rules</h2>
+        <div class="row" style="align-items:flex-start;flex-wrap:nowrap">${sw("ng.strict", n.strict, "Use Strict rules for this group")}<div><b style="font-weight:500">Use Strict rules for this group</b><p class="hint">Your organization uses ${PRESET[S.preset].name}. Turn this on for a regulated client (banking, health, insurance). It only makes Sidekick stricter.</p></div></div>
+        <div class="row" style="align-items:flex-start;flex-wrap:nowrap">${sw("ng.guests", n.guests, "Client guests may join chats")}<div><b style="font-weight:500">Client people may be in this group's chats</b><p class="hint">In chats with guests, Sidekick only uses documents marked Shareable.</p></div></div></div></section>
+    </div>
+    <aside class="panel raised summary"><div class="panel-h"><h3>Summary</h3></div><div class="panel-b stack">
+      <dl><dt>Name</dt><dd>${esc(n.name) || "<span class='faint'>Not set</span>"}</dd><dt>Client</dt><dd>${esc(n.client) || "<span class='faint'>Not set</span>"}</dd>
+        <dt>Team Lead</dt><dd>${n.lead ? esc(P[n.lead].name) : "<span class='faint'>Not picked</span>"}</dd><dt>Members</dt><dd class="num">${n.members.size}</dd>
+        <dt>Chats</dt><dd class="num">${n.chats.size}</dd><dt>Rules</dt><dd>${n.strict ? "Strict" : PRESET[S.preset].name}</dd></dl>
+      ${n.lead ? `<div class="callout" style="font-size:12.5px">${ic("teams")}<div>${esc(P[n.lead].name.split(" ")[0])} gets a Teams message${n.members.size ? `, and the ${n.members.size} members get a short hello` : ""}.</div></div>` : ""}
+      <button class="btn primary lg" data-act="create" ${ok.b && ok.l ? "" : "disabled"}>Create group</button>
+      ${ok.b && ok.l ? "" : `<p class="hint">Add a name, client and Team Lead to create it.</p>`}
+    </div></aside></div>`);
+}
+
+/* ---------- 4. Team Lead's view ---------- */
+function lead() {
+  const t = S.tab;
+  const tb = (v, l, c) => `<button role="tab" aria-selected="${t === v}" data-act="tab" data-v="${v}">${l}${c ? `<span class="count">${c}</span>` : ""}</button>`;
+  const body = { overview: leadOverview, members: leadMembers, chats: leadChats, docs: leadDocs }[t]();
+  return frame(`
+    <div class="crumbs"><button data-go="lead">My groups</button>›<span>Northwind Bank</span></div>
+    <div class="page-head"><div><span class="eyebrow">Northwind Bank</span><h1>Payments Platform</h1><p>You lead this group. Add your people, choose which Teams chats belong here and keep the key documents up to date.</p></div>
+      <div class="row"><span class="tag">Strict rules</span><button class="btn">${ic("teams")}Open in Teams</button></div></div>
+    <div class="tabs" role="tablist">${tb("overview", "Overview")}${tb("members", "Members", "")}${tb("chats", "Chats", S.waiting.length)}${tb("docs", "Documents")}</div>
+    ${body}`, "lead");
+}
+function leadOverview() {
+  const steps = [["Add your people", S.members.length > 1], ["Add Sidekick to your team's chats", S.linked.length > 0], ["Pick which chats belong here", !S.waiting.length], ["Upload the key documents", S.docs.length >= 3], ["Ask Sidekick your first question", true]];
+  const done = steps.filter(s => s[1]).length;
+  return `<div class="ng"><div class="panel"><div class="panel-h"><h3>Group setup</h3><span class="spacer"></span><span class="small muted">${done} of ${steps.length} done</span></div>
+    <div class="panel-b"><div class="meter" style="height:8px;background:var(--sunken);border-radius:99px;overflow:hidden;margin-bottom:12px"><span style="display:block;height:100%;width:${done / steps.length * 100}%;background:var(--accent)"></span></div>
+    <ul class="check-list">${steps.map(([s, ok]) => `<li><span class="ck ${ok ? "ok" : ""}">${ok ? ic("check") : ""}</span>${ok ? s : `<b>${s}</b><span class="spacer"></span>${s.startsWith("Pick") ? `<button class="btn sm primary" data-act="tab" data-v="chats">Pick chats</button>` : ""}`}</li>`).join("")}</ul></div></div>
+    <div class="panel"><div class="panel-h"><h3>This week</h3></div><div class="panel-b stack small">
+      <div class="row"><span class="pill accent nodot num">4</span>meetings with notes</div><div class="row"><span class="pill warn nodot num">2</span>action items without an owner</div>
+      <div class="row"><span class="pill info nodot num">17</span>questions answered</div><div class="row"><span class="pill hand nodot num">1</span>document may be out of date</div></div></div></div>`;
+}
+function leadMembers() {
+  return `<div class="row"><p class="muted" style="flex:1;min-width:240px">Add people here or from Teams: in any chat, type <span class="mono">@Sidekick add @name</span>. You can add Members and Viewers; only an admin can make someone a Team Lead.</p>
+    <button class="btn primary" data-act="addopen">${ic("plus")}Add people</button></div>
+    ${S.addOpen ? `<div class="panel raised"><div class="panel-b stack">${directoryPicker("add")}<div class="row"><span class="spacer"></span><button class="btn" data-act="addopen">Cancel</button><button class="btn primary" data-act="addsave" ${S.add.members.size ? "" : "disabled"}>Add ${S.add.members.size || ""} as Members</button></div></div></div>` : ""}
+    <div class="panel"><div class="tw"><table><thead><tr><th>Person</th><th>Role</th><th>How they joined</th><th></th></tr></thead><tbody>
+    ${S.members.map(([id, role, how], i) => `<tr><td><div class="row" style="flex-wrap:nowrap">${av(id)}<div><div>${esc(P[id].name)}</div><div class="small muted">${esc(P[id].title)}</div></div></div></td>
+      <td>${role === "Team Lead" ? `<span class="pill accent nodot">Team Lead</span>` : `<select class="input" style="width:auto" data-mrole="${i}" aria-label="Role"><option ${role === "Member" ? "selected" : ""}>Member</option><option ${role === "Viewer" ? "selected" : ""}>Viewer</option></select>`}</td>
+      <td class="small muted">${how.includes("Teams") ? ic("teams") + " " : ""}${esc(how)}</td>
+      <td style="text-align:right">${role === "Team Lead" ? "" : `<button class="btn sm ghost" data-act="mremove" data-i="${i}">Remove</button>`}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+function chatToggles(c, key) {
+  const t = (f, label, desc, ic_) => `<div class="tg">${sw(key + "." + f, c[f], label)}<div><b>${label}</b><span>${desc}</span></div></div>`;
+  return `<div class="toggles">${t("notes", "Meeting notes", "Post notes and action items after meetings")}${t("remind", "Daily reminders", "Overdue items and open questions, once a day")}</div><p class="small muted" style="margin-top:8px">${ic("eye")} Once linked, Sidekick reads every message in this chat (it says so in the chat). Unlinking deletes what it saved.</p>`;
+}
+function leadChats() {
+  return `${S.waiting.length ? `<div class="panel raised"><div class="panel-h" style="background:var(--hand-soft);border-radius:var(--r) var(--r) 0 0"><span style="color:var(--hand)">${ic("bell")}</span><div><h3>Chats waiting for a group</h3><p class="small muted">Someone added Sidekick to these Teams chats. Chats are only ever assigned here in the portal, never from Teams. Until you assign one, Sidekick reads nothing, saves nothing and answers nothing there. If nobody assigns a chat within 7 days, Sidekick leaves it on its own.</p></div></div>
+    ${S.waiting.map((c, i) => `<div class="chatc"><span class="chat-ic">${ic("chat")}</span><div>
+      <div class="row"><h3>${esc(c.name)}</h3>${c.guests ? `<span class="pill hand">${c.guests} client guests</span>` : ""}</div>
+      <p class="small muted">${c.kind} · ${c.people} people · Sidekick added by ${esc(c.by)} ${c.when}</p>
+      ${c.guests ? `<p class="small" style="margin-top:6px">${ic("guest")} People from northwindbank.example are in this chat, so Sidekick will only use documents marked <b>Shareable</b> here.</p>` : ""}
+      ${chatToggles(c, "w" + i)}
+      <div class="row" style="margin-top:12px"><button class="btn primary" data-act="link" data-i="${i}">${ic("check")}Add to Payments Platform</button><button class="btn" data-act="notmine" data-i="${i}">${ic("x")}Remove Sidekick from this chat</button><span class="spacer"></span><span class="small muted">Leaves on its own in ${7 - i * 2} days</span></div>
+    </div></div>`).join("")}</div>` : `<div class="callout good">${ic("check")}<div>No chats waiting. When someone adds Sidekick to a new chat, it shows up here for you to assign.</div></div>`}
+    <div class="panel"><div class="panel-h"><h3>Linked chats</h3><span class="small muted">${S.linked.length}</span><span class="spacer"></span><span class="small muted">To add one: add Sidekick to the chat in Teams, then assign it here</span></div>
+    ${S.linked.map((c, i) => `<div class="chatc"><span class="chat-ic">${ic("chat")}</span><div><div class="row"><h3>${esc(c.name)}</h3>${c.guests ? `<span class="pill hand">${c.guests} client guests</span>` : ""}<span class="spacer"></span><button class="btn sm ghost">Unassign</button><button class="btn sm ghost">Remove Sidekick</button></div>
+      <p class="small muted">${c.kind} · ${c.people} people</p>${chatToggles(c, "l" + i)}</div></div>`).join("")}</div>`;
+}
+function leadDocs() {
+  return `<div class="drop"><span style="color:var(--accent)">${ic("upload")}</span><b style="color:var(--fg)">Drop files here, or <button class="btn sm" data-act="upload">choose files</button></b>
+    <span class="small">PDF, Word, PowerPoint, Excel, text. Each file is marked Internal until you mark it Shareable with the client.</span>
+    <button class="btn sm ghost">${ic("plug")}Connect a SharePoint folder instead</button></div>
+    <div class="panel"><div class="tw"><table><thead><tr><th>Document</th><th>Who can see it</th><th>From</th><th>Updated</th><th>Status</th></tr></thead><tbody>
+    ${S.docs.map(([n, vis, from, when, st], i) => `<tr><td><div class="row" style="flex-wrap:nowrap">${ic("doc")}<b style="font-weight:500">${esc(n)}</b></div></td>
+      <td><select class="input" style="width:auto" aria-label="Who can see ${esc(n)}"><option ${vis === "Internal" ? "selected" : ""}>Internal</option><option ${vis === "Shareable" ? "selected" : ""}>Shareable</option></select></td>
+      <td class="small muted">${esc(from)}</td><td class="small num">${when}</td>
+      <td>${st === "Ready" ? `<span class="pill good">Ready</span>` : st === "Reading…" ? `<span class="pill info">Reading…</span>` : `<span class="pill warn" title="A newer meeting mentions a different cutover date">${st}</span>`}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+
+/* ---------- 5. Teams sketch ---------- */
+const SCENES = {
+  welcome: ["Lead's welcome", "Sidekick", "1:1 chat"],
+  add: ["Lead adds people", "Payments core team", "9 people"],
+  newchat: ["New chat shows up", "Payments – sprint 14 standup", "8 people"],
+  notlead: ["Someone else tries", "Payments core team", "9 people"],
+};
+function bot(card) { return `<div class="msg"><span class="bot-av">S</span><div><div class="meta"><b>Sidekick</b> · now</div>${card}</div></div>`; }
+function person(id, html, me) { return me ? `<div class="msg me"><div><div class="meta" style="text-align:right">now</div><div class="bubble">${html}</div></div></div>` : `<div class="msg">${av(id)}<div><div class="meta"><b>${esc(P[id].name)}</b> · now</div><div class="bubble">${html}</div></div></div>`; }
+const mention = n => `<span class="mention">${esc(n)}</span>`;
+function teams() {
+  const sc = S.scene, st = S.sceneState;
+  let thread = "";
+  if (sc === "welcome") thread = `<div class="sys">Sidekick sent you a message</div>` + bot(`<div class="acard"><div class="stripe"></div><div class="ah"><span class="eyebrow">Northwind Bank</span><h3>You're the Team Lead of Payments Platform</h3></div>
+    <div class="ab"><p>Alex Rivera set up this group for your client team. Three things to do, about 5 minutes:</p>
+    <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px"><li><b>Add your people.</b> In any chat with them type <span class="mono">@Sidekick add @name</span>.</li><li><b>Add me to your team's chats</b>, then assign them to Payments Platform in the portal.</li><li><b>Upload the key documents</b> (specs, plans, runbooks) in the portal.</li></ol></div>
+    <div class="aa"><button class="btn primary sm" data-go="lead">Open my group</button><button class="btn sm" data-act="scene" data-v="add">Show me how</button></div></div>`);
+  if (sc === "add") {
+    thread = person("priya", `${mention("@Sidekick")} add ${mention("@Maria Lopez")} ${mention("@Dev Patel")}`, true);
+    thread += bot(st.undone ? `<div class="acard"><div class="ab" style="padding-top:12px"><p>Undone. Maria Lopez and Dev Patel aren't in Payments Platform.</p></div></div>`
+      : `<div class="acard"><div class="stripe good"></div><div class="ah"><h3>Added 2 people to Payments Platform</h3><span class="small muted">Northwind Bank · as Members</span></div>
+      <div class="ab"><div class="row">${av("maria")}Maria Lopez <span class="muted small">Senior Developer</span></div><div class="row">${av("dev")}Dev Patel <span class="muted small">Developer</span></div>
+      <p class="small muted">They can now ask me about this group's documents, meetings and action items, here and in the portal.</p></div>
+      <div class="aa"><button class="btn sm" data-act="sst" data-k="undone">Undo</button><button class="btn sm ghost">Make Viewers instead</button></div></div>`);
+    thread += person("priya", `${mention("@Sidekick")} add ${mention("@Jordan Blake (Guest)")}`, true);
+    thread += bot(`<div class="acard"><div class="stripe warn"></div><div class="ah"><h3>Jordan Blake is a client guest</h3></div><div class="ab"><p>Guests from northwindbank.example can't join a group, but they can still ask me questions in this chat. I'll only use documents marked <b>Shareable</b> when they're here.</p></div></div>`);
+  }
+  if (sc === "newchat") {
+    thread = `<div class="sys">Priya Natarajan added Sidekick to the chat</div>`;
+    thread += bot(`<div class="acard"><div class="stripe warn"></div><div class="ah"><h3>I'm not set up for this chat yet</h3></div>
+      <div class="ab"><p>Hi, I'm Sidekick. A Team Lead needs to assign this chat to a group in the Sidekick portal. Until then I won't read, save or answer anything here.</p>
+      <p class="small muted">If nobody assigns it within 7 days, I'll leave the chat.</p></div></div>`);
+    if (st.linked) {
+      thread += `<div class="sys">Priya Natarajan assigned this chat to Payments Platform in the Sidekick portal</div>`;
+      thread += bot(`<div class="acard"><div class="stripe good"></div><div class="ah"><h3>This chat is now part of Payments Platform</h3><span class="small muted">Northwind Bank · assigned by Priya Natarajan in the portal</span></div>
+        <div class="ab"><div class="cmds"><span class="muted">Meeting notes</span><b>On</b><span class="muted">Daily reminders</span><b>On</b><span class="muted">Reads this chat</span><b>Every message, from now on</b></div></div></div>`);
+      thread += person("maria", `${mention("@Sidekick")} when is the wave 2 cutover?`);
+    }
+  }
+  if (sc === "notlead") {
+    thread = person("dev", `${mention("@Sidekick")} add ${mention("@Chen Wei")}`);
+    thread += bot(`<div class="acard"><div class="ah" style="padding-top:12px"><h3>Only the Team Lead can add people</h3></div><div class="ab"><p>Priya Natarajan leads Payments Platform. I can ask her for you.</p>${st.asked ? `<p class="small" style="color:var(--good)">${ic("check")} Asked Priya. You'll get a message when it's done.</p>` : ""}</div>
+      ${st.asked ? "" : `<div class="aa"><button class="btn primary sm" data-act="sst" data-k="asked">Ask Priya to add Chen</button></div>`}</div>`);
+  }
+  const chats = [["welcome", "Sidekick", "You're the Team Lead of…"], ["add", "Payments core team", "Sidekick: Added 2 people…"], ["newchat", "Payments – sprint 14 standup", "Sidekick: I'm not set up for…"], ["notlead", "Payments core team", "Dev: @Sidekick add…"]];
+  return `<div class="content" style="margin:0 auto">
+    <div class="page-head"><div><h1>In Teams</h1><p>What a Team Lead does without opening the portal. Sidekick's cards use the product palette; the rest is a rough sketch of Teams.</p></div></div>
+    <div class="row"><div class="seg" role="group" aria-label="Scene">${Object.entries(SCENES).map(([k, [l]]) => `<button aria-pressed="${sc === k}" data-act="scene" data-v="${k}">${l}</button>`).join("")}</div></div>
+    <div class="teams"><div class="t-rail">${["Chat", "Teams", "Calendar", "Apps"].map((x, i) => `<i class="${i === 0 ? "on" : ""}">${ic(["chat", "users", "video", "plug"][i])}</i>`).join("")}</div>
+      <div class="t-list"><h4>Chat</h4>${chats.map(([k, n, last]) => `<button class="t-chat ${k === sc ? "on" : ""}" data-act="scene" data-v="${k}">${k === "welcome" ? `<span class="bot-av" style="width:28px;height:28px;font-size:12px">S</span>` : `<span class="av" style="background:var(--teams-me);color:var(--teams)">${ic("users")}</span>`}<div><b style="font-weight:500">${esc(n)}</b><span>${esc(last)}</span></div></button>`).join("")}</div>
+      <div class="t-main"><div class="t-head"><b>${esc(SCENES[sc][1])}</b><span class="small muted">${SCENES[sc][2]}</span><span class="spacer"></span>${sc === "newchat" && !st.linked ? `<button class="btn sm" data-act="sst" data-k="linked">Simulate: Priya assigns it in the portal</button>` : ""}${st && Object.keys(st).length ? `<button class="btn sm ghost" data-act="sreset">Replay</button>` : ""}</div>
+        <div class="t-thread">${thread}</div>
+        <div class="t-compose"><div>Type a message</div></div></div></div>
+    <div class="panel"><div class="panel-h"><h3>What leads can type in Teams</h3></div><div class="panel-b"><div class="cmds">
+      <span class="mono">@Sidekick add @name</span><span>Add people to this chat's group (Team Lead or admin)</span>
+      <span class="mono">@Sidekick remove @name</span><span>Take someone off the group</span>
+      <span class="mono">@Sidekick members</span><span>List who's in the group</span>
+      <span class="mono">@Sidekick link</span><span>Show which group this chat belongs to (assigning is done in the portal)</span>
+      <span class="mono">@Sidekick &lt;question&gt;</span><span>Ask anything; answers come with sources</span></div></div></div>
+  </div>`;
+}
+
+/* ---------- 6. Palette ---------- */
+const TOKENS = ["bg","surface","sunken","line","fg","muted","faint","accent","accent-soft","rail","rail-fg","hand","good","warn","bad","info"];
+const PAIRS = [["fg","bg","Body text"],["muted","surface","Secondary text"],["faint","surface","Hints"],["accent","surface","Links"],["accent-fg","accent","Primary button"],["accent","accent-soft","Selected item"],["rail-fg","rail","Side menu"],["hand","hand-soft","Needs you"],["good","good-soft","Healthy"],["warn","warn-soft","Warning"],["bad","bad-soft","Problem"],["info","info-soft","Info"]];
+function readPalette(pal, th) {
+  const r = document.documentElement, old = [r.dataset.palette, r.dataset.theme];
+  r.dataset.palette = pal; r.dataset.theme = th;
+  const cs = getComputedStyle(r), out = {};
+  for (const t of new Set([...TOKENS, ...PAIRS.flat()])) out[t] = cs.getPropertyValue("--" + t).trim();
+  old[0] === undefined ? delete r.dataset.palette : r.dataset.palette = old[0];
+  old[1] === undefined ? delete r.dataset.theme : r.dataset.theme = old[1];
+  return out;
+}
+function lum(h) { const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; }
+const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+function palette() {
+  const col = (pal, title, blurb) => {
+    const L = readPalette(pal, "light"), D = readPalette(pal, "dark");
+    const strip = v => `<div class="sw">${TOKENS.filter(t => !t.endsWith("soft")).slice(0, 12).map(t => `<div style="background:${v[t]};color:${ratio(v[t], "#ffffff") > ratio(v[t], "#000000") ? "#fff" : "#000"}">${t}</div>`).join("")}</div>`;
+    return `<div class="panel ${S.palette === pal ? "raised" : ""}" style="${S.palette === pal ? "border-color:var(--accent)" : ""}"><div class="panel-h"><h2>${title}</h2><span class="spacer"></span>${pal === "indigo" ? `<span class="pill good">Chosen</span>` : ""}${S.palette === pal ? `<span class="pill accent">Showing now</span>` : `<button class="btn sm" data-act="pal" data-v="${pal}">Try it</button>`}</div>
+      <div class="panel-b stack"><p class="muted">${blurb}</p>
+      <span class="eyebrow">Light</span>${strip(L)}<span class="eyebrow">Dark</span>${strip(D)}
+      <div class="tw"><table><thead><tr><th>Text on background</th><th class="num">Light</th><th class="num">Dark</th></tr></thead><tbody>
+      ${PAIRS.map(([a, b, n]) => { const rl = ratio(L[a], L[b]), rd = ratio(D[a], D[b]); const f = r => `<span class="${r >= 4.5 ? "ratio-ok" : "ratio-bad"}">${r.toFixed(1)}:1</span>`; return `<tr><td>${n} <span class="faint small mono">${a} / ${b}</span></td><td class="num">${f(rl)}</td><td class="num">${f(rd)}</td></tr>`; }).join("")}
+      </tbody></table></div></div></div>`;
+  };
+  return `<div class="content" style="margin:0 auto">
+    <div class="page-head"><div><h1>Two palettes to choose from</h1><p>Both drop the teal. Same fonts as today (Instrument Sans for headings, IBM Plex Sans for text). Every text colour below passes WCAG AA (at least 4.5:1); the numbers are computed live from this page's styles.</p></div></div>
+    <div class="pal-grid">${col("navy", "A · Navy", "Deep navy side menu with a clear Microsoft-style blue. Feels like Azure or Microsoft 365 admin: calm, corporate, familiar to IT buyers.")}
+    ${col("indigo", "B · Indigo", "Graphite side menu with an indigo accent. A little warmer and more modern; sits naturally next to Teams' own purple, so Sidekick looks at home inside Teams.")}</div>
+    <div class="callout">${ic("info")}<div>Status colours (green, amber, red, blue) are shared by both palettes and stay separate from the accent, so “needs attention” never looks like a button. The Teams app icon colour would follow the accent.</div></div></div>`;
+}
+
+/* ---------- Router + events ---------- */
+const SCREENS = { wizard: ["1 · Setup wizard", wizard], groups: ["2 · Groups", groups], new: ["3 · New group", newGroup], lead: ["4 · Team Lead's view", lead], teams: ["5 · In Teams", teams], palette: ["6 · Palettes", palette] };
+function render(keepFocus) {
+  const f = keepFocus && document.activeElement && document.activeElement.id, pos = f && document.activeElement.selectionStart;
+  document.getElementById("mocknav").innerHTML = Object.entries(SCREENS).map(([k, [l]]) => `<button data-go="${k}" aria-current="${S.screen === k}">${l}</button>`).join("");
+  document.getElementById("stage").innerHTML = SCREENS[S.screen][1]();
+  document.querySelectorAll("#palseg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.pal === S.palette));
+  document.querySelectorAll("#themeseg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.th === S.theme));
+  if (f) { const el = document.getElementById(f); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
+}
+function go(screen) { S.screen = screen; try { history.replaceState(null, "", "#" + screen); } catch {} render(); window.scrollTo(0, 0); }
+let toastT;
+function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2600); }
+function setPalette(p) { S.palette = p; p === "navy" ? delete document.documentElement.dataset.palette : document.documentElement.dataset.palette = p; save(); render(); }
+function setTheme(t) { S.theme = t; t === "system" ? delete document.documentElement.dataset.theme : document.documentElement.dataset.theme = t; save(); render(); }
+function save() { try { localStorage.setItem("sk-mock2", JSON.stringify({ p: S.palette, t: S.theme })); } catch {} }
+
+function setPath(path, v) { // "ng.strict" or "w0.notes" / "l1.track"
+  const [a, b] = path.split(".");
+  if (a === "ng") S.ng[b] = v; else (a[0] === "w" ? S.waiting : S.linked)[+a.slice(1)][b] = v;
+}
+function getPath(path) { const [a, b] = path.split("."); return a === "ng" ? S.ng[b] : (a[0] === "w" ? S.waiting : S.linked)[+a.slice(1)][b]; }
+
+document.addEventListener("click", e => {
+  const pal = e.target.closest("[data-pal]"); if (pal) return setPalette(pal.dataset.pal);
+  const th = e.target.closest("[data-th]"); if (th) return setTheme(th.dataset.th);
+  const g = e.target.closest("[data-go]");
+  const a = e.target.closest("[data-act]");
+  if (a && (!g || g.contains(a))) {
+    const v = a.dataset.v, i = +a.dataset.i;
+    switch (a.dataset.act) {
+      case "next": S.step = Math.min(5, S.step + 1); break;
+      case "prev": S.step = Math.max(0, S.step - 1); break;
+      case "step": S.step = i; break;
+      case "m365": S.m365 = true; toast("Approved in Microsoft 365"); break;
+      case "notadmin": S.notAdmin = !S.notAdmin; break;
+      case "copy": { const el = document.getElementById("adminlink"); navigator.clipboard?.writeText(el.value).then(() => toast("Link copied"), () => { el.select(); }); return; }
+      case "install": S.install = v; break;
+      case "preset": S.preset = v; break;
+      case "wgadd": S.wizGroups.push({ name: "", client: "", lead: "" }); break;
+      case "wgdel": S.wizGroups.splice(i, 1); break;
+      case "filter": S.filter = v; break;
+      case "lead": S.ng.lead = v; S.ng.members.delete(v); break;
+      case "unlead": S.ng.lead = null; break;
+      case "importteam": { const st = a.dataset.ctx === "ng" ? S.ng : S.add; ["maria", "dev", "sam", "aisha", "jonas"].forEach(id => { if (id !== S.ng.lead) st.members.add(id); }); toast("Imported 5 people from the Teams team “Payments core team”"); break; }
+      case "clearpick": (a.dataset.ctx === "ng" ? S.ng : S.add).members.clear(); break;
+      case "create": { const n = S.ng; S.groups.unshift({ id: "x" + Date.now(), name: n.name, client: n.client, lead: n.lead, members: n.members.size + 1, chats: n.chats.size, waiting: 0, docs: 0, meetings: 0, strict: n.strict, active: "just created" });
+        toast(`Created ${n.name}. ${P[n.lead].name.split(" ")[0]} got a message in Teams.`); S.ng = { name: "", client: "", code: "", lead: null, leadQ: "", members: new Set(), roles: {}, q: "", dept: "All", chats: new Set(), strict: false, guests: true }; S.filter = "all"; return go("groups"); }
+      case "tab": S.tab = v; break;
+      case "toggle": setPath(a.dataset.key, !getPath(a.dataset.key)); break;
+      case "link": { const c = S.waiting.splice(i, 1)[0]; S.linked.push(c); S.groups[0].waiting = S.waiting.length; S.groups[0].chats++; toast(`“${c.name}” is now part of Payments Platform. Sidekick said so in the chat.`); break; }
+      case "notmine": { const c = S.waiting.splice(i, 1)[0]; S.groups[0].waiting = S.waiting.length; toast(`Sidekick left “${c.name}” and posted a short goodbye there.`); break; }
+      case "addopen": S.addOpen = !S.addOpen; S.add = { members: new Set(), q: "", dept: "All" }; break;
+      case "addsave": S.add.members.forEach(id => S.members.push([id, "Member", "Added in the portal by Priya"])); toast(`Added ${S.add.members.size} people. They'll get a hello from Sidekick in Teams.`); S.addOpen = false; break;
+      case "mremove": { const m = S.members.splice(i, 1)[0]; toast(`${P[m[0]].name} was taken off Payments Platform.`); break; }
+      case "upload": S.docs.unshift(["Release checklist.xlsx", "Internal", "Uploaded by Priya", "Oct 20", "Reading…"]); setTimeout(() => { S.docs[0][4] = "Ready"; if (S.screen === "lead") render(); }, 1600); break;
+      case "scene": S.scene = v; S.sceneState = {}; break;
+      case "sst": S.sceneState[a.dataset.k] = true; break;
+      case "sreset": S.sceneState = {}; break;
+      case "pal": return setPalette(v);
+      default: return;
+    }
+    return render();
+  }
+  if (g) { if (g.dataset.scene) { S.scene = g.dataset.scene; S.sceneState = {}; } if (g.dataset.go === "lead") S.tab = S.waiting.length ? "chats" : "overview"; go(g.dataset.go); }
+});
+document.addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && e.target.matches("article[data-go]")) { e.preventDefault(); e.target.click(); } });
+document.addEventListener("input", e => {
+  const t = e.target, d = t.dataset;
+  if (d.wg !== undefined) { S.wizGroups[+d.wg][d.f] = t.value; if (d.f !== "lead") { const b = document.querySelector('.wiz-foot .btn.primary'); if (b) b.firstChild.textContent = "Create " + S.wizGroups.filter(g => g.name).length + " groups"; } return; }
+  if (d.ng) { S.ng[d.ng] = t.value; return render(true); }
+  if (d.lq) { S.ng.leadQ = t.value; return render(true); }
+  if (d.pq) { (d.pq === "ng" ? S.ng : S.add).q = t.value; return render(true); }
+});
+document.addEventListener("change", e => {
+  const t = e.target, d = t.dataset;
+  if (d.pick) { const st = d.pick === "ng" ? S.ng : S.add; t.checked ? st.members.add(t.value) : st.members.delete(t.value); return render(); }
+  if (d.pd) { (d.pd === "ng" ? S.ng : S.add).dept = t.value; return render(); }
+  if (d.chat !== undefined) { t.checked ? S.ng.chats.add(+d.chat) : S.ng.chats.delete(+d.chat); return render(); }
+  if (d.role) { S.ng.roles[d.role] = t.value; return; }
+  if (d.mrole !== undefined) { S.members[+d.mrole][1] = t.value; toast(`${P[S.members[+d.mrole][0]].name} is now a ${t.value}.`); return; }
+  if (d.wg !== undefined && d.f === "lead") { S.wizGroups[+d.wg].lead = t.value; }
+});
+
+(function init() {
+  try { const s = JSON.parse(localStorage.getItem("sk-mock2") || "{}"); if (s.p) S.palette = s.p; if (s.t) S.theme = s.t; } catch {}
+  S.palette = S.palette || "indigo"; S.theme = S.theme || "system";
+  if (S.palette !== "navy") document.documentElement.dataset.palette = S.palette;
+  if (S.theme !== "system") document.documentElement.dataset.theme = S.theme;
+  const h = (location.hash || "").slice(1); if (SCREENS[h]) S.screen = h;
+  render();
+})();
+</script>
+</body>
+</html>

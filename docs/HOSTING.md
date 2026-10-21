@@ -45,6 +45,27 @@ Scripts in `infra/azure/` (run after `az login`):
   database storage (~$4) are still billed while frozen. Azure restarts a stopped Postgres after 7 days.
 - `./unfreeze.sh`: starts them again.
 
+## Automatic deploys (GitHub Actions)
+
+Every merge to `main` that changes the app (`app/`, `teams/` or the workflows) deploys itself:
+`.github/workflows/deploy.yml` runs the full test suite on the merged code, builds the image in
+`sidekicklabsacr`, switches `sidekick-app` to it and waits until the new revision gets all traffic, is
+healthy and `/api/health` answers ok. If not within ~5 minutes it **rolls back** to the previous image and
+the run fails (GitHub emails the repo owner). One deploy at a time. Docs-only merges don't deploy; the
+Actions tab has **Run workflow** for a manual deploy, and `./infra/azure/deploy.sh` still works from the Mac.
+
+- **No stored Azure password.** GitHub's own login token (OIDC) is exchanged for the user-assigned managed
+  identity `sidekick-deployer` (resource group `sidekick-rg`), which has a federated credential trusting
+  only `repo:ScottyP1/side_kick:ref:refs/heads/main`. Its roles: Contributor on `sidekicklabsacr` (image
+  builds) and on `sidekick-app` (switch the image). Nothing else: not the database, the other services or
+  the subscription.
+- **Repository variables** (Settings → Secrets and variables → Actions → Variables; ids, not secrets):
+  `AZURE_CLIENT_ID` (the identity's client id), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+- **No manual approval gate:** GitHub's "required reviewers" for environments needs a paid plan on private
+  repos, so merging *is* releasing. Keep the rule: merge only reviewed PRs with a green `test` check.
+- **Stop automatic deploys** (e.g. during an incident): Actions → Deploy → ⋯ → Disable workflow.
+- Rollback by hand: `docs/RUNBOOKS.md` → Roll back.
+
 ## Teams app package
 
 There is **one** Sidekick app in Teams: its app ID is the Azure Bot's ID, and Teams sends its messages to

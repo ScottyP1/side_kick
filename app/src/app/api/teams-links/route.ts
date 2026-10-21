@@ -1,7 +1,12 @@
 /**
  * GET/POST/PATCH/DELETE /api/teams-links: which Teams channels and chats are linked to which workspace.
- * Linking uses the code Sidekick shows in Teams (see lib/teams/bot.ts). Listing: workspace members; changes:
- * Org Owners and Org Admins, or a Team Lead for the workspaces they lead.
+ * Listing: workspace members; changes: Org Owners and Org Admins, or a Team Lead for the workspaces they lead.
+ * Two ways to link (see lib/teams/bot.ts and lib/tenants.ts):
+ * - **Assign a waiting chat** (`{ id, ws }`): chats and channels Sidekick was added to in the org's own
+ *   Microsoft tenant, not linked yet. GET returns them as `waiting` (name, kind, who added Sidekick, when) to
+ *   Org Owners/Admins and Team Leads only; a Team Lead assigns them to the workspaces they lead.
+ * - **Link code** (`{ code, ws }`): the fallback, the code Sidekick shows in Teams. In multi-tenant mode the
+ *   chat must belong to the org's own Microsoft tenant.
  * The list includes each chat's settings (tracking, notes, reminders; see lib/reminders.ts) and its last
  * reminder. Unlinking also forgets the messages Sidekick saved from that chat and its settings.
  */
@@ -12,12 +17,14 @@ import { all, get, now, run } from "@/lib/db";
 import { helpCard } from "@/lib/teams/cards";
 import { normalizeCode, postCard, type TeamsConversation } from "@/lib/teams/bot";
 import { forgetChat, getChatSettings, lastRuns } from "@/lib/reminders";
+import { tenantMode, tenantOfOrg } from "@/lib/tenants";
 
 // Teams channels and chats linked to the workspaces this user can see.
 export const GET = handle(async () => {
   const user = await requireUser();
+  const waiting = await waitingChats(user);
   const ids = await workspaceIdsFor(user);
-  if (!ids.length) return { links: [] };
+  if (!ids.length) return { links: [], waiting };
   const links = await all<{ id: string; workspace_id: string }>(
     `SELECT t.id, t.kind, t.name, t.guests, t.linked_at, t.last_seen_at, t.workspace_id, w.name AS workspace
        FROM teams_conversations t JOIN workspaces w ON w.id = t.workspace_id
@@ -30,26 +37,56 @@ export const GET = handle(async () => {
     user.org_id, ...links.map((l) => l.id),
   );
   return {
+    waiting,
     links: await Promise.all(
       links.map(async (l) => ({ ...l, settings: await getChatSettings(l), lastReminder: runs.get(l.id) ?? null, savedMessages: tracked.find((t) => t.conversation_id === l.id)?.n ?? 0 })),
     ),
   };
 });
 
-// Link a Teams channel/chat to a workspace using the code Sidekick showed in Teams.
+/**
+ * The org's chats and channels waiting to be assigned: unlinked, in the org's own Microsoft tenant, not 1:1.
+ * Only for people who can assign them (Org Owners/Admins, Team Leads); an empty list for everyone else.
+ */
+async function waitingChats(user: User) {
+  if (!isAdmin(user) && !isLead(user)) return [];
+  const tenant = await tenantOfOrg(user.org_id);
+  if (!tenant) return [];
+  return all<{ id: string; kind: string; name: string | null; added_by: string | null; created_at: string; last_seen_at: string }>(
+    `SELECT id, kind, name, added_by, created_at, last_seen_at FROM teams_conversations
+      WHERE tenant_id = ? AND workspace_id IS NULL AND kind <> 'personal' ORDER BY created_at DESC LIMIT 100`,
+    tenant,
+  );
+}
+
+// Link a Teams channel/chat to a workspace: assign a waiting chat by id, or use the code Sidekick showed in Teams.
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
-  const body = await readJson<{ code?: string; ws?: string; guests?: boolean }>(req);
+  const body = await readJson<{ id?: string; code?: string; ws?: string; guests?: boolean }>(req);
   const ws = await requireManage(user, body.ws);
-  const code = normalizeCode(requireText(body.code, "Link code", 20));
-  const conv = code
-    ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE link_code = ? AND code_expires_at > ? AND workspace_id IS NULL", code, now())
-    : undefined;
-  if (!conv) throw new HttpError(404, "That code doesn't match a Teams channel or chat. Codes expire after 24 hours: mention @Sidekick with “link” in Teams to get a new one.");
-  await run(
-    "UPDATE teams_conversations SET org_id = ?, workspace_id = ?, guests = ?, linked_by = ?, linked_at = ?, link_code = NULL, code_expires_at = NULL WHERE id = ?",
+  const tenant = await tenantOfOrg(user.org_id);
+  let conv: TeamsConversation | undefined;
+  if (body.id !== undefined) {
+    // Assigning from "Waiting to be assigned": only chats from this org's own Microsoft tenant.
+    conv = typeof body.id === "string" && tenant
+      ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ? AND tenant_id = ? AND workspace_id IS NULL AND kind <> 'personal'", body.id, tenant)
+      : undefined;
+    if (!conv) throw new HttpError(404, "That chat isn't waiting to be assigned any more (someone may have just assigned it). Reload the page.");
+  } else {
+    const code = normalizeCode(requireText(body.code, "Link code", 20));
+    conv = code
+      ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE link_code = ? AND code_expires_at > ? AND workspace_id IS NULL", code, now())
+      : undefined;
+    // Multi-tenant: a code from another company's Teams never links into this org.
+    if (conv && tenantMode() === "multi" && (!tenant || conv.tenant_id !== tenant)) conv = undefined;
+    if (!conv) throw new HttpError(404, "That code doesn't match a Teams channel or chat. Codes expire after 24 hours: mention @Sidekick with “link” in Teams to get a new one.");
+  }
+  // "AND workspace_id IS NULL": if two people assign the same chat at once, only the first one wins.
+  const linked = await run(
+    "UPDATE teams_conversations SET org_id = ?, workspace_id = ?, guests = ?, linked_by = ?, linked_at = ?, link_code = NULL, code_expires_at = NULL WHERE id = ? AND workspace_id IS NULL",
     user.org_id, ws, body.guests ? 1 : 0, user.id, now(), conv.id,
   );
+  if (!linked.changes) throw new HttpError(409, "Someone just linked that chat. Reload the page.");
   const wsName = (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ?", ws))!.name;
   await audit(user, `Linked Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}” to workspace “${wsName}”`, "Access", ws);
   // Let the people in Teams know it worked.
@@ -60,7 +97,7 @@ export const POST = handle(async (req: Request) => {
       console.error("Couldn't confirm the link in Teams", e);
     }
   });
-  return { ok: true, name: conv.name };
+  return { ok: true, id: conv.id, name: conv.name };
 });
 
 // Change whether client guests are in the conversation (guests only get Shareable sources).

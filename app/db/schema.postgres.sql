@@ -225,3 +225,9 @@ CREATE TABLE IF NOT EXISTS reminder_state (
 -- Reminders: due dates as real dates (YYYY-MM-DD).
 ALTER TABLE action_items ADD COLUMN IF NOT EXISTS due_on TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS due_on TEXT;
+-- Multi-tenant Teams (lib/tenants.ts, lib/directory.ts): who added Sidekick to a chat, and when the org's
+-- Microsoft admin approved the directory permission.
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS added_by TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS added_by_oid TEXT;
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS graph_consent_at TEXT;
+CREATE INDEX IF NOT EXISTS teams_conversations_tenant ON teams_conversations(tenant_id);

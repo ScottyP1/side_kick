@@ -325,6 +325,12 @@ function migrate(conn: DatabaseSync) {
   // Reminders: due dates as real dates (YYYY-MM-DD), worked out from what was said and the meeting date.
   if (!has("action_items", "due_on")) conn.exec("ALTER TABLE action_items ADD COLUMN due_on TEXT");
   if (!has("items", "due_on")) conn.exec("ALTER TABLE items ADD COLUMN due_on TEXT");
+  // Multi-tenant Teams (lib/tenants.ts): who added Sidekick to a chat (shown on "Waiting to be assigned"),
+  // and when the org's Microsoft admin approved Sidekick's directory permission (lib/directory.ts).
+  if (!has("teams_conversations", "added_by")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN added_by TEXT");
+  if (!has("teams_conversations", "added_by_oid")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN added_by_oid TEXT");
+  if (!has("orgs", "graph_consent_at")) conn.exec("ALTER TABLE orgs ADD COLUMN graph_consent_at TEXT");
+  conn.exec("CREATE INDEX IF NOT EXISTS teams_conversations_tenant ON teams_conversations(tenant_id)");
 }
 
 /**

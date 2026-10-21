@@ -3,8 +3,8 @@
 /**
  * Workspaces (/workspaces): one workspace per client engagement, plus the Teams channels and chats linked to them.
  * Org Owners/Admins create, rename (name and engagement code) and delete workspaces; deleting asks for a
- * confirmation that says what will be removed. Admins, and Team Leads for the workspaces they lead, link Teams channels with the
- * code Sidekick shows in Teams, and choose per chat what Sidekick does there (meeting notes, tracking every
+ * confirmation that says what will be removed. Admins, and Team Leads for the workspaces they lead, assign Teams chats
+ * that are waiting to be assigned (components/waiting-chats.tsx) or link them with the code Sidekick shows in Teams, and choose per chat what Sidekick does there (meeting notes, tracking every
  * message, reminders; components/chat-settings.tsx).
  */
 
@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
 import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
+import { WaitingChats, type WaitingChat } from "@/components/waiting-chats";
 
 type TeamsLink = {
   id: string; kind: string; name: string | null; guests: number; linked_at: string; last_seen_at: string; workspace_id: string; workspace: string;
@@ -30,6 +31,7 @@ export default function WorkspacesPage() {
   const [error, setError] = useState("");
 
   const [links, setLinks] = useState<TeamsLink[] | null>(null);
+  const [waiting, setWaiting] = useState<WaitingChat[]>([]);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkForm, setLinkForm] = useState({ code: "", ws: "", guests: false });
   const [linkError, setLinkError] = useState("");
@@ -41,8 +43,12 @@ export default function WorkspacesPage() {
     () =>
       Promise.all([
         api<{ workspaces: W[] }>("/api/workspaces").then((r) => setList(r.workspaces)),
-        api<{ links: TeamsLink[] }>("/api/teams-links").then((r) => setLinks(r.links)),
-      ]),
+        api<{ links: TeamsLink[]; waiting?: WaitingChat[] }>("/api/teams-links").then((r) => {
+          setLinks(r.links);
+          setWaiting(r.waiting ?? []);
+          return r.links;
+        }),
+      ]).then(([, l]) => l),
     [],
   );
   useEffect(() => {
@@ -197,6 +203,17 @@ export default function WorkspacesPage() {
           </div>
         ))}
       </div>
+      {manage && !!list?.length && (
+        <WaitingChats
+          chats={waiting}
+          workspaces={list}
+          onAssigned={(id) =>
+            load()
+              .then((l) => setSettingsFor(l.find((x) => x.id === id) ?? null))
+              .catch(reportError)
+          }
+        />
+      )}
       <div className="panel" style={{ marginTop: 16 }}>
         <div className="panel-h">
           <div>
@@ -214,7 +231,7 @@ export default function WorkspacesPage() {
           <div className="empty">
             <span>
               {manage
-                ? "Nothing linked yet. Add Sidekick to a Teams group chat or channel and mention it: it replies with a link code to enter here."
+                ? "Nothing linked yet. Add Sidekick to a Teams group chat or channel: it shows up above as waiting to be assigned (or mention it to get a link code to enter here)."
                 : "Nothing linked yet. Your Org Owner, Org Admin or Team Lead links Teams chats and channels here."}
             </span>
           </div>

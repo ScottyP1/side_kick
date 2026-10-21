@@ -31,7 +31,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `db/schema.postgres.sql` | The Postgres schema, mirroring the SQLite one |
 | `lib/auth.ts` | Sessions, roles, `requireUser` (also blocks everything but the password change while a temporary password is pending), `requireWorkspace` (the workspace wall), audit log |
 | `lib/login-limit.ts` | Sign-in rate limit: failed password sign-ins per email and per IP, stored in `login_failures` (works across several app copies) |
-| `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification |
+| `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification (issuer checked per tenant; single-tenant mode also checks the tenant) |
+| `lib/tenants.ts` | Single- vs multi-tenant mode (`TENANT_ID`), which Sidekick org a Microsoft tenant belongs to, `tieOrgToTenant` (also for the sign-up flow) |
+| `lib/directory.ts` | The customer's Microsoft 365 directory via Microsoft Graph (app permission `User.Read.All`): admin-consent round trip, search, import as Microsoft-sign-in people |
 | `lib/owner.ts` | Owner Console sign-in, kill switches (`assertEnabled`), operator log |
 | `lib/trace.ts` | Traces and steps (spans) for every request and Teams message; feeds the Activity page and the home orb |
 | `lib/api.ts` | `handle()` wrapper: JSON responses, `HttpError` → `{ error }`, reference codes + `app_errors` log for unexpected errors |
@@ -45,7 +47,8 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/guard-text.ts` | The quick guardrail text checks with no I/O (slurs, jailbreaks, swearing, loosening and too-broad rules, masking contact details but not dates), unit-tested in `tests/db.test.mjs` |
 | `lib/excerpt.ts` | Plain-text source excerpts for answers, taken from the part of a passage that matches the question |
 | `lib/workspaces.ts` | Unique workspace names, renaming, and deleting a workspace with everything scoped to it (both engines, plus Azure search) |
-| `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
+| `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards; tenant check, waiting chats |
+| `lib/teams/members.ts` | `@Sidekick add` / `remove @name`: who may, who can be added, auditing |
 | `lib/reminders.ts` | Per-chat settings (notes, tracking, reminders), saving tracked chat messages, building reminder digests (items picked in code, worded by Claude feature `remind`, every point with a source) and their card buttons |
 | `lib/reminder-rules.ts` | Plain rules for chat settings and reminder timing (defaults, validation, time zones, quiet days); no I/O, unit-tested |
 | `instrumentation.ts` | Starts the in-app timer that calls `POST /api/reminders/tick` every 5 minutes (off with `SIDEKICK_SCHEDULER=off`) |
@@ -75,8 +78,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 **A Teams message**
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
 2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
-3. Unlinked conversation → link-code card. Linked → typing indicator now, answer card after the request returns.
-4. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
+3. `tenantGate`: in multi-tenant mode an activity from a Microsoft tenant no Sidekick org is tied to gets the sign-up card and nothing is stored.
+4. Unlinked conversation → in a tied tenant it waits on the org's Workspaces page ("Waiting to be assigned", card with the portal link and a fallback code); otherwise the link-code card. Linked → `add`/`remove @name` commands (members.ts), or typing indicator now and the answer card after the request returns.
+5. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
 
 ## Rules every change must keep
 - **Walls**: filter every query by `org_id`, and by a workspace id that went through `requireWorkspace` (or a linked Teams conversation). Never trust an id from the request on its own.

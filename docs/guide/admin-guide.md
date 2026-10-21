@@ -18,6 +18,14 @@ The first person to open a new Sidekick install sets up the organization and bec
 ## 4. Add people
 **Users & access → Add person.** Pick their role and the workspaces they can see. Sidekick shows a **temporary password once**: share it with them privately; they must change it at first sign-in. Change roles or workspaces at any time from the same page. **Remove** asks you to confirm first. Nobody can change their own role or remove themselves (so you can't lock yourself out by accident): ask the Org Owner or another Org Admin. If your organization uses Microsoft sign-in, people can ignore the temporary password and use **Sign in with Microsoft** with that same email; the list shows a **Microsoft** badge once they have.
 
+**Import from Microsoft 365.** Once Microsoft sign-in is connected (step 3), **Users & access → Import from Microsoft 365** searches your company's directory: type part of a name or email, tick the people, pick their role and workspaces, and press **Import**. They're created as people who **sign in with Microsoft** (no temporary password); anyone already in Sidekick is just added to the workspaces you picked. Guests from other companies aren't listed. Team Leads can import too, as Member or Viewer into the workspaces they lead.
+
+The first time, a **Microsoft admin of your company** (Global Administrator, Privileged Role Administrator or Cloud Application Administrator) has to approve Sidekick once: an Org Owner or Org Admin presses **Approve Sidekick for your organization**, signs in on Microsoft's page as (or hands the link to) that admin, and approves. Until then the import says Sidekick isn't approved yet. What the approval allows:
+- **Sign in and read user profile**: people sign in to Sidekick with their work account.
+- **Read all users' full profiles** (an *application* permission): Sidekick can search your directory when someone imports people or types `@Sidekick add` in Teams. It reads names, work emails, job titles and account ids only and never changes anything in Microsoft 365. It's an application permission (Sidekick reads as itself, not as you) because `@Sidekick add` happens in Teams, where nobody is signed in to the portal.
+- Reading Teams messages is **not** part of it: that's asked per chat or team when Sidekick is added there.
+The approval is recorded on Security & audit; your Microsoft admin can withdraw it any time in the Microsoft Entra admin center (Enterprise applications → Sidekick).
+
 **Team Leads.** Give the person who runs a project the **Team Lead** role and add them to that project's workspace(s). They can then add their own team to those workspaces (as Member or Viewer), take people off, and link the project's Teams chats, from **Users & access**, **Workspaces** or the home assistant, without needing you. If they add someone who already has an account in your organization, that person is simply added to the lead's workspace. Roles, removing people from the organization and new workspaces stay with you.
 
 ## 5. Add documents
@@ -37,11 +45,12 @@ You can change the tag later; it takes effect immediately. **Delete** asks you t
 If the workspace has linked Teams chats or channels, Sidekick posts the notes and action items there automatically.
 
 ## 7. Link Teams chats and channels
-See [Sidekick in Teams](teams-guide.md) for what people see. To link:
-1. Someone adds Sidekick to the Teams group chat or channel (Sidekick posts a code; or mention it: `@Sidekick link`).
-2. Sidekick replies with an 8-character code, valid for 24 hours.
-3. In the portal: **Workspaces → Link a Teams chat or channel**, enter the code, pick the workspace.
-4. Tick **Client guests are in this chat or channel** if the client can read it.
+See [Sidekick in Teams](teams-guide.md) for what people see. With Microsoft sign-in connected (step 3), no codes are needed:
+1. Someone adds Sidekick to a Teams group chat or channel in your company.
+2. It appears on **Workspaces → Waiting to be assigned**, with its name, who added Sidekick and when (Org Owners, Org Admins and Team Leads see this list; nobody outside your organization does).
+3. Pick the workspace (a Team Lead only sees the workspaces they lead), tick **Guests present** if the client can read the chat, and press **Assign**. Sidekick confirms in the chat, and the chat's **Settings** open straight away so you can choose meeting notes, message tracking and reminders.
+
+**With a code instead** (the fallback, and the only way before Microsoft sign-in is connected): Sidekick's card shows an 8-character code, valid for 24 hours (mention `@Sidekick link` for a new one). Enter it on **Workspaces → Link a Teams chat or channel**, pick the workspace, and tick **Client guests are in this chat or channel** if the client can read it.
 
 The **Teams chats and channels** table on the Workspaces page shows every link. Use the switch to change the client-guests setting, or **Unlink** to stop Sidekick answering and posting there (this also deletes the messages it saved from that chat).
 
@@ -98,5 +107,8 @@ On the home page, type requests like "create a workspace for Fabrikam, code FAB"
 | "… is paused by the Sidekick team" | A feature was paused for maintenance. Try again later. |
 | "… is turned off for your organization by the Sidekick team" | Not an error: the Sidekick team switched that feature off for your organization. Org Owners: contact the Sidekick team to have it turned back on. Everyone else: ask your Org Owner. |
 | "This organization's Sidekick access is paused" | Contact the Sidekick team. |
-| A Teams link code doesn't work | Codes expire after 24 hours. Mention `@Sidekick link` in Teams for a new one. |
+| A Teams link code doesn't work | Codes expire after 24 hours. Mention `@Sidekick link` in Teams for a new one. A code from another company's Teams never works in your organization. |
+| A chat doesn't appear under *Waiting to be assigned* | Microsoft sign-in must be connected (Settings), and the chat must be in your company's Microsoft 365. 1:1 chats never wait; use their link code. |
+| "Sidekick isn't approved for your Microsoft 365 organization yet" when importing | A Microsoft admin of your company approves it once: **Users & access → Import from Microsoft 365 → Approve Sidekick for your organization**. |
+| "Sidekick isn't set up for your organization yet" in Teams | Your company hasn't signed up, or Microsoft sign-in isn't connected yet (Settings). |
 | Sidekick answers "I couldn't find that" | The workspace doesn't have it yet. Upload the document; the question is already listed as a gap. |

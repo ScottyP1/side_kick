@@ -23,7 +23,8 @@ import { EVERYONE, MATRIX } from "./permissions-matrix.mjs";
 
 const APP = path.resolve(import.meta.dirname, "..");
 const ENGINE = process.env.TEST_DB === "postgres" ? "postgres" : "sqlite";
-const PORT = ENGINE === "postgres" ? 3201 : 3200;
+// TEST_PORT lets parallel worktrees run the suite without sharing a port (default 3200/3201).
+const PORT = Number(process.env.TEST_PORT) || (ENGINE === "postgres" ? 3201 : 3200);
 const BASE = `http://localhost:${PORT}`;
 const PG_URL = process.env.TEST_DATABASE_URL || "postgres:///sidekick_test";
 
@@ -197,7 +198,9 @@ before(async () => {
     TEAMS_LOCAL_PLAYGROUND: "true",
     CLIENT_ID: "",
     CLIENT_SECRET: "",
-    TENANT_ID: "",
+    // Single-tenant mode (lib/tenants.ts): Teams works for every chat as before multi-tenant support.
+    // Multi-tenant mode has its own suite: tests/teams-multitenant.test.mjs.
+    TENANT_ID: "tenant-1",
     SIDEKICK_PUBLIC_URL: "",
     // The reminder timer is off; tests call its route themselves with this secret.
     SIDEKICK_SCHEDULER: "off",
@@ -1183,6 +1186,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   const r = await owner("POST", "/api/owner/tenants", { org: "Leak Org", name: "Leak Admin", email: "leak@test.local" });
   await firstSignIn(other, "leak@test.local", r.body.tempPassword);
   for (const url of [`/api/docs?ws=${s.wsB}`, `/api/memory?ws=${s.wsB}`]) assert.equal((await other("GET", url)).status, 404, url);
+  assert.equal((await other("GET", "/api/directory?q=vault")).status, 400, "no Microsoft 365 directory without its own connected tenant");
   assert.equal((await other("POST", "/api/ask", { ws: s.wsB, question: "vault code" })).status, 404);
   // Guardrails: workspace B's settings and rules, and this org's custom rules, are out of reach.
   const ruleB = (await admin("POST", "/api/guardrails/rules", { text: "Never mention the ZEBRA vault", ws: s.wsB })).body.rule.id;
@@ -1466,6 +1470,35 @@ test(`[${ENGINE}] Microsoft: requiring it turns passwords off and signs password
 
 /* ---------- proactive reminders and per-chat settings (lib/reminders.ts) ---------- */
 const GROUP = "conv-group-reminders";
+test(`[${ENGINE}] single-tenant mode: other tenants still get a link code; chats in the connected tenant wait for this org only`, async () => {
+  const OLD = "conv-single-tenant-old";
+  const NEW = "19:connected-tenant@thread.v2";
+  // The test above disconnected Microsoft; connect it again for this one (and disconnect at the end).
+  assert.equal((await microsoftSignIn(admin, { tid: TENANT, oid: "oid-admin", email: "admin@test.local", name: "Test Admin" }, { mode: "link" })).to.search, "?microsoft=connected");
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: OLD, conversationType: "groupChat", tenantId: "tenant-1" } }));
+  const old = await waitForSent((m) => decodeURIComponent(m.url).includes(OLD));
+  assert.match(JSON.stringify(old.body), /Link this chat to a workspace/, "unchanged: the classic link-code card");
+  await toBot(activity({ type: "installationUpdate", action: "add", from: { id: "29:w", name: "Wendy Adder", aadObjectId: "aad-w" }, conversation: { id: NEW, conversationType: "groupChat", tenantId: TENANT, name: "Cutover crew" } }));
+  const card = await waitForSent((m) => decodeURIComponent(m.url).includes(NEW));
+  assert.match(JSON.stringify(card.body), /waiting to be assigned/);
+  const waiting = (await admin("GET", "/api/teams-links")).body.waiting;
+  assert.deepEqual(waiting.map((w) => [w.id, w.name, w.added_by]), [[NEW, "Cutover crew", "Wendy Adder"]], "only the connected tenant's chat waits");
+  // Requiring Microsoft sign-in (above) ended the member's password session: Mia signs in with Microsoft.
+  const mia = client();
+  assert.equal((await microsoftSignIn(mia, { tid: TENANT, oid: "oid-member", email: "member@test.local" })).to.pathname, "/");
+  assert.deepEqual((await mia("GET", "/api/teams-links")).body.waiting, [], "Members don't see waiting chats");
+  const other = client();
+  const r = await owner("POST", "/api/owner/tenants", { org: "Picker Org", name: "Picker Admin", email: "picker@test.local" });
+  await firstSignIn(other, "picker@test.local", r.body.tempPassword);
+  const theirWs = (await other("POST", "/api/workspaces", { name: "Theirs" })).body.id;
+  assert.deepEqual((await other("GET", "/api/teams-links")).body.waiting, [], "another org never sees it");
+  assert.equal((await other("POST", "/api/teams-links", { id: NEW, ws: theirWs })).status, 404, "or assigns it");
+  assert.equal((await admin("POST", "/api/teams-links", { id: NEW, ws: s.wsA })).status, 200);
+  assert.ok((await admin("GET", "/api/teams-links")).body.links.some((l) => l.id === NEW && l.workspace_id === s.wsA));
+  assert.equal((await admin("DELETE", `/api/teams-links?id=${encodeURIComponent(NEW)}`)).status, 200);
+  assert.equal((await admin("DELETE", "/api/auth/microsoft")).status, 200);
+});
+
 const groupMsg = (overrides) => activity({ conversation: { id: GROUP, conversationType: "groupChat", tenantId: "tenant-1", name: "Wave 2 team" }, ...overrides });
 const mia = client();
 

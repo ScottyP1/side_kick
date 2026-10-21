@@ -87,6 +87,39 @@ export function linkCard(code: string, kind: string): IAdaptiveCard {
   ]);
 }
 
+/**
+ * Shown in an unassigned chat or channel when its Microsoft organization uses Sidekick: an Org Admin or the
+ * group's Team Lead assigns it on the portal's Workspaces page ("Waiting to be assigned"), no code needed.
+ * The link code stays as a fallback for anyone who prefers it.
+ */
+export function waitingCard(kind: string, code: string, portalUrl: string): IAdaptiveCard {
+  const where = kind === "channel" ? "channel" : "chat";
+  return card(
+    [
+      ...header("Sidekick", `This ${where} is waiting to be assigned`),
+      text(`I don't know which workspace this ${where} belongs to yet, so I can't answer from its documents and meetings.`),
+      text(`An admin or the group's leader can assign this ${where} in the Sidekick portal: **Workspaces → Waiting to be assigned**.`),
+      text(`Or link it with this code on the Workspaces page: **${code}** (works for 24 hours).`, { size: "Small", isSubtle: true, spacing: "Medium" }),
+    ],
+    [{ type: "Action.OpenUrl", title: "Open Sidekick", url: portalUrl }],
+  );
+}
+
+/**
+ * Shown in multi-tenant mode when Sidekick is added to (or mentioned in) a chat whose Microsoft organization
+ * hasn't signed up for Sidekick. Nothing about the chat is stored.
+ */
+export function unknownTenantCard(signupUrl: string): IAdaptiveCard {
+  return card(
+    [
+      ...header("Sidekick", "Sidekick isn't set up for your organization yet"),
+      text(`Sign up at ${signupUrl} and connect your Microsoft 365 organization. Then mention me here again and an admin can assign this chat to a workspace.`),
+      text("Until then I don't read or keep anything from this chat.", { size: "Small", isSubtle: true }),
+    ],
+    [{ type: "Action.OpenUrl", title: "Sign up", url: signupUrl }],
+  );
+}
+
 /** What Sidekick can do here, and which workspace this conversation is linked to (if any). */
 export function helpCard(workspace: string | null): IAdaptiveCard {
   return card([
@@ -97,6 +130,8 @@ export function helpCard(workspace: string | null): IAdaptiveCard {
       facts: [
         { title: "@Sidekick <question>", value: "Answer with sources" },
         { title: "@Sidekick link", value: "Show the code to link this chat to a workspace" },
+        { title: "@Sidekick add @name", value: "Add someone to this workspace (Team Lead or Org Admin)" },
+        { title: "@Sidekick remove @name", value: "Take someone off this workspace (Team Lead or Org Admin)" },
         { title: "@Sidekick help", value: "Show this card" },
       ],
     },

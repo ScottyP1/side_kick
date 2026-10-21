@@ -6,11 +6,13 @@
  * and can add people to those workspaces (as Member or Viewer) or take them off; roles and removing people
  * from the organization stay with admins. New people get a temporary password they must change at first sign-in.
  * Removing someone asks for confirmation first. Nobody can change their own role or remove themselves here.
+ * "Import from Microsoft 365" (components/directory-import.tsx) adds people from the organization's directory.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, useToast } from "@/components/ui";
+import { DirectoryImport } from "@/components/directory-import";
 
 type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; microsoft: number; workspaces: string[] };
 const ROLES = ["Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"];
@@ -91,6 +93,7 @@ export default function UsersPage() {
           <p>{lead ? "The people in the workspaces you lead. Add teammates to your workspaces, or take them off; an Org Admin changes roles." : "Add teammates and choose which workspaces they can see. People can sign in with their Microsoft work account once Microsoft sign-in is connected on Settings."}</p>
         </div>
         <div className="actions">
+          <DirectoryImport roles={roles} workspaces={me.workspaces} lead={lead} onImported={load} />
           <button className="btn primary" onClick={() => setInvite(true)}><Icon n="plus" />Add person</button>
         </div>
       </div>

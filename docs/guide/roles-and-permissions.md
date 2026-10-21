@@ -50,6 +50,10 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | Add people to their workspaces, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
 | Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |
+| Assign Teams chats waiting to be assigned (and see that list) | ✓ | ✓ | ✓ (to own workspaces) | | | |
+| Import people from Microsoft 365 | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | | |
+| `@Sidekick add` / `remove @name` in a linked Teams chat | ✓ | ✓ | ✓ (Members and Viewers, that chat's workspace if they lead it) | | | |
+| Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval) | ✓ | ✓ | | | | |
 | See the audit log and Activity (traces, performance) | ✓ | ✓ | | | | |
 | Change branding (logo, brand color) | ✓ | ✓ | | | | |
 | Make a workspace's guardrails stricter, write custom rules, use "Test it" | ✓ | ✓ | | | | |

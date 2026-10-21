@@ -5,6 +5,9 @@
 ## End-to-end test results (Oct 20, 2026)
 - **Answers, documents, guardrails, workspaces** (branch `claude/e2e-answers-docs-7a3221`): chat timestamps no longer masked as phone numbers; rate/fee questions no longer refused as HR advice; too-broad custom rules ("Don't answer any questions") refused at save, clearer custom-rule refusal; workspaces can be renamed and deleted (with everything in them) by Org Owners/Admins, names unique per org; document delete asks first; unsupported/empty uploads refused before saving; Knowledge, Guardrails (phone width) and Workspaces polish.
 
+## Multi-tenant Microsoft/Teams (Oct 20, 2026, branch `claude/multitenant-teams-492546`)
+Code ready, **off** until Cody switches (checklist: [TEAMS-MULTITENANT.md](TEAMS-MULTITENANT.md)): `SIDEKICK_MULTI_TENANT=1` serves any company tied to a Sidekick org (others get a "sign up first" card, nothing stored; the Azure Bot stays single-tenant, since Microsoft no longer creates multi-tenant bots, and goes to the Teams Store); sign-in checks each token against its own tenant; **chat picker** (chats Sidekick joins in the org's tenant show on Workspaces → *Waiting to be assigned*, codes stay as fallback); **Import from Microsoft 365** on Users & access (Graph `User.Read.All` app permission, admin-approval round trip, Microsoft-sign-in users without passwords); **`@Sidekick add/remove @name`** in Teams (Team Lead / Org Admin, audited); manifest 1.3.0 with `/privacy` `/terms` links. For the sign-up flow: `tieOrgToTenant` in `lib/tenants.ts`. New test suite `tests/teams-multitenant.test.mjs` (ports 3210/3211).
+
 ## Regroup (Oct 17, 2026)
 Many side sessions had drifted apart, so Cody paused them, merged what was ready and cleaned up. State after the regroup:
 

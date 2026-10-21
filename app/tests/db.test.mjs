@@ -328,6 +328,8 @@ test(`[${engine}] FAQ: one list, unique ids, every help-center link lands on a r
     if (anchor) assert.ok(g.blocks.some((b) => b.t === "h" && b.id === anchor), `${f.id}: #${anchor} exists in ${slug}`);
   }
   assert.equal(FAQ.find((f) => f.id === "training").legalReview, true, "the AI-training answer is marked for legal review");
+});
+
 /* ---------- Plan limits (lib/plans.ts, no I/O) ---------- */
 test(`[${engine}] plan limits: every plan has every limit; Enterprise isn't for sale; limit states and custom limits`, () => {
   for (const p of plans.ALL_PLANS) for (const k of plans.LIMIT_KEYS) assert.ok(k in p, `${p.id} has ${k}`);

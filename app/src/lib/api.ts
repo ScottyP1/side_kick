@@ -36,7 +36,7 @@ export function routeName(req: unknown) {
  * The collections with a dynamic `[id]` segment (app/api/<collection>/[id]); the segment right after one of
  * them is always an id. Add a collection here when adding such a route.
  */
-const ID_COLLECTIONS = new Set(["meetings", "action-items", "docs", "users", "tenants"]);
+const ID_COLLECTIONS = new Set(["meetings", "action-items", "docs", "users", "tenants", "tickets", "attachments"]);
 
 /** The path with dynamic segments replaced by ":id" (see `routeName`). */
 export function normalisePath(pathname: string) {

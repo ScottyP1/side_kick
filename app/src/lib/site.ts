@@ -50,7 +50,7 @@ export const SITE_NAV: readonly { href: string; label: string }[] = [
  * setup, checkout, the Owner Console and the API. A test checks every portal folder is listed here.
  */
 export const PRIVATE_PATHS: readonly string[] = [
-  "/home", "/activity", "/agent", "/audit", "/connectors", "/get-started", "/guardrails", "/knowledge",
+  "/home", "/activity", "/agent", "/audit", "/connectors", "/get-started", "/guardrails", "/help", "/knowledge",
   "/meetings", "/memory", "/settings", "/usage", "/users", "/workspaces",
   "/login", "/setup", "/checkout", "/owner", "/api/",
 ];

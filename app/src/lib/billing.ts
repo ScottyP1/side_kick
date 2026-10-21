@@ -100,7 +100,8 @@ export async function usage(orgId: string) {
 // Routes that keep working while an organization is read-only: signing in and out, the password change,
 // billing itself (so it can be fixed), the Owner Console, sign-up, health, and the Teams endpoints
 // (their AI work is refused by assertEnabled instead).
-const ALWAYS_OPEN = ["/api/auth/", "/api/billing", "/api/owner/", "/api/signup", "/api/health", "/api/messages", "/api/reminders/tick"];
+// Contacting support keeps working on a read-only plan (that is when people most need it).
+const ALWAYS_OPEN = ["/api/auth/", "/api/billing", "/api/support/tickets", "/api/support/public", "/api/help-bot", "/api/owner/", "/api/signup", "/api/health", "/api/messages", "/api/reminders/tick"];
 
 /**
  * Called by `handle()` before every API route: when the signed-in person's organization is read-only and

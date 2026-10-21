@@ -6,8 +6,8 @@
  *
  * Server component with no JavaScript of its own: the phone menu is a native <details> element, so it works
  * under the enforced Content-Security-Policy and before any script loads. Styles: components/public-site.css
- * on top of the Indigo tokens in globals.css. The links come from lib/site.ts. The empty <SiteChatSlot> at the
- * end is where the public "Ask about Sidekick" chat will go.
+ * on top of the Indigo tokens in globals.css. The links come from lib/site.ts. <SiteChatSlot> at the end is the
+ * bottom-left "Ask about Sidekick" help bot (a small client component; the rest of the frame has no script).
  */
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -26,7 +26,7 @@ export function PublicShell({ children, narrow, current, layout }: { children: R
   const mode = layout ?? (narrow ? "narrow" : "page");
   const here = (href: string) => (current && (current === href || current.startsWith(`${href}/`)) ? "page" : undefined);
   return (
-    <div className="site">
+    <div className="site dock-space">
       <a className="site-skip" href="#main">Skip to content</a>
       <header className="site-head">
         <div className="site-head-in">
@@ -64,7 +64,7 @@ export function PublicShell({ children, narrow, current, layout }: { children: R
         )}
       </main>
       <SiteFooter />
-      {/* Reserved for the public "Ask about Sidekick" chat (not built yet; see site-chat-slot.tsx). */}
+      {/* "Ask about Sidekick", the help bot behind the bottom-left button (site-chat-slot.tsx). */}
       <SiteChatSlot />
     </div>
   );

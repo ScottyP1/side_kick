@@ -320,3 +320,75 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS created_at TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip TEXT;
+
+-- Support (lib/support.ts). One row per ticket: from the portal (org_id + user_id), the public /support form
+-- or the help bot's "talk to a human" (no org). ref is the short code people quote (SUP-7K3Q). status = open |
+-- waiting (on the customer) | resolved; a reply from the customer reopens it. customer_unread / staff_unread
+-- drive the dot on the assistant button and the inbox counts. checks = what the support assistant checked
+-- (JSON, when the ticket came from a conversation).
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id TEXT PRIMARY KEY, ref TEXT NOT NULL UNIQUE, org_id TEXT, user_id TEXT,
+  name TEXT NOT NULL, email TEXT NOT NULL, phone TEXT, subject TEXT NOT NULL, category TEXT NOT NULL,
+  priority TEXT NOT NULL, status TEXT NOT NULL, source TEXT NOT NULL, page TEXT, checks TEXT, assigned_to TEXT,
+  customer_unread INTEGER NOT NULL DEFAULT 0, staff_unread INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS support_tickets_org ON support_tickets(org_id, updated_at);
+CREATE INDEX IF NOT EXISTS support_tickets_status ON support_tickets(status, updated_at);
+-- The thread of a ticket: the customer's messages, the Sidekick team's replies, and internal notes
+-- (internal = 1: only the Sidekick team ever sees them). author_kind = customer | staff | system.
+CREATE TABLE IF NOT EXISTS support_messages (
+  id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, org_id TEXT,
+  author_kind TEXT NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, internal INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS support_messages_ticket ON support_messages(ticket_id, created_at);
+-- Files attached to a ticket message (screenshots, logs, PDFs): type and size checked when added, stored
+-- base64 in the database (the same on both engines), always downloaded as an attachment, never shown inline.
+CREATE TABLE IF NOT EXISTS support_attachments (
+  id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, message_id TEXT,
+  org_id TEXT, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS support_attachments_ticket ON support_attachments(ticket_id);
+-- Support articles (lib/support-articles.ts), managed in the Owner Console. level = public (help center and
+-- help bot) | customer (signed-in support assistant, when relevant) | internal (Sidekick team only).
+-- status = draft | published; source_ticket_id = the resolved ticket a draft was written from.
+CREATE TABLE IF NOT EXISTS support_articles (
+  id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body TEXT NOT NULL, level TEXT NOT NULL,
+  status TEXT NOT NULL, tags TEXT, source_ticket_id TEXT, seed INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+-- Each time an assistant cited an article (help bot or support assistant), and the ticket the conversation
+-- became, if any, so the Owner Console can show which articles help and whether those tickets got resolved.
+CREATE TABLE IF NOT EXISTS support_article_uses (
+  id TEXT PRIMARY KEY, article_id TEXT NOT NULL, assistant TEXT NOT NULL, conversation_id TEXT, org_id TEXT,
+  ticket_id TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS support_article_uses_article ON support_article_uses(article_id);
+CREATE INDEX IF NOT EXISTS support_article_uses_conv ON support_article_uses(conversation_id);
+-- Assistant conversations (lib/conversations.ts): the last few turns, so a follow-up builds on what was said.
+-- kind = assist (portal in-app assistant) | support (support assistant) | helpbot (public website). Owned by
+-- one person in one org (org_id + user_id), or one browser on the website (visitor_id, a random cookie id);
+-- never shared. Expire 24 hours after the last turn. Visitor text is masked (contact details) before saving.
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, org_id TEXT, user_id TEXT, visitor_id TEXT,
+  created_at TEXT NOT NULL, last_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS conversations_last ON conversations(last_at);
+CREATE TABLE IF NOT EXISTS conversation_turns (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, org_id TEXT,
+  role TEXT NOT NULL, text TEXT NOT NULL, question TEXT, refused INTEGER NOT NULL DEFAULT 0, meta TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS conversation_turns_conv ON conversation_turns(conversation_id, created_at);
+-- The public help bot (lib/helpbot.ts): questions it couldn't answer (masked, kept 30 days) for the Owner
+-- Console to turn into FAQ or help articles (status open | done), and one row per reply by outcome
+-- (answered, dont_know, refused, limited, budget) with the rule that fired: counts only, no text, 90 days.
+CREATE TABLE IF NOT EXISTS helpbot_questions (
+  id TEXT PRIMARY KEY, question TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS helpbot_events (
+  id TEXT PRIMARY KEY, outcome TEXT NOT NULL, rule TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS helpbot_events_time ON helpbot_events(created_at);
+-- Who pays for an AI call (lib/claude.ts `payer`): null = the organization's AI credit, support / helpbot = Sidekick.
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS payer TEXT;

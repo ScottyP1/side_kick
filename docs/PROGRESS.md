@@ -5,25 +5,28 @@
 ## Roadmap & queue (Oct 21, 2026)
 The single list of what's done, in flight and next. Sessions work one tight scope each; the coordinating session reviews and merges PRs (Cody asked it to), then deploys. Run at most ~3 sessions at once (more hit the usage limit on Oct 20).
 
-**Done and on `main`** (Oct 20)
+**Done and on `main`** (Oct 20–21)
 - E2E fixes #18 accounts & security, #19 answers/docs/guardrails, #20 meetings/activity/owner signals; #17 live Teams package 1.2.0; deployed `ba0a60a`.
 - #25 security headers (CSP report-only), health-checked `deploy.sh`, `docs/RUNBOOKS.md`. Azure (Cody-approved): 35-day DB backups, Log Analytics `sidekick-logs` (capped), health probes, uptime test + site-down/restart alerts (~$2.90/month).
 - #23 Indigo palette + Groups pages (New group, group page, members API).
 - Reports: #21 Azure security/ops review, #22 app security review (draft PRs, docs only).
+- #24 sign-up + test-mode payment + public pages (sign-up **off** by default: Owner Console switch or `SIDEKICK_SIGNUP_OPEN=true`).
+- #28 **automatic deploys**: every merge to `main` that changes the app runs the tests, builds and deploys, with health check and automatic rollback (HOSTING → Automatic deploys). First automatic deploy started Oct 21 for `b2deee5`.
 
 **In flight**
-1. **#24 sign-up + mock (test-mode) payment + public pages**: sign-up **off by default** (Owner Console switch or `SIDEKICK_SIGNUP_OPEN=true`); being merged.
-2. **Multi-tenant Teams** (session `multitenant-teams`): any company's Microsoft 365, "chats waiting for a group" picker (no codes), directory import, `@Sidekick add @person`, only Team Leads/admins may add Sidekick; checklist `docs/TEAMS-MULTITENANT.md` for the Azure/Entra/Partner Center switches only Cody can make.
-3. **Setup wizard** after sign-up (design session `onboarding-design`, from the approved mockup).
+1. **Multi-tenant Teams** (PR #26, session `multitenant-teams`): reviewed OK (live stays single-tenant until Cody switches; per-tenant token checks); being updated from `main`. Checklist for Cody: `docs/TEAMS-MULTITENANT.md`.
+2. **Plan limits & AI credit + Owner Console business view** (session `plan-limits`): see Next 1 for scope.
+3. **Setup wizard** after sign-up (PR #27, design session).
+4. A session "Harden portal sign-in and restore Cody's access" was started by the multi-tenant session (not by the coordinator); check its PR before merging, it overlaps Next 3.
 
 **Next, in this order**
-1. **Plan limits & AI credit** (starts when #24 merges): per-plan limits on people, groups, tracked chats, meeting hours, documents, connectors, monthly AI credit (80% warning, essentials-only at 100%, owner override), per-person rate limits; hide Claude/model status from customers (Owner Console only; "Powered by Claude" on the trust page); Enterprise **bring your own AI** (company's Anthropic key or Azure Foundry / Bedrock / Vertex, encrypted, per-org routing in `lib/claude.ts`); **usage export by engagement code** (WBS chargeback); **Owner Console business view** (MRR, trials ending, failed payments, sign-ups, usage vs plan and margin per client, "near limit" flags, partner/referrer field, distinct operator look).
+1. **Plan limits & AI credit** (running): per-plan limits on people, groups, tracked chats, meeting hours, documents, connectors, monthly AI credit (80% warning, essentials-only at 100%, owner override), per-person rate limits; hide Claude/model status from customers (Owner Console only; "Powered by Claude" on the trust page); Enterprise **bring your own AI** (company's Anthropic key or Azure Foundry / Bedrock / Vertex, encrypted, per-org routing in `lib/claude.ts`); **usage export by engagement code** (WBS chargeback); **Owner Console business view** (MRR, trials ending, failed payments, sign-ups, usage vs plan and margin per client, "near limit" flags, partner/referrer field, **infrastructure health + latest deploys** (Cody's single place: no Azure dashboard), distinct operator look).
 2. **Support tickets + support assistant + hidden support knowledge base** (starts when multi-tenant finishes): portal Help → Contact support (auto contact details, category, priority, attachments, page), My tickets with threads; public `/support` form; Owner Console Support inbox (filters, client context: plan + recent errors by reference code, replies, internal notes, assign, resolve/reopen, audit), notifications; AI support assistant for customers (answers from the guides, checks their own setup, safe fixes behind Confirm, turns the chat into a ticket with a summary; own small limit, not the customer's AI credit); AI triage + draft replies + recurring-issue view for Cody; support articles at three levels (public / customer-visible when relevant / internal only), managed in the Owner Console, drafted from resolved tickets with Cody's approval, seeded with known issues (group-chat consent, plain-text @Sidekick, temp passwords, "General" channel name, GitGuardian false positive).
 3. **Security fixes** (after #24 and multi-tenant merge): Owner Console sign-in limit + failed-login log, sign out other sessions on password change, Word "zip bomb" limit, CSRF `Origin` check, owner setup via a one-time code (not `Host`), plus the low items of #22; Azure leftovers: separate laptop vs live keys, least-privilege DB user, one test restore, GitHub branch protection + Dependabot.
 4. **Deploy** everything merged; check health; set up the live Owner Console account.
 5. **Public website & help center** in the same app: home, features, how it works, security & trust, pricing (from `lib/plans.ts`), docs (public support articles + guides), support, changelog, legal, Sign in / Get started → register → pay → setup wizard → portal; later `sidekick.ai` (site) + `app.sidekick.ai` (portal).
 6. **Next wave**: (a) a designated **notes chat** per group + **automatic Teams meeting transcripts** (Graph, admin consent) → notes posted after every meeting; (b) **"Save this to the knowledge base?" cards** for notes and important chat facts (new source type "Saved from Teams", approved by whom/when); (c) **connectors**: Azure DevOps Boards first, then Jira (read work items into answers, create tickets from action items, two-way status), room for Linear/Asana/Monday.
-7. Later: Step 3 live voice in meetings; Teams Store submission (Partner Center, publisher verification); own domain; real Stripe payments.
+7. Later: Step 3 live voice in meetings; (decided: code and releases stay on **GitHub**, no move to Azure DevOps; Teams Store submission (Partner Center, publisher verification); own domain; real Stripe payments.)
 
 **Cody's to-dos** (only he can do these)
 - Teams cleanup: remove the old Sidekick apps (Manage your apps, the Project team, Wave 2 cutover chat, Teams admin center), check the tenant's **chat** resource-specific consent setting, then upload `teams/build/sidekick-teams-live.zip` once to the org catalog.

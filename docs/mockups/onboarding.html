@@ -532,7 +532,7 @@ function wTeams() {
   return `<header><span class="eyebrow">Step 3 of 6</span><h1>Add Sidekick to Teams</h1>
     <p>This puts Sidekick in your people's Teams app list. It doesn't join any chat by itself: someone has to add it to a chat first.</p></header>
     <div class="stack" role="radiogroup" aria-label="Who gets Sidekick in Teams">
-      ${c("leads", "Only Team Leads and admins (recommended)", "Only they can add Sidekick to a chat, so it can't be pulled into chats it shouldn't be in. Members still see its answers and cards in assigned chats.")}
+      ${c("leads", "Only Team Leads and admins (recommended)", "Only they can add Sidekick to a chat. If anyone else adds it, Sidekick says so and leaves straight away. Members still see its answers and cards in assigned chats.")}
       ${c("all", "Everyone at " + ORG.name, "Anyone can add Sidekick to a chat. It still stays silent there until a Team Lead assigns the chat in the portal.")}
       ${c("some", "Only some people", "Pick Microsoft 365 groups or people. Good for a pilot with one or two client teams.")}
     </div>

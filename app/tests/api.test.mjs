@@ -1874,6 +1874,54 @@ test(`[${ENGINE}] sign-up: creates the organization, its Org Owner and a free tr
   s.fay = c;
 });
 
+test(`[${ENGINE}] setup wizard: sign-up starts it, admins record steps and finish it, other roles and orgs can't`, async () => {
+  const fay = s.fay;
+  assert.equal((await fay("GET", "/api/me")).body.setupPending, true, "a new sign-up gets the Finish setting up banner");
+  assert.equal((await admin("GET", "/api/me")).body.setupPending, false, "an organization that never opened the wizard doesn't");
+  const g = await fay("GET", "/api/setup");
+  assert.equal(g.status, 200, JSON.stringify(g.body));
+  assert.equal(g.body.org, "Fabrikam Labs");
+  assert.deepEqual(g.body.steps, {});
+  assert.deepEqual(g.body.facts, { microsoftConnected: false, groups: 0 });
+  assert.equal(g.body.rules.current, "standard");
+  assert.equal(g.body.rules.canChange, true);
+  assert.ok(g.body.rules.presets.strict.small_talk && !g.body.rules.presets.standard.small_talk);
+  assert.ok(!JSON.stringify(g.body).includes("admin@test.local"), "only its own people");
+
+  assert.equal((await fay("PUT", "/api/setup", { step: "teams", state: "done" })).status, 200);
+  assert.equal((await fay("PUT", "/api/setup", { step: "microsoft", state: "skipped" })).status, 200);
+  assert.equal((await fay("PUT", "/api/setup", { step: "nope", state: "done" })).status, 400);
+  assert.equal((await fay("PUT", "/api/setup", { step: "rules", state: "maybe" })).status, 400);
+  // The Strict preset goes through the normal guardrails route.
+  assert.equal((await fay("PUT", "/api/guardrails", g.body.rules.presets.strict)).status, 200);
+  const g2 = (await fay("GET", "/api/setup")).body;
+  assert.deepEqual(g2.steps, { teams: "done", microsoft: "skipped" });
+  assert.equal(g2.rules.current, "strict");
+  assert.equal((await admin("GET", "/api/guardrails")).body.switches.find((x) => x.key === "small_talk").on, false, "another org's rules are untouched");
+
+  // Other roles can't read or change it.
+  // (In a separate signed-up organization: earlier tests signed this file's password users out, and later
+  // tests count the people in Fay's organization.)
+  const boss = client();
+  assert.equal((await signUpAs(boss, { org: "Setup Roles Co", name: "Rhea Roles", email: "rhea@setuproles.test", password: "correct horse battery", plan: "team" })).status, 200);
+  for (const [role, email] of [["Member", "mo@setuproles.test"], ["Team Lead", "tl@setuproles.test"], ["Billing Admin", "bill@setuproles.test"]]) {
+    const added = await boss("POST", "/api/users", { name: role, email, role, workspaces: [] });
+    assert.equal(added.status, 200, JSON.stringify(added.body));
+    const who = client();
+    assert.equal((await firstSignIn(who, email, added.body.tempPassword)).status, 200);
+    assert.equal((await who("GET", "/api/setup")).status, 403, role);
+    assert.equal((await who("PUT", "/api/setup", { finished: true })).status, 403, role);
+    assert.equal((await who("GET", "/api/me")).body.setupPending, false, `${role}s don't get the banner`);
+  }
+  assert.equal((await client()("GET", "/api/setup")).status, 401);
+
+  assert.equal((await fay("PUT", "/api/setup", { finished: true })).status, 200);
+  assert.equal((await fay("GET", "/api/me")).body.setupPending, false);
+  assert.match(JSON.stringify((await fay("GET", "/api/audit")).body), /Finished setting up Sidekick/);
+  assert.equal((await admin("GET", "/api/me")).body.setupPending, false);
+  assert.equal((await fay("PUT", "/api/guardrails", g.body.rules.presets.standard)).status, 200, "back to Standard for the tests after this");
+});
+
 test(`[${ENGINE}] sign-up: duplicate emails, weak passwords, unknown plans and missing fields are refused`, async () => {
   const dupe = await signUpAs(client(), { org: "Dupe Co", name: "D", email: "ADMIN@test.local", password: "correct horse battery", plan: "team" });
   assert.equal(dupe.status, 409, "an email from another organization");

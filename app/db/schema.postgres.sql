@@ -227,6 +227,10 @@ ALTER TABLE action_items ADD COLUMN IF NOT EXISTS due_on TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS due_on TEXT;
 -- Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS client TEXT;
+-- Setup wizard progress per organization (lib/setup.ts): which steps are done or skipped, and when it finished.
+CREATE TABLE IF NOT EXISTS org_setup (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), json TEXT NOT NULL, completed_at TEXT, updated_at TEXT NOT NULL
+);
 -- Self-service sign-up attempts (lib/signup.ts), for the per-IP sign-up limit. Kept one day.
 CREATE TABLE IF NOT EXISTS signup_attempts (
   id TEXT PRIMARY KEY, ip TEXT, created_at TEXT NOT NULL

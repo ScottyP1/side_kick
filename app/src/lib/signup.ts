@@ -4,7 +4,8 @@
  * Concepts
  * - **What sign-up creates**: the organization, its Org Owner (the person signing up, with the password
  *   they chose), and a subscription on the chosen plan in its free trial (lib/billing.ts `startTrial`), all
- *   in one transaction. The route then signs them in and sends them to checkout.
+ *   in one transaction, plus its setup-wizard progress (lib/setup.ts) so the wizard follows checkout. The
+ *   route then signs them in and sends them to checkout.
  * - **Switch**: the Sidekick team can turn self-service sign-up off in the Owner Console (Releases &
  *   switches → "Self-service sign-up", key `signup` in lib/owner.ts). Off = only the Sidekick team adds
  *   clients, as before.
@@ -26,6 +27,7 @@ import { requirePlan, startTrial } from "./billing";
 import { get, newId, now, run, tx } from "./db";
 import { flagEnabled, platformLog } from "./owner";
 import { planById } from "./plans";
+import { startSetup } from "./setup";
 import { span, traceScope } from "./trace";
 
 /** Sign-up attempts allowed per IP address within the window. */
@@ -85,6 +87,7 @@ export async function signUp(input: SignUpInput, ip: string): Promise<{ orgId: s
     const ids = await tx(async () => {
       const created = await createOrgWithOwner(org, { name, email, password }, { entraTenantId: ms?.tenantId, entraOid: ms?.oid });
       await startTrial(created.orgId, plan, name);
+      await startSetup(created.orgId);
       return created;
     });
     traceScope({ orgId: ids.orgId, actor: name, userId: ids.userId });

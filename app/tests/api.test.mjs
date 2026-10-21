@@ -126,8 +126,8 @@ async function microsoftSignIn(call, claims, { mode, cheat = {}, replay } = {}) 
 /* ---------- a tiny HTTP client with its own cookie jar per user ---------- */
 function client() {
   const jar = new Map();
-  return async function call(method, url, body, { form } = {}) {
-    const headers = { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; ") };
+  return async function call(method, url, body, { form, headers: extra = {} } = {}) {
+    const headers = { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "), ...extra };
     let payload;
     if (form) payload = form;
     else if (body !== undefined) {
@@ -165,6 +165,11 @@ async function firstSignIn(call, email, temp) {
   return r;
 }
 const NEW_PASSWORD = "a new password 123";
+
+/** Self-service sign-up from its own made-up network address (so the per-IP sign-up limit isn't shared). */
+let signupIp = 0;
+const nextIp = () => `198.18.${Math.floor(++signupIp / 250)}.${signupIp % 250}`;
+const signUpAs = (call, body, ip = nextIp()) => call("POST", "/api/signup", body, { headers: { "x-forwarded-for": ip } });
 
 const activity = (overrides) => ({
   id: `act-${Math.random()}`,
@@ -1268,6 +1273,15 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await other("POST", `/api/workspaces/${s.wsB}/members`, { users: [(await other("GET", "/api/me")).body.user.id] })).status, 404);
   assert.equal((await other("DELETE", `/api/workspaces/${s.wsB}/members?user=${s.bea}`)).status, 404);
   assert.equal((await other("POST", "/api/workspaces", { name: "Steal", lead: s.bea })).status, 404, "can't make someone from another org a lead");
+  // From an organization that signed itself up (self-service), even with workspace B's id.
+  const signedUp = client();
+  assert.equal((await signUpAs(signedUp, { org: "Self Serve Leak Co", name: "Sal Signup", email: "sal@selfserve.test", password: "correct horse battery", plan: "team" })).status, 200);
+  for (const url of [`/api/docs?ws=${s.wsB}`, `/api/memory?ws=${s.wsB}`, `/api/meetings?ws=${s.wsB}`]) assert.equal((await signedUp("GET", url)).status, 404, url);
+  assert.equal((await signedUp("POST", "/api/ask", { ws: s.wsB, question: "vault code" })).status, 404);
+  assert.deepEqual((await signedUp("GET", "/api/workspaces")).body.workspaces, []);
+  assert.ok(!/admin@test\.local|ZEBRA/.test(JSON.stringify((await signedUp("GET", "/api/users")).body)), "only its own people");
+  assert.ok(!/Sal Signup/.test(JSON.stringify((await admin("GET", "/api/users")).body)), "and the other way round");
+  assert.ok(!/Signed up/.test(JSON.stringify((await admin("GET", "/api/audit")).body)), "its audit stays its own");
   const theirWs = (await other("POST", "/api/workspaces", { name: "Leak WS" })).body.id;
   assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "vault code ZEBRA-7731" })));
   // From a Teams chat linked to workspace A.
@@ -1821,4 +1835,197 @@ test(`[${ENGINE}] users: an Org Admin can't change their own role or remove them
   // Another admin (here the Org Owner) still can.
   assert.equal((await admin("PATCH", `/api/users/${id}`, { role: "Member" })).status, 200);
   assert.equal((await admin("DELETE", `/api/users/${id}`)).status, 200);
+});
+
+/* ---------- Self-service sign-up and mock (test-mode) billing ---------- */
+
+test(`[${ENGINE}] sign-up: creates the organization, its Org Owner and a free trial, then sends them to checkout`, async () => {
+  assert.deepEqual((await client()("GET", "/api/signup")).body, { open: true, testMode: true });
+  const c = client();
+  const r = await signUpAs(c, { org: "Fabrikam Labs", name: "Fay Founder", email: "Fay@Fabrikam.test", password: "correct horse battery", plan: "team" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.next, "/checkout?plan=team");
+  const me = (await c("GET", "/api/me")).body;
+  assert.equal(me.user.role, "Org Owner");
+  assert.equal(me.user.email, "fay@fabrikam.test");
+  assert.equal(me.org.name, "Fabrikam Labs");
+  assert.equal(me.billing.mode, "full");
+  assert.match(me.billing.notice, /Free trial: 14 days left/);
+  const b = (await c("GET", "/api/billing")).body;
+  assert.equal(b.subscription.plan, "team");
+  assert.equal(b.subscription.status, "trialing");
+  assert.equal(b.subscription.provider, "mock");
+  assert.equal(b.testMode, true);
+  assert.equal(b.canManage, true);
+  assert.deepEqual(b.usage, { seats: 1, workspaces: 0 });
+  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /Signed up: created organization “Fabrikam Labs” on the Team plan/);
+  const t = (await owner("GET", "/api/owner/tenants")).body.tenants.find((x) => x.name === "Fabrikam Labs");
+  assert.equal(t.plan, "team");
+  assert.equal(t.sub_status, "trialing");
+  assert.equal(t.owner_email, "fay@fabrikam.test");
+  assert.equal((await owner("GET", "/api/owner/tenants")).body.tenants.find((x) => x.name === "Test Org").plan, null, "Setup's org is managed (no plan)");
+  assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /New organization Fabrikam Labs/.test(l.action)), "the operator sees new sign-ups");
+  // Signed in for real: they can sign in again with the password they chose.
+  assert.equal((await client()("POST", "/api/auth/login", { email: "fay@fabrikam.test", password: "correct horse battery" })).status, 200);
+  // The public pages render without signing in; checkout needs a session.
+  for (const page of ["/pricing", "/signup", "/privacy", "/terms", "/support"]) assert.equal((await client()("GET", page)).status, 200, page);
+  assert.equal((await client()("GET", "/checkout")).status, 307);
+  assert.equal((await c("GET", "/checkout")).status, 200);
+  s.fay = c;
+});
+
+test(`[${ENGINE}] sign-up: duplicate emails, weak passwords, unknown plans and missing fields are refused`, async () => {
+  const dupe = await signUpAs(client(), { org: "Dupe Co", name: "D", email: "ADMIN@test.local", password: "correct horse battery", plan: "team" });
+  assert.equal(dupe.status, 409, "an email from another organization");
+  assert.match(dupe.body.error, /already exists/);
+  assert.equal((await signUpAs(client(), { org: "Dupe Co", name: "D", email: "fay@fabrikam.test", password: "correct horse battery", plan: "starter" })).status, 409);
+  assert.match((await signUpAs(client(), { org: "Weak Co", name: "W", email: "w@weak.test", password: "short", plan: "team" })).body.error, /at least 10 characters/);
+  assert.match((await signUpAs(client(), { org: "Plan Co", name: "P", email: "p@plan.test", password: "correct horse battery", plan: "platinum" })).body.error, /Pick one of the plans/);
+  assert.equal((await signUpAs(client(), { name: "N", email: "n@noorg.test", password: "correct horse battery", plan: "team" })).status, 400);
+  assert.equal((await signUpAs(client(), { org: "Bad Email", name: "B", email: "not-an-email", password: "correct horse battery", plan: "team" })).status, 400);
+  const names = (await owner("GET", "/api/owner/tenants")).body.tenants.map((t) => t.name);
+  for (const n of ["Dupe Co", "Weak Co", "Plan Co", "Bad Email"]) assert.ok(!names.includes(n), `${n} wasn't created`);
+});
+
+test(`[${ENGINE}] sign-up: the operator's switch turns it off (platform-wide only), and back on`, async () => {
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "signup", enabled: false })).status, 200);
+  assert.equal((await client()("GET", "/api/signup")).body.open, false);
+  const r = await signUpAs(client(), { org: "Closed Co", name: "C", email: "c@closed.test", password: "correct horse battery", plan: "team" });
+  assert.equal(r.status, 403);
+  assert.match(r.body.error, /sign-up is closed/i);
+  assert.ok((await owner("GET", "/api/owner/releases")).body.flags.some((f) => f.key === "signup" && !f.enabled));
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "signup", enabled: true })).status, 200);
+  assert.equal((await signUpAs(client(), { org: "Open Again Co", name: "O", email: "o@open.test", password: "correct horse battery", plan: "starter" })).status, 200);
+  // It isn't a per-client restriction.
+  const orgId = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Test Org").id;
+  assert.ok(!(await owner("GET", `/api/owner/tenants/${orgId}`)).body.flags.some((f) => f.key === "signup"));
+  assert.equal((await owner("POST", `/api/owner/tenants/${orgId}/flags`, { key: "signup", enabled: false })).status, 400);
+  // Client accounts can't flip it.
+  assert.equal((await admin("POST", "/api/owner/releases", { key: "signup", enabled: false })).status, 401);
+});
+
+test(`[${ENGINE}] sign-up limit: one network address can't create many organizations`, async () => {
+  const ip = "203.0.113.99";
+  for (let i = 0; i < 5; i++) assert.equal((await signUpAs(client(), { org: `Spam ${i}`, name: "S", email: `spam${i}@spam.test`, password: "short", plan: "team" }, ip)).status, 400);
+  const blocked = await signUpAs(client(), { org: "Spam OK", name: "S", email: "spam-ok@spam.test", password: "correct horse battery", plan: "team" }, ip);
+  assert.equal(blocked.status, 429, "even a valid sign-up waits");
+  assert.match(blocked.body.error, /Too many sign-up attempts/);
+  assert.equal((await signUpAs(client(), { org: "Spam OK", name: "S", email: "spam-ok@spam.test", password: "correct horse battery", plan: "team" }, "203.0.113.100")).status, 200, "other addresses aren't");
+});
+
+test(`[${ENGINE}] mock checkout: pay, change plan, a failed payment, pay again and cancel, all audited`, async () => {
+  const c = s.fay;
+  const post = (body) => c("POST", "/api/billing", body);
+  let r = await post({ action: "pay", plan: "team" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.subscription.status, "active");
+  assert.ok(Date.parse(r.body.subscription.current_period_end) > Date.now() + 29 * 86400_000);
+  assert.equal(r.body.access.notice, null);
+  assert.equal((await c("GET", "/api/me")).body.billing.notice, null);
+  r = await post({ action: "change", plan: "starter" });
+  assert.equal(r.body.subscription.plan, "starter");
+  assert.match((await post({ action: "change", plan: "starter" })).body.error, /already on the Starter plan/);
+  // A plan they've outgrown is refused with the numbers.
+  for (const n of ["One", "Two", "Three"]) assert.equal((await c("POST", "/api/workspaces", { name: `Fab ${n}` })).status, 200);
+  await post({ action: "change", plan: "team" });
+  const tooSmall = await post({ action: "change", plan: "starter" });
+  assert.equal(tooSmall.status, 409);
+  assert.match(tooSmall.body.error, /Starter allows 2 workspaces and your organization has 3/);
+  r = await post({ action: "fail" });
+  assert.equal(r.body.subscription.status, "past_due");
+  assert.equal(r.body.access.mode, "full", "the grace period keeps everything working");
+  assert.match(r.body.access.notice, /payment failed/i);
+  assert.equal((await c("POST", "/api/workspaces", { name: "Fab During Grace" })).status, 200);
+  r = await post({ action: "pay", plan: "team" });
+  assert.equal(r.body.subscription.status, "active");
+  assert.equal(r.body.subscription.past_due_since, null);
+  r = await post({ action: "cancel" });
+  assert.equal(r.body.subscription.status, "canceled");
+  assert.equal(r.body.access.mode, "full", "usable until the end of what was paid for");
+  assert.match(r.body.access.notice, /canceled/);
+  assert.equal((await post({ action: "cancel" })).status, 400);
+  assert.equal((await post({ action: "refund" })).status, 400);
+  const log = JSON.stringify((await c("GET", "/api/audit")).body);
+  for (const line of [/Paid for the Team plan \(test mode, no money moved\)/, /Changed the plan from Team to Starter/, /Simulated a failed payment \(test mode\)/, /Canceled the Team plan/]) assert.match(log, line);
+  // A managed organization (no self-service plan) has nothing to pay.
+  assert.equal((await admin("GET", "/api/billing")).body.subscription, null);
+  assert.equal((await admin("POST", "/api/billing", { action: "pay", plan: "team" })).status, 404);
+});
+
+test(`[${ENGINE}] billing roles: Org Owners and Billing Admins manage the plan, Org Admins only see it, others neither`, async () => {
+  const c = s.fay;
+  const add = async (name, email, role) => {
+    const call = client();
+    const u = await c("POST", "/api/users", { name, email, role, workspaces: [] });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    assert.equal((await firstSignIn(call, email, u.body.tempPassword)).status, 200);
+    return call;
+  };
+  const bill = await add("Bo Billing", "bo@fabrikam.test", "Billing Admin");
+  const adm = await add("Ada Admin", "ada@fabrikam.test", "Org Admin");
+  const mem = await add("Max Member", "max@fabrikam.test", "Member");
+  assert.equal((await bill("GET", "/api/billing")).body.canManage, true);
+  const paid = await bill("POST", "/api/billing", { action: "pay", plan: "team" });
+  assert.equal(paid.status, 200, "a Billing Admin can pay");
+  assert.equal(paid.body.subscription.status, "active");
+  assert.equal((await adm("GET", "/api/billing")).body.canManage, false);
+  const refused = await adm("POST", "/api/billing", { action: "cancel" });
+  assert.equal(refused.status, 403);
+  assert.match(refused.body.error, /Only Org Owners and Billing Admins/);
+  assert.equal((await mem("GET", "/api/billing")).status, 403);
+  assert.equal((await mem("POST", "/api/billing", { action: "fail" })).status, 403);
+  assert.equal((await bill("GET", "/api/billing")).body.usage.seats, 4);
+  s.fabMember = mem;
+});
+
+test(`[${ENGINE}] a lapsed plan makes the portal read-only (everything visible, nothing changes) until someone pays`, async () => {
+  const c = s.fay;
+  const orgId = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Fabrikam Labs").id;
+  const ws = (await c("GET", "/api/workspaces")).body.workspaces[0].id;
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${orgId}/billing`, { status: "canceled" })).status, 200);
+  const me = (await s.fabMember("GET", "/api/me")).body;
+  assert.equal(me.billing.mode, "read_only");
+  assert.match(me.billing.notice, /read-only for your organization because the plan is canceled/);
+  // Reading still works.
+  assert.equal((await c("GET", "/api/workspaces")).status, 200);
+  assert.equal((await c("GET", `/api/docs?ws=${ws}`)).status, 200);
+  assert.equal((await c("GET", "/api/usage")).status, 200);
+  // Changes and new AI work don't.
+  const refused = await c("POST", "/api/workspaces", { name: "Fab Read Only" });
+  assert.equal(refused.status, 402);
+  assert.match(refused.body.error, /read-only/);
+  assert.equal((await c("POST", "/api/ask", { ws, question: "anything?" })).status, 402);
+  assert.equal((await c("POST", "/api/assistant", { message: "hello" })).status, 402);
+  assert.equal((await c("PATCH", `/api/workspaces/${ws}`, { name: "Renamed" })).status, 402);
+  // Signing out and in, and fixing billing, still work.
+  assert.equal((await client()("POST", "/api/auth/login", { email: "fay@fabrikam.test", password: "correct horse battery" })).status, 200);
+  const paid = await c("POST", "/api/billing", { action: "pay", plan: "team" });
+  assert.equal(paid.status, 200, JSON.stringify(paid.body));
+  assert.equal(paid.body.access.mode, "full");
+  assert.equal((await c("POST", "/api/workspaces", { name: "Fab Read Only" })).status, 200, "paying turns everything back on");
+  // Other organizations are unaffected by Fabrikam's billing.
+  assert.equal((await admin("POST", "/api/workspaces", { name: "Unaffected" })).status, 200);
+});
+
+test(`[${ENGINE}] Owner Console: the operator sets a client's plan and status, audited on both sides`, async () => {
+  const list = (await owner("GET", "/api/owner/tenants")).body.tenants;
+  const fab = list.find((t) => t.name === "Fabrikam Labs").id;
+  const r = await owner("PATCH", `/api/owner/tenants/${fab}/billing`, { plan: "business", status: "active" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const d = (await owner("GET", `/api/owner/tenants/${fab}?reload=1`)).body.billing;
+  assert.equal(d.subscription.plan, "business");
+  assert.equal(d.subscription.status, "active");
+  assert.equal(d.subscription.updated_by, "Owner");
+  assert.match(JSON.stringify((await s.fay("GET", "/api/audit")).body), /Sidekick team.*Set the plan to Business plan, Active|Set the plan to Business plan, Active.*Sidekick team/);
+  assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => l.action === "Set Fabrikam Labs to the Business plan, Active"));
+  // A managed client gets a subscription when the operator sets one.
+  const nw = list.find((t) => t.plan === null && t.name !== "Test Org").id;
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${nw}/billing`, { plan: "starter" })).status, 200);
+  assert.equal((await owner("GET", `/api/owner/tenants/${nw}?reload=1`)).body.billing.subscription.status, "active");
+  // Bad input and client accounts are refused.
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${fab}/billing`, { status: "free" })).status, 400);
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${fab}/billing`, { plan: "gold" })).status, 400);
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${fab}/billing`, {})).status, 400);
+  assert.equal((await owner("PATCH", "/api/owner/tenants/nope/billing", { plan: "team" })).status, 404);
+  assert.equal((await s.fay("PATCH", `/api/owner/tenants/${fab}/billing`, { status: "active" })).status, 401);
 });

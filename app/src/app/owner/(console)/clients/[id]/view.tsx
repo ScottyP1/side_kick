@@ -2,7 +2,8 @@
 
 /**
  * One client (/owner/clients/:id): who is in this organization (role, workspaces, Microsoft sign-in, last
- * active), its workspaces, and its restrictions: feature switches that apply to this client only.
+ * active), its workspaces, its plan (the operator can set plan and subscription status, audited), and its
+ * restrictions: feature switches that apply to this client only.
  * Operators only; opening the page is recorded in the operator log once per visit (reloads after a switch
  * flip aren't). Shows no document or meeting content.
  */
@@ -11,6 +12,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Icon, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
+import { limitText, planById, PLANS, STATUS_LABEL, SUB_STATUSES, type Access, type PlanId, type SubStatus } from "@/lib/plans";
 
 type Person = { id: string; name: string; email: string; role: string; microsoft: boolean; last_active: string | null; created_at: string; workspaces: string[] };
 type Workspace = { id: string; name: string; code: string | null; documents: number; meetings: number; members: number };
@@ -20,6 +22,11 @@ type Detail = {
   people: Person[];
   workspaces: Workspace[];
   flags: Flag[];
+  billing: {
+    subscription: { plan: PlanId; status: SubStatus; provider: string; trial_ends_at: string | null; current_period_end: string | null; access_until: string | null; updated_by: string | null; updated_at: string } | null;
+    access: Access;
+    usage: { seats: number; workspaces: number };
+  };
 };
 
 export default function ClientPage() {
@@ -90,6 +97,8 @@ function Client() {
         </div>
       </div>
 
+      <PlanPanel d={d} onSaved={() => load(true).catch(reportError)} />
+
       <div className="grid g2">
         <div className="panel">
           <div className="panel-h"><h2>Workspaces</h2></div>
@@ -126,5 +135,56 @@ function Client() {
         </Modal>
       )}
     </>
+  );
+}
+
+/**
+ * The client's plan and subscription, and the operator's controls to set plan and/or status (PATCH
+ * /api/owner/tenants/:id/billing). Setting a status restarts its dates: Active = paid for 30 days from now,
+ * Free trial = a new 14-day trial, Payment failed = the 7-day grace period starts now, Canceled = read-only now.
+ */
+function PlanPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
+  const toast = useToast();
+  const sub = d.billing.subscription;
+  const [plan, setPlan] = useState<PlanId>(sub?.plan ?? "team");
+  const [status, setStatus] = useState<SubStatus>(sub?.status ?? "active");
+  const [err, setErr] = useState("");
+  const changed = !sub || plan !== sub.plan || status !== sub.status;
+  const save = async () => {
+    setErr("");
+    try {
+      await api(`/api/owner/tenants/${d.org.id}/billing`, { method: "PATCH", json: { plan, ...(sub && status === sub.status ? {} : { status }) } });
+      toast(`${d.org.name}: ${planById(plan)!.name} plan, ${STATUS_LABEL[status]}`);
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't save.");
+    }
+  };
+  const p = sub ? planById(sub.plan)! : null;
+  return (
+    <div className="panel">
+      <div className="panel-h">
+        <h2>Plan</h2>
+        {sub ? <Pill kind={d.billing.access.mode === "read_only" ? "bad" : sub.status === "active" ? "good" : "warn"}>{d.billing.access.mode === "read_only" ? "Read-only" : STATUS_LABEL[sub.status]}</Pill> : <Pill>Managed</Pill>}
+      </div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <p className="muted" style={{ margin: 0 }}>
+          {sub && p
+            ? <>{p.name} (${p.pricePerSeat} per person) via {sub.provider === "mock" ? "test-mode checkout" : sub.provider === "manual" ? "the Sidekick team" : sub.provider} · {d.billing.usage.seats} of {limitText(p.seats)} people · {d.billing.usage.workspaces} of {limitText(p.workspaces)} workspaces · last change by {sub.updated_by ?? "—"} {fmtTime(sub.updated_at)}</>
+            : <>No self-service plan: this client was added by the Sidekick team and has full use. Setting a plan here starts billing rules for them.</>}
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select className="input" style={{ width: "auto" }} value={plan} onChange={(e) => setPlan(e.target.value as PlanId)} aria-label="Plan">
+            {PLANS.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+          <select className="input" style={{ width: "auto" }} value={status} onChange={(e) => setStatus(e.target.value as SubStatus)} aria-label="Status">
+            {SUB_STATUSES.map((x) => <option key={x} value={x}>{STATUS_LABEL[x]}</option>)}
+          </select>
+          <button className="btn primary" disabled={!changed} onClick={save}>Save plan</button>
+        </div>
+        <span className="muted" style={{ fontSize: 12.5 }}>Recorded in the operator log and the client&apos;s audit log. Canceled turns the client read-only at once; Payment failed gives them 7 days.</span>
+        {err && <p className="err" style={{ margin: 0 }}>{err}</p>}
+      </div>
+    </div>
   );
 }

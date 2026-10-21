@@ -15,6 +15,9 @@
 - ⚠️ **To create the live Owner Console account:** set `SIDEKICK_SETUP_CODE` on the Container App, open `/owner/setup`, then remove it (`docs/guide/owner-guide.md`).
 - Tests: `TEST_PORT` (and `TEST_DATABASE_URL`) let a second worktree run the suite without clashing on 3200/3201 and `sidekick_test`.
 
+## Sign-up and mock billing (Oct 20, 2026, branch `claude/signup-mock-billing-f16afb`)
+Self-service sign-up at `/signup` (org + Org Owner + 14-day trial; **off by default**: open it with the Owner Console switch "Self-service sign-up" or `SIDEKICK_SIGNUP_OPEN=true`; 5 attempts per IP per hour), plans in `lib/plans.ts` (Starter $8 / Team $15 / Business $25 per person, made up), **test-mode** checkout (`lib/billing.ts`, `mock` provider, no payment details ever; Stripe documented for later), Plan section on Usage & billing (Org Owner + Billing Admin manage, Org Admin sees), lapsed plan = read-only portal + no AI work, operator sets plan/status per client. Public pages: `/pricing`, `/privacy`, `/terms`, `/support` (legal text = drafts for a lawyer). Next: real Stripe, "Sign up with Microsoft" (hook in `lib/signup.ts`), seat limit when adding people (shown, not enforced yet).
+
 ## Regroup (Oct 17, 2026)
 Many side sessions had drifted apart, so Cody paused them, merged what was ready and cleaned up. State after the regroup:
 

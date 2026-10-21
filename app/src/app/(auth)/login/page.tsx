@@ -77,6 +77,7 @@ export default function LoginPage() {
         {error && <p className="err" role="alert">{error}</p>}
         <button className="btn primary" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         {needsSetup && <Link href="/setup">Set up your organization</Link>}
+        <span className="muted" style={{ fontSize: 13 }}>New to Sidekick? <Link href="/signup">Sign up</Link> or see <Link href="/pricing">plans</Link>.</span>
       </form>
     </div>
   );

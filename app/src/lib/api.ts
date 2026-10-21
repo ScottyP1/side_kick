@@ -20,6 +20,7 @@ import { FeatureOffError } from "./owner";
 import { now, run } from "./db";
 import { failureReason, traceFailed, withTrace } from "./trace";
 import { crossSiteRefusal } from "./security";
+import { readOnlyRefusal } from "./billing";
 
 /**
  * "/api/meetings/3f2a…" → "/api/meetings/:id", so the Activity page groups requests by operation. Every
@@ -114,13 +115,18 @@ const detailsOf = (e: unknown) => ((e && typeof e === "object" && (e as Record<s
  * - Claude API errors (bad key, rate limit, outage) become plain-language messages with a reference code.
  * - Anything unexpected returns a 500 with a generic message and a reference code; the full details go to
  *   the error log (`logAppError`), never to the browser, so internal details can't leak.
+ * - Before the route runs, a change (anything but GET) from an organization whose plan has lapsed is
+ *   refused with 402 and the reason (`readOnlyRefusal` in lib/billing.ts), so read-only holds for every route.
  */
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>) {
   return async (...args: A) =>
     withTrace({ name: routeName(args[0]), channel: "portal" }, async () => {
     try {
+      // Changes from another website first (CSRF), then a read-only (unpaid/ended) plan.
       const crossSite = args[0] instanceof Request ? crossSiteRefusal(args[0]) : null;
       if (crossSite) throw new HttpError(403, crossSite);
+      const readOnly = args[0] instanceof Request ? await readOnlyRefusal(args[0]) : null;
+      if (readOnly) throw new HttpError(402, readOnly);
       const out = await fn(...args);
       return out instanceof Response ? out : NextResponse.json(out ?? { ok: true });
     } catch (e) {

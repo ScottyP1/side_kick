@@ -26,7 +26,7 @@
 import "server-only";
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
-import { all, get, newId, now, run } from "./db";
+import { all, get, newId, now, run, tx } from "./db";
 import { traceScope } from "./trace";
 
 export const SESSION_COOKIE = "sk_session";
@@ -266,4 +266,24 @@ export async function createUser(orgId: string, name: string, email: string, rol
     now(),
   );
   return id;
+}
+
+/**
+ * Creates a new organization and its Org Owner together (both or neither). Used by self-service sign-up
+ * (lib/signup.ts); first-run Setup and the Owner Console still create theirs inline. `entraTenantId` ties
+ * the organization to a Microsoft tenant from the start, for a later "Sign up with Microsoft" (the tenant
+ * id must be unique: the database refuses a second organization for the same tenant). Returns both ids.
+ */
+export async function createOrgWithOwner(
+  orgName: string,
+  owner: { name: string; email: string; password: string },
+  opts: { entraTenantId?: string | null; entraOid?: string | null } = {},
+): Promise<{ orgId: string; userId: string }> {
+  const orgId = newId();
+  return tx(async () => {
+    await run("INSERT INTO orgs (id, name, created_at, entra_tenant_id) VALUES (?, ?, ?, ?)", orgId, orgName, now(), opts.entraTenantId ?? null);
+    const userId = await createUser(orgId, owner.name, owner.email, "Org Owner", owner.password, false);
+    if (opts.entraOid) await run("UPDATE users SET entra_oid = ? WHERE id = ?", opts.entraOid, userId);
+    return { orgId, userId };
+  });
 }

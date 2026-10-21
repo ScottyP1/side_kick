@@ -204,3 +204,50 @@ test(`[${engine}] prompts and Teams cards: document text can't fake tags or link
   assert.equal(cards.noLinks("[Re-sign in](https://evil.example) and [S1]"), "[Re-sign in] (https://evil.example) and [S1]");
   assert.equal(cards.noLinks("[x]  (y)"), "[x] (y)");
 });
+
+/* ---------- Plans: what a subscription allows (lib/plans.ts, no I/O) ---------- */
+const plans = await import("../src/lib/plans.ts");
+const DAY = 86400_000;
+const iso = (ms) => new Date(ms).toISOString();
+
+test(`[${engine}] plans: one list, cheapest first, and unknown ids aren't plans`, () => {
+  assert.deepEqual(plans.PLANS.map((p) => p.id), ["starter", "team", "business"]);
+  assert.ok(plans.PLANS.every((p, i) => i === 0 || p.pricePerSeat > plans.PLANS[i - 1].pricePerSeat));
+  assert.equal(plans.planById("team").name, "Team");
+  assert.equal(plans.planById("platinum"), undefined);
+  assert.equal(plans.planById(undefined), undefined);
+});
+
+test(`[${engine}] plans: trial, grace period and cancellation decide full use or read-only`, () => {
+  const now = Date.parse("2026-10-20T12:00:00Z");
+  const sub = (status, f = {}) => ({ status, trial_ends_at: null, past_due_since: null, access_until: null, ...f });
+  assert.deepEqual(plans.accessFor(null, now), { mode: "full", notice: null, reason: null }, "managed organizations keep full use");
+  assert.equal(plans.accessFor(sub("active"), now).mode, "full");
+  const trial = plans.accessFor(sub("trialing", { trial_ends_at: iso(now + 3 * DAY) }), now);
+  assert.equal(trial.mode, "full");
+  assert.match(trial.notice, /3 days left/);
+  assert.equal(plans.accessFor(sub("trialing", { trial_ends_at: iso(now - 1) }), now).mode, "read_only");
+  const grace = plans.accessFor(sub("past_due", { past_due_since: iso(now - (plans.GRACE_DAYS - 1) * DAY) }), now);
+  assert.equal(grace.mode, "full");
+  assert.match(grace.notice, /payment failed/i);
+  const lapsed = plans.accessFor(sub("past_due", { past_due_since: iso(now - (plans.GRACE_DAYS + 1) * DAY) }), now);
+  assert.equal(lapsed.mode, "read_only");
+  assert.match(lapsed.reason, /wasn't fixed in time/);
+  assert.equal(plans.accessFor(sub("canceled", { access_until: iso(now + DAY) }), now).mode, "full");
+  assert.equal(plans.accessFor(sub("canceled", { access_until: iso(now - DAY) }), now).mode, "read_only");
+  assert.equal(plans.accessFor(sub("canceled"), now).mode, "read_only", "no paid-until date = read-only now");
+});
+
+test(`[${engine}] subscriptions: one per organization; the upsert works on this engine`, async () => {
+  const id = db.newId();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", id, "Billing test org", db.now());
+  const upsert = (plan, status) => db.run(
+    `INSERT INTO subscriptions (org_id, plan, status, provider, updated_at, created_at) VALUES (?, ?, ?, 'manual', ?, ?)
+     ON CONFLICT (org_id) DO UPDATE SET plan = excluded.plan, status = excluded.status, updated_at = excluded.updated_at`,
+    id, plan, status, db.now(), db.now(),
+  );
+  await upsert("team", "trialing");
+  await upsert("business", "active");
+  const rows = await db.all("SELECT plan, status FROM subscriptions WHERE org_id = ?", id);
+  assert.deepEqual(rows.map((r) => ({ ...r })), [{ plan: "business", status: "active" }]);
+});

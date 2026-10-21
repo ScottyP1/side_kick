@@ -3,6 +3,8 @@
 For **Org Owners** and **Org Admins**: everything needed to set Sidekick up for your organization and keep it running. New to the terms? Read [Concepts](concepts.md) first.
 
 ## 1. First sign-in
+**Signing up yourself.** When the Sidekick team has opened sign-up, a company can create its own organization at **/signup** (or **Start free trial** on the **/pricing** page): see [Sign-up, plan and billing](#15-sign-up-plan-and-billing) below.
+
 The first person to open a new Sidekick install sets up the organization and becomes its **Org Owner**. If the Sidekick team onboarded you, sign in with the temporary password they gave you. Sidekick then shows only a **Pick your own password** screen until you choose a new one (at least 10 characters); nothing else works with a temporary password. Signing in with Microsoft instead also counts.
 
 **Signing in safely.** After 5 wrong passwords for one email (or 20 from one network address) within 15 minutes, password sign-in is paused for that email or address for 15 minutes, even with the right password. Wrong passwords on real accounts, the pause, sign-ins and sign-outs all appear on **Security & audit**. Org Owners and Org Admins see **Sign-in locked** next to a paused person on **Users & access** and can press **Unlock** to let them in straight away. Changing your password signs you out on every other browser and device. To sign out, use **Sign out** at the bottom of the sidebar, or tap your initials at the top right (the only way on a phone).
@@ -66,7 +68,7 @@ Reminders only cover the chat's own workspace, and a chat with client guests onl
 **Memory & gaps → Refresh knowledge map** after adding material (Members and Admins can; Viewers and Billing Admins can't, since each refresh is a paid AI request). Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place: tick them done, set the owner, the due date (pick a date; a due date said in the meeting, like "next Friday", shows underneath until you do) and the status. Every change is in the audit log with what changed. The same edits work on the meeting's own page.
 
 ## 9. Watch usage and activity
-- **Usage & billing**: AI cost by feature, workspace and day for the whole month (also open to Billing Admins). Work that isn't tied to a workspace, such as the home assistant, shows as **Organization-wide**.
+- **Usage & billing**: your **plan** at the top (see section 15), then AI cost by feature, workspace and day for the whole month (also open to Billing Admins). Work that isn't tied to a workspace, such as the home assistant, shows as **Organization-wide**.
 - **Security & audit**: who did what and when, including everything Sidekick did on its own.
 
 ## 10. See what Sidekick is doing (Activity)
@@ -94,6 +96,30 @@ On the home page, type requests like "create a workspace for Fabrikam, code FAB"
 - **AI models & agent** (everyone can read it): which Claude model each feature uses (answers, meeting notes, knowledge map, assistant, guardrail check, reminders), how Sidekick is told to behave, and what's ready versus planned. Models are set by the Sidekick team; your documents and meetings are never used to train a model.
 - **Connectors**: the sources Sidekick can use. Available now: document upload, Teams transcripts and Teams chats and channels (assigned on each group's page). Outlook, SharePoint, Jira and the others are planned; each will connect with its own sign-in, without storing passwords.
 
+## 15. Sign-up, plan and billing
+Payments are in **test mode** for now: no money moves, prices are made up, and Sidekick **never asks for card or bank details** (a blue "Test mode" note shows wherever billing appears).
+
+**Signing up.** On **/signup** enter your organization's name, your name, work email, a password (at least 10 characters) and a plan (Starter, Team or Business; compare them on **/pricing**). You become the **Org Owner**, are signed in straight away and land on **checkout**. Each email can only have one Sidekick account, in any organization. Sign-up is **off until the Sidekick team opens it**: until then **/signup** says "Sign-up isn't open yet" and **/pricing** shows **Contact us** instead of **Start free trial**; contact them to get an organization set up. Too many sign-up attempts from one network (5 an hour) are paused for an hour.
+
+**Free trial and paying.** Every new organization gets a **14-day free trial**. On checkout you see the plan, the price per person, how many people you have and the total every 30 days, and one **Pay (test mode)** button. **Not now** keeps the trial; everyone sees a "Free trial: N days left" note at the top until you pay.
+
+**Plan on Usage & billing** (Org Owners, Org Admins and Billing Admins see it; **only the Org Owner and Billing Admins** can change it):
+- **Current plan**, its status (Free trial, Active, Payment failed, Canceled) and dates; **people** used against the plan's limit and **workspaces** against its limit. A person is anyone with an account, any role.
+- **Pay now** (when not active) opens checkout. **Change plan…** switches straight away (the paid-until date stays); a plan you've outgrown (more people or workspaces than it allows) is refused with the numbers.
+- **Cancel plan** asks first. Sidekick stays fully usable until the end of what you paid for (or the trial), then turns read-only.
+- **Simulate a failed payment** (test mode only) shows what your team would see when a payment fails.
+- Every change is on **Security & audit** (kind "Billing").
+
+**When the plan isn't active.**
+| Status | What happens |
+|---|---|
+| Free trial | Full use until the trial ends, with a note at the top saying how many days are left. |
+| Payment failed | Full use for a **7-day grace period**, with a warning to fix it. |
+| Canceled | Full use until the end of what was paid for, with a note. |
+| Any of these after its date | **Read-only**: everyone can still sign in and see everything; nothing can be added or changed (refused with "Sidekick is read-only for your organization because…"), and Sidekick doesn't answer in the portal, Teams or the assistant, write meeting notes or send reminders. Nothing is deleted. Paying on Usage & billing turns everything back on at once. |
+
+Organizations set up by the Sidekick team (or the very first one on an install) have no self-service plan: Usage & billing says the plan is managed by the Sidekick team.
+
 ## Troubleshooting
 | You see | What to do |
 |---|---|
@@ -108,5 +134,7 @@ On the home page, type requests like "create a workspace for Fabrikam, code FAB"
 | "… is paused by the Sidekick team" | A feature was paused for maintenance. Try again later. |
 | "… is turned off for your organization by the Sidekick team" | Not an error: the Sidekick team switched that feature off for your organization. Org Owners: contact the Sidekick team to have it turned back on. Everyone else: ask your Org Owner. |
 | "This organization's Sidekick access is paused" | Contact the Sidekick team. |
+| "Sidekick is read-only for your organization because…" | The free trial ended, a failed payment wasn't fixed, or the plan was canceled. The Org Owner or a Billing Admin pays on **Usage & billing** to turn everything back on. |
+| "Self-service sign-up isn't open yet" | Sign-up is off until the Sidekick team opens it. Contact them (see Support) to get an organization set up. |
 | A Teams link code doesn't work | Codes expire after 24 hours. Mention `@Sidekick link` in Teams for a new one. |
 | Sidekick answers "I couldn't find that" | The workspace doesn't have it yet. Upload the document; the question is already listed as a gap. |

@@ -9,7 +9,7 @@
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError } from "@/lib/auth";
 import { get, now, run } from "@/lib/db";
-import { FLAGS, platformLog, requireOwner, type FlagKey } from "@/lib/owner";
+import { FLAGS, isPlatformOnly, platformLog, requireOwner, type FlagKey } from "@/lib/owner";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -18,7 +18,7 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
   const org = await get<{ id: string; name: string }>("SELECT id, name FROM orgs WHERE id = ?", (await params).id);
   if (!org) throw new HttpError(404, "Organization not found.");
   const { key, enabled } = await readJson<{ key?: string; enabled?: unknown }>(req);
-  if (!key || !(key in FLAGS)) throw new HttpError(400, "Unknown switch.");
+  if (!key || !(key in FLAGS) || isPlatformOnly(key as FlagKey)) throw new HttpError(400, "Unknown switch.");
   if (typeof enabled !== "boolean") throw new HttpError(400, "Say whether the switch is on (true) or off (false).");
   const label = FLAGS[key as FlagKey].label;
   await run(

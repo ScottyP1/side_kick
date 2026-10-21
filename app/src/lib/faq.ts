@@ -122,7 +122,7 @@ export const FAQ: readonly FaqItem[] = [
     id: "teams-install",
     q: "How do we install Sidekick in Teams?",
     a: [
-      "Your Teams admin makes the Sidekick app available to the people who should have it (we recommend Team Leads and admins only). They then add it to a group chat, a meeting's chat or a channel from Teams' Manage apps, and assign the chat to a group in the Sidekick portal. The setup wizard after sign-up walks you through it.",
+      "Your Teams admin makes the Sidekick app available to the people who should have it (we recommend Team Leads and admins only). They then add it to a group chat or a channel from Teams' Manage apps (meeting chats come with automatic meeting notes, coming soon), and assign the chat to a group in the Sidekick portal. The setup wizard after sign-up walks you through it.",
     ],
     topics: ["how-it-works"],
     guide: "/docs/teams-guide#getting-started",

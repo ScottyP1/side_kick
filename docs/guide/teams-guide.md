@@ -4,7 +4,7 @@ Sidekick works inside Microsoft Teams group chats, channels and 1:1 chats. It an
 
 ## Getting started
 1. Add Sidekick where your team works:
-   - **Group chat** (including a meeting's chat): open the chat, click **+** or **⋯ → Manage apps** at the top, add **Sidekick**.
+   - **Group chat**: open the chat, click **+** or **⋯ → Manage apps** at the top, add **Sidekick**.
    - **Channel**: on the team, **⋯ → Manage team → Apps**, add **Sidekick**.
 
    Teams asks the chat or team owner to let Sidekick **read messages** there. Accept it: that's what lets Sidekick follow the chat once it's assigned to a group (it reads nothing before that, and announces it when it starts).
@@ -21,7 +21,7 @@ If your organization hasn't connected Microsoft sign-in to Sidekick yet (and in 
 Both work the same for Sidekick; use whatever your team already uses.
 - **Group chat**: one running conversation. Sidekick's answers, notes, action-item cards and reminders appear in the chat in order.
 - **Channel**: posts with replies. Meeting notes are a new post and their action items go in that post's thread; reminders are a new post; answers are replies to the post that mentioned Sidekick.
-- A **meeting chat** (the chat of a scheduled Teams meeting) is a group chat to Sidekick, so it's a natural place for that meeting series' notes.
+- **Meeting chats** (the chat of a scheduled Teams meeting): Teams doesn't offer Sidekick there yet (it needs a meeting tab). This is coming with **automatic meeting notes**; until then, use the team's group chat or channel for notes.
 - **Names on a group's Teams chats tab**: a group chat shows its name if someone gave it one. A channel shows as "Team › Channel"; a team's first channel shows only the team name until it's renamed, because Teams doesn't tell apps that channel's name (it's "General" unless someone renamed it).
 
 ## Asking questions
@@ -40,7 +40,9 @@ If the workspace doesn't contain the answer, Sidekick says so instead of guessin
 Your organization's **guardrails** apply in Teams exactly as in the portal. A question that breaks them (abuse, trying to get Sidekick to drop its rules, asking about another client, something your Org Owner switched off, or one of your organization's or workspace's custom rules) gets a short, polite refusal card instead of an answer.
 
 ## Meeting notes
-After a meeting transcript is imported for the workspace, Sidekick posts:
+Today, notes come from **imported meeting transcripts**: after a transcript is imported for the workspace, Sidekick posts the notes below. **Automatic notes after every meeting** (no import needed) and **Sidekick live in meetings** (Enterprise) are coming soon.
+
+After a meeting transcript is imported, Sidekick posts:
 1. a **notes card**: summary, decisions and questions still open, with **Open in Sidekick** for the full notes;
 2. one **card per action item** (in a group chat they follow the notes; in a channel they're replies in the notes post's thread).
 

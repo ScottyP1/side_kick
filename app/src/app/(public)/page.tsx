@@ -18,7 +18,7 @@ export const metadata: Metadata = pageMetadata("/");
 
 const HIGHLIGHTS: [string, string, string][] = [
   ["answer", "Answers with sources", "Ask in the chat. Sidekick answers from that client's documents, meetings and chat, and shows where each answer came from. If it doesn't know, it says so."],
-  ["notes", "Meeting notes, done", "After each meeting: a summary, decisions, open questions and action items with owners and due dates, posted to the chat."],
+  ["notes", "Meeting notes, done", "From your meeting transcripts: a summary, decisions, open questions and action items with owners and due dates, posted to the chat. Automatic notes after every meeting: coming soon."],
   ["bell", "Reminders that matter", "Overdue and unowned action items, decisions still waiting, and documents that look out of date, raised in the chat before they slip."],
   ["groups", "One group per client", "Each engagement gets its own walled-off group with its own Team Lead, chats and documents. One client's material never shows up in another's answers."],
   ["shield", "Guardrails on every answer", "Company-wide and per-group rules, checked before Sidekick answers and again after. Client guests only ever see what's marked shareable."],

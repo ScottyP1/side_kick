@@ -288,6 +288,7 @@ test(`[${engine}] help center: only the four customer guides, links rewritten, s
   assert.equal(help.helpLink("https://learn.microsoft.com/x"), "https://learn.microsoft.com/x");
   const text = JSON.stringify(help.guides());
   assert.doesNotMatch(text, /permissions-matrix|npm --prefix|SIDEKICK_|azurecontainerapps/, "nothing internal in the public guides");
+  assert.doesNotMatch(text, /including a meeting's chat/, "Teams doesn't offer Sidekick in meeting chats yet; the guide says it's coming");
   const hits = help.searchHelp(help.helpSections(), "read-only");
   assert.ok(hits.length > 0);
   assert.ok(hits.every((h) => `${h.heading} ${h.text}`.toLowerCase().includes("read-only")));

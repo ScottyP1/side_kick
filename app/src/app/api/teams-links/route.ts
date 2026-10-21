@@ -6,6 +6,7 @@
  * reminder. Unlinking also forgets the messages Sidekick saved from that chat and its settings.
  */
 import { after } from "next/server";
+import { assertCanAdd } from "@/lib/limits";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, HttpError, isAdmin, isLead, requireManage, requireUser, workspaceIdsFor, type User } from "@/lib/auth";
 import { all, get, now, run } from "@/lib/db";
@@ -41,6 +42,7 @@ export const POST = handle(async (req: Request) => {
   const user = await requireUser();
   const body = await readJson<{ code?: string; ws?: string; guests?: boolean }>(req);
   const ws = await requireManage(user, body.ws);
+  await assertCanAdd(user.org_id, "chats"); // tracked chats are a plan limit (lib/limits.ts)
   const code = normalizeCode(requireText(body.code, "Link code", 20));
   const conv = code
     ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE link_code = ? AND code_expires_at > ? AND workspace_id IS NULL", code, now())

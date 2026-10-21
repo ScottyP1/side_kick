@@ -269,11 +269,18 @@ select.ws-pick{width:auto;max-width:240px;padding-top:5px;padding-bottom:5px;fon
 .banner{display:flex;gap:10px;align-items:center;padding:10px 16px;background:var(--warn-soft);color:var(--fg);border-bottom:1px solid var(--line);font-size:13.5px;flex-wrap:wrap}
 pre.transcript-raw{white-space:pre-wrap;font-family:var(--f-body);font-size:13.5px;margin:0;max-height:460px;overflow:auto}
 
-/* ---- Owner Console: warm graphite rail + amber mark so it never gets mistaken for a client portal ---- */
-.owner-app .rail{background:#1b1712}
-.owner-app .nav a:hover,.owner-app .nav a[aria-current="page"]{background:#2b241c}
-.owner-app .nav a[aria-current="page"]{box-shadow:inset 3px 0 0 var(--hand)}
-.owner-mark{background:var(--hand) !important;color:#1a1205 !important}
+/* ---- Owner Console: always dark graphite with the Indigo accent, so it never gets mistaken for a client
+   portal (which follows the device's light/dark setting). Text pairs keep the dark palette's AA contrast. ---- */
+.owner-app{
+  --bg:#0e0f12; --surface:#16181d; --sunken:#1c1f25; --line:#2a2e36; --fg:#e9eaef; --muted:#a2a6b3; --faint:#8a8f9c;
+  --accent:#a7a3ff; --accent-soft:#272550; --accent-fg:#16133d;
+  --good:#5fcf8a; --good-soft:#14301f; --warn:#f0b452; --warn-soft:#34290f; --bad:#ff8a7f; --bad-soft:#3d1a18; --info:#8fb8f5; --info-soft:#172846;
+  --rail:#08090b; --rail-fg:#b6b9c6; --rail-active:#1f2229; --shadow:0 1px 2px rgba(0,0,0,.4);
+  color-scheme:dark; background:var(--bg); color:var(--fg)}
+.owner-app .nav a:hover,.owner-app .nav a[aria-current="page"]{background:var(--rail-active)}
+.owner-app .nav a[aria-current="page"]{box-shadow:inset 3px 0 0 var(--accent)}
+.owner-mark{background:var(--accent) !important;color:var(--accent-fg) !important}
+.owner-app .topbar{background:#121418}
 .spark{display:flex;align-items:flex-end;gap:3px;height:150px}
 .spark > div{flex:1;min-width:4px;display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:2px}
 .spark .c{background:var(--accent);border-radius:3px 3px 0 0}

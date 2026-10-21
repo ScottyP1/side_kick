@@ -21,6 +21,8 @@ import { structured } from "./claude";
 import { indexText, searchPassages } from "./search";
 import { audit, auditAsSidekick, type User } from "./auth";
 import { assertEnabled } from "./owner";
+import { takeQuestion } from "./rate-limit";
+import { creditStatus } from "./credit";
 import { excerptFor } from "./excerpt";
 import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, type GuardPlace, type RuleId } from "./guardrails";
 
@@ -60,9 +62,14 @@ Rules:
  *
  * Every answered question is saved in `questions`; unanswered ones show up as knowledge gaps.
  * If search finds nothing, the answer step isn't called at all (only the guardrail check is).
+ *
+ * Limits: each person may ask `ASK_PER_HOUR` questions an hour (portal and Teams together, lib/rate-limit.ts;
+ * 429 past it). When the organization's AI credit is used up, answers keep working on a cheaper model
+ * (lib/credit.ts) and the result says `aiMode: "essentials"`.
  */
 export async function ask(user: User, workspaceId: string, question: string, guests: boolean, channel: "portal" | "teams" = "portal") {
   await assertEnabled("ask", user.org_id);
+  await takeQuestion(user.org_id, user.id);
   const place: GuardPlace = { orgId: user.org_id, workspaceId, channel };
   // The workspace's guardrails: org switches plus any it turned on itself, and org-wide + workspace custom rules.
   const policy = await getGuardPolicy(user.org_id, workspaceId);
@@ -73,7 +80,7 @@ export async function ask(user: User, workspaceId: string, question: string, gue
   ]);
   if (blocked) {
     await recordGuard(place, "question", blocked, "blocked");
-    return { found: false, answer: refusalFor(blocked), sources: [], blocked: blocked as RuleId | null };
+    return { found: false, answer: refusalFor(blocked), sources: [], blocked: blocked as RuleId | null, aiMode: await aiMode(user.org_id) };
   }
   const sources = passages.map((p, i) => ({ id: `S${i + 1}`, ...p }));
   let result: z.infer<typeof AnswerSchema>;
@@ -114,8 +121,11 @@ export async function ask(user: User, workspaceId: string, question: string, gue
     .filter((s) => used.has(s.id))
     .map((s) => ({ id: s.id, title: s.title, loc: s.loc, type: s.source_type, sourceId: s.source_id, excerpt: clean(excerptFor(s.text, question)) }));
   for (const f of fired.values()) await recordGuard(place, "answer", f.rule, f.action);
-  return { found: result.found, answer: result.answer, sources: cited, blocked: null as RuleId | null };
+  return { found: result.found, answer: result.answer, sources: cited, blocked: null as RuleId | null, aiMode: await aiMode(user.org_id) };
 }
+
+/** "essentials" when the organization's AI credit is used up (answers run on a cheaper model), else "full". */
+const aiMode = async (orgId: string): Promise<"full" | "essentials"> => ((await creditStatus(orgId)).level === "essentials" ? "essentials" : "full");
 
 /** Keeps a model-given date only if it really is a YYYY-MM-DD calendar day; anything else becomes null. */
 const isoDay = (d: string | null | undefined) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? d : null);

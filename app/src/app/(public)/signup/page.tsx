@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/components/ui";
 import { PublicShell, TestModeBanner } from "@/components/public-shell";
-import { PLANS, planById, priceText, TRIAL_DAYS, type PlanId } from "@/lib/plans";
+import { PLANS, priceText, TRIAL_DAYS, type PlanId } from "@/lib/plans";
 
 export default function SignupPage() {
   const [f, setF] = useState({ org: "", name: "", email: "", password: "", plan: "team" as PlanId });
@@ -22,7 +22,7 @@ export default function SignupPage() {
 
   useEffect(() => {
     // Read after mount: the page is static, and the plan comes from the pricing page's link.
-    const plan = planById(new URLSearchParams(location.search).get("plan"));
+    const plan = PLANS.find((p) => p.id === new URLSearchParams(location.search).get("plan"));
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (plan) setF((cur) => ({ ...cur, plan: plan.id }));
     api<{ open: boolean }>("/api/signup").then((r) => setOpen(r.open)).catch((e) => setError(e instanceof Error ? e.message : "Couldn't reach Sidekick."));

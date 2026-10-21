@@ -147,13 +147,14 @@ export async function orgFlags(orgId: string) {
 }
 
 /**
- * A feature someone deliberately turned off: `paused` (a kill switch, for every client, temporary) or
- * `restricted` (turned off for one organization on its Owner Console page). It's a refusal, not a fault:
+ * A feature someone deliberately turned off: `paused` (a kill switch, for every client, temporary),
+ * `restricted` (turned off for one organization on its Owner Console page), or `credit` (an extra paused
+ * because the organization used this month's AI credit, lib/credit.ts). It's a refusal, not a fault:
  * `handle()` answers with status 503 and `{ error, kind }`, doesn't log it under App errors and doesn't count
  * it as a failed request or a Claude error; the portal shows it as a notice (components/ui.tsx).
  */
 export class FeatureOffError extends HttpError {
-  constructor(public reason: "paused" | "restricted", message: string) {
+  constructor(public reason: "paused" | "restricted" | "credit", message: string) {
     super(503, message);
   }
 }

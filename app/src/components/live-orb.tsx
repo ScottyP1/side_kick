@@ -8,7 +8,7 @@
  * - The ball moves faster and glows brighter while Sidekick is working (a request in the last ~20 s, or
  *   while the assistant is writing a reply). While the assistant thinks, the dust inside also swirls in
  *   circles, as if an invisible finger were stirring it (`useThinkingSwirl`).
- * - Each connection (Teams, Claude, search, database) has a dot colored by health: green Healthy, amber
+ * - Each connection (Teams, AI answers, search, database) has a dot colored by health: green Healthy, amber
  *   Slow/had errors, red Failing, grey Idle/Not set up. The word is always shown, so color is never the
  *   only signal. Admins also see who's active; everyone else sees a count.
  *
@@ -186,7 +186,7 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
   const conns: Conn[] = c
     ? [
         { key: "teams", label: "Teams", detail: c.teams.linked ? `${c.teams.linked} chat${c.teams.linked === 1 ? "" : "s"} linked` : "No chats linked", state: c.teams.state },
-        { key: "claude", label: "Claude", detail: c.claude.calls ? `${c.claude.calls} calls · ${(c.claude.avgMs! / 1000).toFixed(1)} s avg` : "AI answers & notes", state: c.claude.state },
+        { key: "claude", label: "AI answers", detail: c.claude.calls ? `${c.claude.calls} requests · ${(c.claude.avgMs! / 1000).toFixed(1)} s avg` : "Answers & meeting notes", state: c.claude.state },
         { key: "search", label: "Search", detail: c.search.engine, state: c.search.state },
         { key: "database", label: "Database", detail: c.database.engine, state: c.database.state },
       ]

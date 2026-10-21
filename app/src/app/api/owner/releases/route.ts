@@ -2,40 +2,12 @@
  * GET/POST /api/owner/releases: the running version, models in use, kill switches and the operator log; POST flips a kill switch.
  * Who: platform operators only.
  */
-import fs from "node:fs";
-import path from "node:path";
 import { handle, readJson } from "@/lib/api";
 import { HttpError } from "@/lib/auth";
 import { MODELS } from "@/lib/claude";
 import { all, now, run } from "@/lib/db";
+import { buildInfo } from "@/lib/ops";
 import { FLAGS, flagEnabled, platformLog, requireOwner, type FlagKey } from "@/lib/owner";
-
-// Reads the running build's version from package.json and the git checkout (if present).
-function buildInfo() {
-  const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as { version: string; dependencies: Record<string, string> };
-  let branch: string | null = null;
-  let commit: string | null = null;
-  try {
-    const gitDir = path.join(process.cwd(), "..", ".git");
-    const head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
-    if (head.startsWith("ref: ")) {
-      const ref = head.slice(5);
-      branch = ref.replace("refs/heads/", "");
-      const refFile = path.join(gitDir, ref);
-      commit = fs.existsSync(refFile) ? fs.readFileSync(refFile, "utf8").trim().slice(0, 7) : null;
-    } else commit = head.slice(0, 7);
-  } catch {}
-  return {
-    version: pkg.version,
-    branch,
-    commit,
-    next: pkg.dependencies.next,
-    sdk: pkg.dependencies["@anthropic-ai/sdk"],
-    node: process.version,
-    environment: process.env.NODE_ENV,
-    startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
-  };
-}
 
 export const GET = handle(async () => {
   await requireOwner();

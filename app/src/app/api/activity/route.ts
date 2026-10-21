@@ -13,7 +13,8 @@
  * - live: the last few minutes, for the home page orb: active people, each connection's health
  *   (Teams, Claude, search, database), and recent work (used to tell whether Sidekick is busy).
  *
- * Traces hold timings, counts, model names and costs only; no document text (see lib/trace.ts).
+ * Traces hold timings, counts, model names and costs only; no document text (see lib/trace.ts). Model names
+ * are left out of what the portal gets (they're for the Owner Console).
  */
 import { guardSummary } from "@/lib/guardrails";
 import { handle } from "@/lib/api";
@@ -144,7 +145,11 @@ export const GET = handle(async (req: Request) => {
         "SELECT span_id, parent_id, kind, name, start_ms, duration_ms, status, error, attrs FROM trace_spans WHERE trace_id = ? ORDER BY start_ms, span_id",
         trace.id,
       )
-    ).map((s) => ({ ...s, attrs: JSON.parse(s.attrs || "{}") as Record<string, unknown> }));
+    ).map((s) => {
+      // Model names stay in the Owner Console: the portal shows plain "AI" steps.
+      const { model: _model, ...attrs } = JSON.parse(s.attrs || "{}") as Record<string, unknown>;
+      return { ...s, attrs };
+    });
     return { trace, spans };
   }
 

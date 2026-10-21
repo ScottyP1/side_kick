@@ -45,6 +45,15 @@ Scripts in `infra/azure/` (run after `az login`):
   database storage (~$4) are still billed while frozen. Azure restarts a stopped Postgres after 7 days.
 - `./unfreeze.sh`: starts them again.
 
+**Release facts for the Owner Console.** The console's **Business** page shows which commit is running and
+when it was released, read from two settings on the container: `SIDEKICK_COMMIT` (short git commit) and
+`SIDEKICK_RELEASED_AT` (ISO time). The automatic deploy (`.github/workflows/deploy.yml`, PR #28) should set
+them in its "Switch the app to the new image" step, e.g.
+`az containerapp update … --image $ACR.azurecr.io/sidekick:$TAG --set-env-vars SIDEKICK_COMMIT=$TAG SIDEKICK_RELEASED_AT=$(date -u +%FT%TZ)`.
+Without them the page falls back to the git checkout (laptop) or says "Not set by the deploy". Each app
+copy records the release it runs (`app_releases`) the first time `/api/health` answers, so the page lists
+the recent deploys without needing Azure.
+
 ## Teams app package
 
 There is **one** Sidekick app in Teams: its app ID is the Azure Bot's ID, and Teams sends its messages to
@@ -71,6 +80,10 @@ with the live address as its web address. It asks Azure for the address (`az log
   points at the tunnel. Upload the live package again afterwards.
 
 ## Monitoring and alerts (October 20, 2026)
+
+Day to day, watch the business and the app's health in the **Owner Console → Business** page (MRR,
+margin, limits, trials, payments, health checks, running release, app errors). The Azure pieces below are
+the safety net that alerts when the app itself is down.
 
 - **Health probes** on `sidekick-app`: *startup* and *readiness* call `/api/health` (200 only when the
   database answers); *liveness* is a plain port check, so a database blip takes the app out of traffic

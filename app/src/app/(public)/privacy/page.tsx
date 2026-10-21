@@ -24,6 +24,8 @@ export default function PrivacyPage() {
         </ul>
         <h2 style={{ margin: 0 }}>How it&apos;s used</h2>
         <p style={{ margin: 0 }}>Only to run Sidekick for your organization: answering your team, writing notes and reminders, and keeping the service working. Your content is sent to the AI model (Claude) to produce answers and is not used to train models. Each organization&apos;s data is walled off from every other, and each workspace from the others.</p>
+        <h2 style={{ margin: 0 }}>Powered by Claude</h2>
+        <p style={{ margin: 0 }}>Sidekick&apos;s answers, meeting notes and reminders are powered by Claude, Anthropic&apos;s AI model. Claude sees only what one task needs (for example the few passages that answer one question), under terms where your content isn&apos;t used to train models. The Sidekick team picks and runs the AI; your organization doesn&apos;t need its own AI account.</p>
         <h2 style={{ margin: 0 }}>Who else sees it</h2>
         <p style={{ margin: 0 }}>The services Sidekick runs on (Microsoft Azure hosting, Microsoft Teams, the Claude AI model) process data on our behalf. We don&apos;t sell data or show ads. The Sidekick team sees counts and usage for support, not your documents.</p>
         <h2 style={{ margin: 0 }}>Your choices</h2>

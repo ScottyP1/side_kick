@@ -2,21 +2,26 @@
 
 /**
  * The Plan section at the top of Usage & billing (/usage): the organization's plan and subscription status,
- * people and workspaces used against the plan's limits, and (Org Owners and Billing Admins) pay, change plan,
- * cancel, and the test-mode "simulate a failed payment". Org Admins see it read-only. Organizations managed
- * by the Sidekick team (no self-service subscription) see a short note instead. Data: GET/POST /api/billing.
+ * every plan limit with its use (people, groups, tracked chats, meeting hours, documents, connectors, AI
+ * credit; "Over limit" when a plan shrank below what's used, nothing is ever deleted), and (Org Owners and
+ * Billing Admins) pay, change plan, cancel, and the test-mode "simulate a failed payment". Org Admins see it
+ * read-only. Organizations managed by the Sidekick team (no self-service subscription) and Enterprise see
+ * their limits and a note to contact the team. Data: GET/POST /api/billing.
  */
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, Modal, Pill, useReportError, useToast } from "@/components/ui";
 import { TestModeBanner } from "@/components/public-shell";
-import { limitText, planById, STATUS_LABEL, type Access, type Plan, type PlanId, type SubStatus } from "@/lib/plans";
+import { limitText, planById, STATUS_LABEL, type Access, type LimitKey, type Plan, type PlanId, type SubStatus } from "@/lib/plans";
+
+type LimitLine = { key: LimitKey; label: string; used: number; limit: number | null; pct: number; over: boolean; full: boolean; near: boolean };
 
 type Billing = {
   subscription: { plan: PlanId; status: SubStatus; trial_ends_at: string | null; current_period_end: string | null; past_due_since: string | null; access_until: string | null } | null;
   access: Access;
   usage: { seats: number; workspaces: number };
+  limits: LimitLine[];
   plans: Plan[];
   canManage: boolean;
   testMode: boolean;
@@ -54,15 +59,18 @@ export function PlanSection() {
 
   if (!b) return null;
   const sub = b.subscription;
-  if (!sub) {
+  const plan = sub ? planById(sub.plan)! : null;
+  if (!sub || !plan?.selfService) {
     return (
       <div className="panel">
-        <div className="panel-h"><h2>Plan</h2></div>
-        <div className="panel-b muted">Your organization&apos;s plan is managed by the Sidekick team. Contact them to change it.</div>
+        <div className="panel-h"><h2>Plan</h2>{plan && <Pill kind="info">{plan.name}</Pill>}</div>
+        <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <span className="muted">Your organization&apos;s plan is managed by the Sidekick team. Contact them to change it or raise a limit.</span>
+          <Limits lines={b.limits} />
+        </div>
       </div>
     );
   }
-  const plan = planById(sub.plan)!;
   const seatPct = plan.seats ? Math.min(100, (b.usage.seats / plan.seats) * 100) : 0;
   const when =
     sub.status === "trialing" ? `Free trial until ${fmtDate(sub.trial_ends_at)}`
@@ -97,13 +105,14 @@ export function PlanSection() {
             <div className="muted">About ${(plan.pricePerSeat * Math.max(1, b.usage.seats)).toFixed(2)} every 30 days</div>
           </div>
         </div>
+        <Limits lines={b.limits} />
         {err && <p className="err" role="alert" style={{ margin: 0 }}>{err}</p>}
         {b.canManage ? (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {sub.status !== "active" && <Link className="btn primary" href={`/checkout?plan=${sub.plan}`}>Pay now</Link>}
             <select className="input" style={{ width: "auto" }} value={pick} onChange={(e) => setPick(e.target.value as PlanId)} aria-label="Change plan to">
               <option value="">Change plan…</option>
-              {b.plans.filter((p) => p.id !== sub.plan).map((p) => <option key={p.id} value={p.id}>{p.name}: ${p.pricePerSeat} per person</option>)}
+              {b.plans.filter((p) => p.id !== sub.plan && p.selfService).map((p) => <option key={p.id} value={p.id}>{p.name}: ${p.pricePerSeat} per person</option>)}
             </select>
             <button className="btn" disabled={!pick} onClick={() => setConfirm("change")}>Change</button>
             <span className="spacer" style={{ flex: 1 }} />
@@ -116,7 +125,7 @@ export function PlanSection() {
       </div>
       {confirm === "change" && next && (
         <Modal title={`Switch to ${next.name}?`} onClose={() => setConfirm(null)} footer={<><button className="btn" onClick={() => setConfirm(null)}>Back</button><button className="btn primary" onClick={() => act("change", `You're on the ${next.name} plan now`)}>Switch plan</button></>}>
-          <p style={{ margin: 0 }}>{next.name} is ${next.pricePerSeat} per person / month, for up to {limitText(next.seats)} people and {limitText(next.workspaces)} workspaces. It applies straight away; the paid-until date stays the same.</p>
+          <p style={{ margin: 0 }}>{next.name} is ${next.pricePerSeat} per person / month, for up to {limitText(next.seats)} people, {limitText(next.workspaces)} groups, {limitText(next.chats)} tracked chats, {limitText(next.meetingHours)} meeting hours a month, {limitText(next.documents)} documents and ${next.aiCreditUsd} of AI credit a month. It applies straight away; the paid-until date stays the same. If you use more than a smaller plan allows, nothing is deleted: you just can&apos;t add more until you&apos;re under the limit.</p>
         </Modal>
       )}
       {confirm === "cancel" && (
@@ -129,6 +138,36 @@ export function PlanSection() {
           <p style={{ margin: 0 }}>Test mode only: marks the last payment as failed so you can see what your team sees. Sidekick keeps working for a 7-day grace period, then turns read-only. <b>Pay now</b> fixes it.</p>
         </Modal>
       )}
+    </div>
+  );
+}
+
+/** Shows one limit's number: money for the AI credit, one decimal for meeting hours. */
+const shown = (key: LimitKey, n: number) => (key === "aiCreditUsd" ? `$${n.toFixed(2)}` : key === "meetingHours" ? String(Math.round(n * 10) / 10) : n.toLocaleString());
+
+/**
+ * Every plan limit with its use: "3 of 5", a meter, and "Over limit" (more than the plan allows, e.g. after
+ * moving to a smaller plan; new ones are refused, nothing is deleted), "At limit" (nothing more fits) or
+ * "Near limit" from 80%.
+ */
+export function Limits({ lines }: { lines: LimitLine[] }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th>Limit</th><th className="r">Used</th><th className="r">Included</th><th style={{ width: "30%" }}></th></tr></thead>
+        <tbody>
+          {lines.map((l) => (
+            <tr key={l.key}>
+              <td>{l.label[0].toUpperCase() + l.label.slice(1)}</td>
+              <td className="r num">{l.key === "connectors" && l.used === 0 ? "—" : shown(l.key, l.used)}</td>
+              <td className="r num">{l.limit === null ? (l.key === "connectors" ? "All" : "Unlimited") : l.limit === 0 && l.key === "connectors" ? "None" : shown(l.key, l.limit)}</td>
+              <td>
+                {l.over ? <Pill kind="bad">Over limit</Pill> : l.full && l.limit !== 0 ? <Pill kind="warn">At limit</Pill> : l.near ? <Pill kind="warn">Near limit</Pill> : l.limit !== null && l.limit > 0 ? <div className="meter"><span style={{ width: `${Math.min(100, l.pct)}%` }} /></div> : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

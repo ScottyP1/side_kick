@@ -31,6 +31,7 @@ export function PublicShell({ children, narrow }: { children: ReactNode; narrow?
         <Link href="/privacy">Privacy</Link>
         <Link href="/terms">Terms of use</Link>
         <Link href="/support">Support</Link>
+        <Link href="/privacy">Powered by Claude</Link>
       </footer>
     </div>
   );

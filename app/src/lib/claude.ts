@@ -11,6 +11,11 @@
  * - **Prompt caching**: repeated instructions are cached by Anthropic, so follow-up calls cost less.
  * - **Server-side fallback**: if a model declines a request on policy grounds, Anthropic retries it on
  *   their recommended fallback model automatically.
+ * - **AI credit** (lib/credit.ts): before each call, the organization's monthly AI credit is checked. From
+ *   100% ("essentials only") answers and guardrail checks run on cheaper models and the extras pause. A
+ *   call can opt out with `skipCredit` (work Sidekick pays for itself, like the coming support assistant).
+ * - **Plumbing stays here**: customers see plain wording ("AI answers"); model names and providers are
+ *   shown only in the Owner Console.
  *
  * The key comes from `ANTHROPIC_API_KEY` in app/.env.local. Production swaps this client for Claude hosted
  * on Azure (AnthropicFoundry) without changing callers.
@@ -23,6 +28,7 @@ import { HttpError } from "./auth";
 import { now, run } from "./db";
 import { assertEnabled } from "./owner";
 import { span, spanAttrs, traceUserId } from "./trace";
+import { addSpend, creditGate } from "./credit";
 
 // One place to choose models. Defaults to Claude Opus 5.5 everywhere; override per feature in .env.local
 // (e.g. SIDEKICK_MODEL_ASK=claude-sonnet-5-5) to trade quality for cost. In step 2 this client is swapped
@@ -57,13 +63,19 @@ export const FAKE_CLAUDE = process.env.SIDEKICK_FAKE_CLAUDE === "1" && process.e
 /**
  * Canned, schema-shaped outputs for test mode. A content containing "__FAIL__" makes the call fail, so
  * tests can check that failures are reported (e.g. a meeting marked Failed with a reason).
+ * "__SPEND_<dollars>__" in the content records that cost for the call, so tests can drive the AI credit.
+ * The recorded model is "fake-claude", or "fake-claude:<model>" when the call didn't use the feature's
+ * normal model (essentials mode).
  */
-async function fakeClaude(feature: Feature, ctx: Ctx, content: string): Promise<unknown> {
+async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: string): Promise<unknown> {
+  const cost = Number(content.match(/__SPEND_(\d+(?:\.\d+)?)__/)?.[1] ?? 0);
   await run(
     `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
-     VALUES (?, ?, ?, ?, 'fake-claude', 0, 0, 0, 0, ?, ?, ?)`,
-    ctx.orgId, ctx.workspaceId, traceUserId(), feature, content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
+     VALUES (?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?, ?)`,
+    ctx.orgId, ctx.workspaceId, traceUserId(), feature, model === MODELS[feature] ? "fake-claude" : `fake-claude:${model}`, cost,
+    content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
   );
+  addSpend(ctx.orgId, cost);
   if (content.includes("__FAIL__")) throw new HttpError(502, "Claude API error (test): fake failure for testing.");
   if (feature === "guard") return fakeGuard(content);
   if (feature === "remind") {
@@ -177,15 +189,15 @@ let client: Anthropic | null = null;
 /** The shared Anthropic client. Throws a friendly 503 if no API key is configured yet. */
 function anthropic(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
-    throw new HttpError(503, "Claude isn't connected yet. Add your key as ANTHROPIC_API_KEY in app/.env.local, then restart the app.");
+    throw new HttpError(503, "AI answers aren't set up on this server yet. The Sidekick team needs to add the AI key (ANTHROPIC_API_KEY), then restart the app.");
   }
   client ??= new Anthropic();
   return client;
 }
 
-/** True when an API key is set. Drives the "Claude connected" badge in the portal header. */
+/** True when Sidekick's own AI key is set (or test mode). Drives "AI answers: working" in the portal. */
 export function claudeConfigured() {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.ANTHROPIC_API_KEY) || FAKE_CLAUDE;
 }
 
 /** Dollar cost of one call, from its token usage and the model's prices (unknown models priced as Opus). */
@@ -196,9 +208,11 @@ function costOf(model: string, u: { input_tokens: number; output_tokens: number;
   return (u.input_tokens * p.in + cacheWrite * p.in * 1.25 + cacheRead * p.cacheRead + u.output_tokens * p.out) / 1_000_000;
 }
 
-/** Who the call is for, so its cost lands on the right org and workspace in usage reports. */
-/** Whose work a call is: org and workspace (for metering), and the reader's role (for restriction wording). */
-type Ctx = { orgId: string; workspaceId: string | null; role?: string | null };
+/**
+ * Whose work a call is: org and workspace (for metering), the reader's role (for restriction wording), and
+ * `skipCredit` for work that must not count against the organization's AI credit (see lib/credit.ts).
+ */
+type Ctx = { orgId: string; workspaceId: string | null; role?: string | null; skipCredit?: boolean };
 
 /**
  * Calls Claude and returns its answer, validated against a Zod schema.
@@ -210,12 +224,13 @@ type Ctx = { orgId: string; workspaceId: string | null; role?: string | null };
  * @param opts.schema    the exact JSON shape Claude must return
  * @param opts.effort    how hard Claude thinks: "low" is fast and cheap, "high" is most thorough
  * @param opts.maxTokens upper limit on the reply length
- * @throws HttpError 503 if the feature is paused or no key is set; 422 if Claude declined or ran out of room
+ * @throws HttpError 503 if the feature is paused or no key is set; 422 if Claude declined or ran out of room;
+ *   FeatureOffError("credit") if the feature pauses because the AI credit is used up
  *
  * Server-side fallback ("default") re-runs a policy-declined request on Anthropic's recommended model.
  * Usage is recorded in `finally`, so failed calls are metered too.
  */
-const SPAN_NAMES: Record<Feature, string> = { ask: "Claude: write the answer", extract: "Claude: write meeting notes", insights: "Claude: build the knowledge map", assist: "Claude: in-app assistant", guard: "Claude: guardrail check", remind: "Claude: word the reminders" };
+const SPAN_NAMES: Record<Feature, string> = { ask: "AI: write the answer", extract: "AI: write meeting notes", insights: "AI: build the knowledge map", assist: "AI: in-app assistant", guard: "AI: guardrail check", remind: "AI: word the reminders" };
 export async function structured<S extends z.ZodType>(
   feature: Feature,
   ctx: Ctx,
@@ -224,7 +239,12 @@ export async function structured<S extends z.ZodType>(
   // Checked before the step starts: a paused or restricted feature is a deliberate refusal, so it must not
   // show up as a failed Claude step (which would turn the home orb's Claude light to "had errors").
   await assertEnabled(feature, ctx.orgId, ctx.role);
-  return span("ai", SPAN_NAMES[feature], () => structuredCall(feature, ctx, opts), { model: FAKE_CLAUDE ? "fake-claude" : MODELS[feature], effort: opts.effort ?? "medium" });
+  // The AI credit: may switch to a cheaper model ("essentials only"), or refuse an extra.
+  const gate = await creditGate(feature, ctx.orgId, { size: opts.content.length, skipCredit: ctx.skipCredit });
+  const model = gate.model ?? MODELS[feature];
+  return span("ai", SPAN_NAMES[feature], () => structuredCall(feature, ctx, opts, model), {
+    model: FAKE_CLAUDE ? "fake-claude" : model, effort: opts.effort ?? "medium", ...(gate.model ? { essentials: true } : {}),
+  });
 }
 
 /** The Claude call itself (wrapped in a trace span by `structured`). */
@@ -232,9 +252,9 @@ async function structuredCall<S extends z.ZodType>(
   feature: Feature,
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
+  model: string,
 ): Promise<z.infer<S>> {
-  if (FAKE_CLAUDE) return fakeClaude(feature, ctx, opts.content) as z.infer<S>;
-  const model = MODELS[feature];
+  if (FAKE_CLAUDE) return fakeClaude(feature, ctx, opts.content, model) as z.infer<S>;
   const started = Date.now();
   let ok = 0;
   let error: string | null = null;
@@ -270,6 +290,8 @@ async function structuredCall<S extends z.ZodType>(
     throw e;
   } finally {
     spanAttrs({ input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cached_tokens: usage.cache_read_input_tokens, cost_usd: Number(costOf(model, usage).toFixed(6)) });
+    const cost = costOf(model, usage);
+    addSpend(ctx.orgId, cost);
     await run(
       `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -282,7 +304,7 @@ async function structuredCall<S extends z.ZodType>(
       usage.output_tokens,
       usage.cache_read_input_tokens,
       usage.cache_creation_input_tokens,
-      costOf(model, usage),
+      cost,
       Date.now() - started,
       ok,
       error,

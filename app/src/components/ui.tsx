@@ -14,7 +14,8 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
  * - "network": the browser couldn't reach Sidekick at all (offline, server down, tunnel stopped)
  * - "server":  Sidekick hit an unexpected problem (5xx); comes with a reference code (`ref`)
  * - "paused":  a feature or the whole organization is paused by the Sidekick team (503, `kind: "paused"`)
- * - "restricted": the Sidekick team turned this feature off for this organization (503, `kind: "restricted"`).
+ * - "restricted": the Sidekick team turned this feature off for this organization (503, `kind: "restricted"`),
+ *   or it pauses because this month's AI credit is used up (`kind: "credit"`, lib/credit.ts).
  *   Deliberate and lasting, not a fault: left to the page like "request", which shows it as a notice
  * - "request": the request itself was refused (4xx: not allowed, not found, invalid input)
  */
@@ -66,7 +67,7 @@ export async function api<T = unknown>(url: string, init?: RequestInit & { json?
     const message = data?.error ?? (res.status >= 500 ? `Sidekick had a problem answering (error ${res.status}). Try again in a minute.` : `Request failed (${res.status}).`);
     // The server says when a 503 is a deliberate pause or restriction (lib/owner.ts FeatureOffError).
     const kind: ProblemKind =
-      data?.kind === "restricted" ? "restricted" : data?.kind === "paused" || (res.status === 503 && /paused/i.test(message)) ? "paused" : res.status >= 500 ? "server" : "request";
+      data?.kind === "restricted" || data?.kind === "credit" ? "restricted" : data?.kind === "paused" || (res.status === 503 && /paused/i.test(message)) ? "paused" : res.status >= 500 ? "server" : "request";
     const e = new ApiError(res.status, message, kind, data?.ref, data ?? undefined);
     if (!inPlace(kind)) raiseProblem(e);
     throw e;

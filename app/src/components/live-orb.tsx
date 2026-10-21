@@ -8,9 +8,11 @@
  * - The ball moves faster and glows brighter while Sidekick is working (a request in the last ~20 s, or
  *   while the assistant is writing a reply). While the assistant thinks, the dust inside also swirls in
  *   circles, as if an invisible finger were stirring it (`useThinkingSwirl`).
- * - Each connection (Teams, AI answers, search, database) has a dot colored by health: green Healthy, amber
- *   Slow/had errors, red Failing, grey Idle/Not set up. The word is always shown, so color is never the
- *   only signal. Admins also see who's active; everyone else sees a count.
+ * - Connection health (Teams, AI answers, search, database) is shown **only when something's wrong**: amber
+ *   Slow/had errors, red Failing, with a plain line saying what that means. "Not set up" is shown only to
+ *   admins (they can act on it). When everything is fine the row just shows who's active, because a wall of
+ *   green "Healthy" dots is noise. The word is always shown next to the color. Admins see names; everyone
+ *   else sees a count. The screen-reader summary still covers every connection.
  *
  * Care taken: the core is React Bits' Crystalized Ball (WebGL 2 via the small `ogl` library); it pauses
  * when off-screen, holds still when the person prefers reduced motion, follows light/dark mode, falls back
@@ -191,6 +193,8 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
         { key: "database", label: "Database", detail: c.database.engine, state: c.database.state },
       ]
     : [];
+  // Only problems: slow or failing for everyone, "not set up" for admins (who can fix it).
+  const shown = conns.filter((n) => n.state === "degraded" || n.state === "failing" || (admin && n.state === "off"));
   const people = live ? (admin ? [...new Set(live.people.map((p) => p.actor.replace(/ \(Teams\)$/, "")))] : []) : [];
   const busy = Boolean(live?.busy) || thinking;
 
@@ -219,7 +223,7 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
         </div>
       </div>
       <div className="orb-status" aria-hidden="true">
-        {conns.map((n) => (
+        {shown.map((n) => (
           <span key={n.key} className="orb-conn" title={`${STATE_LABEL[n.state]} · ${n.detail}`}>
             <span className="orb-dot" style={{ background: STATE_COLOR[n.state] }} />
             <b>{n.label}</b>
@@ -234,6 +238,9 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
           </span>
         )}
       </div>
+      {shown.some((n) => n.state === "degraded" || n.state === "failing") && (
+        <p className="orb-note muted">Something is slower than usual. Sidekick retries on its own; if it keeps happening, contact support.</p>
+      )}
       <div className="panel-b orb-assist">
         <Assistant onThinking={setThinking} />
       </div>

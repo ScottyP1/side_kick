@@ -64,7 +64,7 @@ export default function HowItWorksPage() {
             <li><b>Connect Microsoft 365</b>: one sign-in with your work account</li>
             <li><b>Add to Teams</b>: who gets the app, and what your Teams admin does</li>
             <li><b>Rules</b>: a guardrails starting point, Standard or Strict</li>
-            <li><b>First groups</b>: a name, client and Team Lead for each client team</li>
+            <li><b>First groups</b>: a name, client and Team Lead for each team</li>
           </ul>
           <p style={{ marginTop: 10 }}>You can leave and come back: a &quot;Finish setting up&quot; note in the portal takes you back to where you were.</p>
         </div>

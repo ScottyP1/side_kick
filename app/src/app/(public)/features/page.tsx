@@ -18,7 +18,7 @@ const GROUPS: { id: string; title: string; lead: string; items: Feature[] }[] = 
   {
     id: "teams",
     title: "In Microsoft Teams",
-    lead: "Where your people already work: group chats (including meeting chats), channels and 1:1 chats.",
+    lead: "Where your people already work: group chats, channels and 1:1 chats with Sidekick (meeting chats are coming with automatic meeting notes).",
     items: [
       { icon: "answer", title: "Answers with sources", text: "Mention @Sidekick with a question and get an answer from that client's group, with the documents and meetings it came from.", points: ["Says \"I couldn't find that\" instead of guessing", "Unanswered questions become knowledge gaps to fill", "Follows the chat once a Team Lead assigns it to a group"] },
       { icon: "notes", title: "Meeting notes and action items", text: "After a meeting, Sidekick posts a notes card and one card per action item.", points: ["Summary, decisions and open questions", "Owners and due dates on action items", "Assign or mark done right from the card"] },
@@ -54,7 +54,7 @@ export default function FeaturesPage() {
     <PublicShell layout="full" current="/features">
       <div className="site-wrap site-page-head">
         <span className="site-eyebrow">Features</span>
-        <h1>Everything a client team needs to remember, in the chat they already use</h1>
+        <h1>Everything your team needs to remember, in the chat they already use</h1>
         <p>Sidekick answers, takes the notes and keeps track, separately for every client. Here&apos;s what&apos;s in the box.</p>
       </div>
       {GROUPS.map((g, i) => (

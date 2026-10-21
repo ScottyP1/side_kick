@@ -2,6 +2,8 @@
  * GET/POST /api/docs: list a workspace's documents, or upload new ones.
  * Uploads are extracted to text and indexed for search straight away. Files of an unsupported type, empty
  * or over 25 MB are refused before anything is saved (listed in `results`; 415 if every file was refused).
+ * A file whose text is already in this group (same SHA-256 of its text, lib/rank.ts `contentHash`) is refused too,
+ * so the same document isn't searched and cited twice.
  * At most 20 files per upload; a file whose text is over 2 million characters, or a Word file that unpacks
  * to far more than it should (a "zip bomb"), is saved as Failed with the reason (see lib/extract.ts).
  * Who: workspace members (upload needs edit rights).
@@ -9,9 +11,10 @@
 import { assertCanAdd } from "@/lib/limits";
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
-import { all, newId, now, run } from "@/lib/db";
+import { all, get, newId, now, run } from "@/lib/db";
 import { fileToText, MAX_DOCUMENT_CHARS, MAX_FILES_PER_UPLOAD, uploadProblem } from "@/lib/extract";
 import { indexText } from "@/lib/search";
+import { contentHash } from "@/lib/rank";
 import { assertEnabled } from "@/lib/owner";
 
 export const GET = handle(async (req: Request) => {
@@ -59,8 +62,15 @@ export const POST = handle(async (req: Request) => {
       if (text.length > MAX_DOCUMENT_CHARS) {
         throw new HttpError(413, `This file holds ${text.length.toLocaleString("en-US")} characters of text; the limit is ${MAX_DOCUMENT_CHARS.toLocaleString("en-US")} per document. Split it into smaller files.`);
       }
+      const hash = contentHash(text);
+      const same = await get<{ name: string }>("SELECT name FROM documents WHERE org_id = ? AND workspace_id = ? AND content_hash = ? AND id != ?", user.org_id, ws, hash, id);
+      if (same) {
+        await run("DELETE FROM documents WHERE id = ? AND org_id = ?", id, user.org_id);
+        results.push({ name: file.name, ok: false, error: `The same text is already in this group as “${same.name}”.` });
+        continue;
+      }
       const n = await indexText({ orgId: user.org_id, workspaceId: ws, sourceType: "document", sourceId: id, title: file.name, audience, text });
-      await run("UPDATE documents SET status = 'Ready', chunk_count = ? WHERE id = ?", n, id);
+      await run("UPDATE documents SET status = 'Ready', chunk_count = ?, content_hash = ? WHERE id = ?", n, hash, id);
       results.push({ name: file.name, ok: true });
     } catch (e) {
       // Our own refusals explain themselves; a library's error (a broken PDF, a damaged zip) is logged and

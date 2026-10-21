@@ -36,6 +36,7 @@ import crypto from "node:crypto";
 import { audit, HttpError, type User } from "./auth";
 import { all, get, newId, now, run, tx } from "./db";
 import { deleteWorkspace } from "./workspaces";
+import { FIRM_SCOPE, removeFirmIndex } from "./search";
 import { platformLog } from "./owner";
 import { span } from "./trace";
 import { textPdf } from "./pdf";
@@ -327,6 +328,7 @@ export async function deleteGroupWithCertificate(orgId: string, workspaceId: str
  */
 export const ORG_TABLES = [
   "support_attachments", "support_messages", "support_article_uses", "support_tickets", "conversation_turns", "conversations",
+  "answer_feedback", "firm_docs",
   "guard_rule_versions", "guard_custom_rules", "guard_workspace_rules", "guard_events", "guard_rules",
   "chat_messages", "teams_chat_settings", "reminder_runs", "action_items", "items", "meetings", "documents",
   "questions", "passages", "usage_events", "audit_log", "settings", "org_flags", "traces", "org_setup",
@@ -335,7 +337,8 @@ export const ORG_TABLES = [
 ] as const;
 
 /**
- * Deletes a whole organization: every group (`deleteWorkspace`, search entries included), then every row
+ * Deletes a whole organization: every group (`deleteWorkspace`, search entries included), the firm library's
+ * search entries (local and Azure, `removeFirmIndex`), then every row
  * with its id (`ORG_TABLES`), its people's sign-in data (sessions, two-step factors, backup codes, Microsoft
  * sign-ins in progress, failed sign-ins, rate-limit hits), Teams chats waiting in its Microsoft tenant, and
  * the organization itself. Writes the certificate on the roll-off row (or a new one) and the operator log.
@@ -359,9 +362,13 @@ export async function deleteOrganization(orgId: string, actor: string, rolloff?:
     counts["Audit log entries"] = await n("SELECT COUNT(*) AS n FROM audit_log WHERE org_id = ?", orgId);
     counts["AI usage records"] = await n("SELECT COUNT(*) AS n FROM usage_events WHERE org_id = ?", orgId);
     counts["Activity traces"] = await n("SELECT COUNT(*) AS n FROM traces WHERE org_id = ?", orgId);
+    counts["Firm library documents"] = await n("SELECT COUNT(*) AS n FROM firm_docs WHERE org_id = ?", orgId);
+    counts["Firm library search entries"] = await n("SELECT COUNT(*) AS n FROM passages WHERE org_id = ? AND workspace_id = ?", orgId, FIRM_SCOPE);
     counts["Settings and guardrail switches"] = await n("SELECT COUNT(*) AS n FROM settings WHERE org_id = ?", orgId) + await n("SELECT COUNT(*) AS n FROM guard_rules WHERE org_id = ?", orgId);
 
     for (const g of groups) await deleteWorkspace(orgId, g.id);
+    // The firm library is indexed once per org (not per group): remove it from Azure too, before the rows go.
+    await removeFirmIndex(orgId);
     await tx(async () => {
       const users = "(SELECT id FROM users WHERE org_id = ?)";
       await run(`DELETE FROM mfa_backup_codes WHERE account_kind = 'user' AND account_id IN ${users}`, orgId);

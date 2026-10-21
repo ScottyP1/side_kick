@@ -13,6 +13,18 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-21",
     label: "October 21, 2026",
+    title: "Firm library, sharper answers and follow-up questions",
+    changes: [
+      "The firm library: your organization's policies, standards and templates, added once and used in every group's answers (cited as “Firm policy”). Client guests only see Shareable ones.",
+      "Sharper answers: sources are ranked by how well they fit the whole question, newer ones count more, out-of-date versions are flagged, duplicates are used once, and meeting notes come before raw transcripts. When sources disagree, the answer says so.",
+      "Filters in Ask: documents, meetings, Teams chats, decisions or the firm library, and a date range.",
+      "Follow-up questions in Ask and in Teams (same thread, or within 30 minutes in a chat), with “Following up on…” and New question.",
+      "👍/👎 on every answer, with the counts for your admins.",
+    ],
+  },
+  {
+    date: "2026-10-21",
+    label: "October 21, 2026",
     title: "Website, help center and setup wizard",
     changes: [
       "A public website: features, how it works, security & trust, pricing, an FAQ and this changelog.",

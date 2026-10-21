@@ -2,15 +2,25 @@
  * @file Finding the passages that can answer a question. All search goes through this file.
  *
  * Concepts
- * - **Indexing**: when a document, transcript or tracked Teams chat message is added, its text is split into ~1,200-character
- *   passages (see `chunk` in extract.ts) and stored in a SQLite full-text index with its org, workspace
- *   and audience.
+ * - **Indexing**: when a document, transcript, meeting's notes or tracked Teams chat message is added, its text is
+ *   split into ~1,200-character passages (see `chunk` in extract.ts) and stored in a SQLite full-text index with
+ *   its org, workspace (group) and audience.
  * - **Retrieval (the "R" in RAG)**: Sidekick doesn't send whole documents to Claude. It looks up the
  *   handful of passages that best match the question and sends only those, numbered, as sources.
  * - **BM25**: the standard keyword-ranking formula: passages that use the question's rarer words more
  *   often rank higher. Title matches count double.
  * - **Audience**: `internal` passages are team-only; `shareable` ones may be used when client guests are
  *   present (a guest meeting, or a Teams channel marked as having client guests).
+ * - **Firm library** (lib/firm.ts): org-wide documents (policies, standards, templates). Their passages are
+ *   indexed **once per org** under the workspace id `FIRM_SCOPE` ("firm"), not copied into each group. A
+ *   group's search covers that group **plus** its org's firm library, never another group or org.
+ * - **Source types**: `document` (a group's upload), `meeting` (a transcript), `notes` (the notes Sidekick wrote
+ *   for a meeting: summary, decisions, facts; source id `<meeting id>:notes`), `chat` (a tracked Teams message)
+ *   and `firm` (a firm library document).
+ * - **The answer pipeline** (`findSources`): search returns ~30 candidates (filtered by type and date when the
+ *   person asked for that), the database adds each source's date, origin and outdated flags, and lib/rank.ts
+ *   re-ranks them (fit to the whole question, freshness, firm-vs-group priority, summaries first), removes
+ *   duplicates and keeps the best ~10.
  *
  * - **Two engines, one door**: passages always go into the local SQLite index (the source of truth). When
  *   Azure AI Search is configured (see azure-search.ts), a copy also goes to Azure, and questions are
@@ -18,10 +28,17 @@
  *   search falls back to local keyword search, so answers keep working.
  */
 import "server-only";
-import { all, DIALECT, run } from "./db";
+import { all, DIALECT, run, type Param } from "./db";
 import { chunk } from "./extract";
 import { span, spanAttrs } from "./trace";
 import { azureCount, azureIndex, azureRemove, azureSearch, azureSearchConfigured, azureSetAudience } from "./azure-search";
+import { rerank, versionKey, type Candidate, type Ranked } from "./rank";
+
+/** The workspace id the firm library's passages are indexed under (one copy per org, shared by its groups). */
+export const FIRM_SCOPE = "firm";
+
+/** What a passage was cut from (see the file comment). */
+export type SourceType = "document" | "meeting" | "notes" | "chat" | "firm";
 
 /** One searchable piece of a document or transcript. `loc` is where it came from, like "Page 3" or "00:12:40". */
 export type Passage = {
@@ -29,9 +46,22 @@ export type Passage = {
   text: string;
   title: string;
   loc: string;
-  source_type: "document" | "meeting" | "chat";
+  source_type: SourceType;
   source_id: string;
   audience: string;
+  /** The group it belongs to, or `FIRM_SCOPE` for the firm library. */
+  workspace_id?: string;
+};
+
+/** The filters a person can pick in Ask: what kind of source, and a date range. */
+export type SourceFilter = "documents" | "meetings" | "chats" | "decisions" | "firm";
+/** Which source types each filter covers. "decisions" = the meeting notes (summaries and decisions). */
+export const FILTER_TYPES: Record<SourceFilter, SourceType[]> = {
+  documents: ["document", "firm"],
+  meetings: ["meeting", "notes"],
+  chats: ["chat"],
+  decisions: ["notes"],
+  firm: ["firm"],
 };
 
 /**
@@ -42,7 +72,7 @@ export type Passage = {
 export async function indexText(opts: {
   orgId: string;
   workspaceId: string;
-  sourceType: "document" | "meeting" | "chat";
+  sourceType: SourceType;
   sourceId: string;
   title: string;
   audience: "internal" | "shareable";
@@ -58,10 +88,16 @@ export async function indexText(opts: {
   });
 }
 
-/** Removes every passage of one document or meeting from the index (on delete or reprocess). */
+/**
+ * Removes every passage of one document, meeting or chat message from the index (on delete or reprocess). For a
+ * meeting this also removes its notes (`<id>:notes`).
+ */
 export async function removeIndexed(sourceId: string) {
-  await run("DELETE FROM passages WHERE source_id = ?", sourceId);
-  if (azureSearchConfigured()) await azureRemove(sourceId).catch((e) => console.error("Azure AI Search: delete failed", e));
+  const notes = `${sourceId}:notes`;
+  await run("DELETE FROM passages WHERE source_id = ? OR source_id = ?", sourceId, notes);
+  if (azureSearchConfigured()) {
+    for (const id of [sourceId, notes]) await azureRemove(id).catch((e) => console.error("Azure AI Search: delete failed", e));
+  }
 }
 
 /**
@@ -75,6 +111,12 @@ export async function removeWorkspaceIndex(orgId: string, workspaceId: string) {
   }
   await run("DELETE FROM passages WHERE workspace_id = ? AND org_id = ?", workspaceId, orgId);
 }
+
+/**
+ * Removes the whole firm library of one org from the index (local and Azure), when the organization is deleted
+ * (lib/rolloff.ts). Single firm documents are removed with `removeIndexed`.
+ */
+export const removeFirmIndex = (orgId: string) => removeWorkspaceIndex(orgId, FIRM_SCOPE);
 
 /** Changes whether a source's passages are internal or shareable (when a document is re-tagged). */
 export async function setAudience(sourceId: string, audience: string) {
@@ -129,32 +171,92 @@ function keywords(question: string): string[] {
   return [...new Set((question.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length > 1 && !STOP.has(w)))];
 }
 
+/** Where and what to search: one group (and, unless left out, its org's firm library), with optional filters. */
+export type SearchOpts = {
+  /** when true, only `shareable` passages are returned (client guests are present) */
+  guests?: boolean;
+  /** maximum passages to return (default 12) */
+  limit?: number;
+  /** also search the org's firm library (default true) */
+  firm?: boolean;
+  /** only these source types (default: all) */
+  types?: SourceType[];
+  /** only sources dated on or after this day (YYYY-MM-DD) */
+  since?: string | null;
+  /** only sources dated on or before this day (YYYY-MM-DD) */
+  until?: string | null;
+};
+
+/** The workspace ids one search covers: the group, plus the firm library unless left out or filtered away. */
+function scopesFor(workspaceId: string, opts: SearchOpts): string[] {
+  const firm = opts.firm !== false && (!opts.types || opts.types.includes("firm"));
+  return firm ? [workspaceId, FIRM_SCOPE] : [workspaceId];
+}
+
 /**
- * Finds the passages that best answer a question, scoped to one workspace in one org: the core of every
- * answer. Uses Azure hybrid search when configured, otherwise (or if Azure fails) local keyword search.
+ * Finds the passages that best match a question, scoped to one group in one org (plus the org's firm library):
+ * the raw candidates, in the engine's order. Uses Azure hybrid search when configured, otherwise (or if Azure
+ * fails) local keyword search. Most callers want `findSources`, which re-ranks these.
  *
  * @param orgId       always filtered on, so results never cross organizations
- * @param workspaceId always filtered on, so results never cross workspaces (callers check access first)
- * @param opts.guests when true, only `shareable` passages are returned (client guests are present)
- * @param opts.limit  maximum passages to return (default 12)
+ * @param workspaceId always filtered on, so results never cross groups (callers check access first)
  */
-export async function searchPassages(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit?: number } = {}): Promise<Passage[]> {
+export async function searchPassages(orgId: string, workspaceId: string, question: string, opts: SearchOpts = {}): Promise<Passage[]> {
   return span("search", "Search the workspace", async () => {
+    const scopes = scopesFor(workspaceId, opts);
+    const dated = Boolean(opts.since || opts.until);
+    const limit = opts.limit ?? 12;
     if (azureSearchConfigured() && question.trim()) {
       try {
         await ensureBackfilled();
-        const hits = await azureSearch(orgId, workspaceId, question, { guests: opts.guests, limit: opts.limit ?? 12 });
-        spanAttrs({ engine: "Azure AI Search", results: hits.length });
-        return hits;
+        // Azure has no dates on passages: take a bigger pool and keep the ones in the date range.
+        const hits = await azureSearch(orgId, scopes, question, { guests: opts.guests, limit: dated ? Math.max(limit * 3, 50) : limit, types: opts.types });
+        const kept = dated ? (await inDateRange(orgId, hits, opts)).slice(0, limit) : hits;
+        spanAttrs({ engine: "Azure AI Search", results: kept.length, firm: scopes.length > 1 });
+        return kept;
       } catch (e) {
         console.error("Azure AI Search failed; falling back to local keyword search", e);
         spanAttrs({ fallback: "Azure AI Search failed, used local keyword search" });
       }
     }
-    const hits = await keywordSearch(orgId, workspaceId, question, opts);
-    spanAttrs({ engine: "local keyword", results: hits.length });
+    const hits = await keywordSearch(orgId, scopes, question, { ...opts, limit });
+    spanAttrs({ engine: "local keyword", results: hits.length, firm: scopes.length > 1 });
     return hits;
-  }, { guests: Boolean(opts.guests) });
+  }, { guests: Boolean(opts.guests), filtered: Boolean(opts.types || opts.since || opts.until) });
+}
+
+/** The day after a YYYY-MM-DD date, so "until" includes the whole day in string comparisons. */
+const dayAfter = (d: string) => new Date(Date.parse(d.slice(0, 10)) + 86400_000).toISOString().slice(0, 10);
+
+/**
+ * SQL (and its values) that keeps only passages whose source is dated within the range: documents by the day
+ * they were added, meetings and their notes by the day held, chat messages by when they were sent, firm
+ * documents by their effective date (or upload day). Works on both engines (`||` joins text on both).
+ */
+function dateClause(orgId: string, opts: SearchOpts): [string, Param[]] {
+  if (!opts.since && !opts.until) return ["", []];
+  const from = opts.since?.slice(0, 10) ?? "0000-01-01";
+  const to = opts.until ? dayAfter(opts.until) : "9999-12-31";
+  const r = (col: string) => `${col} >= ? AND ${col} < ?`;
+  return [
+    `AND (source_id IN (SELECT id FROM documents WHERE org_id = ? AND ${r("created_at")})
+       OR source_id IN (SELECT id FROM meetings WHERE org_id = ? AND ${r("held_at")})
+       OR source_id IN (SELECT id || ':notes' FROM meetings WHERE org_id = ? AND ${r("held_at")})
+       OR source_id IN (SELECT id FROM chat_messages WHERE org_id = ? AND ${r("sent_at")})
+       OR source_id IN (SELECT id FROM firm_docs WHERE org_id = ? AND ${r("COALESCE(effective_on, created_at)")}))`,
+    [orgId, from, to, orgId, from, to, orgId, from, to, orgId, from, to, orgId, from, to],
+  ];
+}
+
+/** Keeps the passages whose source is dated within the range (for Azure results, which carry no dates). */
+async function inDateRange(orgId: string, hits: Passage[], opts: SearchOpts): Promise<Passage[]> {
+  const info = await sourceInfo(orgId, hits);
+  const from = opts.since?.slice(0, 10) ?? "0000-01-01";
+  const to = opts.until?.slice(0, 10) ?? "9999-12-31";
+  return hits.filter((h) => {
+    const d = info.get(h.source_id)?.date;
+    return d != null && d >= from && d <= to;
+  });
 }
 
 /**
@@ -162,32 +264,121 @@ export async function searchPassages(orgId: string, workspaceId: string, questio
  * - SQLite: FTS5 with BM25 ranking (title weighted 2x), prefix matching on each word.
  * - Postgres: the generated `tsv` column (English stemming, title weighted higher) ranked with ts_rank,
  *   matching any of the question's meaningful words (and words starting with them).
+ * Always filtered on the org and the given workspace ids (the group and maybe the firm library), the audience
+ * when guests are present, and the type and date filters.
  */
-async function keywordSearch(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit?: number }): Promise<Passage[]> {
+async function keywordSearch(orgId: string, scopes: string[], question: string, opts: SearchOpts & { limit: number }): Promise<Passage[]> {
   const words = keywords(question);
   if (!words.length) return [];
+  const marks = (n: number) => Array(n).fill("?").join(", ");
   const audienceClause = opts.guests ? "AND audience = 'shareable'" : "";
+  const typeClause = opts.types?.length ? `AND source_type IN (${marks(opts.types.length)})` : "";
+  const [dates, dateParams] = dateClause(orgId, opts);
+  const filters: Param[] = [orgId, ...scopes, ...(opts.types ?? []), ...dateParams];
+  const where = `org_id = ? AND workspace_id IN (${marks(scopes.length)}) ${audienceClause} ${typeClause} ${dates}`;
   if (DIALECT === "postgres") {
     // to_tsquery syntax: word:* = prefix match, | = OR. Words are letters/digits only, so they're safe here,
     // and the whole query still goes in as a bound parameter.
+    const q = words.map((w) => `${w}:*`).join(" | ");
     return await all<Passage>(
-      `SELECT rowid, text, title, loc, source_type, source_id, audience
+      `SELECT rowid, text, title, loc, source_type, source_id, audience, workspace_id
          FROM passages
-        WHERE tsv @@ to_tsquery('english', ?) AND org_id = ? AND workspace_id = ? ${audienceClause}
+        WHERE tsv @@ to_tsquery('english', ?) AND ${where}
         ORDER BY ts_rank(tsv, to_tsquery('english', ?)) DESC LIMIT ?`,
-      words.map((w) => `${w}:*`).join(" | "), orgId, workspaceId, words.map((w) => `${w}:*`).join(" | "), opts.limit ?? 12,
+      q, ...filters, q, opts.limit,
     );
   }
   return await all<Passage>(
-    `SELECT rowid, text, title, loc, source_type, source_id, audience
+    `SELECT rowid, text, title, loc, source_type, source_id, audience, workspace_id
        FROM passages
-      WHERE passages MATCH ? AND org_id = ? AND workspace_id = ? ${audienceClause}
+      WHERE passages MATCH ? AND ${where}
       ORDER BY bm25(passages, 1.0, 2.0) LIMIT ?`,
-    words.map((w) => `"${w}"*`).join(" OR "),
-    orgId,
-    workspaceId,
-    opts.limit ?? 12,
+    words.map((w) => `"${w}"*`).join(" OR "), ...filters, opts.limit,
   );
+}
+
+/* ---------- The answer pipeline: candidates → source facts → re-rank ---------- */
+
+/** What the database knows about one source, for ranking and for the answer prompt. */
+type SourceFacts = { date: string | null; hash: string | null; outdated: string | null; name: string | null };
+
+/** Splits a list into pieces of `n` (keeps `IN (...)` lists short). */
+const pieces = <T>(list: T[], n = 100) => Array.from({ length: Math.ceil(list.length / n) }, (_, i) => list.slice(i * n, i * n + n));
+
+/**
+ * Looks up each passage's source in the database, scoped to the org: its date, its document's text hash, and
+ * whether it's outdated (a firm document with "superseded by", or a group document with a newer upload of the
+ * same name apart from the version: see `versionKey` in rank.ts).
+ */
+export async function sourceInfo(orgId: string, passages: Pick<Passage, "source_id" | "source_type">[]): Promise<Map<string, SourceFacts>> {
+  const out = new Map<string, SourceFacts>();
+  const ids = (type: string) => [...new Set(passages.filter((p) => p.source_type === type).map((p) => p.source_id))];
+  const q = (n: number) => Array(n).fill("?").join(", ");
+  for (const part of pieces(ids("document"))) {
+    const rows = await all<{ id: string; name: string; created_at: string; content_hash: string | null; workspace_id: string }>(
+      `SELECT id, name, created_at, content_hash, workspace_id FROM documents WHERE org_id = ? AND id IN (${q(part.length)})`, orgId, ...part,
+    );
+    for (const d of rows) {
+      // A newer upload with the same name apart from the version makes this one outdated.
+      const key = versionKey(d.name);
+      const first = key.split(" ")[0] ?? "";
+      const newer = first
+        ? (await all<{ name: string }>(
+            "SELECT name FROM documents WHERE org_id = ? AND workspace_id = ? AND status = 'Ready' AND id != ? AND created_at > ? AND LOWER(name) LIKE ? ORDER BY created_at DESC LIMIT 50",
+            orgId, d.workspace_id, d.id, d.created_at, `${first}%`,
+          )).find((x) => versionKey(x.name) === key && x.name !== d.name)
+        : undefined;
+      out.set(d.id, { date: d.created_at.slice(0, 10), hash: d.content_hash, outdated: newer ? `a newer version exists: ${newer.name}` : null, name: d.name });
+    }
+  }
+  const meetingIds = [...new Set([...ids("meeting"), ...ids("notes").map((x) => x.replace(/:notes$/, ""))])];
+  for (const part of pieces(meetingIds)) {
+    for (const m of await all<{ id: string; held_at: string }>(`SELECT id, held_at FROM meetings WHERE org_id = ? AND id IN (${q(part.length)})`, orgId, ...part)) {
+      const facts = { date: m.held_at.slice(0, 10), hash: null, outdated: null, name: null };
+      out.set(m.id, facts);
+      out.set(`${m.id}:notes`, facts);
+    }
+  }
+  for (const part of pieces(ids("chat"))) {
+    for (const c of await all<{ id: string; sent_at: string }>(`SELECT id, sent_at FROM chat_messages WHERE org_id = ? AND id IN (${q(part.length)})`, orgId, ...part)) {
+      out.set(c.id, { date: c.sent_at.slice(0, 10), hash: null, outdated: null, name: null });
+    }
+  }
+  for (const part of pieces(ids("firm"))) {
+    const rows = await all<{ id: string; title: string; effective_on: string | null; created_at: string; content_hash: string | null; replaced_by: string | null }>(
+      `SELECT f.id, f.title, f.effective_on, f.created_at, f.content_hash, n.title AS replaced_by
+         FROM firm_docs f LEFT JOIN firm_docs n ON n.id = f.superseded_by AND n.org_id = f.org_id
+        WHERE f.org_id = ? AND f.id IN (${q(part.length)})`,
+      orgId, ...part,
+    );
+    for (const f of rows) {
+      out.set(f.id, { date: (f.effective_on ?? f.created_at).slice(0, 10), hash: f.content_hash, outdated: f.replaced_by ? `superseded by ${f.replaced_by}` : null, name: f.title });
+    }
+  }
+  return out;
+}
+
+/** A source ready for the answer prompt and citations: a ranked passage plus its date and outdated flag. */
+export type FoundSource = Ranked;
+
+/**
+ * The answer pipeline for Ask (portal and Teams): searches the group and its firm library (~30 candidates,
+ * with the person's type and date filters), adds each source's facts (`sourceInfo`), then re-ranks,
+ * de-duplicates and keeps the best `limit` (lib/rank.ts). Traced as its own step with counts only.
+ */
+export async function findSources(orgId: string, workspaceId: string, question: string, opts: SearchOpts = {}): Promise<FoundSource[]> {
+  const limit = opts.limit ?? 10;
+  const candidates = await searchPassages(orgId, workspaceId, question, { ...opts, limit: Math.max(30, limit * 3) });
+  return span("rank", "Re-rank the sources", async () => {
+    const info = await sourceInfo(orgId, candidates);
+    const list: Candidate[] = candidates.map((p) => {
+      const f = info.get(p.source_id);
+      return { ...p, origin: p.source_type === "firm" || p.workspace_id === FIRM_SCOPE ? "firm" : "group", date: f?.date ?? null, hash: f?.hash ?? null, outdated: f?.outdated ?? null };
+    });
+    const ranked = rerank(question, list, { limit });
+    spanAttrs({ candidates: candidates.length, kept: ranked.length, firm: ranked.filter((r) => r.origin === "firm").length, outdated: ranked.filter((r) => r.outdated).length });
+    return ranked;
+  });
 }
 
 /* ---------- Help knowledge: the support assistant's and the help bot's sources ---------- */

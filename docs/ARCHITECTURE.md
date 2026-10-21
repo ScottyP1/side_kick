@@ -52,12 +52,15 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/trace.ts` | Traces and steps (spans) for every request and Teams message; feeds the Activity page and the home orb |
 | `lib/api.ts` | `handle()` wrapper: JSON responses, `HttpError` → `{ error }`, reference codes + `app_errors` log for unexpected errors |
 | `lib/extract.ts` | Files → text (PDF, Word, Teams .vtt) and text → passages |
-| `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured |
+| `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured. Searches one group **plus** its org's firm library (indexed once per org under workspace id `FIRM_SCOPE` = "firm"), with type and date filters; `sourceInfo` (each source's date, text hash, outdated flag); `findSources`, the answer pipeline (search ~30 → facts → `rerank` → best 10) |
+| `lib/rank.ts` | Re-ranking for answers, pure and unit-tested: fit to the whole question, freshness, outdated down-ranking, firm-vs-group priority (`isPolicyQuestion`), summaries first, de-duplication (text hash, contained passages), at most 3 passages per source; `versionKey`, `contentHash` |
+| `lib/firm.ts` | The firm library (`firm_docs`): upload (title, audience, effective date, replaces), edit, delete; counts toward the document limit; indexed once per org |
+| `lib/feedback.ts` | 👍/👎 on answers (`answer_feedback`, one vote per person per answer, walled to the answer's org and group); `feedbackSummary` for admins, `qualityTrends` for the Owner Console; counts only |
 | `lib/azure-search.ts` | Azure AI Search index, embeddings and hybrid (keyword + vector) queries |
 | `lib/claude.ts` | **All Claude calls go through here**: model per feature, the AI credit check (`creditGate`), retries with backoff (`withRetry`, `AiBusyError`), the cached system prompt, structured output, metering, and the Batch API for non-urgent work (`queueStructured`, `runBatches`, handlers such as the daily reminder digest). The hook for a second route (Claude in Azure AI Foundry) is `aiClient()` |
 | `lib/assistant.ts` | The in-app assistant on the home page: answers questions about Sidekick and proposes role-limited actions that only run when the person presses Confirm |
-| `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
-| `lib/conversations.ts` | Conversations for the three assistants (in-app assistant, Help chat, public help bot): the last few turns per person (or per browser on the website), never shared, expire 24 h after the last turn; `standaloneQuestion` rewrites a follow-up into a full question (Claude feature `followup`) before checking and searching; `priorSummary` for the prompt |
+| `lib/sidekick.ts` | The AI features: answers with sources (group + firm library, follow-ups, filters, conflicts), meeting notes (also indexed as a `notes` source, `<meeting id>:notes`), knowledge map |
+| `lib/conversations.ts` | Conversations for the three assistants (in-app assistant, Help chat, public help bot) and for Ask (`ask`, per group and guests setting) and Teams answers (`teams`, per group and Teams thread or chat, 30 minutes in chats): the last few turns per person (or per browser on the website), never shared, expire 24 h after the last turn; `standaloneQuestion` rewrites a follow-up into a full question (Claude feature `followup`) before checking and searching; `priorSummary` for the prompt |
 | `lib/support.ts` | Support tickets: portal, Help chat, public form and help bot tickets; who sees which (`listTicketsFor`, `visibleTicket`); thread, internal notes, attachments (type checked by first bytes, 5 MB, base64 in the database, always downloaded); unread flags (the dot) and the `notify` email hook; the Owner Console inbox, client context (plan, recent errors by reference code) and team actions, all audited |
 | `lib/support-articles.ts` | Support articles at three levels (public / customer / internal), seeds, uses per article and the tickets that followed, Claude drafts from resolved tickets |
 | `lib/knowledge.ts` | What the help assistants may answer from: public (guides, FAQ, plans, public articles) or customer (adds customer-level articles). Never client data, never internal articles. Ranked by `rankKnowledge` in lib/search.ts |
@@ -101,21 +104,26 @@ Browser (client portal, Owner Console)        Microsoft Teams
 
 Support routes: portal `/help` (Contact support, My tickets) and `/help/tickets/<id>`; public `/support` (form) and `/docs/articles/<slug>` (published public articles only); Owner Console `/owner/support`, `/owner/support/<id>`, `/owner/articles`, `/owner/helpbot`. APIs: `/api/assistant`, `/api/support/assistant`, `/api/help-bot` (POST a message; GET/DELETE `?conversation=`), `/api/support/tickets[/<id>]`, `/api/support/attachments/<id>`, `/api/support/unread`, `/api/support/public`, `/api/owner/support[/tickets/<id>|/articles|/helpbot]`.
 
+Answers and the firm library: portal `/knowledge` (Ask with filters, follow-ups, New question, 👍/👎) and `/firm-library`; APIs `/api/ask` (POST a question; GET/DELETE `?ws=&guests=&conversation=`), `/api/firm[/<id>]`, `/api/feedback` (POST a vote; GET counts for admins); the Owner Console's answer quality is on `/owner/performance`.
+
 Adding a public page: add it to `PUBLIC_PAGES` in `lib/site.ts` (sitemap, metadata) **and** to the proxy's `matcher` (a unit test checks both); adding a portal page: add its path to `PRIVATE_PATHS` (a unit test checks every `app/(app)` folder is listed). Later the website and portal can split into `sidekick.ai` and `app.sidekick.ai`; keeping the website under `(public)` and the portal under `(app)` keeps that a hosting change.
 
 ## Three flows worth knowing
 
-**Asking a question** (portal or Teams)
-1. Route checks the user and workspace (`requireUser`, `requireWorkspace`), or the Teams conversation's link.
-2. `ask()` runs the guardrail check (`screenQuestion`: local check, then Claude `guard`) **at the same time as** the search. A refused question returns a fixed reply with `blocked` set and is counted in `guard_events`; it isn't answered or saved as a gap.
-3. `searchPassages()` finds up to 12 passages in that org + workspace (Shareable only if guests are present): Azure hybrid search when configured, otherwise local keyword search.
-4. `structured("ask", …)` sends the numbered passages, the question and the org's rules (`answerRules`) to Claude, which must return `{ found, answer, source_ids }`.
-5. `checkGrounding` turns a "found" answer with no real cited source into "I don't know"; `cleanOutput` masks swearing (and contact details if switched on) in the answer and excerpts.
-6. The question is saved in `questions` (unanswered = knowledge gap); the cited sources are returned.
+**Asking a question** (portal or Teams): the retrieval pipeline
+1. Route checks the user and workspace (`requireUser`, `requireWorkspace`), or the Teams conversation's link. Filters (`types`, `since`, `until`) are checked.
+2. Conversation (lib/conversations.ts): the person's conversation in this group (and guests setting; in Teams this thread or chat) is found or started (`newQuestion` / "new question" starts afresh). `standaloneQuestion` rewrites a follow-up into a full question (only when there are earlier turns).
+3. `ask()` runs the guardrail check (`screenTurn`: the quick check on what was typed, the full check on the standalone question) **at the same time as** the search. A refused question returns a fixed reply with `blocked` set, is counted in `guard_events` and saved as a refused turn (so its follow-ups are refused too); it isn't answered or saved as a gap.
+4. `findSources()` (lib/search.ts): `searchPassages()` gets ~30 candidates from the org's group **and** its firm library (`workspace_id IN (group, "firm")`; Shareable only if guests are present; type and date filters), by Azure hybrid search when configured, otherwise local keyword search. `sourceInfo()` adds each source's date (document added, meeting held, chat sent, firm effective date), text hash, and outdated flag (firm "superseded by", or a newer group upload of the same document). `rerank()` (lib/rank.ts) scores fit to the whole question, freshness, firm-vs-group priority and notes-first, drops duplicates, keeps ≤3 per source and the best 10.
+5. `structured("ask", …)` sends the numbered sources (with `origin`, `date`, `outdated`), a short `priorSummary` of earlier turns (context, not a source), the standalone question and the org's rules (`answerRules`) to Claude, which must return `{ found, answer, source_ids, conflict }`.
+6. `checkGrounding` turns a "found" answer with no real cited source into "I don't know"; `cleanOutput` masks swearing (and contact details if switched on) in the answer and excerpts.
+7. The standalone question is saved in `questions` (unanswered = knowledge gap) and its id returned as `questionId` for 👍/👎 (`answer_feedback`, lib/feedback.ts); the exchange is saved in the conversation; the cited sources (with origin "firm" = "Firm policy") are returned.
+
+Quality check: `npm --prefix app run eval:answers` runs the accuracy test set (`samples/eval/contoso.json`) against the real Claude in a throwaway copy and prints a score and the cost (not in CI; the plumbing is tested with fake Claude).
 
 **Importing a meeting**
 1. `POST /api/meetings` stores the transcript (`.vtt` converted to "[time] Speaker: text").
-2. `processMeeting()` asks Claude for summary, decisions, action items, open questions and facts, saves them in one transaction, and indexes the transcript.
+2. `processMeeting()` asks Claude for summary, decisions, action items, open questions and facts, saves them in one transaction, and indexes the transcript and the notes (source type `notes`, id `<meeting id>:notes`, ranked before transcript passages). Meetings processed before notes were indexed are indexed on the first question after a server start.
 3. After the response is sent (`after()`), `postMeetingNotes()` posts the cards to the linked Teams conversations that take notes, then `remindAfterMeeting()` posts a reminder to the chats that want one after meetings.
 
 **A daily reminder**

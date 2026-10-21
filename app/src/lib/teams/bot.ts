@@ -23,7 +23,10 @@
  *   that chat is stored. In single-tenant mode (TENANT_ID set) every chat works as before.
  * - **Managing people from Teams** (members.ts): `@Sidekick add @name` / `remove @name` in a linked chat.
  * - **Client guests**: a linked conversation can be marked as having client guests. Answers there use only
- *   Shareable sources, and notes from internal-only meetings are never posted there.
+ *   Shareable sources (the group's and the firm library's), and notes from internal-only meetings are never posted there.
+ * - **Follow-ups**: a question builds on the asker's earlier questions in the same channel thread, or in the same
+ *   group/1:1 chat within 30 minutes (lib/conversations.ts); "@Sidekick new question" starts afresh. The answer
+ *   card shows "Following up on …" and has 👍/👎 buttons (lib/feedback.ts).
  * - **Chat settings** (see reminders.ts): per linked chat, an Org Admin chooses whether Sidekick tracks
  *   every message there (needs the app's resource-specific consent permissions, see teams/manifest),
  *   whether meeting notes go there, and whether reminders are posted there. (Chats assigned through the
@@ -44,7 +47,9 @@ import type { IAdaptiveCard } from "@microsoft/teams.cards";
 import { all, get, now, run } from "../db";
 import { audit, canEdit, HttpError, type User } from "../auth";
 import { FeatureOffError } from "../owner";
-import { ask } from "../sidekick";
+import { ask, endAskConversation } from "../sidekick";
+import { CHAT_FOLLOWUP_MINUTES } from "../conversations";
+import { recordFeedback } from "../feedback";
 import { span, traceFailed, traceScope, withTrace } from "../trace";
 import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, noticeCard, notSetUpCard, REMIND_PREFIX, unknownTenantCard, VERBS, type ActionItemInput } from "./cards";
 import { leaveChat, mayAddSidekick, WAITING_DAYS } from "./install";
@@ -461,7 +466,7 @@ function registerHandlers(app: App) {
     }
     // Not assigned yet where the picker rules apply: read, save and answer nothing; just say how to set it up.
     if (!conv.workspace_id && usesPicker(conv, gate.org)) return void (await send(notSetUpCard(conv.kind, WAITING_DAYS)));
-    const question = (plainMention ? plainText(activity.text ?? "").replace(PLAIN_MENTION, "") : (stripMentionsText(activity) ?? "")).replace(/\s+/g, " ").trim();
+    let question = (plainMention ? plainText(activity.text ?? "").replace(PLAIN_MENTION, "") : (stripMentionsText(activity) ?? "")).replace(/\s+/g, " ").trim();
     const command = question.toLowerCase().replace(/[^a-z]/g, "");
 
     if (!question || command === "help") return void (await send(helpCard(await workspaceName(conv))));
@@ -485,6 +490,18 @@ function registerHandlers(app: App) {
       return void (await send({ type: "message", attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: noticeCard(out.title, out.lines.map((l) => `- ${l}`).join("\n")) }] } as IMessageActivityInput));
     }
     traceScope({ actor: asker.name });
+    // Follow-ups: in a channel the reply thread is the conversation (its id carries ";messageid=<first post>"); in a
+    // group or 1:1 chat it's the chat, for CHAT_FOLLOWUP_MINUTES after the last answer. "new question" starts afresh.
+    const threadKey = conv.kind === "channel" ? activity.conversation.id : conv.id;
+    const guests = conv.guests === 1;
+    const fresh = /^new question\b[\s:,.!?-]*/i.exec(question);
+    if (fresh) {
+      question = question.slice(fresh[0].length).trim();
+      if (!question) {
+        await endAskConversation(asker, conv.workspace_id, guests, { teamsKey: threadKey });
+        return void (await send("Okay, starting fresh. Mention me with your next question."));
+      }
+    }
 
     await send({ type: "typing" });
     // Teams expects a reply to its request within a few seconds; Claude can take longer, so the
@@ -492,7 +509,10 @@ function registerHandlers(app: App) {
     after(() =>
       withTrace({ name: "Teams answer", channel: "teams", orgId: conv.org_id, workspaceId: conv.workspace_id, actor: asker.name, detached: true }, async () => {
         try {
-          const result = await ask(asker, conv.workspace_id!, question, conv.guests === 1, "teams");
+          const result = await ask(asker, conv.workspace_id!, question, guests, "teams", {
+            teamsScope: { key: threadKey, idleMinutes: conv.kind === "channel" ? undefined : CHAT_FOLLOWUP_MINUTES },
+            newQuestion: Boolean(fresh),
+          });
           const card = answerCard(question, result, (await workspaceName(conv)) ?? "Workspace");
           await span("teams", "Send the answer card to Teams", () => reply(card));
         } catch (e) {
@@ -517,6 +537,17 @@ function registerHandlers(app: App) {
     if (tenantMode() === "multi" && gate.org && conv.org_id !== gate.org.id) return fail(`This chat is linked to a different organization's ${BRAND.name}.`);
     traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
     if (await orgPaused(conv.org_id)) return fail(`${BRAND.name} is paused for this organization.`);
+    // 👍/👎 on an answer card: only for answers given in this chat's own group (recordFeedback checks it).
+    if (verb === VERBS.feedbackUp || verb === VERBS.feedbackDown) {
+      const voter = await teamsActor(conv, activity);
+      try {
+        await recordFeedback(conv.org_id, conv.workspace_id, String(data?.questionId ?? ""), voter.id, verb === VERBS.feedbackUp ? 1 : -1, "teams");
+      } catch (e) {
+        if (e instanceof HttpError) return fail(e.message);
+        throw e;
+      }
+      return fail(verb === VERBS.feedbackUp ? "Thanks, glad it helped." : "Thanks for telling us. Your admins can see which answers weren't helpful.");
+    }
     if (typeof verb === "string" && verb.startsWith(REMIND_PREFIX)) {
       const out = await span("remind", "Reminder card button", async () => reminderAction(conv, await teamsActor(conv, activity), verb, { ...(data ?? {}) }));
       if ("error" in out) return fail(out.error);

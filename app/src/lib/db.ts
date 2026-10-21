@@ -385,7 +385,8 @@ CREATE TABLE IF NOT EXISTS support_article_uses (
 CREATE INDEX IF NOT EXISTS support_article_uses_article ON support_article_uses(article_id);
 CREATE INDEX IF NOT EXISTS support_article_uses_conv ON support_article_uses(conversation_id);
 -- Assistant conversations (lib/conversations.ts): the last few turns, so a follow-up builds on what was said.
--- kind = assist (portal in-app assistant) | support (support assistant) | helpbot (public website). Owned by
+-- kind = assist (portal in-app assistant) | support (support assistant) | helpbot (public website) | ask (Ask in
+-- the portal, per group) | teams (Teams answers, per group and Teams thread/chat: scope_key). Owned by
 -- one person in one org (org_id + user_id), or one browser on the website (visitor_id, a random cookie id);
 -- never shared. Expire 24 hours after the last turn. Visitor text is masked (contact details) before saving.
 CREATE TABLE IF NOT EXISTS conversations (
@@ -408,6 +409,28 @@ CREATE TABLE IF NOT EXISTS helpbot_events (
   id TEXT PRIMARY KEY, outcome TEXT NOT NULL, rule TEXT, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS helpbot_events_time ON helpbot_events(created_at);
+-- Firm library (lib/firm.ts): org-wide documents (policies, standards, templates, methods, rate-card rules)
+-- that every group's answers can use. Managed by Org Owners/Admins. audience = internal | shareable (client
+-- guests only ever see shareable ones). effective_on = the day it applies from (YYYY-MM-DD); superseded_by =
+-- the firm document that replaces it (answers down-rank and flag the old one). content_hash = SHA-256 of the
+-- extracted text, to spot the same file uploaded twice. Its passages are indexed once per org, under the
+-- workspace id "firm" (lib/search.ts FIRM_SCOPE), never per group. Counts toward the plan's document limit.
+CREATE TABLE IF NOT EXISTS firm_docs (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), title TEXT NOT NULL, name TEXT NOT NULL, mime TEXT,
+  size INTEGER NOT NULL, audience TEXT NOT NULL DEFAULT 'internal', status TEXT NOT NULL, error TEXT,
+  chunk_count INTEGER NOT NULL DEFAULT 0, effective_on TEXT, superseded_by TEXT, content_hash TEXT,
+  uploaded_by TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS firm_docs_org ON firm_docs(org_id, created_at);
+-- Thumbs up/down on an answer (lib/feedback.ts), one per person per answer (a second click changes it).
+-- question_id = the questions row the answer was saved as; channel = portal | teams. No question or answer
+-- text is stored here: admins and the Owner Console see counts and trends only.
+CREATE TABLE IF NOT EXISTS answer_feedback (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL, question_id TEXT NOT NULL, user_id TEXT NOT NULL,
+  vote INTEGER NOT NULL, channel TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE (question_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS answer_feedback_org ON answer_feedback(org_id, created_at);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -509,6 +532,12 @@ function migrate(conn: DatabaseSync) {
   // Group pricing: extra groups bought on top of the plan.
   if (!has("subscriptions", "extra_groups")) conn.exec("ALTER TABLE subscriptions ADD COLUMN extra_groups INTEGER NOT NULL DEFAULT 0");
   if (!has("platform_admins", "must_change_password")) conn.exec("ALTER TABLE platform_admins ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
+  // Answer quality: a hash of each document's text (spots the same file uploaded twice).
+  if (!has("documents", "content_hash")) conn.exec("ALTER TABLE documents ADD COLUMN content_hash TEXT");
+  // Follow-ups in Ask and Teams: a conversation is tied to one group, and in Teams to one thread or chat (scope_key).
+  if (!has("conversations", "workspace_id")) conn.exec("ALTER TABLE conversations ADD COLUMN workspace_id TEXT");
+  if (!has("conversations", "scope_key")) conn.exec("ALTER TABLE conversations ADD COLUMN scope_key TEXT");
+  conn.exec("CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key)");
 }
 
 /**

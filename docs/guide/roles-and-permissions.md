@@ -39,7 +39,9 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See the guardrails in force | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Inside their workspaces: read** | | | | | | |
 | Read documents, meetings, notes and the knowledge map | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Ask Sidekick questions (portal and Teams) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Ask Sidekick questions (portal and Teams), with follow-ups | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Rate answers 👍/👎 (portal and Teams) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See the firm library (the organization's policies and standards) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Inside their workspaces: change** | | | | | | |
 | Upload, rename or delete documents | ✓ | ✓ | ✓ | | ✓ | |
 | Import, reprocess or delete meetings | ✓ | ✓ | ✓ | | ✓ | |
@@ -58,6 +60,8 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | End a group when the engagement ends (read-only, deleted on a date) or cancel that | ✓ | ✓ | | | | |
 | Export a group, or the whole organization's data, as a zip | ✓ | ✓ | | | | |
 | See roll-offs and download deletion certificates | ✓ | ✓ | | | | |
+| Add, change or delete firm library documents | ✓ | ✓ | | | | |
+| See answer quality (👍/👎 and "I don't know" counts, no text) | ✓ | ✓ | | | | |
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
 | Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |

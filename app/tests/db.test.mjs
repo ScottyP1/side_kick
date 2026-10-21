@@ -524,3 +524,55 @@ test(`[${engine}] brand: one setting names the product in the Teams manifest, pa
   const layout = fs.readFileSync(path.join(import.meta.dirname, "../src/app/layout.tsx"), "utf8");
   assert.match(layout, /title: BRAND\.name/, "the root page title comes from the brand");
 });
+
+const rank = await import("../src/lib/rank.ts");
+/** A search candidate for the ranking tests. */
+const cand = (id, text, extra = {}) => ({ rowid: 0, text, title: `${id}.md`, loc: "", source_type: "document", source_id: id, audience: "internal", origin: "group", date: "2026-10-01", ...extra });
+
+test(`[${engine}] ranking: the passage that fits the whole question wins over the engine's first guess`, () => {
+  const out = rank.rerank("When is the wave 2 cutover date?", [
+    cand("a", "Wave 1 went live in September. The team met on Monday."),
+    cand("b", "The wave 2 cutover date moved to November 12."),
+  ], { today: new Date("2026-10-21") });
+  assert.equal(out[0].source_id, "b");
+});
+
+test(`[${engine}] ranking: newer group sources win on the same topic; outdated ones drop and stay flagged`, () => {
+  const today = new Date("2026-10-21");
+  const older = "The wave 2 cutover is planned for November 5 across the 48 stores.";
+  const newer = "Update: the wave 2 cutover moved to November 12, still 48 stores.";
+  const fresh = rank.rerank("wave 2 cutover stores", [cand("old", older, { date: "2026-06-01" }), cand("new", newer, { date: "2026-10-20" })], { today });
+  assert.deepEqual(fresh.map((c) => c.source_id), ["new", "old"]);
+  const outdated = rank.rerank("wave 2 cutover stores", [cand("v3", older, { outdated: "a newer version exists: Runbook v0.4.md" }), cand("v4", newer, { date: "2026-10-01" })], { today });
+  assert.equal(outdated[0].source_id, "v4");
+  assert.match(outdated[1].outdated, /newer version/);
+});
+
+test(`[${engine}] ranking: policy questions prefer the firm library, engagement questions the group`, () => {
+  const today = new Date("2026-10-21");
+  const list = [cand("group", "Meals on the Chicago trip: the team booked dinner."), cand("firm", "Meals while travelling: up to $75 per day.", { origin: "firm", source_type: "firm" })];
+  assert.equal(rank.isPolicyQuestion("How much can I expense for meals per day?"), true);
+  assert.equal(rank.isPolicyQuestion("When is the wave 2 cutover?"), false);
+  assert.equal(rank.rerank("What is the meals policy per day when travelling?", list, { today })[0].source_id, "firm");
+  assert.equal(rank.rerank("What did the team book for meals in Chicago?", list, { today })[0].source_id, "group");
+});
+
+test(`[${engine}] ranking: meeting notes come before raw transcript passages; duplicates and quoted replies are kept once`, () => {
+  const today = new Date("2026-10-21");
+  const notes = rank.rerank("rollback decision", [cand("m1", "Decision: rollback at 30 minutes.", { source_type: "meeting" }), cand("m1:notes", "Decision: rollback at 30 minutes.", { source_type: "notes" })], { today });
+  assert.equal(notes[0].source_type, "notes");
+  assert.equal(notes.length, 1, "the same text from two sources is kept once");
+  const dupes = rank.rerank("expense receipts", [cand("d1", "Receipts are required over $25.", { hash: "h1" }), cand("d2", "Receipts are required over 25 dollars, see page 2.", { hash: "h1" })], { today });
+  assert.equal(dupes.length, 1, "same document hash = one copy");
+  const quote = "Priya said the cutover moved to November 12 for all 48 stores";
+  const chat = rank.rerank("cutover moved November", [cand("c1", quote, { source_type: "chat" }), cand("c2", `> ${quote}\nJordan: Thanks, confirmed with the stores.`, { source_type: "chat" })], { today });
+  assert.equal(chat.length, 1, "a reply quoting a message isn't a second source");
+});
+
+test(`[${engine}] ranking: at most three passages per source; versions of a document share a key`, () => {
+  const many = Array.from({ length: 6 }, (_, i) => ({ ...cand("big", `Cutover step ${i} for wave 2 number ${i * 7}.`), rowid: i }));
+  assert.equal(rank.rerank("wave 2 cutover step", [...many, cand("other", "Wave 2 cutover owner is Dev.")], { today: new Date("2026-10-21") }).filter((c) => c.source_id === "big").length, 3);
+  assert.equal(rank.versionKey("Wave 2 cutover runbook v0.3.md"), rank.versionKey("Wave 2 cutover runbook v0.4 FINAL.docx"));
+  assert.notEqual(rank.versionKey("Wave 2 cutover runbook.md"), rank.versionKey("Wave 3 cutover runbook.md"));
+  assert.equal(rank.contentHash("a  b\nc"), rank.contentHash("a b c"));
+});

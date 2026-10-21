@@ -24,6 +24,9 @@ export const VERBS = {
   remindDone: "sidekick.remind.done",
   remindSnooze: "sidekick.remind.snooze",
   remindDismiss: "sidekick.remind.dismiss",
+  // 👍/👎 on an answer card (lib/feedback.ts). data: { questionId }.
+  feedbackUp: "sidekick.feedback.up",
+  feedbackDown: "sidekick.feedback.down",
 } as const;
 /** Every reminder-card verb starts with this, so the bot can route them to reminders.ts. */
 export const REMIND_PREFIX = "sidekick.remind.";
@@ -50,27 +53,36 @@ const header = (eyebrow: string, title: string): Block[] => [
 // Card text is Markdown, so strip the source's own Markdown (headings, bold) from excerpts.
 const plain = (s: string) => s.replace(/[#*_`>|]+/g, " ").replace(/\s+/g, " ").trim();
 
-/** One cited source, as returned by `ask()` in sidekick.ts. */
-export type CardSource = { id: string; title: string; loc: string | null; type: string; excerpt: string };
+/** One cited source, as returned by `ask()` in sidekick.ts. `origin` "firm" = the org's firm library. */
+export type CardSource = { id: string; title: string; loc: string | null; type: string; excerpt: string; origin?: "group" | "firm"; outdated?: string | null };
+
+/** What the answer card shows besides the answer itself. */
+export type AnswerExtras = { blocked?: string | null; conflict?: boolean; followUp?: string | null; questionId?: string | null };
 
 /**
- * The reply to a question: the question as the title, the answer (with [S1]-style citations), and each
- * cited source with its location and a short excerpt. Unanswered questions say they were logged as a gap;
- * questions refused by the guardrails (`blocked`) say the organization's guardrails apply instead.
+ * The reply to a question: the question as the title (with a short "Following up on …" line when it built on the
+ * conversation), the answer (with [S1]-style citations), a note when sources disagree, and each cited source with
+ * its origin ("Firm policy · …" for the firm library), location, an "may be out of date" flag, and a short excerpt.
+ * Unanswered questions say they were logged as a gap; questions refused by the guardrails (`blocked`) say the
+ * organization's guardrails apply instead. Answered (and "I don't know") replies get 👍/👎 buttons and a hint
+ * about "new question".
  */
-export function answerCard(question: string, answer: { found: boolean; answer: string; sources: CardSource[]; blocked?: string | null }, workspace: string): IAdaptiveCard {
+export function answerCard(question: string, answer: { found: boolean; answer: string; sources: CardSource[] } & AnswerExtras, workspace: string): IAdaptiveCard {
   const body: Block[] = [
     ...header(`${BRAND.name} · ${workspace}`, question),
+    ...(answer.followUp ? [text(`Following up on: “${answer.followUp}”`, { size: "Small", isSubtle: true, spacing: "None" })] : []),
     text(answer.answer, { spacing: "Medium" }),
   ];
+  if (answer.conflict) body.push(text("⚠ The sources disagree on this; both are cited below.", { size: "Small", color: "Warning", spacing: "Small" }));
   if (answer.sources.length) {
     body.push(text("Sources", { weight: "Bolder", spacing: "Large", separator: true }));
     for (const s of answer.sources) {
+      const origin = s.origin === "firm" ? "Firm policy · " : "";
       body.push({
         type: "Container",
         spacing: "Small",
         items: [
-          text(`**[${s.id}]** ${s.title}${s.loc ? ` · ${s.loc}` : ""}`, { size: "Small" }),
+          text(`**[${s.id}]** ${origin}${s.title}${s.loc ? ` · ${s.loc}` : ""}${s.outdated ? ` · may be out of date (${s.outdated})` : ""}`, { size: "Small" }),
           text(`“${plain(s.excerpt)}…”`, { size: "Small", isSubtle: true, spacing: "None", maxLines: 3 }),
         ],
       });
@@ -80,7 +92,12 @@ export function answerCard(question: string, answer: { found: boolean; answer: s
   } else if (!answer.found) {
     body.push(text("I logged this as a knowledge gap so the team can fill it in.", { size: "Small", isSubtle: true }));
   }
-  return card(body);
+  if (answer.blocked || !answer.questionId) return card(body);
+  body.push(text(`Ask a follow-up the same way, or start with **new question** to start afresh.`, { size: "Small", isSubtle: true, spacing: "Medium" }));
+  return card(body, [
+    { type: "Action.Execute", title: "👍 Helpful", verb: VERBS.feedbackUp, data: { questionId: answer.questionId } },
+    { type: "Action.Execute", title: "👎 Not helpful", verb: VERBS.feedbackDown, data: { questionId: answer.questionId } },
+  ]);
 }
 
 /** Shown in a conversation that isn't linked yet: explains linking and shows the 8-character code. */
@@ -121,6 +138,7 @@ export function assignedCard(workspace: string, by: string, retentionDays: numbe
       type: "FactSet",
       facts: [
         { title: `@${BRAND.name} <question>`, value: "Answer with sources" },
+        { title: `@${BRAND.name} new question`, value: "Start afresh (forget the earlier questions)" },
         { title: `@${BRAND.name} add @name`, value: "Add someone to the group (Team Lead or admin)" },
         { title: `@${BRAND.name} help`, value: "What I can do here" },
       ],
@@ -148,11 +166,12 @@ export function unknownTenantCard(signupUrl: string): IAdaptiveCard {
 export function helpCard(workspace: string | null): IAdaptiveCard {
   return card([
     ...header(BRAND.name, workspace ? `Linked to ${workspace}` : "Not linked to a group yet"),
-    text("Mention me with a question and I'll answer from this workspace's documents and meetings, with sources."),
+    text("Mention me with a question and I'll answer from this group's documents, meetings and chats and your firm library, with sources. Follow-ups build on the last answer: in a channel, reply in the same thread; in a chat, within 30 minutes."),
     {
       type: "FactSet",
       facts: [
         { title: `@${BRAND.name} <question>`, value: "Answer with sources" },
+        { title: `@${BRAND.name} new question`, value: "Start afresh (forget the earlier questions)" },
         { title: `@${BRAND.name} link`, value: "Show which group this chat belongs to" },
         { title: `@${BRAND.name} add @name`, value: "Add someone to this group (Team Lead or admin)" },
         { title: `@${BRAND.name} remove @name`, value: "Take someone off this group (Team Lead or admin)" },

@@ -1,6 +1,7 @@
 /**
- * Website home (/) for visitors: what Sidekick is in one screen, a static demo of its Teams cards, what it
- * does, who it's for, placeholders where customer quotes and logos will go (clearly marked, nothing made up),
+ * Website home (/) for visitors: what Sidekick is in one screen with an illustration (components/site-art.tsx),
+ * "every meeting, remembered", what it does, real product shots in frames (chat, phone, the portal on a laptop;
+ * components/product-shot.tsx), who it's for, placeholders where customer quotes and logos will go (clearly marked, nothing made up),
  * and Get started / Sign in. Public, static, no JavaScript of its own.
  *
  * Signed-in people never see this page: src/proxy.ts sends anyone with a portal session cookie from / to
@@ -10,7 +11,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
-import { TeamsDemo } from "@/components/teams-demo";
+import { ProductShot } from "@/components/product-shot";
+import { HeroArt, RememberArt } from "@/components/site-art";
 import { TRIAL_DAYS } from "@/lib/plans";
 import { pageMetadata } from "@/lib/site";
 import { BRAND } from "@/lib/brand";
@@ -29,7 +31,7 @@ const HIGHLIGHTS: [string, string, string][] = [
 export default function HomePage() {
   return (
     <PublicShell layout="full" current="/">
-      <div className="site-wrap">
+      <div className="site-wrap site-glow">
         <section className="site-hero" aria-labelledby="hero-title">
           <div>
             <span className="site-eyebrow">AI teammate for Microsoft Teams</span>
@@ -49,9 +51,25 @@ export default function HomePage() {
             </div>
             <div className="site-hero-note">{TRIAL_DAYS}-day free trial on every plan. Set up in an afternoon with the setup wizard.</div>
           </div>
-          <TeamsDemo />
+          <HeroArt />
         </section>
       </div>
+
+      <section className="site-section" aria-labelledby="mem-title">
+        <div className="site-wrap site-grid two" style={{ alignItems: "center" }}>
+          <RememberArt />
+          <div>
+            <span className="site-eyebrow">Every meeting, remembered</span>
+            <h2 id="mem-title">Decisions don&apos;t get lost between meetings</h2>
+            <p className="site-lead" style={{ marginBottom: 14 }}>Each meeting adds to what the group knows, so the answer to &quot;what did we decide?&quot; is one question away, with the meeting it came from.</p>
+            <ul className="site-checks">
+              <li><span><span className="site-badge-now">Today</span> Notes, decisions and action items from your meeting transcripts</span></li>
+              <li><span><span className="site-badge-soon">Coming soon</span> Automatic notes after every Teams meeting</span></li>
+              <li><span><span className="site-badge-soon">Enterprise · coming soon</span> {BRAND.name} live in your meetings</span></li>
+            </ul>
+          </div>
+        </div>
+      </section>
 
       <section className="site-section alt" aria-labelledby="what-title">
         <div className="site-wrap">
@@ -71,6 +89,19 @@ export default function HomePage() {
         </div>
       </section>
 
+      <section className="site-section" aria-labelledby="see-title">
+        <div className="site-wrap">
+          <span className="site-eyebrow">See it at work</span>
+          <h2 id="see-title">Right in your team&apos;s Teams chat</h2>
+          <p className="site-lead">Meeting notes with owners and dates, and a short daily reminder of what&apos;s still open, on desktop and on the phone.</p>
+          <div className="site-showcase">
+            <ProductShot name="chat-notes" frame="window" alt={`A team chat where ${BRAND.name} has posted meeting notes for Sprint 14 planning: a summary, decisions, open questions and action items with owners and due dates, with Assign and Mark done buttons.`} />
+            <ProductShot name="phone-reminder" frame="phone" alt={`${BRAND.name}'s daily reminder on a phone: an overdue action item and an out-of-date runbook, each with its source and Assign, Mark done and Snooze buttons.`} />
+          </div>
+          <p className="site-demo-caption">Made-up example data. Cards as {BRAND.name} posts them.</p>
+        </div>
+      </section>
+
       <section className="site-section" aria-labelledby="who-title">
         <div className="site-wrap site-grid two" style={{ alignItems: "center" }}>
           <div>
@@ -85,16 +116,9 @@ export default function HomePage() {
               <li><span><b>Everyone</b> asks in the chat they&apos;re already in, and gets an answer with its sources.</span></li>
             </ul>
           </div>
-          <div className="site-card">
-            <h3 style={{ marginTop: 0 }}>Up and running in five steps</h3>
-            <ol style={{ margin: "8px 0 0", paddingLeft: 20, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 6 }}>
-              <li>Sign up and pick a plan</li>
-              <li>Approve {BRAND.name} for your Microsoft 365</li>
-              <li>Install it in Teams</li>
-              <li>Create a group per client, with its Team Lead</li>
-              <li>Pick the chats {BRAND.name} should follow</li>
-            </ol>
-            <p style={{ margin: "12px 0 0" }}><Link href="/how-it-works">How it works →</Link></p>
+          <div>
+            <ProductShot name="portal-groups" frame="laptop" alt={`The ${BRAND.name} portal's Groups page: one card per client team (Contoso Retail, Fabrikam, Northwind Bank, Tailspin Toys) with its Team Lead, people, chats, documents, meetings and a health label.`} />
+            <p style={{ margin: "14px 0 0", textAlign: "center" }}>Up and running in five steps. <Link href="/how-it-works">How it works →</Link></p>
           </div>
         </div>
       </section>

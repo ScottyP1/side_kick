@@ -9,13 +9,13 @@
  * pages say "Teams" only in text.
  */
 
-/** The pictures in public/site/: file stem, pixel size, and whether a "-dark" version exists. */
+/** The pictures in public/site/: file stem, pixel size, whether a "-dark" version exists, and whether the picture is cropped (so its bottom fades out). */
 export const SHOTS = {
-  "chat-answer": { w: 1400, h: 1311, dark: true },
-  "chat-notes": { w: 1400, h: 1661, dark: true },
-  "phone-reminder": { w: 640, h: 1132, dark: true },
-  "portal-groups": { w: 1600, h: 1000, dark: true },
-  "portal-ask": { w: 1600, h: 1000, dark: false },
+  "chat-answer": { w: 1400, h: 1311, dark: true, fade: false },
+  "chat-notes": { w: 1400, h: 1167, dark: true, fade: true },
+  "phone-reminder": { w: 640, h: 1132, dark: true, fade: true },
+  "portal-groups": { w: 1600, h: 1000, dark: true, fade: false },
+  "portal-ask": { w: 1600, h: 1000, dark: false, fade: false },
 } as const;
 
 export type ShotName = keyof typeof SHOTS;
@@ -41,14 +41,14 @@ export function ProductShot({ name, frame, alt, caption, eager }: { name: ShotNa
   const sizes = frame === "phone" ? "300px" : frame === "laptop" ? "(max-width: 900px) 100vw, 880px" : "(max-width: 860px) 100vw, 640px";
   return (
     <figure className={`site-shot ${frame === "laptop" ? "site-laptop" : ""}`} style={{ margin: 0 }}>
-      {frame === "window" && <div className="site-window"><Picture name={name} alt={alt} eager={eager} sizes={sizes} /></div>}
+      {frame === "window" && <div className={`site-window ${SHOTS[name].fade ? "site-fade" : ""}`}><Picture name={name} alt={alt} eager={eager} sizes={sizes} /></div>}
       {frame === "laptop" && (
         <>
           <div className="site-laptop-screen"><Picture name={name} alt={alt} eager={eager} sizes={sizes} /></div>
           <div className="site-laptop-base" aria-hidden="true" />
         </>
       )}
-      {frame === "phone" && <div className="site-phone"><div className="site-phone-fade"><Picture name={name} alt={alt} eager={eager} sizes={sizes} /></div></div>}
+      {frame === "phone" && <div className="site-phone"><div className="site-fade"><Picture name={name} alt={alt} eager={eager} sizes={sizes} /></div></div>}
       {caption && <figcaption>{caption}</figcaption>}
     </figure>
   );

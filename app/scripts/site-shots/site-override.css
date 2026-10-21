@@ -1,0 +1,31 @@
+/* Website variants of the pitch pack's chat mockups, used by render.cjs next to this file. */
+/* Website variants: Indigo brand (not a Teams-like purple), our own fonts, a generic chat-app frame. */
+:root { --t-brand:#4f46e5; }
+.frame, .frame * { font-family: "IBM Plex Sans", system-ui, sans-serif !important; }
+.frame .h2, .who b, .chathead b { font-family: "Instrument Sans", system-ui, sans-serif !important; }
+body { background: transparent !important; padding: 24px !important; }
+.frame { width: 900px; box-shadow: none !important; border: 1px solid var(--t-line); }
+.acard { width: auto !important; max-width: 720px; }
+.top .search { width: 320px; }
+.note { display: none; }
+/* Dark */
+html.dark { --t-brand:#a7a3ff; --t-bg:#17171f; --t-panel:#1e1e29; --t-line:#2d2d3b; --t-me:#28264d; --t-fg:#ececf3; --t-sub:#a3a4b8; --accent:#a7a3ff; }
+html.dark .bar, html.dark .top { background:#101016; }
+html.dark .bar i { background:#2d2d3b; } html.dark .bar i.on { background: var(--t-brand); }
+html.dark .top .search, html.dark .compose { background:#1e1e29; color:#8a8ca2; }
+html.dark .btn { background:#1e1e29; border-color:#3a3a4c; color:#ececf3; }
+html.dark .btn.pos { background: var(--t-brand); color:#16133d; border-color: var(--t-brand); }
+html.dark .sk { color:#16133d; }
+html.dark .chathead .av { background:#28264d; }
+html.dark .tagr.att { color:#ff8a7f; }
+html.dark .sub[style] { color:#5fcf8a !important; }
+/* Phone */
+html.phone .frame { width: 390px; grid-template-columns: 1fr; border-radius: 28px; }
+html.phone .bar, html.phone .top, html.phone .chathead .tabs, html.phone .compose { display: none; }
+html.phone .chathead { padding: 14px 16px; }
+html.phone .chathead small { display: none; }
+html.phone .feed { padding: 14px 12px 18px; }
+html.phone .msg { grid-template-columns: 28px 1fr; gap: 8px; }
+html.phone .msg .av { width: 28px; height: 28px; font-size: 11px; }
+html.phone .acard { padding: 12px 12px 10px; font-size: 13.5px; }
+html.phone .btn { padding: 5px 10px; font-size: 13px; }

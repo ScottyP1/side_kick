@@ -8,6 +8,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { HelpSearch } from "@/components/help-search";
 import { PublicShell } from "@/components/public-shell";
+import { HelpArt } from "@/components/site-art";
 import { guides, helpSections } from "@/lib/help";
 import { pageMetadata } from "@/lib/site";
 import { BRAND } from "@/lib/brand";
@@ -18,10 +19,15 @@ export default function HelpCenterPage() {
   const all = guides();
   return (
     <PublicShell layout="full" current="/docs">
-      <div className="site-wrap site-page-head">
-        <span className="site-eyebrow">Help center</span>
-        <h1>How can we help?</h1>
-        <p>Plain-language guides for everyone who uses {BRAND.name}. New here? Start with <Link href="/docs/concepts">Concepts</Link>.</p>
+      <div className="site-wrap site-glow">
+        <div className="site-page-art">
+          <div className="site-page-head">
+            <span className="site-eyebrow">Help center</span>
+            <h1>How can we help?</h1>
+            <p>Plain-language guides for everyone who uses {BRAND.name}. New here? Start with <Link href="/docs/concepts">Concepts</Link>.</p>
+          </div>
+          <HelpArt />
+        </div>
       </div>
       <div className="site-wrap site-stack">
         <HelpSearch sections={helpSections()}>

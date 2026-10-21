@@ -10,6 +10,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { FaqList } from "@/components/faq-list";
 import { PublicShell, TestModeBanner } from "@/components/public-shell";
+import { PlansArt } from "@/components/site-art";
 import { SignupClosedNotice, TrialButton } from "@/components/signup-status";
 import { faqFor } from "@/lib/faq";
 import { ENTERPRISE, EXTRA_GROUP, limitText, PLANS, TRIAL_DAYS, usd, type Plan } from "@/lib/plans";
@@ -30,10 +31,15 @@ const limits = (p: Plan) => [
 export default function PricingPage() {
   return (
     <PublicShell layout="full" current="/pricing">
-      <div className="site-wrap site-page-head site-center">
-        <span className="site-eyebrow">Pricing</span>
-        <h1>Priced per client engagement</h1>
-        <p>One monthly price for your organization, by the number of groups (one per client engagement), not per person. Every plan starts with a {TRIAL_DAYS}-day free trial. Client guests in your Teams chats are always free.</p>
+      <div className="site-wrap site-glow">
+        <div className="site-page-art">
+          <div className="site-page-head">
+            <span className="site-eyebrow">Pricing</span>
+            <h1>Priced per client engagement</h1>
+            <p>One monthly price for your organization, by the number of groups (one per client engagement), not per person. Every plan starts with a {TRIAL_DAYS}-day free trial. Client guests in your Teams chats are always free.</p>
+          </div>
+          <PlansArt />
+        </div>
       </div>
       <div className="site-wrap site-stack">
         <SignupClosedNotice />

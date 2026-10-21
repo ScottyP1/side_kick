@@ -79,6 +79,7 @@ people who open `/` go straight to their portal home (`/home`). Details and the 
   `<!-- help-center:skip -->` … `<!-- /help-center:skip -->` stay on GitHub only. The Owner Console guide and
   developer docs are never published.
 - **FAQ**: `app/src/lib/faq.ts` holds every question and answer (the `/faq` page, plus short sections on Pricing, Security & trust and How it works). Keep it consistent with `docs/guide/`; answers marked `legalReview` are drafts.
+- **Pictures**: our own illustrations are inline SVG in `components/site-art.tsx` (Indigo tokens, so light and dark follow); product shots are 2x WebP files in `app/public/site/` (made-up data, a dark version where it exists, lazy-loaded with fixed sizes) shown in window, laptop and phone frames by `components/product-shot.tsx`. Never use Microsoft's artwork, logos or icons; say "Teams" only in text. The proxy lets `/site/` through without sign-in.
 - **Public chat slot**: `components/site-chat-slot.tsx` is the empty, hidden place for a future "Ask about Sidekick" chat (public content and guardrails only).
 - **Changelog**: `app/src/lib/changelog.ts`; add an entry when a customer-visible change ships.
 - **Search engines**: per-page titles, descriptions and link previews, `robots.txt` and `sitemap.xml` (public

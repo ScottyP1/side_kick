@@ -506,6 +506,19 @@ test(`[${ENGINE}] health check reports the database engine and reveals no data`,
   assert.deepEqual(Object.keys(r.body).sort(), ["claude", "database", "ok", "search", "teams"]);
 });
 
+test(`[${ENGINE}] every response carries the browser security headers and doesn't name the framework`, async () => {
+  for (const url of ["/login", "/api/health", "/api/me"]) {
+    const res = await fetch(`${BASE}${url}`, { redirect: "manual" });
+    const h = res.headers;
+    assert.match(h.get("strict-transport-security") ?? "", /max-age=31536000/, url);
+    assert.equal(h.get("x-frame-options"), "DENY", url);
+    assert.equal(h.get("x-content-type-options"), "nosniff", url);
+    assert.equal(h.get("referrer-policy"), "strict-origin-when-cross-origin", url);
+    assert.match(h.get("content-security-policy-report-only") ?? "", /frame-ancestors 'none'/, url);
+    assert.equal(h.get("x-powered-by"), null, url);
+  }
+});
+
 test(`[${ENGINE}] Activity: admins see traces with their steps; members can't`, async () => {
   assert.equal((await member("GET", "/api/activity?view=overview")).status, 403);
   await member("POST", "/api/ask", { ws: s.wsA, question: "When is the wave 2 cutover?" });

@@ -48,6 +48,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/excerpt.ts` | Plain-text source excerpts for answers, taken from the part of a passage that matches the question |
 | `lib/workspaces.ts` | Unique workspace names, renaming, and deleting a workspace with everything scoped to it (both engines, plus Azure search) |
 | `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards; tenant check, waiting chats |
+| `lib/teams/install.ts` | Who may add Sidekick to a chat (Team Leads/admins), and Sidekick leaving chats through Graph (refused installer, 7 days unassigned, removed in the portal) |
 | `lib/teams/members.ts` | `@Sidekick add` / `remove @name`: who may, who can be added, auditing |
 | `lib/reminders.ts` | Per-chat settings (notes, tracking, reminders), saving tracked chat messages, building reminder digests (items picked in code, worded by Claude feature `remind`, every point with a source) and their card buttons |
 | `lib/reminder-rules.ts` | Plain rules for chat settings and reminder timing (defaults, validation, time zones, quiet days); no I/O, unit-tested |
@@ -79,7 +80,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
 2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
 3. `tenantGate`: in multi-tenant mode an activity from a Microsoft tenant no Sidekick org is tied to gets the sign-up card and nothing is stored.
-4. Unlinked conversation → in a tied tenant it waits on the org's Workspaces page ("Waiting to be assigned", card with the portal link and a fallback code); otherwise the link-code card. Linked → `add`/`remove @name` commands (members.ts), or typing indicator now and the answer card after the request returns.
+4. Unlinked conversation in a tied tenant (channel/group chat): on install the installer must be a Team Lead/admin (else Sidekick leaves, install.ts); it then waits to be assigned in the portal, and Sidekick reads, saves and answers nothing there (mentions get the "not set up yet" notice). Elsewhere (untied tenant, 1:1) the link-code card. Assigned via the picker → every message is tracked. Linked → `add`/`remove @name` commands (members.ts), or typing indicator now and the answer card after the request returns.
 5. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
 
 ## Rules every change must keep

@@ -17,7 +17,7 @@ export default function GlobalError({ error, retry }: { error: Error & { digest?
               Reference code: <b style={{ fontFamily: "ui-monospace, monospace" }}>{error.digest}</b>
             </p>
           )}
-          <button onClick={() => retry()} style={{ background: "#0f6b5c", color: "#fff", border: 0, borderRadius: 8, padding: "10px 18px", fontSize: 15, cursor: "pointer" }}>
+          <button onClick={() => retry()} style={{ background: "#4f46e5", color: "#fff", border: 0, borderRadius: 8, padding: "10px 18px", fontSize: 15, cursor: "pointer" }}>
             Try again
           </button>
         </div>

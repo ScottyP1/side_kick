@@ -33,6 +33,14 @@ Azure, Entra, Teams admin and Partner Center; nothing in the repo changes these.
 4. **API permissions** → Microsoft Graph:
    - Delegated: `openid`, `profile`, `email`, `User.Read` (sign-in).
    - Application: **`User.Read.All`** (directory search for import and `@Sidekick add`).
+   - Application: **`TeamsAppInstallation.ReadWriteSelfForChat.All`** and
+     **`TeamsAppInstallation.ReadWriteSelfForTeam.All`** (Sidekick removes *itself* from a chat or team: when
+     someone other than a Team Lead/admin adds it, when a chat isn't assigned within 7 days, or "Remove
+     Sidekick from this chat" in the portal). "Self" only covers the Teams app whose manifest names this Entra
+     app in `webApplicationInfo`, which the package does automatically when `ENTRA_CLIENT_ID` is set (step 4).
+     **To verify on the first real try**: that Graph accepts this app as "self" for Sidekick's Teams app; if not,
+     the same code works with the broader `TeamsAppInstallation.ReadWriteForChat.All` /
+     `ReadWriteForTeam.All` instead (only the permission in Entra changes).
    - Press **Grant admin consent for Sidekick Labs** (so it works in your own tenant). Each customer's admin
      approves it in their own tenant from Sidekick (Users & access → Approve Sidekick for your organization).
 5. **Branding & properties**: name, logo, publisher domain (step 6), home page, privacy and terms URLs
@@ -46,7 +54,12 @@ Azure, Entra, Teams admin and Partner Center; nothing in the repo changes these.
   at the same messaging endpoint, and change `CLIENT_ID` + the manifest's bot id. That makes it a new app in
   Teams: every chat re-adds Sidekick. Avoid unless needed.
 
-### 3. Teams admin center: chat RSC setting (free)
+### 3. Teams admin center: chat RSC setting and who may add Sidekick (free)
+**Recommended setup (Cody's rule: only Team Leads and admins add Sidekick to chats):** Teams admin center →
+Teams apps → **Permission policies** → a policy that allows Sidekick, assigned only to Team Leads and admins;
+everyone else's policy blocks it. Sidekick also checks it itself (it leaves if someone else adds it), but the
+policy stops the "Sidekick joined and left" noise. Customers get the same advice in the admin guide.
+
 Sidekick Labs, and later each customer (documented in the admin guide):
 Teams admin center → Teams apps → **Manage apps → Actions → Org-wide app settings** →
 **Resource-specific consent**: allow it for **chats** as well as teams. Then remove and re-add Sidekick in a
@@ -68,7 +81,8 @@ not delivered", see PROGRESS.)
 3. Set `SIDEKICK_PUBLIC_URL` to `https://<domain>` (links in Teams cards, sign-in redirect).
 4. Add the new redirect URI to the **Sidekick** Entra app (step 1.2) and, if you use it, the bot's app.
 5. Azure Bot → Configuration → messaging endpoint `https://<domain>/api/messages`.
-6. Build the package with `SIDEKICK_LIVE_URL=https://<domain> SIDEKICK_WEBSITE_URL=https://<domain> npm --prefix app run teams:package`.
+6. Build the package with `SIDEKICK_LIVE_URL=https://<domain> SIDEKICK_WEBSITE_URL=https://<domain> npm --prefix app run teams:package`
+   (with `ENTRA_CLIENT_ID` in `app/.env.local`, so `webApplicationInfo` names the multi-tenant app; see step 1.4).
 
 ### 6. Partner Center + publisher verification (free account; verification needs the domain from step 5)
 1. Create a **Microsoft AI Cloud Partner Program** account (Partner Center), company type matching how

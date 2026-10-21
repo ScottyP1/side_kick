@@ -337,6 +337,8 @@ function migrate(conn: DatabaseSync) {
   if (!has("teams_conversations", "team_aad_id")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN team_aad_id TEXT");
   if (!has("teams_conversations", "leaving")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN leaving TEXT");
   if (!has("teams_conversations", "leave_tried_at")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN leave_tried_at TEXT");
+  // Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
+  if (!has("workspaces", "client")) conn.exec("ALTER TABLE workspaces ADD COLUMN client TEXT");
 }
 
 /**

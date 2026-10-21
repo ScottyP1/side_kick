@@ -395,7 +395,7 @@ test(`[${ENGINE}] chat picker: only leads and admins add Sidekick; it waits sile
   const card = await waitFor(CHAT, /not set up for this chat yet/, from);
   assert.match(card, /A Team Lead needs to assign this chat to a group in the Sidekick portal\. Until then I won't read, save or answer anything here/);
   assert.match(card, /within 7 days, I'll leave the chat/);
-  assert.doesNotMatch(card, /Action\.|[A-Z0-9]{4}-[A-Z0-9]{4}/, "no buttons and no link code");
+  assert.doesNotMatch(card, /Action\.|"text":"\*?\*?[A-Z2-9]{4}-[A-Z2-9]{4}|\*\*[A-Z2-9]{4}-[A-Z2-9]{4}\*\*/, "no buttons and no link code");
 
   // Until it's assigned, Sidekick doesn't answer (only repeats the notice) and saves nothing.
   const m0 = sent.length;

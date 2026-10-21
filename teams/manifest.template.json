@@ -15,7 +15,7 @@
     "full": "Mention @Sidekick in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. Your organization signs up at Sidekick first; when someone adds Sidekick to a chat, an admin or the group's leader assigns it to a workspace in the Sidekick portal, and leaders can add teammates right from the chat with @Sidekick add. After each meeting Sidekick posts the notes, decisions and action items, and you can assign or close action items right from the card. In chats an admin chooses to track, Sidekick reads the messages to keep track of decisions and dates, and posts reminders about what's still open."
   },
   "icons": { "color": "color.png", "outline": "outline.png" },
-  "accentColor": "#0F6B5C",
+  "accentColor": "#4F46E5",
   "supportsChannelFeatures": "tier1",
   "bots": [
     {

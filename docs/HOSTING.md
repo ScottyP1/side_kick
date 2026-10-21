@@ -69,7 +69,8 @@ otherwise the app's own address, which serves those pages.
   (`ChannelMessage.Read.Group`, `ChatMessage.Read.Chat`) *and* the tenant allowing that consent. Teams and
   chats have separate tenant settings, so tracking can work in a channel but not in a group chat.
 - **1.3.0** adds the `add` / `remove` commands, store-ready website/privacy/terms links and wording for the
-  chat picker. Nothing in it needs a new permission.
+  chat picker. `webApplicationInfo` names `ENTRA_CLIENT_ID` (the multi-tenant app) when it's set, otherwise the
+  bot's app as before: that's the app Microsoft treats as "Sidekick itself" for removing itself from chats.
 - **Single- or multi-tenant** is set on the server, not in the package: today `TENANT_ID` (Sidekick Labs)
   keeps Sidekick to that tenant; `SIDEKICK_MULTI_TENANT=1` (plus a multi-tenant Entra app in `ENTRA_CLIENT_ID`
   / `ENTRA_CLIENT_SECRET`) serves any company that signed up, with the bot still single-tenant (lib/tenants.ts).

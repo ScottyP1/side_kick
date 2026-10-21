@@ -236,3 +236,5 @@ ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS waiting_since TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS team_aad_id TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leaving TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leave_tried_at TEXT;
+-- Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS client TEXT;

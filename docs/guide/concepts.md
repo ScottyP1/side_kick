@@ -5,8 +5,8 @@ Sidekick is an AI teammate for consulting teams. It reads your project's documen
 ## Organization
 Your company's Sidekick account. Everything in it (people, workspaces, documents, meetings) is completely separate from every other organization. Nothing is shared between organizations, ever.
 
-## Workspace
-One client engagement, like "Contoso Retail – Cloud Migration". Each workspace has its own documents, meetings, memory and members. **Sidekick only ever searches the workspace you're in**, so an answer for one client can never use another client's material.
+## Group (workspace)
+One client team, like "Payments Platform" for the client Northwind Bank. The portal calls it a **group**; some screens still say workspace, which means the same thing. Each group has a **Team Lead** who runs it day to day. Each workspace has its own documents, meetings, memory and members. **Sidekick only ever searches the workspace you're in**, so an answer for one client can never use another client's material.
 
 ## People and roles
 

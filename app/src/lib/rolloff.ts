@@ -326,6 +326,7 @@ export async function deleteGroupWithCertificate(orgId: string, workspaceId: str
  * this list against the real schema, so a new table with an `org_id` can't be forgotten.
  */
 export const ORG_TABLES = [
+  "support_attachments", "support_messages", "support_article_uses", "support_tickets", "conversation_turns", "conversations",
   "guard_rule_versions", "guard_custom_rules", "guard_workspace_rules", "guard_events", "guard_rules",
   "chat_messages", "teams_chat_settings", "reminder_runs", "action_items", "items", "meetings", "documents",
   "questions", "passages", "usage_events", "audit_log", "settings", "org_flags", "traces", "org_setup",

@@ -1,7 +1,10 @@
 "use client";
 
 /**
- * The in-app assistant chat, shown under the crystal ball on the home page (see live-orb.tsx).
+ * The in-app assistant chat: under the crystal ball on the home page (see live-orb.tsx) and in the
+ * bottom-left assistant button on every portal page (components/assistant-dock.tsx). Both show the same
+ * conversation (kept on the server for 24 hours, lib/conversations.ts), so a follow-up builds on what was
+ * said on another page; **New conversation** starts over.
  *
  * The person types a question or a request; POST /api/assistant replies, and may attach one proposed
  * action (create a workspace, add a person, link a Teams chat, refresh a knowledge map, open a page),
@@ -9,27 +12,14 @@
  * happen, and only Confirm sends the request, to the same API route the regular page uses (so role
  * checks and the audit log apply as usual). Cancel does nothing. Results and refusals appear in the card;
  * network/server problems also open the problem modal, so nothing fails silently.
- * While a reply is on its way, the "thinking" bubble steps through short labels ("Reading your
- * question", "Checking what your role allows"…) so the wait feels alive; screen readers hear one
- * "Thinking" instead of every label.
+ * While a reply is on its way, the "thinking" bubble steps through short labels so the wait feels alive.
  */
 import Link from "next/link";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, type Ref } from "react";
 import { useApp } from "./shell";
-import { api, ApiError, Icon, Spinner } from "./ui";
+import { ActionCard, ChatInput, ChatThread, runAction, useConversation, type CardState, type ChatAction, type ChatTurn } from "./chat";
+import { Icon } from "./ui";
 import { BRAND } from "@/lib/brand";
-
-/** A confirm card's action, as built by lib/assistant.ts `checkAction`. */
-type ReadyAction = {
-  type: "create_workspace" | "add_person" | "link_teams" | "refresh_map" | "open_page";
-  title: string;
-  details: { label: string; value: string }[];
-  confirm: boolean;
-  request?: { method: "POST"; url: string; body: Record<string, unknown> };
-  href?: string;
-};
-type CardState = { state: "ready" | "running" | "done" | "cancelled" | "failed"; note?: string; secret?: string; link?: { href: string; label: string } };
-type Turn = { id: number; role: "user" | "assistant"; text: string; action?: ReadyAction | null; card?: CardState };
 
 /** Starter prompts, by what the person's role can do. */
 function suggestionsFor(role: string, admin: boolean): string[] {
@@ -40,140 +30,73 @@ function suggestionsFor(role: string, admin: boolean): string[] {
 }
 
 /** What the thinking bubble cycles through, in order (the last one repeats until the reply arrives). */
-const THINKING_LABELS = [
-  "Reading your question",
-  "Checking what your role allows",
-  `Looking through how ${BRAND.name} works`,
-  "Weighing the options",
-  "Drafting a reply",
-  "Double-checking the details",
-  "Almost there",
-];
+const THINKING_LABELS = ["Reading your question", "Checking what your role allows", `Looking through how ${BRAND.name} works`, "Weighing the options", "Drafting a reply", "Double-checking the details", "Almost there"];
 
-/** The animated "thinking" bubble: a spinner and a label that changes every 1.8 seconds. */
-function ThinkingBubble() {
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setI((n) => Math.min(n + 1, THINKING_LABELS.length - 1)), 1800);
-    return () => clearInterval(t);
-  }, []);
-  return (
-    <div className="assist-bubble muted assist-thinking" role="status" aria-label="Thinking">
-      <Spinner />
-      <span key={i} className="assist-thinking-label" aria-hidden="true">{THINKING_LABELS[i]}…</span>
-    </div>
-  );
-}
+type AssistReply = { conversation: string; reply: string; action: ChatAction | null; followUp: string | null };
 
 /**
- * The chat box. `onThinking` tells the crystal ball to speed up while a reply is on its way.
+ * The chat box. `onThinking` tells the crystal ball to speed up while a reply is on its way; `inputRef` lets
+ * the assistant button focus the message box when it opens; `compact` drops the footnote (the button's panel).
  */
-export function Assistant({ onThinking }: { onThinking?: (on: boolean) => void }) {
+export function Assistant({ onThinking, inputRef, compact }: { onThinking?: (on: boolean) => void; inputRef?: Ref<HTMLInputElement>; compact?: boolean }) {
   const { me, reload } = useApp();
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [text, setText] = useState("");
-  const [thinking, setThinking] = useState(false);
-  const [error, setError] = useState("");
-  // A notice rather than an error: the Sidekick team turned the assistant off for this organization.
-  const [notice, setNotice] = useState("");
-  const nextId = useRef(1);
-  const thread = useRef<HTMLDivElement>(null);
+  const chat = useConversation<AssistReply>("/api/assistant", "assist");
+  const { restore, thinking } = chat;
 
   useEffect(() => {
-    thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: "smooth" });
-  }, [turns, thinking]);
+    restore();
+  }, [restore]);
+  useEffect(() => onThinking?.(thinking), [thinking, onThinking]);
 
-  const setCard = (id: number, card: CardState) => setTurns((ts) => ts.map((t) => (t.id === id ? { ...t, card } : t)));
-
-  async function send(message: string) {
-    const m = message.trim();
-    if (!m || thinking) return;
-    setError("");
-    setNotice("");
-    setText("");
-    const history = turns.map((t) => ({ role: t.role, text: t.text }));
-    setTurns((ts) => [...ts, { id: nextId.current++, role: "user", text: m }]);
-    setThinking(true);
-    onThinking?.(true);
-    try {
-      const r = await api<{ reply: string; action: ReadyAction | null }>("/api/assistant", { method: "POST", json: { message: m, history } });
-      setTurns((ts) => [...ts, { id: nextId.current++, role: "assistant", text: r.reply, action: r.action, card: r.action?.confirm ? { state: "ready" } : undefined }]);
-    } catch (e) {
-      // A restriction is shown as a calm notice; 4xx (too long, not allowed) as an error here;
-      // network/server/paused problems also open the problem modal.
-      if (e instanceof ApiError && e.kind === "restricted") setNotice(e.message);
-      else setError(e instanceof Error ? e.message : "The assistant couldn't answer. Try again.");
-    } finally {
-      setThinking(false);
-      onThinking?.(false);
-    }
-  }
-
-  async function confirm(turn: Turn) {
+  async function confirm(turn: ChatTurn) {
     const a = turn.action;
     if (!a?.request) return;
-    setCard(turn.id, { state: "running" });
-    try {
-      const out = await api<Record<string, unknown>>(a.request.url, { method: a.request.method, json: a.request.body });
-      setCard(turn.id, resultOf(a, out));
-      if (a.type === "create_workspace" || a.type === "add_person") await reload();
-    } catch (e) {
-      setCard(turn.id, { state: "failed", note: e instanceof ApiError || e instanceof Error ? e.message : "That didn't work. Try again." });
-    }
+    chat.setCard(turn.id, { state: "running" });
+    const card = await runAction(a, (out) => resultOf(a, out));
+    chat.setCard(turn.id, card);
+    if (card.state === "done" && (a.type === "create_workspace" || a.type === "add_person")) await reload();
   }
-
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    send(text);
-  };
 
   return (
     <div className="assist">
-      {turns.length > 0 && (
-        <div className="assist-thread" ref={thread} aria-live="polite">
-          {turns.map((t) => (
-            <div key={t.id} className={`assist-msg ${t.role}`}>
-              <div className="assist-bubble">{t.text}</div>
-              {t.action && !t.action.confirm && t.action.href && (
-                <Link className="btn small" href={t.action.href}>{t.action.title}</Link>
-              )}
-              {t.action?.confirm && t.card && <ActionCard action={t.action} card={t.card} onConfirm={() => confirm(t)} onCancel={() => setCard(t.id, { state: "cancelled" })} />}
-            </div>
-          ))}
-          {thinking && (
-            <div className="assist-msg assistant">
-              <ThinkingBubble />
-            </div>
-          )}
-        </div>
-      )}
-      <form className="assist-input" onSubmit={onSubmit}>
-        <input
-          className="input"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          maxLength={1000}
-          placeholder={me.user.admin ? `Ask about ${BRAND.name}, or say “create a workspace for Fabrikam”…` : `Ask how something works in ${BRAND.name}…`}
-          aria-label={`Message the ${BRAND.name} assistant`}
-        />
-        <button className="btn primary" type="submit" disabled={thinking || !text.trim()}>{thinking ? <Spinner /> : "Send"}</button>
-      </form>
-      {error && <p className="err" style={{ margin: 0 }}>{error}</p>}
-      {notice && <div className="callout info" role="status"><Icon n="lock" /><div>{notice}</div></div>}
-      {turns.length === 0 && (
+      <ChatThread
+        turns={chat.turns}
+        thinking={thinking}
+        labels={THINKING_LABELS}
+        extra={(t) => (
+          <>
+            {t.action && !t.action.confirm && t.action.href && <Link className="btn small" href={t.action.href}>{t.action.title}</Link>}
+            {t.action?.confirm && t.card && <ActionCard action={t.action} card={t.card} onConfirm={() => confirm(t)} onCancel={() => chat.setCard(t.id, { state: "cancelled" })} />}
+          </>
+        )}
+      />
+      <ChatInput
+        inputRef={inputRef}
+        onSend={(m) => chat.send(m)}
+        busy={thinking}
+        placeholder={me.user.admin ? `Ask about ${BRAND.name}, or say “create a workspace for Fabrikam”…` : `Ask how something works in ${BRAND.name}…`}
+        label={`Message the ${BRAND.name} assistant`}
+      />
+      {chat.error && <p className="err" style={{ margin: 0 }}>{chat.error}</p>}
+      {chat.notice && <div className="callout info" role="status"><Icon n="lock" /><div>{chat.notice}</div></div>}
+      {chat.turns.length === 0 ? (
         <div className="assist-chips">
           {suggestionsFor(me.user.role, me.user.admin).map((s) => (
-            <button key={s} type="button" className="btn small ghost assist-chip" onClick={() => send(s)}>{s}</button>
+            <button key={s} type="button" className="btn small ghost assist-chip" onClick={() => chat.send(s)}>{s}</button>
           ))}
         </div>
+      ) : (
+        <div className="chat-tools">
+          <button type="button" className="btn small ghost" onClick={chat.reset} disabled={thinking}>New conversation</button>
+        </div>
       )}
-      <p className="assist-note muted">Answers questions about {BRAND.name}. Anything that changes data waits for you to press Confirm. For questions about a project, use Ask {BRAND.name} on Knowledge &amp; docs.</p>
+      {!compact && <p className="assist-note muted">Answers questions about {BRAND.name}. Anything that changes data waits for you to press Confirm. For questions about a project, use Ask {BRAND.name} on Knowledge &amp; docs.</p>}
     </div>
   );
 }
 
 /** What to show after an action succeeded, from that route's response. */
-function resultOf(a: ReadyAction, out: Record<string, unknown>): CardState {
+function resultOf(a: ChatAction, out: Record<string, unknown>): CardState {
   switch (a.type) {
     case "create_workspace":
       return { state: "done", note: "Workspace created. You're its first member.", link: { href: "/workspaces", label: "Open Workspaces" } };
@@ -191,36 +114,4 @@ function resultOf(a: ReadyAction, out: Record<string, unknown>): CardState {
     default:
       return { state: "done" };
   }
-}
-
-/** The confirm card: exactly what will happen, then Confirm / Cancel, then the outcome. */
-function ActionCard({ action, card, onConfirm, onCancel }: { action: ReadyAction; card: CardState; onConfirm: () => void; onCancel: () => void }) {
-  return (
-    <div className={`assist-card ${card.state}`}>
-      <b>{action.title}</b>
-      <dl>
-        {action.details.map((d) => (
-          <div key={d.label}>
-            <dt>{d.label}</dt>
-            <dd>{d.value}</dd>
-          </div>
-        ))}
-      </dl>
-      {(card.state === "ready" || card.state === "running") && (
-        <div className="actions">
-          <button className="btn small primary" onClick={onConfirm} disabled={card.state === "running"}>{card.state === "running" ? <><Spinner /> Working</> : "Confirm"}</button>
-          <button className="btn small" onClick={onCancel} disabled={card.state === "running"}>Cancel</button>
-        </div>
-      )}
-      {card.state === "cancelled" && <span className="muted">Cancelled. Nothing was changed.</span>}
-      {card.state === "failed" && <span className="err">{card.note}</span>}
-      {card.state === "done" && (
-        <>
-          <span className="good-text">✓ {card.note}</span>
-          {card.secret && <code className="assist-secret">{card.secret}</code>}
-          {card.link && <Link className="btn small" href={card.link.href}>{card.link.label}</Link>}
-        </>
-      )}
-    </div>
-  );
 }

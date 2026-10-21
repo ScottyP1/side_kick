@@ -57,6 +57,12 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/claude.ts` | **All Claude calls go through here**: model per feature, the AI credit check (`creditGate`), retries with backoff (`withRetry`, `AiBusyError`), the cached system prompt, structured output, metering, and the Batch API for non-urgent work (`queueStructured`, `runBatches`, handlers such as the daily reminder digest). The hook for a second route (Claude in Azure AI Foundry) is `aiClient()` |
 | `lib/assistant.ts` | The in-app assistant on the home page: answers questions about Sidekick and proposes role-limited actions that only run when the person presses Confirm |
 | `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
+| `lib/conversations.ts` | Conversations for the three assistants (in-app assistant, Help chat, public help bot): the last few turns per person (or per browser on the website), never shared, expire 24 h after the last turn; `standaloneQuestion` rewrites a follow-up into a full question (Claude feature `followup`) before checking and searching; `priorSummary` for the prompt |
+| `lib/support.ts` | Support tickets: portal, Help chat, public form and help bot tickets; who sees which (`listTicketsFor`, `visibleTicket`); thread, internal notes, attachments (type checked by first bytes, 5 MB, base64 in the database, always downloaded); unread flags (the dot) and the `notify` email hook; the Owner Console inbox, client context (plan, recent errors by reference code) and team actions, all audited |
+| `lib/support-articles.ts` | Support articles at three levels (public / customer / internal), seeds, uses per article and the tickets that followed, Claude drafts from resolved tickets |
+| `lib/knowledge.ts` | What the help assistants may answer from: public (guides, FAQ, plans, public articles) or customer (adds customer-level articles). Never client data, never internal articles. Ranked by `rankKnowledge` in lib/search.ts |
+| `lib/support-assistant.ts` | The Help chat (support assistant): read-only setup checks, safe fixes behind Confirm within the role, grounding (sources or checks), paid by Sidekick (`payer: "support"`) with its own per-person limit |
+| `lib/helpbot.ts` | The public "Ask about Sidekick" help bot and every rule it follows (see its header): public knowledge only, grounded, public-mode guardrails, masking, per-visitor/IP limits, daily budget then FAQ, unanswered list for the operator |
 | `lib/guardrails.ts` | The firm's guardrails: locked floor + org-wide switches, per-workspace extra switches (stricter only) and custom rules (save-time loosening check, versioned) merged by `getGuardPolicy`, the question check (quick local check, then Claude feature `guard`), the answer check (grounding, masking), and `guard_events` counts |
 | `lib/guard-text.ts` | The quick guardrail text checks with no I/O (slurs, jailbreaks, swearing, loosening and too-broad rules, masking contact details but not dates), unit-tested in `tests/db.test.mjs` |
 | `lib/excerpt.ts` | Plain-text source excerpts for answers, taken from the part of a passage that matches the question |
@@ -73,6 +79,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/markdown.ts` | Small Markdown reader for the guides: blocks and inline nodes as data (no HTML strings), rendered by `components/markdown.tsx` |
 | `lib/changelog.ts` | The public changelog entries, newest first |
 | `lib/faq.ts` | The FAQ: every question and answer in one data file (`/faq` shows all; Pricing, Security & trust and How it works show theirs via `faqFor`). Answers stay consistent with `docs/guide/`; `legalReview` marks draft wording. The future public chat should answer from this file and the guides |
+| `components/dock.tsx`, `assistant-dock.tsx`, `helpbot.tsx`, `chat.tsx`, `support-chat.tsx` | The bottom-left assistant button (portal: in-app assistant + "I need help"; website: help bot; never in the Owner Console) and the chat pieces the three assistants share (`useConversation`, thread, confirm card) |
 | `components/` | Portal, Owner Console and public-website frames (`public-shell.tsx` + `public-site.css`), the website's pictures (`site-art.tsx`: our own inline-SVG illustrations that follow light/dark; `product-shot.tsx`: real product shots in window/laptop/phone frames from `public/site/*.webp`; `how-mocks.tsx`: small HTML/CSS screen mockups), shared UI |
 | `app/(app)/*/view.tsx` | Client portal pages (home is `app/(app)/home`); `app/owner/(console)/*/view.tsx` Owner Console pages; `app/(public)/*` the public website |
 
@@ -90,7 +97,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `/owner/*` | Owner Console (`noindex`), own sign-in at `/owner/login` | Owner |
 | `/api/*` | API routes; each checks the session itself (the proxy skips them) | Per route |
 
-**Public chat slot**: `components/site-chat-slot.tsx` (rendered at the end of every public page by `public-shell.tsx`) is where the public "Ask about Sidekick" chat goes. It renders nothing today. Whoever builds it: hidden unless switched on, public content only (`lib/faq.ts`, `lib/help.ts`, the public pages), every question and answer through `lib/guardrails.ts`.
+**Public chat slot**: `components/site-chat-slot.tsx` (rendered at the end of every public page by `public-shell.tsx`) holds the "Ask about Sidekick" help bot (`components/helpbot.tsx`, `lib/helpbot.ts`). It is always shown (the pages are prerendered); when the "Public help bot" switch is paused or its daily budget is spent, it answers with FAQ entries and "Talk to a human".
+
+Support routes: portal `/help` (Contact support, My tickets) and `/help/tickets/<id>`; public `/support` (form) and `/docs/articles/<slug>` (published public articles only); Owner Console `/owner/support`, `/owner/support/<id>`, `/owner/articles`, `/owner/helpbot`. APIs: `/api/assistant`, `/api/support/assistant`, `/api/help-bot` (POST a message; GET/DELETE `?conversation=`), `/api/support/tickets[/<id>]`, `/api/support/attachments/<id>`, `/api/support/unread`, `/api/support/public`, `/api/owner/support[/tickets/<id>|/articles|/helpbot]`.
 
 Adding a public page: add it to `PUBLIC_PAGES` in `lib/site.ts` (sitemap, metadata) **and** to the proxy's `matcher` (a unit test checks both); adding a portal page: add its path to `PRIVATE_PATHS` (a unit test checks every `app/(app)` folder is listed). Later the website and portal can split into `sidekick.ai` and `app.sidekick.ai`; keeping the website under `(public)` and the portal under `(app)` keeps that a hosting change.
 
@@ -132,6 +141,15 @@ Adding a public page: add it to `PUBLIC_PAGES` in `lib/site.ts` (sitemap, metada
 3. The timer (`/api/reminders/tick` every 5 minutes) runs `runDueRolloffs`: each due row is claimed (scheduled → running), then `deleteGroupWithCertificate` (via `deleteWorkspace`) or `deleteOrganization` (every group, then sign-in data, then `ORG_TABLES`, then the org), and the certificate is written on the row (and, for a group, in the audit log). Failure → back to scheduled with `error`.
 4. Exports (`/api/workspaces/:id/export`, `/api/export`) are GET, so they keep working while read-only.
 
+**A message to one of the assistants** (in-app assistant, Help chat, public help bot)
+1. Switch and limit checks (`assertEnabled`; the Help chat 30/person/hour; the help bot per visitor and per network, its daily budget, else FAQ mode).
+2. `openConversation` finds the owner's conversation (same person in the same org, or the same browser on the website; unexpired) or starts one.
+3. `standaloneQuestion` rewrites a follow-up into a full question (Claude feature `followup`, cheapest model; skipped when there are no earlier turns; paused = message as typed).
+4. `screenTurn`: the quick check on what was typed, then the full check (`screen`, public mode for the help bot) on the standalone question. A refusal uses fixed wording and is saved as a refused turn, so a follow-up to it is refused too.
+5. Context: the assistant's org snapshot (in-app assistant), the setup checks (Help chat), and the ranked help knowledge (`knowledgeFor` + `rankKnowledge`; public only for the help bot), plus `priorSummary` of the earlier turns.
+6. Claude (`assist`; `support` / `helpbot` with `payer`, so no organization's AI credit is used); grounding (cited sources, or the checks for the Help chat), `checkAction`/`checkFix` for anything proposed, `cleanOutput`.
+7. `addExchange` saves both turns (visitor text masked first) with what the browser shows again (sources, checks, "Following up on").
+
 **A Teams message**
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
 2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
@@ -142,7 +160,8 @@ Adding a public page: add it to `PUBLIC_PAGES` in `lib/site.ts` (sitemap, metada
 ## Rules every change must keep
 - **Walls**: filter every query by `org_id`, and by a workspace id that went through `requireWorkspace` (or a linked Teams conversation). Never trust an id from the request on its own.
 - **Data, not instructions**: anything from documents, transcripts or users goes to Claude inside tags, and the system prompt says to ignore instructions in it.
-- **Guardrails**: anything that answers people (portal, Teams, assistant) goes through `lib/guardrails.ts`: `screenQuestion` before, `cleanOutput` (and `checkGrounding` for sourced answers) after. Refusals use the fixed `MESSAGES`, never Claude-written text. `guard_events` stores rule/where/when only, never text.
+- **Who pays for AI**: AI work goes through `structured()`; work Sidekick pays for itself (support assistant, help bot) passes `payer`, which skips and is left out of the organization's AI credit (`usage_events.payer`).
+- **Guardrails**: anything that answers people (portal, Teams, assistant, Help chat, help bot) goes through `lib/guardrails.ts`: `screenQuestion` before, `cleanOutput` (and `checkGrounding` for sourced answers) after. Refusals use the fixed `MESSAGES`, never Claude-written text. `guard_events` stores rule/where/when only, never text.
 - **Isolation test**: `tests/api.test.mjs` plants a secret in workspace B and checks it can't be reached from workspace A, another org, Teams or the assistant. New routes or surfaces that read workspace data belong in that test.
 - **One path each**: Claude only via `lib/claude.ts`, search only via `lib/search.ts`, so Azure (Foundry, AI Search) can be swapped in later without touching callers.
 - **Brand**: user-facing product name only via `BRAND` (lib/brand.ts); never hard-code it in new text.

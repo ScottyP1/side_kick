@@ -12,8 +12,9 @@
  *   on cheaper models (`ESSENTIAL_MODELS`), short meetings still get notes, and the extras pause with a plain
  *   message: automatic reminders (which also stops Claude reading tracked chats for them), the knowledge
  *   map, the in-app assistant and notes for long meetings. Nothing else is refused and nothing is deleted.
- * - **Opting out**: a call can pass `skipCredit` (e.g. the Sidekick support assistant, coming later, which
- *   Sidekick pays for and shouldn't eat into the customer's credit).
+ * - **Opting out**: a call can pass `skipCredit`, and work Sidekick pays for itself passes `payer` (lib/claude.ts:
+ *   the support assistant and the public help bot). Those calls are recorded with `usage_events.payer` and left
+ *   out of the month's use, so they never eat into the customer's credit.
  * - **Cheap and brief cache**: the month's use is one indexed SUM, cached per organization for
  *   `CACHE_MS`; every recorded call adds its cost to the cached figure straight away, so one copy of the app
  *   sees its own spend at once and other copies within the cache time.
@@ -86,7 +87,8 @@ export async function creditStatus(orgId: string, opts: { fresh?: boolean } = {}
   if (!opts.fresh && hit && hit.status.month === month && Date.now() - hit.at < CACHE_MS) return hit.status;
   const [{ limits }, used, topUp] = await Promise.all([
     orgPlan(orgId),
-    get<{ n: number | null }>("SELECT COALESCE(SUM(cost_usd), 0) AS n FROM usage_events WHERE org_id = ? AND created_at >= ?", orgId, monthStart()),
+    // Calls Sidekick pays for itself (support assistant, help bot: `payer` set) don't count.
+    get<{ n: number | null }>("SELECT COALESCE(SUM(cost_usd), 0) AS n FROM usage_events WHERE org_id = ? AND created_at >= ? AND payer IS NULL", orgId, monthStart()),
     get<{ n: number | null }>("SELECT COALESCE(SUM(amount_usd), 0) AS n FROM credit_topups WHERE org_id = ? AND month = ?", orgId, month),
   ]);
   const usedUsd = Number(used?.n ?? 0);

@@ -149,6 +149,9 @@ export const FLAGS = {
   guard: { label: "Guardrail check", help: `Checks every question first. Pausing it also pauses answers: ${BRAND.name} never answers unchecked` },
   uploads: { label: "Document uploads", help: "New files from any client" },
   remind: { label: "Reminders in Teams", help: "Daily and after-meeting reminder cards posted to Teams chats" },
+  support: { label: "Support assistant", help: "The signed-in Help chat that checks a customer's setup and opens tickets. Paused: people can still contact support with the form" },
+  helpbot: { label: "Public help bot", help: "“Ask about Sidekick” on the website. Paused: visitors see the FAQ and the contact form instead", platformOnly: true },
+  followup: { label: "Follow-up questions", help: "Rewrites a follow-up (“and wave 3?”) into a full question in the assistants. Paused: every message is treated as a new question", platformOnly: true },
   signup: { label: "Self-service sign-up", help: "New companies creating an organization at /signup (test-mode payment). Off by default: only you add clients", platformOnly: true },
 } as const;
 export type FlagKey = keyof typeof FLAGS;

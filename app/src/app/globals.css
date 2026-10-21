@@ -456,3 +456,66 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .site-hero-badges{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:6px;font-size:14px;color:var(--muted)}
 .site-badge{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
 .site-hero-sub{margin:10px 0 0;font-size:15px;color:var(--muted)}
+
+/* ---------- Bottom-left assistant button and panel (components/dock.tsx), shared chat bits (components/chat.tsx) ---------- */
+.dock-button{position:fixed;left:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:55;width:52px;height:52px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;cursor:pointer;box-shadow:0 6px 20px rgba(20,16,60,.28)}
+.dock-button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.dock-button:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 45%,#fff);outline-offset:3px}
+.dock-dot{position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;background:var(--bad);border:2px solid var(--surface)}
+.dock-panel{position:fixed;left:16px;bottom:calc(80px + env(safe-area-inset-bottom,0px));z-index:56;width:min(420px,calc(100vw - 32px));max-height:min(640px,calc(100vh - 110px));display:flex;flex-direction:column;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 48px rgba(20,16,60,.25);overflow:hidden}
+.dock-panel[hidden]{display:none}
+.dock-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.dock-head b{flex:1;font-size:14px}
+.dock-body{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.dock-body .assist{max-width:none}
+.dock-body .assist-thread{max-height:none}
+.dock-tabs{display:flex;gap:4px;background:var(--sunken);border-radius:8px;padding:3px}
+.dock-tabs button{flex:1;border:0;background:transparent;border-radius:6px;padding:6px 8px;font:inherit;font-weight:500;cursor:pointer;color:var(--muted);display:inline-flex;gap:6px;justify-content:center;align-items:center}
+.dock-tabs button.on{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.dock-count{background:var(--bad);color:#fff;border-radius:99px;font-size:11px;padding:0 6px;line-height:17px}
+.dock-links{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
+/* Wide portal screens: the button sits in the sidebar's bottom corner, which always keeps room for it: the menu
+   scrolls inside the sidebar instead of the whole sidebar, so no menu item ever slides under the button. */
+.has-dock .rail{padding-bottom:84px;overflow:hidden}
+.has-dock .rail .nav{flex:1 1 auto;min-height:0;overflow-y:auto}
+/* Phones and the website: room at the bottom so the last buttons can be scrolled clear of the button. */
+.dock-space{padding-bottom:84px}
+@media (max-width: 860px){.has-dock .content{padding-bottom:96px}}
+@media (max-width: 600px){
+  .dock-panel{left:0;right:0;top:0;bottom:0;width:auto;max-height:none;border-radius:0;border:0}
+  .dock-panel:not([hidden]) ~ .dock-button{display:none}
+}
+.linkish{background:none;border:0;padding:0;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer}
+.chat-followup{font-size:12px;color:var(--muted);font-style:italic}
+.chat-sources{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12.5px;max-width:85%}
+.chat-small{font-size:12.5px}
+.chat-tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chat-checks{font-size:12.5px;max-width:100%}
+.chat-checks summary{cursor:pointer;color:var(--muted)}
+.chat-checks ul{margin:6px 0 0;padding-left:16px;display:flex;flex-direction:column;gap:4px}
+.chat-faq{margin:0;padding-left:18px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.chat-human{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.chat-human .field span{font-weight:500;font-size:13px}
+.hp{position:absolute!important;left:-10000px;width:1px;height:1px;overflow:hidden}
+
+/* ---------- Support: tickets (portal /help, Owner Console Support) ---------- */
+.ticket-list{display:flex;flex-direction:column}
+.ticket-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 14px;border-top:1px solid var(--line);color:inherit;text-decoration:none}
+.ticket-row:first-child{border-top:0}
+.ticket-row:hover{background:var(--sunken)}
+.ticket-row .meta{font-size:12.5px;color:var(--muted);grid-column:1 / -1}
+.ticket-row.unread b{font-weight:700}
+.ticket-row.unread b::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:middle}
+.thread{display:flex;flex-direction:column;gap:10px}
+.thread-msg{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface);white-space:pre-wrap;word-break:break-word}
+.thread-msg.staff{border-left:3px solid var(--accent)}
+.thread-msg.internal{background:var(--warn-soft);border-style:dashed}
+.thread-msg.system{background:transparent;border:0;padding:2px 12px;color:var(--muted);font-size:12.5px}
+.thread-msg .who{display:flex;gap:8px;font-size:12.5px;color:var(--muted);margin-bottom:4px;white-space:normal}
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.filters .input{width:auto;min-width:130px}
+.owner-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:16px;align-items:start}
+@media (max-width: 1000px){.owner-split{grid-template-columns:minmax(0,1fr)}}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;font-size:13px;margin:0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;word-break:break-word}

@@ -47,8 +47,15 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   // Don't advertise the framework in an X-Powered-By header.
   poweredByHeader: false,
+  // The assistant button owns the bottom-left corner (components/dock.tsx); keep the dev-only indicator off it.
+  devIndicators: { position: "bottom-right" },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // Support ticket attachments (customer files) are always downloads; a sandbox policy means even a file a
+      // browser tried to open could run nothing. Later entries win for the same header.
+      { source: "/api/support/attachments/:path*", headers: [{ key: "Content-Security-Policy", value: "sandbox; default-src 'none'" }] },
+    ];
   },
   // A separate build folder lets a test copy run next to the main dev server.
   distDir: process.env.NEXT_DIST_DIR || ".next",

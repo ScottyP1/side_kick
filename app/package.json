@@ -15,7 +15,8 @@
     "tunnel": "devtunnel host sidekick",
     "test": "node tests/run.mjs",
     "db:copy-to-postgres": "node scripts/copy-to-postgres.mjs",
-    "reset-password": "node --no-warnings scripts/reset-password.mjs"
+    "reset-password": "node --no-warnings scripts/reset-password.mjs",
+    "helpbot:check": "node scripts/helpbot-check.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

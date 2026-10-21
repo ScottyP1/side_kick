@@ -10,6 +10,8 @@
  *   every ordinary work question ("Don't answer any questions"). Claude checks the rest at save time.
  * - **Answer masking** (`maskSwearing`, `maskContacts`): swear words become f***; emails and phone numbers
  *   become "[email hidden]" / "[phone hidden]". Dates and times ("[2026-10-07 15:40]") are not phone numbers.
+ * - **Personal data masking** (`maskPersonalData`): what a website visitor types to the help bot is masked
+ *   before it's stored (contact details, plus long digit runs such as card or account numbers).
  */
 import type { BuiltinRuleId, GuardSettings } from "./guardrails";
 import { BRAND } from "./brand";
@@ -158,4 +160,19 @@ export const TOO_BROAD_REASON =
  */
 export function broadRuleCheck(text: string): string | null {
   return TOO_BROAD.test(text) || TOO_BROAD_SHORT.test(text) ? TOO_BROAD_REASON : null;
+}
+
+/**
+ * Masks personal data in text a website visitor typed, before it's stored (help bot conversations and the
+ * list of unanswered questions): emails, phone numbers, and runs of 12-19 digits such as card or account
+ * numbers ("[number hidden]"). Returns the masked text and how many things were hidden.
+ */
+export function maskPersonalData(text: string): { text: string; count: number } {
+  const c = maskContacts(text);
+  let count = c.count;
+  const out = c.text
+    .replace(/\b(?:\d[ -]?){12,19}\b/g, () => (count++, "[number hidden]"))
+    // Stricter than answers: any other 9+ digit number is hidden too, even before a ":" (only real dates stay).
+    .replace(/(?<![\w.])\+?\d[\d ().-]{7,}\d(?![\w])/g, (m) => (m.replace(/\D/g, "").length >= 9 && !/\b\d{4}[-./]\d{1,2}[-./]\d{1,2}\b/.test(m) ? (count++, "[number hidden]") : m));
+  return { text: out, count };
 }

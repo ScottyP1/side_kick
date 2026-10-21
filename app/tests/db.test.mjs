@@ -122,6 +122,14 @@ test(`[${engine}] guardrails: chat timestamps and dates aren't masked as phone n
   assert.equal(guard.maskContacts("Mail lena@contoso.example").text, "Mail [email hidden]");
 });
 
+test(`[${engine}] help bot: a visitor's personal data is masked before it's stored; ordinary text and dates aren't`, () => {
+  const r = guard.maskPersonalData("I'm jo@example.com, card 4111-1111-1111-1111 or 4111111111111111, call +1 555 010 9999 on 2026-10-21, or +44 20 7946 0958: thanks");
+  assert.doesNotMatch(r.text, /jo@example|4111|555 010|7946/);
+  assert.match(r.text, /2026-10-21/);
+  assert.ok(r.count >= 4, String(r.count));
+  assert.deepEqual(guard.maskPersonalData("How much is the Team plan for 12 people?"), { text: "How much is the Team plan for 12 people?", count: 0 });
+});
+
 test(`[${engine}] guardrails: rules that would refuse every work question are too broad; topic rules are fine`, () => {
   for (const text of ["Don't answer any questions", "Never answer questions.", "Refuse everything", "Do not respond to any requests", "Don't discuss the project", "Never help anyone", "Answer nothing", "Ignore all questions"]) {
     assert.match(guard.broadRuleCheck(text) ?? "", /too broad/, text);

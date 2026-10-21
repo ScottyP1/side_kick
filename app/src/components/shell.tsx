@@ -9,6 +9,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, Icon, Pill, ToastProvider } from "./ui";
+import { AssistantDock } from "./assistant-dock";
 import { BRAND } from "@/lib/brand";
 
 export type Workspace = { id: string; name: string; code: string | null; color: string };
@@ -45,6 +46,7 @@ const NAV: { g: string; items: [string, string, string, ((m: Me) => boolean)?][]
   { g: "Overview", items: [["/home", "Overview", "home"], ["/usage", "Usage & billing", "chart", (m) => ["Org Owner", "Org Admin", "Billing Admin"].includes(m.user.role)], ["/agent", "AI models & agent", "cpu"]] },
   { g: "Manage", items: [["/workspaces", "Groups", "folder"], ["/knowledge", "Knowledge & docs", "doc"], ["/meetings", "Meetings", "video"], ["/memory", "Memory & gaps", "brain"], ["/connectors", "Connectors", "plug"], ["/users", "Users & access", "users", (m) => m.user.admin || Boolean(m.user.lead)]] },
   { g: "Govern", items: [["/guardrails", "Guardrails", "shield"], ["/activity", "Activity", "activity", (m) => m.user.admin], ["/audit", "Security & audit", "lock", (m) => m.user.admin], ["/settings", "Settings", "gear"]] },
+  { g: "Help", items: [["/help", "Help & support", "chat"]] },
 ];
 
 const WS_KEY = "sidekick.ws";
@@ -134,7 +136,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <AppCtx.Provider value={{ me, ws, setWs, reload }}>
       <ToastProvider>
-        <div className="app">
+        <div className="app has-dock">
           <aside className="rail">
             {me.branding.logo ? (
               <div className="brand brand-logo">
@@ -233,6 +235,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             {/* Workspace pages restart when the workspace changes; org-wide pages (incl. the home assistant) keep their state. */}
             <main className="content" key={WS_PAGES.some((p) => path.startsWith(p)) ? ws : "org"}>{children}</main>
           </div>
+          {/* The bottom-left assistant button on every portal page: the in-app assistant and "I need help". */}
+          <AssistantDock />
         </div>
       </ToastProvider>
     </AppCtx.Provider>

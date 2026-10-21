@@ -11,7 +11,7 @@
  */
 import { handle, readJson } from "@/lib/api";
 import { HttpError, requireUser, requireWorkspace } from "@/lib/auth";
-import { FLOOR, getGuardPolicy, MAX_RULE_LENGTH, refusalFor, RULE_LABELS, screen, type BuiltinRuleId } from "@/lib/guardrails";
+import { FLOOR, getGuardPolicy, MAX_RULE_LENGTH, refusalFor, RULE_LABELS, screen, type BuiltinRuleId, type RuleId } from "@/lib/guardrails";
 
 export const POST = handle(async (req: Request) => {
   const user = await requireUser(["Org Owner", "Org Admin"]);
@@ -34,6 +34,6 @@ export const POST = handle(async (req: Request) => {
     locked: FLOOR.some((f) => f.id === rule),
     draft: custom?.id === "draft",
     checker,
-    message: refusalFor(rule),
+    message: refusalFor(rule as RuleId),
   };
 });

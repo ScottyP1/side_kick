@@ -1,13 +1,14 @@
 /**
- * Reserved place for the public "Ask about Sidekick" chat on the website. Rendered by components/public-shell.tsx
- * on every public page, after the footer; it draws nothing today.
+ * The place on every public page (rendered by components/public-shell.tsx after the footer) for "Ask about
+ * Sidekick", the website's help bot (components/helpbot.tsx, rules in lib/helpbot.ts).
  *
- * For the session that builds the chat (docs/ARCHITECTURE.md → Routes): put the widget here, keep it hidden
- * unless it's switched on, answer only from public content (lib/faq.ts, the help-center guides in lib/help.ts,
- * the public pages), and send every question and answer through lib/guardrails.ts like any other answer.
+ * Always shown: the pages are prerendered, so the slot can't ask the server whether the bot is switched on.
+ * When the Owner Console's "Public help bot" switch is paused (or its daily budget is spent), the bot answers
+ * with matching FAQ entries and "Talk to a human" instead of AI answers.
  */
+import { HelpBotDock } from "./helpbot";
 
-/** The chat widget's slot. Returns nothing until the public chat exists and is switched on. */
+/** The help bot's button and panel. */
 export function SiteChatSlot() {
-  return null;
+  return <HelpBotDock />;
 }

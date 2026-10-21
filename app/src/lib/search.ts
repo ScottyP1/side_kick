@@ -189,3 +189,42 @@ async function keywordSearch(orgId: string, workspaceId: string, question: strin
     opts.limit ?? 12,
   );
 }
+
+/* ---------- Help knowledge: the support assistant's and the help bot's sources ---------- */
+
+/**
+ * One piece of help knowledge the support assistant or the public help bot may answer from: a section of a
+ * help-center guide, an FAQ answer, a plan, or a support article (lib/knowledge.ts builds the lists). Not
+ * client data, so it isn't in the passage index: the whole list is small and ranked in memory.
+ */
+export type KnowledgeDoc = { key: string; kind: "guide" | "faq" | "pricing" | "article"; title: string; url: string | null; text: string; articleId?: string };
+
+// Words too common to say anything about which help article fits.
+const HELP_STOP = new Set("a an and are as at be but by can do does for from how i if in is it its me my of on or our so that the their them there this to us was we what when where which who why will with you your sidekick".split(" "));
+/** Lower-case words with a light plural/verb ending removed, so "chats" finds "chat" and "linking" finds "link". */
+const terms = (t: string) =>
+  t.toLowerCase().split(/[^a-z0-9@]+/).filter((w) => w.length > 1 && !HELP_STOP.has(w)).map((w) => w.replace(/(ing|ed|es|s)$/, "") || w);
+
+/**
+ * The help knowledge that best matches a question, best first (at most `limit`, only ones sharing a word with
+ * it). Score: each question word found in the title counts 3, in the text 1 per mention (up to 3), so short
+ * focused sections beat long ones that mention a word in passing. Pure, used by lib/support-assistant.ts and
+ * lib/helpbot.ts after the question is checked and made standalone.
+ */
+export function rankKnowledge(docs: KnowledgeDoc[], question: string, limit = 6): KnowledgeDoc[] {
+  const q = [...new Set(terms(question))];
+  if (!q.length) return [];
+  return docs
+    .map((d) => {
+      const title = new Set(terms(d.title));
+      const counts = new Map<string, number>();
+      for (const w of terms(d.text)) counts.set(w, (counts.get(w) ?? 0) + 1);
+      let score = 0;
+      for (const w of q) score += (title.has(w) ? 3 : 0) + Math.min(3, counts.get(w) ?? 0);
+      return { d, score: score / Math.sqrt(1 + d.text.length / 1500) };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((x) => x.d);
+}

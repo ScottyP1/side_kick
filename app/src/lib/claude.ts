@@ -2,7 +2,8 @@
  * @file The only place Sidekick talks to Claude (Anthropic's AI model).
  *
  * Concepts
- * - **Feature**: each kind of AI work has a name (`ask`, `extract`, `insights`, `assist`, `guard`) so it can use its own
+ * - **Feature**: each kind of AI work has a name (`ask`, `extract`, `insights`, `assist`, `guard`, `remind`, `support`,
+ *   `helpbot`, `followup`) so it can use its own
  *   model, be metered separately on the Usage page, and be paused with a kill switch in the Owner Console.
  * - **Structured output**: instead of free text, Claude must reply with JSON matching a Zod schema, so the
  *   app can save answers, decisions and action items without guessing at their shape.
@@ -61,6 +62,16 @@ export const MODELS = {
   // Proactive reminders in Teams (see reminders.ts): rewords a short list of items picked in code, so a
   // smaller model (SIDEKICK_MODEL_REMIND=claude-sonnet-5-5) works well here too.
   remind: process.env.SIDEKICK_MODEL_REMIND || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
+  // The signed-in support assistant (lib/support-assistant.ts) and drafting support articles from resolved
+  // tickets (lib/support-articles.ts). Paid by Sidekick, never the customer's AI credit (`payer`).
+  support: process.env.SIDEKICK_MODEL_SUPPORT || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
+  // The public "Ask about Sidekick" help bot (lib/helpbot.ts): short answers from public help articles, so it
+  // defaults to the cheapest model; check it holds quality with scripts/helpbot-check.mjs before and after a
+  // change, and move up to claude-sonnet-5-5 (SIDEKICK_MODEL_HELPBOT) if it doesn't.
+  helpbot: process.env.SIDEKICK_MODEL_HELPBOT || "claude-haiku-5-5",
+  // Rewrites a follow-up ("and wave 3?") into a full question before searching (lib/conversations.ts).
+  // A short rewording job, so the cheapest model by default.
+  followup: process.env.SIDEKICK_MODEL_FOLLOWUP || "claude-haiku-5-5",
 };
 export type Feature = keyof typeof MODELS;
 
@@ -90,14 +101,16 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
   if (attempt < Number(content.match(/__BUSY_(\d+)__/)?.[1] ?? 0)) throw new FakeBusyError();
   const cost = Number(content.match(/__SPEND_(\d+(?:\.\d+)?)__/)?.[1] ?? 0);
   await run(
-    `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
-     VALUES (?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?, ?)`,
+    `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, payer, created_at)
+     VALUES (?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?, ?, ?)`,
     ctx.orgId, ctx.workspaceId, traceUserId(), feature, model === MODELS[feature] ? "fake-claude" : `fake-claude:${model}`, cost,
-    content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, now(),
+    content.includes("__FAIL__") ? 0 : 1, content.includes("__FAIL__") ? "Fake failure" : null, ctx.payer ?? null, now(),
   );
-  addSpend(ctx.orgId, cost);
+  if (!ctx.payer) addSpend(ctx.orgId, cost);
   if (content.includes("__FAIL__")) throw new HttpError(502, "Claude API error (test): fake failure for testing.");
   if (feature === "guard") return fakeGuard(content);
+  if (feature === "followup") return fakeFollowUp(content);
+  if (feature === "helpbot" || feature === "support") return fakeSupport(feature, content);
   if (feature === "remind") {
     // One point per item it was given, plus one pointing at an item that doesn't exist ("R99"), so tests
     // can check that points without a real source are dropped. "__CONTACT__" in an item adds an email.
@@ -183,8 +196,20 @@ function fakeGuard(content: string) {
     if (/\b(relax\w*|loosen\w*|lenient)\b/i.test(proposed)) return { verdict: "loosens" };
     return { verdict: /__not_a_rule__/i.test(proposed) ? "not_a_rule" : "restricts" };
   }
-  const active = content.match(/<active_switches>(.*?)<\/active_switches>/)?.[1] ?? "";
   const q = (content.match(/<question>([\s\S]*)<\/question>/)?.[1] ?? "").toLowerCase();
+  // The public help bot's check (`<mode>public</mode>`): the floor plus off-topic and financial advice.
+  if (content.includes("<mode>public</mode>")) {
+    const pub: [string, RegExp][] = [
+      ["hate", /__hate__/],
+      ["advice", /\b(lawsuit|sue|diagnos\w*)\b/],
+      ["financial", /\b(invest\w*|stocks?|bitcoin|tax advice)\b/],
+      ["judging_people", /\b(rank|rate)\b.*\b(people|consultants?|employees?)\b/],
+      ["off_topic", /\b(recipe|poem|homework|weather|football|joke)\b/],
+    ];
+    const hit = pub.find(([, re]) => re.test(q));
+    return hit ? { allowed: false, rule: hit[0], custom_rule: null } : { allowed: true, rule: "none", custom_rule: null };
+  }
+  const active = content.match(/<active_switches>(.*?)<\/active_switches>/)?.[1] ?? "";
   const tests: [string, RegExp, boolean][] = [
     ["hate", /__hate__/, true],
     ["other_data", /\bother (client|workspace)s?\b/, true],
@@ -203,6 +228,62 @@ function fakeGuard(content: string) {
     if (keys.some((k) => qWords.has(k))) return { allowed: false, rule: "custom", custom_rule: Number(n) };
   }
   return { allowed: true, rule: "none", custom_rule: null };
+}
+
+/**
+ * Test-mode follow-up rewriting (lib/conversations.ts): a message starting with "and", "what about", "how
+ * about" or "also" is a follow-up. Its topic replaces the matching words of the last question ("When is the
+ * wave 2 cutover?" + "and wave 3?" → "When is the wave 3 cutover?"), or is added to it. Anything else stands
+ * on its own.
+ */
+function fakeFollowUp(content: string) {
+  const msg = (content.match(/<message>([\s\S]*?)<\/message>/)?.[1] ?? "").trim();
+  const prev = [...content.matchAll(/<question>([\s\S]*?)<\/question>/g)].map((m) => m[1].trim()).at(-1) ?? "";
+  const m = msg.match(/^(?:and|what about|how about|also)\s+(.+?)[?.!]*$/i);
+  if (!m || !prev) return { standalone: msg, follow_up: false };
+  const topic = m[1];
+  const head = topic.split(/\s+/)[0].replace(/[^\w-]/g, "");
+  const re = new RegExp(`\\b${head}\\s+\\S+?(?=[\\s?.!,]|$)`, "i");
+  const standalone = head && re.test(prev) ? prev.replace(re, topic) : `${prev.replace(/[?.!]+$/, "")} ${topic}?`;
+  return { standalone, follow_up: true };
+}
+
+/**
+ * Test-mode help bot and support assistant. Cites the first two sources it was given (`<source id="K1"`);
+ * none = "not found". Markers in the message: "__UNGROUNDED__" claims an answer citing a source that doesn't
+ * exist (the grounding check must turn it into "I don't know"), "__SWEAR__" swears and "__CONTACT__" adds an
+ * email (both cleaned on the way out). Support assistant only: "turn on tracking" proposes that fix for the
+ * first chat in the context with tracking off, "__FIX_OTHER__" proposes it for a chat that isn't there (must be
+ * dropped), "unlock <email>" proposes unlocking that person, and "which checks" lists the check names it got.
+ * Drafting an article (`<resolved_ticket>`) returns a title and body built from the ticket's subject.
+ */
+function fakeSupport(feature: Feature, content: string) {
+  const ticket = content.match(/<resolved_ticket>([\s\S]*?)<\/resolved_ticket>/)?.[1];
+  if (ticket !== undefined) {
+    const subject = ticket.match(/Subject: (.*)/)?.[1]?.trim() || "Support issue";
+    return { title: `How to fix: ${subject}`, body: `If you see this problem (${subject}), here is what fixed it.\n\n1. Check the setting.\n2. Try again.`, tags: ["test"] };
+  }
+  const msg = (content.match(/<message>([\s\S]*?)<\/message>/)?.[1] ?? "").trim();
+  const ids = [...content.matchAll(/<source id="(K\d+)"/g)].map((m) => m[1]);
+  const base = { found: ids.length > 0, reply: ids.length ? `Test help answer from ${ids.slice(0, 2).join(", ")} [${ids[0]}].` : "I couldn't find that in the help articles.", source_ids: ids.slice(0, 2) };
+  if (msg.includes("__UNGROUNDED__")) Object.assign(base, { found: true, reply: "Sidekick includes a free lifetime plan [K99].", source_ids: ["K99"] });
+  if (msg.includes("__SWEAR__")) base.reply = `That setting is shit, use the other one${ids.length ? ` [${ids[0]}]` : ""}.`;
+  if (msg.includes("__CONTACT__")) base.reply += " Write to maria.chen@contoso.example.";
+  // The help bot's schema calls the text `answer`; the support assistant's `reply`.
+  if (feature === "helpbot") return { found: base.found, answer: base.reply, source_ids: base.source_ids };
+  if (msg.includes("__UNGROUNDED__")) return { ...base, uses_checks: false, fix: null };
+  const ctxJson = content.match(/<checks>([\s\S]*?)<\/checks>/)?.[1] ?? "{}";
+  const checks = JSON.parse(ctxJson) as { name: string; chats?: { id: string; track: boolean }[] }[];
+  let fix: { type: string; target: string | null } | null = null;
+  if (/turn on tracking/i.test(msg)) {
+    const chat = checks.flatMap((c) => c.chats ?? []).find((c) => !c.track);
+    fix = { type: "turn_on_tracking", target: chat?.id ?? null };
+  }
+  if (msg.includes("__FIX_OTHER__")) fix = { type: "turn_on_tracking", target: "19:not-this-orgs-chat@thread.v2" };
+  const unlock = msg.match(/unlock (\S+@\S+)/i);
+  if (unlock) fix = { type: "unlock_person", target: unlock[1] };
+  if (/^which checks/i.test(msg)) return { found: true, reply: `Checked: ${checks.map((c) => c.name).join(", ")}.`, source_ids: [], uses_checks: true, fix: null };
+  return { ...base, found: base.found || Boolean(fix), uses_checks: Boolean(fix), fix };
 }
 
 /** A fake "overloaded" failure (test mode only), retried like the real one. */
@@ -288,21 +369,31 @@ type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tok
 const NO_USAGE: Usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
 
 /** Writes one call's usage row (and adds its cost to the AI credit's cached figure). */
-async function recordUsage(ctx: { orgId: string | null; workspaceId: string | null; userId?: string | null }, feature: string, model: string, usage: Usage, cost: number, latency: number, ok: number, error: string | null) {
-  addSpend(ctx.orgId, cost);
+async function recordUsage(ctx: { orgId: string | null; workspaceId: string | null; userId?: string | null; payer?: Payer }, feature: string, model: string, usage: Usage, cost: number, latency: number, ok: number, error: string | null) {
+  // Calls Sidekick pays for itself never count toward the organization's AI credit.
+  if (!ctx.payer) addSpend(ctx.orgId, cost);
   await run(
-    `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, payer, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ctx.orgId, ctx.workspaceId, ctx.userId === undefined ? traceUserId() : ctx.userId, feature, model,
-    usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens, cost, latency, ok, error, now(),
+    usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens, cost, latency, ok, error, ctx.payer ?? null, now(),
   );
 }
 
 /**
- * Whose work a call is: org and workspace (for metering), the reader's role (for restriction wording), and
- * `skipCredit` for work that must not count against the organization's AI credit (see lib/credit.ts).
+ * Who pays for a call that Sidekick pays for itself: "support" (the signed-in support assistant and support
+ * article drafts) or "helpbot" (the public help bot, which has its own daily budget). Such calls skip the
+ * AI credit check and are recorded with `usage_events.payer`, so they never count toward the organization's
+ * AI credit (lib/credit.ts sums only rows without a payer).
  */
-type Ctx = { orgId: string; workspaceId: string | null; role?: string | null; skipCredit?: boolean };
+export type Payer = "support" | "helpbot";
+
+/**
+ * Whose work a call is: org and workspace (for metering; no org for the public help bot), the reader's role
+ * (for restriction wording), `skipCredit` for work that must not be refused by the organization's AI credit
+ * (see lib/credit.ts), and `payer` when Sidekick pays for it (implies `skipCredit`).
+ */
+export type Ctx = { orgId: string | null; workspaceId: string | null; role?: string | null; skipCredit?: boolean; payer?: Payer };
 
 /**
  * Calls Claude and returns its answer, validated against a Zod schema.
@@ -321,7 +412,10 @@ type Ctx = { orgId: string; workspaceId: string | null; role?: string | null; sk
  * Server-side fallback ("default") re-runs a policy-declined request on Anthropic's recommended model.
  * Usage is recorded in `finally`, so failed calls are metered too (one row per call, whatever the retries).
  */
-const SPAN_NAMES: Record<Feature, string> = { ask: "AI: write the answer", extract: "AI: write meeting notes", insights: "AI: build the knowledge map", assist: "AI: in-app assistant", guard: "AI: guardrail check", remind: "AI: word the reminders" };
+const SPAN_NAMES: Record<Feature, string> = {
+  ask: "AI: write the answer", extract: "AI: write meeting notes", insights: "AI: build the knowledge map", assist: "AI: in-app assistant", guard: "AI: guardrail check",
+  remind: "AI: word the reminders", support: "AI: support assistant", helpbot: "AI: public help bot", followup: "AI: rewrite the follow-up",
+};
 export async function structured<S extends z.ZodType>(
   feature: Feature,
   ctx: Ctx,
@@ -340,7 +434,7 @@ export async function structured<S extends z.ZodType>(
  */
 async function gateFor(feature: Feature, ctx: Ctx, content: string): Promise<string> {
   await assertEnabled(feature, ctx.orgId, ctx.role);
-  const gate = await creditGate(feature, ctx.orgId, { size: content.length, skipCredit: ctx.skipCredit });
+  const gate = await creditGate(feature, ctx.orgId, { size: content.length, skipCredit: ctx.skipCredit || Boolean(ctx.payer) });
   return gate.model ?? MODELS[feature];
 }
 

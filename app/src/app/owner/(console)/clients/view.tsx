@@ -1,17 +1,20 @@
 "use client";
 
 /**
- * Clients (/owner/clients): every client organization with its users, usage and errors; add a client or pause one.
+ * Clients (/owner/clients): every client organization with its plan, users, usage and errors; add a client or pause one.
+ * "Managed" in the Plan column means no self-service subscription (added here or by first-run Setup).
  * Click a client's name to see its people and workspaces and set restrictions for it (clients/[id]).
  */
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Icon, Modal, Pill, usd, useReportError, useToast } from "@/components/ui";
+import { planById, STATUS_LABEL, type SubStatus } from "@/lib/plans";
 
 type T = {
   id: string; name: string; status: string; created_at: string; users: number; active_users: number; workspaces: number; documents: number; meetings: number;
   month_cost: number; month_calls: number; month_errors: number; last_activity: string | null; owner_email: string | null;
+  plan: string | null; sub_status: SubStatus | null;
 };
 
 export default function ClientsPage() {
@@ -87,6 +90,7 @@ export default function ClientsPage() {
                 <tr>
                   <th>Client</th>
                   <th>Status</th>
+                  <th>Plan</th>
                   <th className="r">Users</th>
                   <th className="r">Workspaces</th>
                   <th className="r">Meetings</th>
@@ -105,6 +109,7 @@ export default function ClientsPage() {
                       <div className="muted" style={{ fontSize: 12.5 }}>{t.owner_email ?? "—"} · since {fmtDate(t.created_at)}</div>
                     </td>
                     <td><Pill kind={t.status === "Active" ? "good" : "bad"}>{t.status === "Active" ? "Active" : "Paused"}</Pill></td>
+                    <td>{t.plan ? <>{planById(t.plan)?.name ?? t.plan}<div className="muted" style={{ fontSize: 12.5 }}>{t.sub_status ? STATUS_LABEL[t.sub_status] : ""}</div></> : <span className="muted">Managed</span>}</td>
                     <td className="r num">{t.users}<span className="faint"> ({t.active_users} active)</span></td>
                     <td className="r num">{t.workspaces}</td>
                     <td className="r num">{t.meetings}</td>

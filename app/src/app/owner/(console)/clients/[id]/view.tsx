@@ -3,7 +3,10 @@
 /**
  * One client (/owner/clients/:id): who is in this organization (role, workspaces, Microsoft sign-in, last
  * active), its workspaces, its plan (the operator can set plan and subscription status, audited), and its
- * restrictions: feature switches that apply to this client only.
+ * restrictions: feature switches that apply to this client only. Also its limits against use ("over limit"
+ * / "near limit"), this month's AI credit with a one-off top-up, its plan terms (custom limits for
+ * Enterprise or managed clients, AI credit override, contract price, partner/referrer, questions per person
+ * per hour), and its AI use by feature and model (model names are only shown here, never in the portal).
  * Operators only; opening the page is recorded in the operator log once per visit (reloads after a switch
  * flip aren't). Shows no document or meeting content.
  */
@@ -12,7 +15,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Icon, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
-import { limitText, planById, PLANS, STATUS_LABEL, SUB_STATUSES, type Access, type PlanId, type SubStatus } from "@/lib/plans";
+import { ALL_PLANS, LIMIT_KEYS, LIMIT_LABEL, limitText, planById, STATUS_LABEL, SUB_STATUSES, type Access, type LimitKey, type PlanId, type PlanLimits, type SubStatus } from "@/lib/plans";
+import { Limits } from "@/app/(app)/usage/plan";
+
+type LimitLine = { key: LimitKey; label: string; used: number; limit: number | null; pct: number; over: boolean; full: boolean; near: boolean };
+type Terms = { limits: Partial<PlanLimits>; aiCreditUsd: number | null; monthlyPriceUsd: number | null; partner: string | null; askPerHour: number | null; updatedBy: string | null; updatedAt: string | null };
+type Credit = { month: string; creditUsd: number | null; topUpUsd: number; usedUsd: number; pct: number; level: string };
 
 type Person = { id: string; name: string; email: string; role: string; microsoft: boolean; last_active: string | null; created_at: string; workspaces: string[] };
 type Workspace = { id: string; name: string; code: string | null; documents: number; meetings: number; members: number };
@@ -27,6 +35,10 @@ type Detail = {
     access: Access;
     usage: { seats: number; workspaces: number };
   };
+  terms: Terms;
+  credit: Credit;
+  limits: LimitLine[];
+  ai: { byModel: { feature: string; model: string; calls: number; cost: number; input: number; cached: number }[] };
 };
 
 export default function ClientPage() {
@@ -98,6 +110,14 @@ function Client() {
       </div>
 
       <PlanPanel d={d} onSaved={() => load(true).catch(reportError)} />
+      <div className="grid g2">
+        <div className="panel">
+          <div className="panel-h"><h2>Limits this month</h2></div>
+          <div className="panel-b"><Limits lines={d.limits} /></div>
+        </div>
+        <CreditPanel d={d} onSaved={() => load(true).catch(reportError)} />
+      </div>
+      <TermsPanel d={d} onSaved={() => load(true).catch(reportError)} />
 
       <div className="grid g2">
         <div className="panel">
@@ -170,12 +190,12 @@ function PlanPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="muted" style={{ margin: 0 }}>
           {sub && p
-            ? <>{p.name} (${p.pricePerSeat} per person) via {sub.provider === "mock" ? "test-mode checkout" : sub.provider === "manual" ? "the Sidekick team" : sub.provider} · {d.billing.usage.seats} of {limitText(p.seats)} people · {d.billing.usage.workspaces} of {limitText(p.workspaces)} workspaces · last change by {sub.updated_by ?? "—"} {fmtTime(sub.updated_at)}</>
+            ? <>{p.name} ({p.selfService ? `$${p.pricePerSeat} per person` : "custom price"}) via {sub.provider === "mock" ? "test-mode checkout" : sub.provider === "manual" ? "the Sidekick team" : sub.provider} · {d.billing.usage.seats} of {limitText(p.seats)} people · {d.billing.usage.workspaces} of {limitText(p.workspaces)} workspaces · last change by {sub.updated_by ?? "—"} {fmtTime(sub.updated_at)}</>
             : <>No self-service plan: this client was added by the Sidekick team and has full use. Setting a plan here starts billing rules for them.</>}
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <select className="input" style={{ width: "auto" }} value={plan} onChange={(e) => setPlan(e.target.value as PlanId)} aria-label="Plan">
-            {PLANS.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            {ALL_PLANS.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </select>
           <select className="input" style={{ width: "auto" }} value={status} onChange={(e) => setStatus(e.target.value as SubStatus)} aria-label="Status">
             {SUB_STATUSES.map((x) => <option key={x} value={x}>{STATUS_LABEL[x]}</option>)}
@@ -183,6 +203,124 @@ function PlanPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
           <button className="btn primary" disabled={!changed} onClick={save}>Save plan</button>
         </div>
         <span className="muted" style={{ fontSize: 12.5 }}>Recorded in the operator log and the client&apos;s audit log. Canceled turns the client read-only at once; Payment failed gives them 7 days.</span>
+        {err && <p className="err" style={{ margin: 0 }}>{err}</p>}
+      </div>
+    </div>
+  );
+}
+
+const money = (n: number) => `$${n.toFixed(2)}`;
+
+/**
+ * This month's AI credit (used of included, top-ups) and a one-off top-up for this month (POST
+ * /api/owner/tenants/:id/credit, audited on both sides), plus the client's AI use by feature and model.
+ */
+function CreditPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
+  const toast = useToast();
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [err, setErr] = useState("");
+  const c = d.credit;
+  const topUp = async () => {
+    setErr("");
+    try {
+      await api(`/api/owner/tenants/${d.org.id}/credit`, { method: "POST", json: { amountUsd: Number(amount), note } });
+      toast(`Added $${Number(amount).toFixed(2)} of AI credit for ${d.org.name}`);
+      setAmount("");
+      setNote("");
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't add the top-up.");
+    }
+  };
+  return (
+    <div className="panel">
+      <div className="panel-h">
+        <h2>AI credit ({c.month})</h2>
+        <Pill kind={c.level === "essentials" ? "bad" : c.level === "warn" ? "warn" : "good"}>{c.level === "unlimited" ? "No limit" : c.level === "essentials" ? "Used up: essentials only" : `${Math.round(c.pct)}% used`}</Pill>
+      </div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <span><b className="num">{money(c.usedUsd)}</b>{c.creditUsd !== null && <span className="muted"> of {money(c.creditUsd)}{c.topUpUsd ? ` (incl. ${money(c.topUpUsd)} top-ups)` : ""}</span>}</span>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input className="input" style={{ width: 120 }} inputMode="decimal" placeholder="Amount $" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Top-up amount in dollars" />
+          <input className="input" style={{ flex: 1, minWidth: 140 }} placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Top-up note" />
+          <button className="btn primary" disabled={!(Number(amount) > 0)} onClick={topUp}>Add top-up</button>
+        </div>
+        {err && <p className="err" style={{ margin: 0 }}>{err}</p>}
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Feature</th><th>Model</th><th className="r">Requests</th><th className="r" title="Share of input read from the prompt cache">Cached</th><th className="r">Cost</th></tr></thead>
+            <tbody>
+              {d.ai.byModel.map((m) => <tr key={`${m.feature}-${m.model}`}><td>{m.feature}</td><td className="mono">{m.model}</td><td className="r num">{m.calls}</td><td className="r num">{m.input ? `${Math.round((m.cached / m.input) * 100)}%` : "—"}</td><td className="r num">{money(Number(m.cost))}</td></tr>)}
+              {!d.ai.byModel.length && <tr><td colSpan={5} className="muted">No AI use this month.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The client's plan terms (PATCH /api/owner/tenants/:id/terms): custom limits (empty = the plan's number,
+ * "unlimited" = no limit), AI credit override, contract price per month, partner/referrer, and questions
+ * per person per hour. Saves only what changed; audited in the operator log and the client's audit log.
+ */
+function TermsPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
+  const toast = useToast();
+  const t = d.terms;
+  const keys = LIMIT_KEYS.filter((k) => k !== "aiCreditUsd");
+  const show = (v: number | null | undefined) => (v === undefined ? "" : v === null ? "unlimited" : String(v));
+  const [lim, setLim] = useState<Record<string, string>>(() => Object.fromEntries(keys.map((k) => [k, show(t.limits[k])])));
+  const [credit, setCredit] = useState(t.aiCreditUsd === null ? "" : String(t.aiCreditUsd));
+  const [price, setPrice] = useState(t.monthlyPriceUsd === null ? "" : String(t.monthlyPriceUsd));
+  const [partner, setPartner] = useState(t.partner ?? "");
+  const [ask, setAsk] = useState(t.askPerHour === null ? "" : String(t.askPerHour));
+  const [err, setErr] = useState("");
+  const num = (s: string) => (s.trim() === "" ? null : Number(s));
+  const save = async () => {
+    setErr("");
+    const limits: Record<string, number | null> = {};
+    for (const k of keys) {
+      const v = lim[k].trim().toLowerCase();
+      if (v === "") continue;
+      limits[k] = v === "unlimited" ? null : Number(v);
+    }
+    const body: Record<string, unknown> = {
+      limits: Object.keys(limits).length ? limits : null,
+      aiCreditUsd: num(credit), monthlyPriceUsd: num(price), partner: partner.trim() || null, askPerHour: num(ask),
+    };
+    // NaN would travel as null (= no limit), so typos are caught here.
+    if ([...Object.values(limits), body.aiCreditUsd, body.monthlyPriceUsd, body.askPerHour].some((v) => typeof v === "number" && Number.isNaN(v))) {
+      setErr("Use numbers only (or \"unlimited\" for a limit, or leave it empty).");
+      return;
+    }
+    try {
+      await api(`/api/owner/tenants/${d.org.id}/terms`, { method: "PATCH", json: body });
+      toast(`Saved plan terms for ${d.org.name}`);
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't save.");
+    }
+  };
+  return (
+    <div className="panel">
+      <div className="panel-h"><h2>Plan terms</h2>{t.updatedBy && <span className="muted">Last change by {t.updatedBy} {fmtTime(t.updatedAt)}</span>}</div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <p className="muted" style={{ margin: 0 }}>Leave a limit empty to use the plan&apos;s number; type &quot;unlimited&quot; for no limit. Lowering a limit never deletes anything: the client just can&apos;t add more.</p>
+        <div className="grid g3">
+          {keys.map((k) => (
+            <label key={k} className="field">
+              <span>{LIMIT_LABEL[k].many[0].toUpperCase() + LIMIT_LABEL[k].many.slice(1)}</span>
+              <input className="input" value={lim[k]} placeholder="Plan's number" onChange={(e) => setLim((cur) => ({ ...cur, [k]: e.target.value }))} />
+            </label>
+          ))}
+          <label className="field"><span>AI credit per month ($)</span><input className="input" inputMode="decimal" value={credit} placeholder="Plan's credit" onChange={(e) => setCredit(e.target.value)} /></label>
+          <label className="field"><span>Contract price per month ($)</span><input className="input" inputMode="decimal" value={price} placeholder="Enterprise / managed only" onChange={(e) => setPrice(e.target.value)} /></label>
+          <label className="field"><span>Partner or referrer</span><input className="input" value={partner} maxLength={120} placeholder="Who brought this client" onChange={(e) => setPartner(e.target.value)} /></label>
+          <label className="field"><span>Questions per person per hour</span><input className="input" inputMode="numeric" value={ask} placeholder="Default (60)" onChange={(e) => setAsk(e.target.value)} /></label>
+        </div>
+        <div><button className="btn primary" onClick={save}>Save plan terms</button></div>
         {err && <p className="err" style={{ margin: 0 }}>{err}</p>}
       </div>
     </div>

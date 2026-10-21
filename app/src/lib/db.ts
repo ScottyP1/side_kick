@@ -79,6 +79,41 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   past_due_since TEXT, canceled_at TEXT, access_until TEXT,
   updated_by TEXT, updated_at TEXT NOT NULL, created_at TEXT NOT NULL
 );
+-- Plan terms the Sidekick team sets per organization in the Owner Console (lib/limits.ts, lib/credit.ts):
+-- custom limits (JSON, Enterprise or managed clients), an AI credit override, the contract price per month
+-- (Enterprise / managed), the partner or referrer who brought the client, and a per-person questions-per-hour
+-- limit. Missing row = the plan's own numbers.
+CREATE TABLE IF NOT EXISTS org_terms (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), limits_json TEXT, ai_credit_usd REAL, monthly_price_usd REAL,
+  partner TEXT, ask_per_hour INTEGER, updated_by TEXT, updated_at TEXT NOT NULL
+);
+-- One-off AI credit top-ups granted by the Sidekick team, for one calendar month (YYYY-MM, UTC).
+CREATE TABLE IF NOT EXISTS credit_topups (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), month TEXT NOT NULL, amount_usd REAL NOT NULL,
+  note TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS credit_topups_org ON credit_topups(org_id, month);
+-- AI credit notices already given (level warn = 80%, essentials = 100%), so each is audited once a month.
+CREATE TABLE IF NOT EXISTS credit_notices (
+  org_id TEXT NOT NULL, month TEXT NOT NULL, level TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, month, level)
+);
+-- Rate-limit hits (lib/rate-limit.ts), e.g. bucket "ask:<user id>". Kept two hours.
+CREATE TABLE IF NOT EXISTS rate_events (
+  id TEXT PRIMARY KEY, bucket TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rate_events_bucket ON rate_events(bucket, created_at);
+-- Claude work queued for the Batch API (lib/claude.ts queueStructured / runBatches), e.g. daily reminder
+-- digests. request_json (instructions + content) is cleared once the result is handled; rows go after a day.
+CREATE TABLE IF NOT EXISTS ai_batch_items (
+  id TEXT PRIMARY KEY, batch_id TEXT, org_id TEXT NOT NULL, workspace_id TEXT, feature TEXT NOT NULL, model TEXT NOT NULL,
+  handler TEXT NOT NULL, ref TEXT NOT NULL, request_json TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_batch_items_status ON ai_batch_items(status, batch_id);
+-- Versions of the app seen running (lib/ops.ts): commit and release time set by the deploy, first seen.
+CREATE TABLE IF NOT EXISTS app_releases (
+  release_key TEXT PRIMARY KEY, commit_sha TEXT, released_at TEXT, first_seen_at TEXT NOT NULL
+);
 -- Microsoft sign-in in progress: one row per "Sign in with Microsoft" click, kept 10 minutes. state is
 -- the random value sent to Microsoft and back; verifier (PKCE) and nonce prove the reply belongs to it.
 -- mode = signin | link (an Org Owner connecting their organization's Microsoft tenant).
@@ -379,6 +414,8 @@ function migrate(conn: DatabaseSync) {
   if (!has("teams_conversations", "leave_tried_at")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN leave_tried_at TEXT");
   // Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
   if (!has("workspaces", "client")) conn.exec("ALTER TABLE workspaces ADD COLUMN client TEXT");
+  // Plan limits: each meeting's length, for meeting hours per month.
+  if (!has("meetings", "duration_min")) conn.exec("ALTER TABLE meetings ADD COLUMN duration_min INTEGER");
   // Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.
   // Where each session was started and when it was last used (Settings → Where you're signed in).
   for (const col of ["created_at", "last_seen", "user_agent", "ip"]) if (!has("sessions", col)) conn.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);

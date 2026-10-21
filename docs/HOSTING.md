@@ -85,6 +85,19 @@ Actions tab has **Run workflow** for a manual deploy, and `./infra/azure/deploy.
 - **Stop automatic deploys** (e.g. during an incident): Actions → Deploy → ⋯ → Disable workflow.
 - Rollback by hand: `docs/RUNBOOKS.md` → Roll back.
 
+**Release facts for the Owner Console.** The console's **Business** page shows which commit is running and
+when it was released, read from two settings on the container: `SIDEKICK_COMMIT` (short git commit) and
+`SIDEKICK_RELEASED_AT` (ISO time). The automatic deploy (`.github/workflows/deploy.yml`) sets them when it switches the app to the new image
+(and again on a rollback, to the previous image's tag).
+Without them the page falls back to the git checkout (laptop) or says "Not set by the deploy". Each app
+copy records the release it runs (`app_releases`) the first time `/api/health` answers, so the page lists
+the recent deploys without needing Azure.
+
+**AI settings worth knowing** (all optional): `SIDEKICK_CLAUDE_RETRIES` (extra attempts when Claude is busy,
+default 3), `SIDEKICK_BATCH=off` (send daily reminder wording live instead of through the half-price Batch
+API), `SIDEKICK_MODEL_ESSENTIAL_ASK/_GUARD/_EXTRACT` (models used once a client's AI credit is used up),
+`SIDEKICK_ASK_PER_HOUR` (questions per person per hour, default 60).
+
 ## Teams app package
 
 There is **one** Sidekick app in Teams: its app ID is the Azure Bot's ID, and Teams sends its messages to
@@ -120,6 +133,10 @@ otherwise the app's own address, which serves those pages.
   points at the tunnel. Upload the live package again afterwards.
 
 ## Monitoring and alerts (October 20, 2026)
+
+Day to day, watch the business and the app's health in the **Owner Console → Business** page (MRR,
+margin, limits, trials, payments, health checks, running release, app errors). The Azure pieces below are
+the safety net that alerts when the app itself is down.
 
 - **Health probes** on `sidekick-app`: *startup* and *readiness* call `/api/health` (200 only when the
   database answers); *liveness* is a plain port check, so a database blip takes the app out of traffic

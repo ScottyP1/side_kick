@@ -4,6 +4,9 @@
  * followed by a reminder in the chats that want one after meetings (lib/reminders.ts).
  */
 import { after } from "next/server";
+import { assertCanAdd } from "@/lib/limits";
+import { transcriptMinutes } from "@/lib/plans";
+import { creditGate } from "@/lib/credit";
 import { handle, withErrorDetails } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { all, newId, now, run } from "@/lib/db";
@@ -37,7 +40,9 @@ export const GET = handle(async (req: Request) => {
 /**
  * Import a meeting transcript (Teams .vtt or .docx, or pasted text) and let Sidekick write the notes.
  * Who: people who can edit content in the workspace. Limits: files up to 25 MB, and the transcript text
- * (pasted or from the file) up to `MAX_TRANSCRIPT_CHARS`; the date must be YYYY-MM-DD.
+ * (pasted or from the file) up to `MAX_TRANSCRIPT_CHARS`; the date must be YYYY-MM-DD. Plan limits: the
+ * meeting's length counts toward this month's meeting hours (402 past the limit), and once the AI credit is
+ * used up, long meetings are refused before saving (short ones still get notes; lib/credit.ts).
  * If writing the notes fails, the meeting is still saved (status Failed) and the error body carries its
  * `meeting_id`, so the page can open it with **Try again** instead of the person importing it twice.
  */
@@ -64,10 +69,14 @@ export const POST = handle(async (req: Request) => {
   const heldAt = String(form.get("held_at") ?? "").trim() || now().slice(0, 10);
   // Dates sort as text, so anything but a real YYYY-MM-DD date would jump above real meetings.
   if (!isDay(heldAt)) throw new HttpError(400, "Meeting date must be a date like 2026-10-20.");
+  // Plan limits before anything is saved: meeting hours this month, and (AI credit used up) long meetings.
+  const minutes = transcriptMinutes(transcript);
+  await assertCanAdd(user.org_id, "meetingHours", minutes / 60);
+  await creditGate("extract", user.org_id, { size: transcript.length });
   const id = newId();
   await run(
-    "INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?)",
-    id, user.org_id, ws, title, heldAt, form.get("external") === "true" ? 1 : 0, transcript, user.id, now(),
+    "INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at, duration_min) VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?, ?)",
+    id, user.org_id, ws, title, heldAt, form.get("external") === "true" ? 1 : 0, transcript, user.id, now(), minutes,
   );
   await audit(user, `Imported meeting “${title}”`, "Data", ws);
   try {

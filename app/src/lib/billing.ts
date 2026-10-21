@@ -123,10 +123,14 @@ export async function readOnlyRefusal(req: Request): Promise<string | null> {
 const inDays = (n: number) => new Date(Date.now() + n * 86400_000).toISOString();
 const planName = (id: PlanId) => planById(id)!.name;
 
-/** Throws 400 unless `plan` is one of PLANS. Returns it typed. */
-export function requirePlan(plan: unknown): PlanId {
+/**
+ * Throws 400 unless `plan` is one of the self-service plans (Starter, Team, Business). Returns it typed.
+ * With `operator` (the Owner Console), Enterprise is allowed too; customers can't pick it themselves.
+ */
+export function requirePlan(plan: unknown, opts: { operator?: boolean } = {}): PlanId {
   const p = planById(plan);
-  if (!p) throw new HttpError(400, "Pick one of the plans: Starter, Team or Business.");
+  if (p && !p.selfService && !opts.operator) throw new HttpError(400, "Enterprise is set up with the Sidekick team. Contact them, or pick Starter, Team or Business.");
+  if (!p) throw new HttpError(400, opts.operator ? "Pick a plan: Starter, Team, Business or Enterprise." : "Pick one of the plans: Starter, Team or Business.");
   return p.id;
 }
 

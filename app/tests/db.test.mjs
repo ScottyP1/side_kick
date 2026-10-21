@@ -252,6 +252,31 @@ test(`[${engine}] subscriptions: one per organization; the upsert works on this 
   assert.deepEqual(rows.map((r) => ({ ...r })), [{ plan: "business", status: "active" }]);
 });
 
+/* ---------- Plan limits (lib/plans.ts, no I/O) ---------- */
+test(`[${engine}] plan limits: every plan has every limit; Enterprise isn't for sale; limit states and custom limits`, () => {
+  for (const p of plans.ALL_PLANS) for (const k of plans.LIMIT_KEYS) assert.ok(k in p, `${p.id} has ${k}`);
+  assert.equal(plans.planById("enterprise").selfService, false);
+  assert.ok(!plans.PLANS.some((p) => p.id === "enterprise"), "buyers never see Enterprise");
+  assert.deepEqual(plans.PLANS.map((p) => p.aiCreditUsd), [20, 150, 1000]);
+  assert.deepEqual(plans.ALL_PLANS.map((p) => p.liveMeetingHours), [0, 0, 0, 100], "live meetings are Enterprise only");
+  assert.deepEqual(plans.limitState(4, 5), { used: 4, limit: 5, pct: 80, over: false, full: false, near: true });
+  assert.equal(plans.limitState(6, 5).over, true, "a plan that shrank shows over limit");
+  assert.equal(plans.limitState(0, 0).full, true, "a limit of 0 means none fit");
+  assert.equal(plans.limitState(999, null).near, false, "unlimited is never near");
+  assert.deepEqual(plans.parseCustomLimits({ seats: 3, workspaces: null, aiCreditUsd: 12.5 }), { limits: { seats: 3, workspaces: null, aiCreditUsd: 12.5 } });
+  assert.match(plans.parseCustomLimits({ seats: 1.5 }).error, /people must be a number/);
+  assert.match(plans.parseCustomLimits({ seats: -1 }).error, /people must be a number/);
+  assert.match(plans.parseCustomLimits({ gold: 1 }).error, /isn't a limit/);
+  assert.match(plans.parseCustomLimits([1]).error, /must be an object/);
+});
+
+test(`[${engine}] meeting hours: a transcript's length comes from its timestamps, or its words`, () => {
+  assert.equal(plans.transcriptMinutes("[00:00:05] Ana: hi\n[00:44:30] Ben: bye"), 45);
+  assert.equal(plans.transcriptMinutes("00:01:02.345 --> 00:01:05.000\n<v Ana>Hi</v>\n01:30:00.000 --> 01:30:04.000\n<v Ben>Bye</v>"), 90);
+  assert.equal(plans.transcriptMinutes("word ".repeat(1500)), 10, "about 150 words a minute without timestamps");
+  assert.equal(plans.transcriptMinutes("short"), 1, "at least a minute");
+});
+
 /* ---------- encryption at rest for stored secrets (src/lib/secret-box.ts) ---------- */
 const box = await import("../src/lib/secret-box.ts");
 

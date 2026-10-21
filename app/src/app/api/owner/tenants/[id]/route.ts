@@ -10,6 +10,8 @@ import { audit, HttpError } from "@/lib/auth";
 import { all, get, run } from "@/lib/db";
 import { billingSummary } from "@/lib/billing";
 import { orgFlags, platformLog, requireOwner } from "@/lib/owner";
+import { creditStatus } from "@/lib/credit";
+import { limitReport, monthStart, orgTerms } from "@/lib/limits";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -17,7 +19,9 @@ type Ctx = { params: Promise<{ id: string }> };
  * The client's details for its Owner Console page: the organization (status, Microsoft sign-in), every
  * person (role, workspaces, Microsoft-linked, last active), every workspace (members, documents, meetings)
  * its feature switches and its subscription (plan, status, what it allows now; null = managed by the
- * Sidekick team). Never any document or meeting content.
+ * Sidekick team), its plan terms (custom limits, AI credit override, contract price, partner), every limit
+ * with its use, this month's AI credit, and its AI use by feature and model (models are shown only here,
+ * never in the client portal). Never any document or meeting content.
  */
 export const GET = handle(async (req: Request, { params }: Ctx) => {
   const owner = await requireOwner();
@@ -39,6 +43,7 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
     "SELECT wm.user_id, wm.workspace_id FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id WHERE w.org_id = ?", org.id,
   );
   const wsName = new Map(workspaces.map((w) => [w.id, w.name]));
+  const credit = await creditStatus(org.id, { fresh: true });
   // Once per visit: the page's own reloads after a change send ?reload=1.
   if (new URL(req.url).searchParams.get("reload") !== "1") await platformLog(owner.name, `Viewed the people and workspaces of ${org.name}`);
   return {
@@ -52,6 +57,12 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
     workspaces: workspaces.map((w) => ({ ...w, members: members.filter((m) => m.workspace_id === w.id).length })),
     flags: await orgFlags(org.id),
     billing: await billingSummary(org.id),
+    terms: await orgTerms(org.id),
+    credit,
+    limits: (await limitReport(org.id, credit.usedUsd)).lines,
+    ai: {
+      byModel: await all("SELECT feature, model, COUNT(*) calls, COALESCE(SUM(cost_usd),0) cost, COALESCE(SUM(input_tokens + cache_read_tokens + cache_write_tokens),0) input, COALESCE(SUM(cache_read_tokens),0) cached FROM usage_events WHERE org_id = ? AND created_at >= ? GROUP BY feature, model ORDER BY cost DESC", org.id, monthStart()),
+    },
   };
 });
 

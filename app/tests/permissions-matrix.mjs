@@ -44,6 +44,7 @@ export const MATRIX = [
   // Money
   { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ["owner", "admin", "billing"] },
   { what: "See the plan and subscription", method: "GET", url: () => "/api/billing", allow: ["owner", "admin", "billing"] },
+  { what: "Export usage per group (CSV, for chargeback)", method: "GET", url: () => "/api/usage/export?months=1", allow: ["owner", "admin", "billing"] },
   { what: "Pay, change the plan or cancel it", method: "POST", url: () => "/api/billing", body: { action: "nope" }, allow: ["owner", "billing"] },
   // Running the organization
   { what: "Create workspaces", method: "POST", url: () => "/api/workspaces", body: {}, allow: ADMINS },

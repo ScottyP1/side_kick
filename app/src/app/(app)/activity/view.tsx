@@ -3,7 +3,7 @@
 /**
  * Activity (/activity): what Sidekick did for this organization, like an APM tool (Dynatrace-style).
  * - Overview: request volume, failures, response times, AI calls and cost, portal vs Teams, busiest operations.
- * - Traces: every request and Teams message; click one for its step-by-step waterfall (search, Claude,
+ * - Traces: every request and Teams message; click one for its step-by-step waterfall (search, AI,
  *   embeddings, Teams delivery, database time).
  * - Messages: questions asked in the portal and in Teams, and whether Sidekick found the answer.
  * - Audit trail: who did what (the same log as Security & audit).
@@ -34,7 +34,7 @@ const ms = (n: number) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFi
 const pctText = (x: number) => `${(x * 100).toFixed(x > 0 && x < 0.01 ? 1 : 0)}%`;
 
 /** Plain-language names and colors (CSS classes k-*) for each kind of step. */
-const KINDS: Record<string, string> = { request: "Request", search: "Search", ai: "Claude", embed: "Embeddings", teams: "Teams", index: "Indexing", file: "Reading a file", guard: "Guardrails", remind: "Reminders", billing: "Sign-up & billing", microsoft: "Microsoft 365", auth: "Sign-in security" };
+const KINDS: Record<string, string> = { request: "Request", search: "Search", ai: "AI", embed: "Embeddings", teams: "Teams", index: "Indexing", file: "Reading a file", guard: "Guardrails", remind: "Reminders", billing: "Sign-up & billing", microsoft: "Microsoft 365", auth: "Sign-in security" };
 
 export default function ActivityPage() {
   const [tab, setTab] = useState<Tab>("Overview");

@@ -6,7 +6,14 @@
  *
  * Concepts
  * - **Plan**: what an organization pays for. Priced **per seat per month**: a seat is one person with a
- *   portal account in the organization (any role). Each plan also has a seat limit and a workspace limit.
+ *   portal account in the organization (any role). Each plan has **limits** (`PlanLimits`): people, groups
+ *   (workspaces), tracked Teams chats, meeting hours per month, documents, connectors and a **monthly AI
+ *   credit** in US dollars. Limits are enforced where each thing is created (lib/limits.ts) and the AI
+ *   credit before every Claude call (lib/credit.ts). A plan that shrinks never deletes anything: new things
+ *   are refused and the portal shows "over limit".
+ * - **Enterprise**: not self-service. Its limits and price are set per organization by the Sidekick team in
+ *   the Owner Console (`org_terms`); until they are, it gets the Business limits. Organizations with no
+ *   subscription at all ("managed", set up by the Sidekick team) have no limits unless the team sets some.
  * - **Made-up prices**: Sidekick's pricing isn't decided yet (see docs/BLUEPRINT.md). These numbers are
  *   placeholders for the test-mode checkout and will change before anyone pays real money.
  * - **Trial**: every self-service sign-up starts with `TRIAL_DAYS` of free use before the first payment.
@@ -15,17 +22,48 @@
  */
 
 /** The plan ids stored in `subscriptions.plan`. */
-export const PLAN_IDS = ["starter", "team", "business"] as const;
+export const PLAN_IDS = ["starter", "team", "business", "enterprise"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
-/** One plan as shown to buyers. `seats`/`workspaces` are limits; `null` means no limit. */
-export type Plan = {
-  id: PlanId;
-  name: string;
-  /** US dollars per seat per month (made up, test mode only). */
-  pricePerSeat: number;
+/**
+ * What a plan allows. `null` means no limit. `connectors`: 0 = none, 1 = one tool, null = all of them.
+ * `meetingHours`, `liveMeetingHours` and `aiCreditUsd` are per calendar month (UTC); the others are totals
+ * at any moment. `liveMeetingHours` is Sidekick joining calls live (product step 3, not built yet): only
+ * Enterprise includes it.
+ */
+export type PlanLimits = {
   seats: number | null;
   workspaces: number | null;
+  chats: number | null;
+  meetingHours: number | null;
+  liveMeetingHours: number | null;
+  documents: number | null;
+  connectors: number | null;
+  aiCreditUsd: number | null;
+};
+export type LimitKey = keyof PlanLimits;
+export const LIMIT_KEYS: readonly LimitKey[] = ["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors", "aiCreditUsd"];
+
+/** Plain names for the limits, as shown to people ("2 of 2 groups"). */
+export const LIMIT_LABEL: Record<LimitKey, { one: string; many: string }> = {
+  seats: { one: "person", many: "people" },
+  workspaces: { one: "group", many: "groups" },
+  chats: { one: "tracked Teams chat", many: "tracked Teams chats" },
+  meetingHours: { one: "meeting hour this month", many: "meeting hours this month" },
+  liveMeetingHours: { one: "live meeting hour this month", many: "live meeting hours this month" },
+  documents: { one: "document", many: "documents" },
+  connectors: { one: "connector", many: "connectors" },
+  aiCreditUsd: { one: "AI credit this month", many: "AI credit this month" },
+};
+
+/** One plan as shown to buyers. `seats`/`workspaces` (and the other limits) are `null` for no limit. */
+export type Plan = PlanLimits & {
+  id: PlanId;
+  name: string;
+  /** US dollars per seat per month (made up, test mode only). 0 for Enterprise (priced per contract). */
+  pricePerSeat: number;
+  /** False for Enterprise: set up by the Sidekick team, never bought or picked at checkout. */
+  selfService: boolean;
   /** One line for the pricing card. */
   blurb: string;
   /** What's included, in plain words, for the pricing card. */
@@ -38,8 +76,15 @@ export const PLANS: readonly Plan[] = [
     id: "starter",
     name: "Starter",
     pricePerSeat: 8,
+    selfService: true,
     seats: 10,
     workspaces: 2,
+    chats: 5,
+    meetingHours: 20,
+    liveMeetingHours: 0,
+    documents: 200,
+    connectors: 0,
+    aiCreditUsd: 20,
     blurb: "For a small team trying Sidekick on one or two projects.",
     features: ["Up to 10 people", "2 workspaces", "Answers with sources in Teams and the portal", "Meeting notes and action items", "Guardrails and audit log"],
   },
@@ -47,8 +92,15 @@ export const PLANS: readonly Plan[] = [
     id: "team",
     name: "Team",
     pricePerSeat: 15,
+    selfService: true,
     seats: 50,
     workspaces: 10,
+    chats: 30,
+    meetingHours: 100,
+    liveMeetingHours: 0,
+    documents: 2000,
+    connectors: 1,
+    aiCreditUsd: 150,
     blurb: "For a delivery team running several client engagements.",
     features: ["Up to 50 people", "10 workspaces", "Everything in Starter", "Reminders in Teams chats", "Team Leads and custom guardrail rules"],
   },
@@ -56,12 +108,92 @@ export const PLANS: readonly Plan[] = [
     id: "business",
     name: "Business",
     pricePerSeat: 25,
+    selfService: true,
     seats: 500,
     workspaces: null,
+    chats: 200,
+    meetingHours: 500,
+    liveMeetingHours: 0,
+    documents: 20000,
+    connectors: null,
+    aiCreditUsd: 1000,
     blurb: "For a whole practice, with Microsoft sign-in for everyone.",
     features: ["Up to 500 people", "Unlimited workspaces", "Everything in Team", "Require Microsoft sign-in", "Priority support"],
   },
 ];
+
+/**
+ * Enterprise: limits and price agreed per organization and set by the Sidekick team (Owner Console →
+ * client → Plan terms). These defaults (the Business limits) apply until the team sets its own.
+ */
+export const ENTERPRISE: Plan = {
+  id: "enterprise",
+  name: "Enterprise",
+  pricePerSeat: 0,
+  selfService: false,
+  seats: 500,
+  workspaces: null,
+  chats: 200,
+  meetingHours: 500,
+  liveMeetingHours: 100,
+  documents: 20000,
+  connectors: null,
+  aiCreditUsd: 1000,
+  blurb: "Custom limits and price, set up with the Sidekick team.",
+  features: ["Custom limits and price", "Live meetings (when available)", "Everything in Business"],
+};
+
+/** Every plan including Enterprise (for the server and the Owner Console). Buyers only see `PLANS`. */
+export const ALL_PLANS: readonly Plan[] = [...PLANS, ENTERPRISE];
+
+/** No limits at all: organizations managed by the Sidekick team with no plan and no custom terms. */
+export const UNLIMITED: PlanLimits = { seats: null, workspaces: null, chats: null, meetingHours: null, liveMeetingHours: null, documents: null, connectors: null, aiCreditUsd: null };
+
+/** Just the limits of a plan (drops price and wording). */
+export const limitsOf = (p: Plan): PlanLimits => Object.fromEntries(LIMIT_KEYS.map((k) => [k, p[k]])) as PlanLimits;
+
+/**
+ * Checks custom limits typed by an operator: each known key must be null (no limit) or a whole number ≥ 0
+ * (the AI credit may have cents). Returns only the valid keys, or a message for the first bad one.
+ */
+export function parseCustomLimits(raw: unknown): { limits: Partial<PlanLimits> } | { error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "Limits must be an object like { \"seats\": 100 }." };
+  const out: Partial<PlanLimits> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!LIMIT_KEYS.includes(k as LimitKey)) return { error: `“${k.slice(0, 40)}” isn't a limit. Use: ${LIMIT_KEYS.join(", ")}.` };
+    if (v === null) out[k as LimitKey] = null;
+    else if (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1e9 && (k === "aiCreditUsd" || Number.isInteger(v))) out[k as LimitKey] = v;
+    else return { error: `${LIMIT_LABEL[k as LimitKey].many} must be a number of 0 or more, or empty for no limit.` };
+  }
+  return { limits: out };
+}
+
+/**
+ * How full one limit is: `pct` (0-100+, 0 when unlimited), `over` when more is used than allowed (a plan
+ * that shrank), `full` when nothing more fits, and `near` from 80%. Pure, unit-tested.
+ */
+export function limitState(used: number, limit: number | null) {
+  if (limit === null) return { used, limit, pct: 0, over: false, full: false, near: false };
+  const pct = limit === 0 ? (used > 0 ? 100 : 0) : (used / limit) * 100;
+  return { used, limit, pct, over: used > limit, full: used >= limit, near: pct >= 80 };
+}
+
+/**
+ * About how many minutes a transcript covers: from its first to its last timestamp ("00:12:05", "[12:05]",
+ * or WebVTT "00:12:05.120 --> …"), or, without timestamps, from its length at about 150 spoken words a
+ * minute. At least 1 minute. Used for meeting hours.
+ */
+export function transcriptMinutes(text: string): number {
+  const stamps = [...text.matchAll(/(?<![\d:])(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[.,]\d{1,3})?(?![\d:])/g)]
+    .map(([, h, m, s]) => Number(h ?? 0) * 3600 + Number(m) * 60 + Number(s))
+    .filter((n) => Number.isFinite(n));
+  if (stamps.length >= 2) {
+    const span = (Math.max(...stamps) - Math.min(...stamps)) / 60;
+    if (span >= 1) return Math.ceil(span);
+  }
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.ceil(words / 150));
+}
 
 /** Free days before the first payment for a new self-service organization. */
 export const TRIAL_DAYS = 14;
@@ -72,14 +204,14 @@ export const PERIOD_DAYS = 30;
 
 /** The plan with this id, or undefined for anything else (e.g. text from a request). */
 export function planById(id: unknown): Plan | undefined {
-  return PLANS.find((p) => p.id === id);
+  return ALL_PLANS.find((p) => p.id === id);
 }
 
 /** "Unlimited" or the number, for limits shown to people. */
 export const limitText = (n: number | null) => (n === null ? "Unlimited" : String(n));
 
 /** "$15 per person / month" */
-export const priceText = (p: Plan) => `$${p.pricePerSeat} per person / month`;
+export const priceText = (p: Plan) => (p.selfService ? `$${p.pricePerSeat} per person / month` : "Custom price");
 
 /* ---------- What a subscription allows (pure, unit-tested in tests/db.test.mjs) ---------- */
 

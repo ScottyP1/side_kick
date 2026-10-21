@@ -49,6 +49,17 @@ Support scope (item 5): portal Help → Contact support (auto contact details, c
 - Microsoft 365 trial ends **Nov 14, 2026**: keep ($8.40/month) or cancel before Nov 15 (`docs/RUNBOOKS.md` → Trial end).
 - Pitch prep: lawyer check (IP, privacy/terms drafts), dry run.
 
+## Plan limits & AI credit (Oct 20, 2026, branch `claude/plan-limits-ai-credit-e04f04`)
+- **Limits** in `lib/plans.ts` (Starter 10 people / 2 groups / 5 tracked chats / 20 meeting h / 200 docs / no connectors / $20 AI; Team 50 / 10 / 30 / 100 h / 2,000 / 1 / $150; Business 500 / unlimited / 200 / 500 h / 20,000 / all / $1,000; **Enterprise** custom, operator-only). Enforced where created (`assertCanAdd`, 402 `kind: "limit"`), never deletes ("Over limit" shown). Operator terms per client (`org_terms`: custom limits, credit override, contract price, partner, questions/hour).
+- **Monthly AI credit** (`lib/credit.ts`, checked in `structured()`): 80% banner + one audit entry; 100% = essentials only (answers + guardrail check on cheaper models, short meeting notes; reminders, knowledge map, assistant and long-meeting notes pause with a plain notice). Operator top-ups and overrides (audited). `skipCredit` for the coming support assistant.
+- **Per-person rate limit**: 60 questions/hour (portal + Teams), stored in `rate_events`.
+- **Plain wording**: no model names in the portal ("AI answers: working"); models only in the Owner Console; "Powered by Claude" on /privacy and the public footer.
+- **Usage export** CSV per group/month with engagement code and client (billing roles).
+- **Owner Console → Business**: MRR, margin, plan mix, trials ending, failed payments, sign-ups per week, per-client usage vs limits with flags and partner, infrastructure health (health facts, release from `SIDEKICK_COMMIT`/`SIDEKICK_RELEASED_AT`, deploys seen, app errors). Console now always dark graphite + Indigo.
+- **Added after the checkpoint**: live meeting hours limit (Enterprise only, for product step 3); Claude retries with backoff on 429/overloaded and a plain "very busy" message; the system prompt is the cached block (no more cache writes for one-off content), cache share per model in the Owner Console; daily reminder digests through the Batch API (half price, posted on a later tick); hook for a second AI route in `aiClient()`.
+- **Dropped: bring your own AI** (customer Anthropic/Azure keys). It was in the brief, but Cody decided against it: it would expose the brain (provider, models, cost). Every client uses Sidekick's AI and credit.
+- **Next**: email the 80%/100% notices; enforce connectors once connectors exist (`assertCanAdd(org, "connectors")`).
+
 ## Sign-in security + access recovery (Oct 20, 2026, branch `claude/hopeful-shaw-e2b9d8`)
 - **Access recovery**: `./infra/azure/reset-password.sh <email>` (live; temporary firewall rule for this Mac, reads the `database-url` secret into a variable, removes the rule on exit) or `npm --prefix app run reset-password -- <email>` (laptop). One-time password printed only in the terminal, forced change, all sessions ended, failures cleared, audited. `--owner` for the Owner Console (creates the first owner if none), `--allow-password` turns "Require Microsoft sign-in" off, `--reset-2fa` removes two-step sign-in. Steps in RUNBOOKS → Locked out.
 - **Owner Console**: temporary-password change step (`platform_admins.must_change_password`, POST /api/owner/auth/password), sign-in rate limit (lib/login-limit.ts under `owner:<email>`), new **Security** page.

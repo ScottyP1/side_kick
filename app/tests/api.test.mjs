@@ -1336,6 +1336,12 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.ok(!/admin@test\.local|ZEBRA/.test(JSON.stringify((await signedUp("GET", "/api/users")).body)), "only its own people");
   assert.ok(!/Sal Signup/.test(JSON.stringify((await admin("GET", "/api/users")).body)), "and the other way round");
   assert.ok(!/Signed up/.test(JSON.stringify((await admin("GET", "/api/audit")).body)), "its audit stays its own");
+  // The usage export (CSV per group): each organization only ever gets its own groups.
+  const theirCsv = (await signedUp("GET", "/api/usage/export?months=1")).body;
+  assert.ok(typeof theirCsv === "string" && theirCsv.startsWith("Month,Group"), "a CSV comes back");
+  assert.ok(!/Workspace B|Workspace A/.test(theirCsv), "another organization's export never lists this org's groups");
+  assert.ok(!/Self Serve|Leak/.test((await admin("GET", "/api/usage/export?months=1")).body), "and the other way round");
+  assert.equal((await member("GET", "/api/usage/export")).status, 403, "Members can't export usage");
   // Groups: another org can't list, add to or take people off workspace B.
   assert.equal((await other("GET", `/api/workspaces/${s.wsB}/members`)).status, 404);
   assert.equal((await other("POST", `/api/workspaces/${s.wsB}/members`, { users: [(await other("GET", "/api/me")).body.user.id] })).status, 404);
@@ -2084,9 +2090,9 @@ test(`[${ENGINE}] mock checkout: pay, change plan, a failed payment, pay again a
   r = await post({ action: "change", plan: "starter" });
   assert.equal(r.body.subscription.plan, "starter");
   assert.match((await post({ action: "change", plan: "starter" })).body.error, /already on the Starter plan/);
-  // A plan they've outgrown is refused with the numbers.
-  for (const n of ["One", "Two", "Three"]) assert.equal((await c("POST", "/api/workspaces", { name: `Fab ${n}` })).status, 200);
+  // A plan they've outgrown is refused with the numbers (the groups are made on Team, which allows 10).
   await post({ action: "change", plan: "team" });
+  for (const n of ["One", "Two", "Three"]) assert.equal((await c("POST", "/api/workspaces", { name: `Fab ${n}` })).status, 200);
   const tooSmall = await post({ action: "change", plan: "starter" });
   assert.equal(tooSmall.status, 409);
   assert.match(tooSmall.body.error, /Starter allows 2 workspaces and your organization has 3/);
@@ -2189,6 +2195,239 @@ test(`[${ENGINE}] Owner Console: the operator sets a client's plan and status, a
   assert.equal((await s.fay("PATCH", `/api/owner/tenants/${fab}/billing`, { status: "active" })).status, 401);
 });
 
+/* ---------- Plan limits, monthly AI credit, rate limits, usage export, business view ---------- */
+
+/** Uploads one small text document to a workspace as `call`. */
+async function uploadDoc(call, ws, name, text) {
+  const form = new FormData();
+  form.append("ws", ws);
+  form.append("files", new File([text], name, { type: "text/markdown" }));
+  return call("POST", "/api/docs", undefined, { form });
+}
+/** Imports a pasted transcript as `call`. */
+async function importMeeting(call, ws, title, text) {
+  const form = new FormData();
+  form.append("ws", ws);
+  form.append("title", title);
+  form.append("text", text);
+  form.append("held_at", "2026-10-20");
+  return call("POST", "/api/meetings", undefined, { form });
+}
+const limitOrg = async () => (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Limit Co").id;
+const terms = async (body) => {
+  const r = await owner("PATCH", `/api/owner/tenants/${await limitOrg()}/terms`, body);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+};
+
+test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meeting hours stop at the limit with a clear message`, async () => {
+  const c = client();
+  assert.equal((await signUpAs(c, { org: "Limit Co", name: "Lee Limit", email: "lee@limitco.test", password: "correct horse battery", plan: "starter" })).status, 200);
+  s.lee = c;
+  const lines = (await c("GET", "/api/billing")).body.limits;
+  const line = (k) => lines.find((l) => l.key === k);
+  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors", "aiCreditUsd"].map((k) => line(k).limit), [10, 2, 5, 20, 0, 200, 0, 20], "Starter's numbers");
+  // The operator tightens the limits for this client (custom terms), so each can be hit quickly.
+  await terms({ limits: { seats: 2, workspaces: 1, chats: 0, meetingHours: 1, documents: 1 } });
+
+  const ws = await c("POST", "/api/workspaces", { name: "Limit Group", code: "WBS-1001", client: "Northwind Bank" });
+  assert.equal(ws.status, 200, JSON.stringify(ws.body));
+  s.limitWs = ws.body.id;
+  const ws2 = await c("POST", "/api/workspaces", { name: "Second Group" });
+  assert.equal(ws2.status, 402);
+  assert.equal(ws2.body.kind, "limit");
+  assert.equal(ws2.body.limit, "workspaces");
+  assert.match(ws2.body.error, /Your Starter plan allows 1 group and you have 1\. An Org Owner or Billing Admin can move to a bigger plan on Usage & billing/);
+
+  const m = await c("POST", "/api/users", { name: "Lou Member", email: "lou@limitco.test", role: "Member", workspaces: [s.limitWs] });
+  assert.equal(m.status, 200, JSON.stringify(m.body));
+  s.lou = client();
+  assert.equal((await firstSignIn(s.lou, "lou@limitco.test", m.body.tempPassword)).status, 200);
+  const third = await c("POST", "/api/users", { name: "Too Many", email: "many@limitco.test", role: "Member", workspaces: [] });
+  assert.equal(third.status, 402);
+  assert.match(third.body.error, /allows 2 people and you have 2/);
+
+  assert.equal((await uploadDoc(c, s.limitWs, "Runbook.md", "Cutover runbook for the Northwind wave.")).status, 200);
+  const doc2 = await uploadDoc(c, s.limitWs, "Second.md", "Another document.");
+  assert.equal(doc2.status, 402);
+  assert.match(doc2.body.error, /allows 1 document and you have 1/);
+
+  const chat = await c("POST", "/api/teams-links", { code: "ABCD-1234", ws: s.limitWs });
+  assert.equal(chat.status, 402, "no tracked chats on these terms, refused before the code is even looked up");
+  assert.match(chat.body.error, /doesn't include tracked Teams chats/);
+
+  const first = await importMeeting(c, s.limitWs, "Kickoff", "[00:00:00] Ana: Welcome.\n[00:45:00] Ben: That's all, thanks.");
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  const meetingsBefore = await rows("meetings", "org_id", await limitOrg());
+  const second = await importMeeting(c, s.limitWs, "Follow-up", "[00:00:00] Ana: Hello again.\n[00:30:00] Ben: Bye.");
+  assert.equal(second.status, 402);
+  assert.match(second.body.error, /allows 1 meeting hour this month and 0\.8 hours are used; this one is about 0\.5 hours/);
+  assert.equal(await rows("meetings", "org_id", await limitOrg()), meetingsBefore, "a refused meeting isn't saved");
+
+  // A smaller limit never deletes anything: the people stay, the line says "over", new ones are refused.
+  await terms({ limits: { seats: 1 } });
+  assert.equal((await c("GET", "/api/users")).body.users.length, 2, "nobody was removed");
+  const seats = (await c("GET", "/api/billing")).body.limits.find((l) => l.key === "seats");
+  assert.deepEqual([seats.used, seats.limit, seats.over], [2, 1, true]);
+  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /Set plan terms: custom limits/);
+  assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Set plan terms for Limit Co/.test(l.action)));
+  await terms({ limits: null });
+  assert.equal((await c("GET", "/api/billing")).body.limits.find((l) => l.key === "seats").limit, 10, "back to the plan's numbers");
+  // Customers can't pick Enterprise themselves; the operator can set it.
+  assert.match((await c("POST", "/api/billing", { action: "change", plan: "enterprise" })).body.error, /Enterprise is set up with the Sidekick team/);
+});
+
+test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answers on a cheaper model and pauses the extras`, async () => {
+  const c = s.lee;
+  await terms({ aiCreditUsd: 10 });
+  const ask = (call, q) => call("POST", "/api/ask", { ws: s.limitWs, question: q });
+  // Fake Claude records "__SPEND_<dollars>__" as the cost of the guardrail check on the question.
+  assert.equal((await ask(c, "__SPEND_8.5__ zebra quokka?")).status, 200);
+  let me = (await c("GET", "/api/me")).body;
+  assert.deepEqual(me.credit, { level: "warn", pct: 85 });
+  assert.equal((await s.lou("GET", "/api/me")).body.credit, null, "Members don't get the credit banner");
+  assert.equal((await ask(c, "zebra quokka again?")).body.aiMode, "full");
+  const audit = JSON.stringify((await c("GET", "/api/audit")).body);
+  assert.match(audit, /80% of this month's AI credit \(\$10\.00\) is used/);
+  assert.equal(audit.match(/80% of this month's AI credit/g).length, 1, "the notice is written once a month");
+
+  assert.equal((await ask(c, "__SPEND_2__ zebra quokka once more?")).status, 200);
+  me = (await c("GET", "/api/me")).body;
+  assert.equal(me.credit.level, "essentials");
+  const answered = await ask(s.lou, "zebra quokka still?");
+  assert.equal(answered.status, 200, "answers keep working");
+  assert.equal(answered.body.aiMode, "essentials");
+  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /AI credit \(\$10\.00\) is used up: essentials only/);
+  assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Limit Co used up its AI credit/.test(l.action)), "the operator is told too");
+  const orgId = await limitOrg();
+  const models = (await owner("GET", `/api/owner/tenants/${orgId}?reload=1`)).body.ai.byModel.map((m) => m.model);
+  assert.ok(models.includes("fake-claude:claude-haiku-5-5"), "the guardrail check moved to the cheaper model");
+
+  // Extras pause with a plain notice (kind "credit"), not an error.
+  const assistant = await c("POST", "/api/assistant", { message: "hello", history: [] });
+  assert.equal(assistant.status, 503);
+  assert.equal(assistant.body.kind, "credit");
+  assert.match(assistant.body.error, /in-app assistant is paused because your organization has used this month's AI credit\. Answers to questions keep working/);
+  assert.equal(assistant.body.ref, undefined, "a pause isn't an app error");
+  const map = await c("POST", "/api/memory/refresh", { ws: s.limitWs });
+  assert.equal(map.status, 503);
+  assert.equal(map.body.kind, "credit");
+  const before = await rows("meetings", "org_id", orgId);
+  const long = await importMeeting(c, s.limitWs, "Long workshop", "Ana: talking about the cutover plan. ".repeat(1800));
+  assert.equal(long.status, 503);
+  assert.match(long.body.error, /Notes for long meetings/);
+  assert.equal(await rows("meetings", "org_id", orgId), before, "refused before saving, so no Failed meeting to clean up");
+  const short = await importMeeting(c, s.limitWs, "Stand-up", "[00:00:00] Ana: Quick update.\n[00:10:00] Ben: Done.");
+  assert.equal(short.status, 200, "short meetings still get notes");
+  assert.ok((await owner("GET", `/api/owner/tenants/${orgId}?reload=1`)).body.ai.byModel.some((m) => m.model === "fake-claude:claude-sonnet-5-5" && m.feature === "extract"));
+
+  // The operator grants a one-off top-up: back under 80%, the extras work again. Audited on both sides.
+  assert.equal((await c("POST", `/api/owner/tenants/${orgId}/credit`, { amountUsd: 5 })).status, 401, "clients can't top themselves up");
+  assert.equal((await owner("POST", `/api/owner/tenants/${orgId}/credit`, { amountUsd: -3 })).status, 400);
+  assert.equal((await owner("POST", "/api/owner/tenants/nope/credit", { amountUsd: 5 })).status, 404);
+  const top = await owner("POST", `/api/owner/tenants/${orgId}/credit`, { amountUsd: 5, note: "Go-live week" });
+  assert.equal(top.status, 200, JSON.stringify(top.body));
+  assert.equal(top.body.credit.creditUsd, 15);
+  assert.equal(top.body.credit.level, "ok");
+  assert.equal((await c("POST", "/api/assistant", { message: "hello", history: [] })).status, 200);
+  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /Added \$5\.00 of AI credit for \d{4}-\d{2} \(Go-live week\)/);
+  assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Added \$5\.00 of AI credit for Limit Co/.test(l.action)));
+  // Raising the credit itself works the same way.
+  await terms({ aiCreditUsd: 100 });
+  assert.equal((await c("GET", "/api/usage")).body.credit.creditUsd, 105);
+});
+
+test(`[${ENGINE}] rate limit: questions per person per hour, portal and Teams together, with a friendly message`, async () => {
+  await terms({ askPerHour: 2 });
+  const fresh = client();
+  const u = await s.lee("POST", "/api/users", { name: "Rae Rate", email: "rae@limitco.test", role: "Member", workspaces: [s.limitWs] });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  await firstSignIn(fresh, "rae@limitco.test", u.body.tempPassword);
+  for (let i = 0; i < 2; i++) assert.equal((await fresh("POST", "/api/ask", { ws: s.limitWs, question: `zebra ${i}?` })).status, 200);
+  const third = await fresh("POST", "/api/ask", { ws: s.limitWs, question: "zebra 3?" });
+  assert.equal(third.status, 429);
+  assert.match(third.body.error, /asked 2 questions in the last hour.*ask again in a few minutes/);
+  assert.equal((await s.lou("POST", "/api/ask", { ws: s.limitWs, question: "zebra?" })).status, 200, "the limit is per person");
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${await limitOrg()}/terms`, { askPerHour: 0 })).status, 400);
+  await terms({ askPerHour: null });
+});
+
+test(`[${ENGINE}] usage export: a CSV per group and month with the engagement code and client, for billing roles only`, async () => {
+  const r = await s.lee("GET", "/api/usage/export?months=3");
+  assert.equal(r.status, 200);
+  const [head, ...lines] = r.body.trim().split("\r\n");
+  assert.equal(head, "Month,Group,Engagement code,Client,AI requests,AI cost (USD),Questions asked,Meetings imported,Meeting hours,Documents added");
+  const month = new Date().toISOString().slice(0, 7);
+  const row = lines.find((l) => l.includes("Limit Group")).split(",");
+  assert.deepEqual(row.slice(0, 4), [month, "Limit Group", "WBS-1001", "Northwind Bank"]);
+  assert.ok(Number(row[5]) >= 10.5, "the AI cost charged to the group");
+  assert.ok(Number(row[6]) >= 5, "questions");
+  assert.equal(row[7], "2", "two meetings imported");
+  assert.equal(row[9], "1", "one document");
+  assert.ok(!/Workspace A|Fabrikam|Test Org/.test(r.body), "only this organization's groups");
+  assert.match((await s.lee("GET", "/api/usage/export?month=2026-13")).body.error, /Month must look like/);
+  assert.equal((await s.lee("GET", "/api/usage/export?months=99")).status, 400);
+  assert.equal((await s.lou("GET", "/api/usage/export")).status, 403);
+  assert.equal((await client()("GET", "/api/usage/export")).status, 401);
+  // A cell that looks like a spreadsheet formula is defused.
+  const evil = await admin("POST", "/api/workspaces", { name: "=HYPERLINK(1)", code: "+1" });
+  assert.equal(evil.status, 200);
+  await uploadDoc(admin, evil.body.id, "x.md", "text");
+  assert.match((await admin("GET", "/api/usage/export?months=1")).body, /'=HYPERLINK\(1\),'\+1/);
+});
+
+test(`[${ENGINE}] plain wording: the portal never shows model names; the Owner Console does`, async () => {
+  const me = (await s.lee("GET", "/api/me")).body;
+  assert.deepEqual(me.ai, { working: true });
+  assert.equal(me.claude, undefined);
+  assert.equal(me.plan.name, "Starter");
+  assert.equal(me.plan.connectors, 0);
+  const usage = (await s.lee("GET", "/api/usage")).body;
+  assert.equal(usage.byModel, undefined);
+  assert.doesNotMatch(JSON.stringify(usage), /claude-|fake-claude/i, "no model names on Usage & billing");
+  const traces = (await s.lee("GET", "/api/activity?view=traces")).body.traces ?? [];
+  const withAi = traces.find((t) => /ask/.test(t.name));
+  if (withAi) assert.doesNotMatch(JSON.stringify((await s.lee("GET", `/api/activity?view=trace&id=${withAi.id}`)).body), /"model"/);
+  assert.ok((await owner("GET", "/api/owner/releases")).body.models.ask, "the operator still sees the models");
+  // "Powered by Claude" is said once, on the public trust pages.
+  assert.match((await client()("GET", "/privacy")).body, /Powered by Claude/);
+});
+
+test(`[${ENGINE}] Owner Console business view: revenue, margin, trials, payments, limits, partner and health, operators only`, async () => {
+  await terms({ partner: "Contoso Partners" });
+  assert.equal((await client()("GET", "/api/owner/business")).status, 401);
+  assert.equal((await admin("GET", "/api/owner/business")).status, 401, "an Org Owner of a client can't see it");
+  assert.equal((await s.lee("PATCH", `/api/owner/tenants/${await limitOrg()}/terms`, { partner: "Me" })).status, 401);
+  const b = await owner("GET", "/api/owner/business");
+  assert.equal(b.status, 200, JSON.stringify(b.body));
+  const limitCo = b.body.clients.find((c) => c.name === "Limit Co");
+  assert.equal(limitCo.partner, "Contoso Partners");
+  assert.equal(limitCo.plan, "Starter");
+  assert.equal(limitCo.revenue, 0, "a trial isn't revenue yet");
+  assert.ok(limitCo.aiCost >= 10.5);
+  assert.ok(Math.abs(limitCo.margin + limitCo.aiCost) < 1e-9, "margin = revenue - AI cost");
+  const fab = b.body.clients.find((c) => c.name === "Fabrikam Labs");
+  assert.equal(fab.plan, "Business");
+  assert.equal(fab.revenue, fab.people * 25, "active Business: people × $25");
+  assert.ok(b.body.kpis.mrr >= fab.revenue);
+  assert.ok(b.body.planMix.Starter >= 1 && b.body.planMix.Managed >= 1);
+  assert.ok(b.body.trialsEnding.every((t) => t.name), "trials ending soon are listed by name");
+  assert.ok(b.body.signups.length === 12 && b.body.signups.at(-1).selfService >= 1, "this week's self-service sign-ups");
+  assert.equal(b.body.infra.health.ok, true);
+  assert.equal(b.body.infra.health.database.engine, ENGINE);
+  assert.ok(b.body.infra.releases.length >= 1, "the running release is recorded");
+  assert.equal(typeof b.body.infra.errors24h, "number");
+  // Over a limit shows up as a flag.
+  await terms({ limits: { documents: 1 } });
+  assert.ok((await owner("GET", "/api/owner/business")).body.clients.find((c) => c.name === "Limit Co").near.includes("documents"));
+  await terms({ limits: null });
+  // Bad terms are refused with a reason.
+  assert.match((await owner("PATCH", `/api/owner/tenants/${await limitOrg()}/terms`, { limits: { gold: 1 } })).body.error, /isn't a limit/);
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${await limitOrg()}/terms`, {})).status, 400);
+  assert.equal((await owner("PATCH", "/api/owner/tenants/nope/terms", { partner: "x" })).status, 404);
+  // The operator can put a client on Enterprise (not self-service).
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${await limitOrg()}/billing`, { plan: "enterprise" })).status, 200);
+  assert.equal((await s.lee("GET", "/api/me")).body.plan.name, "Enterprise");
+});
 /* ---------- Security review fixes (Oct 2026, docs/security/2026-10-app-security-review.md) ---------- */
 
 /**
@@ -2320,6 +2559,16 @@ function zipClaiming(name, size) {
   end.writeUInt32LE(0, 16);
   return Buffer.concat([cd, end]);
 }
+
+test(`[${ENGINE}] busy AI: overloaded calls are retried with backoff; if it stays busy people get a plain "try again"`, async () => {
+  const ok = await importMeeting(s.lee, s.limitWs, "Retry check", "[00:00:00] Ana: __BUSY_2__ quick sync.\n[00:05:00] Ben: Done.");
+  assert.equal(ok.status, 200, "two overloaded answers, then it works");
+  const busy = await importMeeting(s.lee, s.limitWs, "Busy check", "[00:00:00] Ana: __BUSY_9__ quick sync.\n[00:05:00] Ben: Done.");
+  assert.equal(busy.status, 503);
+  assert.match(busy.body.error, /Sidekick's AI is very busy right now\. Try again in a minute/);
+  assert.ok(busy.body.meeting_id, "the meeting is kept with Try again, as for any failure");
+  assert.doesNotMatch(busy.body.error, /529|overloaded|anthropic/i, "no raw API error");
+});
 
 /* ---------- access recovery: scripts/reset-password.mjs (run last: it resets the Owner Console account) ---------- */
 /** Runs the operator's reset script against this run's database and returns { code, out, password }. */

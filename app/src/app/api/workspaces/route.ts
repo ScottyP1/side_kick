@@ -8,6 +8,7 @@
  * is any member whose role is Team Lead. Creating a group can pick the lead and the first members in one
  * go; picking a Member or Viewer as lead makes them a Team Lead (audited), since only admins may do that.
  */
+import { assertCanAdd } from "@/lib/limits";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, isAdmin, requireUser, workspaceIdsFor, HttpError, type Role } from "@/lib/auth";
 import { all, newId, now, run, tx } from "@/lib/db";
@@ -64,6 +65,7 @@ export const POST = handle(async (req: Request) => {
   const memberIds = Array.isArray(body.members) ? [...new Set(body.members.filter((m): m is string => typeof m === "string"))] : [];
   if (memberIds.length > 500) throw new HttpError(400, "Add at most 500 people at once.");
   await assertUniqueName(user.org_id, name);
+  await assertCanAdd(user.org_id, "workspaces");
 
   // Everyone named must be in this organization (404 otherwise, like any person lookup).
   const wanted = [...new Set([...(body.lead ? [body.lead] : []), ...memberIds])];

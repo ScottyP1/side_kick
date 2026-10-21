@@ -1,25 +1,88 @@
 "use client";
 
 /**
- * Usage & billing (/usage): the organization's plan (PlanSection: status, seats, pay / change / cancel), then
- * every Claude request metered: tokens, cost and response time by feature, model, workspace and day.
+ * Usage & billing (/usage): the organization's plan (PlanSection: status, limits, pay / change / cancel), the
+ * monthly AI credit, then every AI request metered: tokens, cost and response time by feature, group and day,
+ * and **Export CSV** (AI cost and activity per group with its engagement code, per month, for chargeback;
+ * GET /api/usage/export). Plain wording: no model names (those are for the Sidekick team).
  * Owners, Admins and Billing Admins (only Owners and Billing Admins change the plan).
  */
 
 import { useEffect, useState } from "react";
-import { api, usd } from "@/components/ui";
+import { api, ApiError, usd, useReportError, useToast } from "@/components/ui";
 import { PlanSection } from "./plan";
+
+type Credit = { month: string; creditUsd: number | null; topUpUsd: number; usedUsd: number; pct: number; level: "unlimited" | "ok" | "warn" | "essentials" };
 
 type U = {
   period: { start: string; end: string; day: number; days: number };
   totals: { calls: number; cost: number; input: number; output: number; latency: number; errors: number };
   byFeature: { feature: string; calls: number; cost: number; latency: number }[];
-  byModel: { model: string; calls: number; cost: number; input: number; output: number; cached: number }[];
   byWorkspace: { name: string; color: string; calls: number; cost: number }[];
   daily: { day: string; cost: number; calls: number }[];
-  models: Record<string, string>;
+  credit: Credit;
 };
 const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", remind: "Reminders", embed: "Search embeddings" };
+
+/**
+ * Downloads the usage CSV for the last `months` months. Problems (not allowed, server trouble) show as a
+ * toast or the problem modal, never silently.
+ */
+function ExportButton() {
+  const toast = useToast();
+  const reportError = useReportError();
+  const [months, setMonths] = useState("12");
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/usage/export?months=${months}`);
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new ApiError(res.status, data?.error ?? `Export failed (${res.status}).`, res.status >= 500 ? "server" : "request");
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = Object.assign(document.createElement("a"), { href: url, download: /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "sidekick-usage.csv" });
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("Usage exported");
+    } catch (e) {
+      reportError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="actions" style={{ alignItems: "center" }}>
+      <select className="input" style={{ width: "auto" }} value={months} onChange={(e) => setMonths(e.target.value)} aria-label="Months to export">
+        <option value="1">This month</option>
+        <option value="3">Last 3 months</option>
+        <option value="12">Last 12 months</option>
+      </select>
+      <button className="btn" onClick={download} disabled={busy}>{busy ? "Exporting…" : "Export CSV"}</button>
+    </div>
+  );
+}
+
+/** The month's AI credit: used / included (with top-ups), a meter, and what happens at 80% and 100%. */
+function CreditPanel({ c }: { c: Credit }) {
+  const pct = Math.min(100, c.pct);
+  return (
+    <div className="panel">
+      <div className="panel-h"><h2>AI credit this month</h2><span className="muted">{c.creditUsd === null ? "No limit" : `${Math.round(c.pct)}% used`}</span></div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <b className="num" style={{ fontSize: 18 }}>{usd(c.usedUsd)}{c.creditUsd !== null && <span className="muted" style={{ fontWeight: 400 }}> of {usd(c.creditUsd)}</span>}</b>
+        {c.creditUsd !== null && <div className="meter"><span style={{ width: `${pct}%`, background: c.level === "essentials" ? "var(--bad)" : c.level === "warn" ? "var(--warn)" : undefined }} /></div>}
+        {c.topUpUsd > 0 && <span className="muted">Includes a {usd(c.topUpUsd)} top-up from the Sidekick team.</span>}
+        <span className="muted">
+          {c.creditUsd === null ? "Your organization's AI use isn't capped."
+            : c.level === "essentials" ? "Used up: Sidekick keeps answering questions and checking them against your guardrails; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st. Ask the Sidekick team for a top-up, or move to a bigger plan."
+            : "At 80% the Org Owner, Org Admins and Billing Admins see a notice. At 100% Sidekick keeps answering questions and pauses the extras until the 1st."}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function UsagePage() {
   const [u, setU] = useState<U | null>(null);
@@ -48,14 +111,15 @@ export default function UsagePage() {
         <div>
           <div className="eyebrow">Usage & billing</div>
           <h1>{month}</h1>
-          <p>Every Claude request is metered: tokens, cost and response time. Prices are Claude API list prices; your plan&apos;s price is separate (below the plan).</p>
+          <p>Every AI request is metered: cost, size and response time. Your plan includes a monthly AI credit; the plan&apos;s price is separate.</p>
         </div>
+        <ExportButton />
       </div>
       <PlanSection />
       <div className="grid g4">
         {[
           ["AI spend this month", usd(u.totals.cost), `On pace for ${usd(projected)}`],
-          ["Claude requests", u.totals.calls.toLocaleString(), `${u.totals.errors} failed`],
+          ["AI requests", u.totals.calls.toLocaleString(), `${u.totals.errors} failed`],
           ["Tokens", `${((u.totals.input + u.totals.output) / 1000).toFixed(1)}k`, `${(u.totals.input / 1000).toFixed(1)}k in · ${(u.totals.output / 1000).toFixed(1)}k out`],
           ["Avg response time", `${(u.totals.latency / 1000).toFixed(1)} s`, u.totals.calls ? `Average over ${u.totals.calls.toLocaleString()} request${u.totals.calls === 1 ? "" : "s"}` : "No requests yet"],
         ].map(([l, v, d]) => (
@@ -99,7 +163,7 @@ export default function UsagePage() {
       </div>
       <div className="grid g2">
         <div className="panel">
-          <div className="panel-h"><h2>By workspace</h2></div>
+          <div className="panel-h"><h2>By group</h2></div>
           <div className="panel-b">
             {!u.byWorkspace.length && <span className="muted">No usage yet.</span>}
             {u.byWorkspace.map((w) => (
@@ -111,20 +175,7 @@ export default function UsagePage() {
             ))}
           </div>
         </div>
-        <div className="panel">
-          <div className="panel-h"><h2>By model</h2></div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Model</th><th className="r">Requests</th><th className="r">Cached input</th><th className="r">Cost</th></tr></thead>
-              <tbody>
-                {u.byModel.map((m) => (
-                  <tr key={m.model}><td className="mono">{m.model}</td><td className="r num">{m.calls}</td><td className="r num">{(m.cached / 1000).toFixed(1)}k</td><td className="r num">{usd(m.cost)}</td></tr>
-                ))}
-                {!u.byModel.length && <tr><td colSpan={4} className="muted">No usage yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <CreditPanel c={u.credit} />
       </div>
     </>
   );

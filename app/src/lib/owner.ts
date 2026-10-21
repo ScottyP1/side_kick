@@ -14,6 +14,11 @@
  *   only (a restriction set on that client's page in the Owner Console). A feature runs only when both
  *   the platform-wide switch and that organization's switch are on.
  * - **Operator log**: owner actions are recorded in `platform_log`, separate from each client's audit log.
+ * - **Temporary password**: `npm run reset-password -- --owner <email>` (scripts/reset-password.mjs, run by
+ *   whoever has the database) gives an owner a one-time password (`must_change_password`). Until they pick
+ *   their own, `requireOwner` refuses everything except the password change.
+ * - **Sign-in limit**: owner sign-in uses the same failure limit as the portal (lib/login-limit.ts), counted
+ *   under `owner:<email>` so it never mixes with a portal account of the same email.
  */
 import "server-only";
 import crypto from "node:crypto";
@@ -25,8 +30,14 @@ import { hashPassword, HttpError, verifyPassword } from "./auth";
 export const OWNER_COOKIE = "sk_owner";
 const SESSION_HOURS = 12;
 
-/** A signed-in platform operator. */
-export type Owner = { id: string; name: string; email: string };
+/** A signed-in platform operator. `must_change_password` is 1 while they still have a temporary password. */
+export type Owner = { id: string; name: string; email: string; must_change_password: number };
+
+/** The refusal while an owner still has a temporary password; the sign-in page shows the change step instead. */
+export const OWNER_PASSWORD_CHANGE_REQUIRED = "Change your temporary password first. Then you can use the Owner Console.";
+
+/** Owner Console passwords are longer than portal ones (12, not 10), because the console sees every client. */
+export const OWNER_MIN_PASSWORD = 12;
 
 const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
@@ -55,8 +66,13 @@ export async function createOwner(name: string, email: string, password: string)
 
 /** Returns the owner if the email and password match, otherwise null. */
 export async function checkOwnerPassword(email: string, password: string): Promise<Owner | null> {
-  const row = await get<Owner & { password_hash: string }>("SELECT id, name, email, password_hash FROM platform_admins WHERE email = ?", email.trim().toLowerCase());
-  return row && verifyPassword(password, row.password_hash) ? { id: row.id, name: row.name, email: row.email } : null;
+  const row = await get<Owner & { password_hash: string }>(
+    "SELECT id, name, email, password_hash, must_change_password FROM platform_admins WHERE email = ?",
+    email.trim().toLowerCase(),
+  );
+  return row && verifyPassword(password, row.password_hash)
+    ? { id: row.id, name: row.name, email: row.email, must_change_password: Number(row.must_change_password) }
+    : null;
 }
 
 /** Signs an owner in: session row + `sk_owner` cookie (httpOnly, sameSite strict, 12 hours). */
@@ -76,17 +92,22 @@ export async function endOwnerSession() {
   jar.delete(OWNER_COOKIE);
 }
 
-/** Returns the signed-in owner or throws 401. First line of every `/api/owner/*` route. */
-export async function requireOwner(): Promise<Owner> {
+/**
+ * Returns the signed-in owner or throws 401. First line of every `/api/owner/*` route. While the owner still
+ * has a temporary password it throws 403, except for the password change (`allowPendingPassword`).
+ */
+export async function requireOwner(opts: { allowPendingPassword?: boolean } = {}): Promise<Owner> {
   const token = (await cookies()).get(OWNER_COOKIE)?.value;
   const row = token
     ? await get<Owner & { expires_at: string }>(
-        "SELECT a.id, a.name, a.email, s.expires_at FROM owner_sessions s JOIN platform_admins a ON a.id = s.admin_id WHERE s.token_hash = ?",
+        "SELECT a.id, a.name, a.email, a.must_change_password, s.expires_at FROM owner_sessions s JOIN platform_admins a ON a.id = s.admin_id WHERE s.token_hash = ?",
         sha256(token),
       )
     : undefined;
   if (!row || new Date(row.expires_at) < new Date()) throw new HttpError(401, "Sign in to the Owner Console.");
-  return { id: row.id, name: row.name, email: row.email };
+  const owner = { id: row.id, name: row.name, email: row.email, must_change_password: Number(row.must_change_password) };
+  if (owner.must_change_password && !opts.allowPendingPassword) throw new HttpError(403, OWNER_PASSWORD_CHANGE_REQUIRED);
+  return owner;
 }
 
 /** Records an owner action in the operator log (shown on Releases & switches). */

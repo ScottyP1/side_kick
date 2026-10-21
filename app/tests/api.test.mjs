@@ -1835,3 +1835,72 @@ test(`[${ENGINE}] users: an Org Admin can't change their own role or remove them
   assert.equal((await admin("PATCH", `/api/users/${id}`, { role: "Member" })).status, 200);
   assert.equal((await admin("DELETE", `/api/users/${id}`)).status, 200);
 });
+
+/* ---------- access recovery: scripts/reset-password.mjs (run last: it resets the Owner Console account) ---------- */
+/** Runs the operator's reset script against this run's database and returns { code, out, password }. */
+async function resetPassword(...args) {
+  const env = { ...process.env, ...(ENGINE === "postgres" ? { DATABASE_URL: PG_URL } : { DATABASE_URL: "", SIDEKICK_DATA_DIR: dataDir }) };
+  try {
+    const { stdout } = await promisify(execFile)(process.execPath, ["--no-warnings", "scripts/reset-password.mjs", ...args], { cwd: APP, env });
+    return { code: 0, out: stdout, password: stdout.match(/Temporary password:\s+(\S+)/)?.[1] };
+  } catch (e) {
+    return { code: e.code, out: `${e.stdout}${e.stderr}` };
+  }
+}
+
+/** A sign-in attempt from a made-up network address, so these guesses don't use up localhost's per-address limit. */
+const signInFrom = (url, ip, body) =>
+  fetch(BASE + url, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify(body) });
+
+test(`[${ENGINE}] reset-password: a temporary password, signed out everywhere, change forced, audited`, async () => {
+  const rita = await newPerson("Rita Reset", "rita@test.local", "Member");
+  assert.equal((await rita.call("GET", "/api/overview")).status, 200);
+  // Locked out by wrong guesses too: the reset clears that.
+  for (let i = 0; i < 5; i++) await signInFrom("/api/auth/login", "192.0.2.10", { email: "rita@test.local", password: "forgot it" });
+  const r = await resetPassword("Rita@Test.Local");
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.password, /^[a-z2-9]{5}(-[a-z2-9]{5}){3}$/);
+  assert.equal((await rita.call("GET", "/api/overview")).status, 401, "old sessions are gone");
+  assert.equal((await client()("POST", "/api/auth/login", { email: "rita@test.local", password: NEW_PASSWORD })).status, 401, "the old password no longer works");
+  const c = client();
+  assert.equal((await c("POST", "/api/auth/login", { email: "rita@test.local", password: r.password })).status, 200);
+  assert.equal((await c("GET", "/api/overview")).status, 403, "the temporary password must be changed first");
+  assert.equal((await c("POST", "/api/auth/password", { current: r.password, next: "rita's own password" })).status, 200);
+  assert.equal((await c("GET", "/api/overview")).status, 200);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Reset Rita Reset's password to a temporary one/);
+  // Unknown emails and bad arguments fail without changing anything.
+  assert.notEqual((await resetPassword("nobody@test.local")).code, 0);
+  assert.notEqual((await resetPassword()).code, 0);
+});
+
+test(`[${ENGINE}] reset-password --owner: the Owner Console account gets a temporary password it must change`, async () => {
+  assert.equal((await owner("GET", "/api/owner/me")).status, 200);
+  const r = await resetPassword("--owner", "owner@test.local");
+  assert.equal(r.code, 0, r.out);
+  assert.equal((await owner("GET", "/api/owner/me")).status, 401, "old owner sessions are gone");
+  const o = client();
+  const login = await o("POST", "/api/owner/auth/login", { email: "owner@test.local", password: r.password });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.mustChange, true);
+  const blocked = await o("GET", "/api/owner/overview");
+  assert.equal(blocked.status, 403);
+  assert.match(blocked.body.error, /Change your temporary password first/);
+  assert.equal((await o("POST", "/api/owner/auth/password", { current: r.password, next: "too short" })).status, 400);
+  assert.equal((await o("POST", "/api/owner/auth/password", { current: r.password, next: r.password })).status, 400);
+  assert.equal((await o("POST", "/api/owner/auth/password", { current: r.password, next: "the owner's own long password" })).status, 200);
+  assert.equal((await o("GET", "/api/owner/overview")).status, 200);
+  const again = await client()("POST", "/api/owner/auth/login", { email: "owner@test.local", password: "the owner's own long password" });
+  assert.equal(again.body.mustChange, false);
+  assert.notEqual((await resetPassword("--owner", "someone-else@test.local")).code, 0, "only existing owners, once one exists");
+});
+
+test(`[${ENGINE}] Owner Console sign-in is rate limited like the portal's`, async () => {
+  for (let i = 0; i < 5; i++) assert.equal((await signInFrom("/api/owner/auth/login", "192.0.2.11", { email: "owner@test.local", password: `guess ${i}` })).status, 401);
+  const locked = await client()("POST", "/api/owner/auth/login", { email: "owner@test.local", password: "the owner's own long password" });
+  assert.equal(locked.status, 429, "even the right password waits");
+  // The portal account limit is separate: a portal user with the same email isn't affected.
+  assert.equal((await client()("POST", "/api/auth/login", { email: "admin@test.local", password: "correct horse battery" })).status, 200);
+  // The operator's reset clears the lock.
+  const r = await resetPassword("--owner", "owner@test.local");
+  assert.equal((await client()("POST", "/api/owner/auth/login", { email: "owner@test.local", password: r.password })).status, 200);
+});

@@ -13,7 +13,8 @@
     "teams:package": "node scripts/teams-package.mjs",
     "tunnel": "devtunnel host sidekick",
     "test": "node tests/run.mjs",
-    "db:copy-to-postgres": "node scripts/copy-to-postgres.mjs"
+    "db:copy-to-postgres": "node scripts/copy-to-postgres.mjs",
+    "reset-password": "node --no-warnings scripts/reset-password.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

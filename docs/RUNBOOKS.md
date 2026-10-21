@@ -15,6 +15,7 @@ operations review is in `docs/security/`.
 | Someone broke in, or something is badly wrong | [Incident](#incident-leaked-key-break-in-data-loss) |
 | The site is down (uptime alert email) | [Site down](#the-site-is-down) |
 | Microsoft 365 trial ends Nov 14, 2026 | [Trial end](#microsoft-365-trial-ending-nov-14-2026) |
+| Locked out of the portal or the Owner Console | [Locked out](#locked-out-of-the-portal-or-the-owner-console) |
 
 ## Roll back a bad deploy
 
@@ -135,3 +136,41 @@ Microsoft 365 Business Basic trial that turns into a paid subscription ($8.40/mo
   subscription and the live portal. Before cancelling: turn off the bot's Teams channel and the reminders
   switch (Owner Console), make sure budget and uptime alerts also go to the outlook.com address (they do
   as of Oct 2026), and note in PROGRESS that Teams testing needs a new tenant.
+
+## Locked out of the portal or the Owner Console
+
+Nobody on the web can reset an Org Owner's or an owner's password (on purpose: there is no reset email to
+steal). Whoever has the database can, with one command on the Mac. It sets a **one-time temporary
+password**, prints it **only in your terminal**, signs that account out everywhere, clears its failed
+sign-ins, and records it (the organization's Security & audit page, or the Owner Console's operator log).
+The next sign-in must pick a new password before anything else works.
+
+**Live site** (after `az login` as the Sidekick Labs account, from the repo root; `npm --prefix app ci` once):
+
+```bash
+./infra/azure/reset-password.sh you@example.com
+```
+
+- Use the email you sign in to the portal with. It prints your name, role and organization, then the
+  temporary password. Paste it into the sign-in page (or your password manager) straight away; never into
+  chat, email or a ticket. Then pick your own password (a password manager can make a long one).
+- **Owner Console** account instead: put `--owner` in front of the email. If there's no owner account yet
+  on the live site (the first one can otherwise only be made on localhost), this creates it; add
+  `--name "Your name"` to set the name.
+- If your organization has **Require Microsoft sign-in** on and Microsoft sign-in is what's broken, add
+  `--allow-password` at the end: it also turns that setting off (audited). Turn it back on in Settings
+  once you're in.
+- The live database only accepts Azure traffic, so the script lets this Mac's public IP address in for
+  the run only (firewall rule `reset-password-tmp`, takes about a minute) and removes it afterwards, even
+  on Ctrl-C. It reads the `database-url` secret into a variable; the secret is never shown or saved. If it
+  ever says it couldn't remove the rule, run the command it prints.
+- The database must be running (`./infra/azure/status.sh`; if frozen, `./infra/azure/unfreeze.sh`).
+
+**Laptop copy** (SQLite in `app/data`, or whatever `DATABASE_URL` points to):
+
+```bash
+npm --prefix app run reset-password -- you@example.com
+```
+
+Same options (`--owner`, `--name`, `--allow-password`). Someone else in your organization locked out? An
+Org Owner or Org Admin can also just remove and re-add them on Users & access, without this script.

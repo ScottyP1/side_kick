@@ -327,6 +327,8 @@ function migrate(conn: DatabaseSync) {
   if (!has("items", "due_on")) conn.exec("ALTER TABLE items ADD COLUMN due_on TEXT");
   // Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
   if (!has("workspaces", "client")) conn.exec("ALTER TABLE workspaces ADD COLUMN client TEXT");
+  // Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.
+  if (!has("platform_admins", "must_change_password")) conn.exec("ALTER TABLE platform_admins ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
 }
 
 /**

@@ -3,7 +3,9 @@
 For the **Sidekick operator** (whoever runs Sidekick as a service), not for client users. The console lives at `/owner` and has its own sign-in, separate from every client account.
 
 ## First sign-in
-The first owner account can only be created **on the machine running Sidekick** (open `http://localhost:3000/owner`). After that, sign in at `/owner/login`. Owner sessions last 12 hours.
+The first owner account can only be created **on the machine running Sidekick** (open `http://localhost:3000/owner`). After that, sign in at `/owner/login`. Owner sessions last 12 hours. Owner passwords need at least 12 characters; after 5 wrong passwords for one email (or 20 from one network address) in 15 minutes, owner sign-in waits 15 minutes, and failures show in the operator log.
+
+**Lost the owner password, or a client's Org Owner is locked out?** Run the reset command on the Mac (`docs/RUNBOOKS.md` → Locked out). It prints a one-time password in your terminal only; signing in with it asks for a new password first.
 
 The portal's own first-run setup (the very first organization on an empty install) is also localhost-only. Every organization after that is added here with **Add a client**: nobody inside a client organization can create one, and the home assistant can't either.
 

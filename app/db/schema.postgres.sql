@@ -227,3 +227,5 @@ ALTER TABLE action_items ADD COLUMN IF NOT EXISTS due_on TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS due_on TEXT;
 -- Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS client TEXT;
+-- Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.
+ALTER TABLE platform_admins ADD COLUMN IF NOT EXISTS must_change_password INTEGER NOT NULL DEFAULT 0;

@@ -17,6 +17,7 @@ const NAV: [string, string, string][] = [
   ["/owner", "Overview", "home"],
   ["/owner/business", "Business", "activity"],
   ["/owner/clients", "Clients", "users"],
+  ["/owner/rolloffs", "Roll-offs", "folder"],
   ["/owner/performance", "Performance & errors", "chart"],
   ["/owner/releases", "Releases & switches", "gear"],
   ["/owner/security", "Security", "lock"],

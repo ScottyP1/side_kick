@@ -18,6 +18,8 @@ export type Group = {
   id: string; name: string; code: string | null; client: string | null; color: string; created_at: string;
   docs: number; meetings: number; members: number; open_items: number; overdue: number; chats: number;
   last_meeting: string | null; leads: { id: string; name: string }[];
+  /** Set when the group is ending (read-only, deleted on `deleteOn`; lib/rolloff.ts), otherwise null. */
+  ending?: { deleteOn: string; requestedBy: string } | null;
 };
 
 /** A person in the organization as GET /api/users returns them. */
@@ -36,6 +38,7 @@ export const Avatar = ({ name, large }: { name: string; large?: boolean }) => (
  * person most: no Team Lead, nobody added yet, overdue action items, no documents, otherwise healthy.
  */
 export function groupHealth(g: Group): [string, string, string] {
+  if (g.ending) return ["bad", `Ending ${new Date(g.ending.deleteOn).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`, `Read-only. Everything in it is deleted on that date (set by ${g.ending.requestedBy}). An Org Owner or Org Admin can download it or cancel on the group's Settings tab.`];
   if (!g.leads.length) return ["bad", "No Team Lead", "Nobody runs this group day to day. An admin picks a Team Lead on the group's People tab."];
   if (g.members <= 2 && !g.chats && !g.docs) return ["info", "Setting up", `${g.leads[0].name.split(" ")[0]} hasn't added people, chats or documents yet.`];
   if (g.overdue) return ["warn", `${g.overdue} overdue action item${g.overdue === 1 ? "" : "s"}`, "Action items from meetings are past their due date."];

@@ -13,12 +13,14 @@ import { handle, readJson, requireText } from "@/lib/api";
 import { audit, isAdmin, requireUser, workspaceIdsFor, HttpError, type Role } from "@/lib/auth";
 import { all, newId, now, run, tx } from "@/lib/db";
 import { assertUniqueName, MAX_CLIENT, MAX_CODE, MAX_NAME } from "@/lib/workspaces";
+import { endingGroups } from "@/lib/rolloff";
 
 const COLORS = ["#4f46e5", "#2a5ba8", "#7a5a2a", "#8b3f6b", "#5a6b1f", "#9a4a1f", "#3d4a52"];
 
 /**
  * Lists the caller's workspaces with document, meeting, member, open/overdue action item and linked chat
- * counts, and `leads` (the Team Leads in each), for the Groups page cards.
+ * counts, `leads` (the Team Leads in each), and `ending` (`{ deleteOn, requestedBy }` when the group is
+ * ending and read-only, see lib/rolloff.ts; otherwise null), for the Groups page cards.
  */
 export const GET = handle(async () => {
   const user = await requireUser();
@@ -43,8 +45,12 @@ export const GET = handle(async () => {
       WHERE u.org_id = ? AND u.role = 'Team Lead' AND wm.workspace_id IN (${ph}) ORDER BY u.name`,
     user.org_id, ...ids,
   );
+  const ending = await endingGroups(user.org_id);
   return {
-    workspaces: workspaces.map((w) => ({ ...w, leads: leads.filter((l) => l.workspace_id === w.id).map(({ id, name }) => ({ id, name })) })),
+    workspaces: workspaces.map((w) => {
+      const r = ending.get(w.id);
+      return { ...w, leads: leads.filter((l) => l.workspace_id === w.id).map(({ id, name }) => ({ id, name })), ending: r ? { deleteOn: r.delete_on, requestedBy: r.requested_by } : null };
+    }),
   };
 });
 

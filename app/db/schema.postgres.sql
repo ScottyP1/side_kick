@@ -254,6 +254,22 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 -- Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS client TEXT;
+-- Roll-offs (lib/rolloff.ts): a group (scope 'group') or a whole organization (scope 'org') scheduled for
+-- deletion when an engagement ends or a company leaves. status = scheduled | running | canceled | done.
+-- read_only_from: when the organization turns read-only (org scope); delete_on: when everything is deleted.
+-- chats_json: the Teams chats unlinked when a group started ending (relinked if it's cancelled).
+-- certificate_json: the deletion certificate (kinds and counts only, never content). No foreign key to
+-- orgs on purpose: this row (and org_name) is the minimum record kept after an organization is deleted.
+CREATE TABLE IF NOT EXISTS rolloffs (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, org_name TEXT NOT NULL, workspace_id TEXT, workspace_name TEXT,
+  scope TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, read_only_from TEXT, delete_on TEXT NOT NULL,
+  requested_by TEXT NOT NULL, created_at TEXT NOT NULL, chats_json TEXT, closed_by TEXT, closed_at TEXT,
+  certificate_json TEXT, error TEXT
+);
+CREATE INDEX IF NOT EXISTS rolloffs_org ON rolloffs(org_id, status);
+CREATE INDEX IF NOT EXISTS rolloffs_due ON rolloffs(status, delete_on);
+-- Group pricing: extra groups bought on top of the plan (lib/plans.ts EXTRA_GROUP).
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS extra_groups INTEGER NOT NULL DEFAULT 0;
 -- Plan terms the Sidekick team sets per organization in the Owner Console (lib/limits.ts, lib/credit.ts):
 -- custom limits (JSON, Enterprise or managed clients), an AI credit override, the contract price per month
 -- (Enterprise / managed), the partner or referrer who brought the client, and a per-person questions-per-hour

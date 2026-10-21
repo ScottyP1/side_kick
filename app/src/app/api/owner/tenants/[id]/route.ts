@@ -9,6 +9,7 @@ import { handle, readJson } from "@/lib/api";
 import { audit, HttpError } from "@/lib/auth";
 import { all, get, run } from "@/lib/db";
 import { billingSummary } from "@/lib/billing";
+import { listRolloffs } from "@/lib/rolloff";
 import { orgFlags, platformLog, requireOwner } from "@/lib/owner";
 import { creditStatus } from "@/lib/credit";
 import { limitReport, monthStart, orgTerms } from "@/lib/limits";
@@ -57,6 +58,7 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
     workspaces: workspaces.map((w) => ({ ...w, members: members.filter((m) => m.workspace_id === w.id).length })),
     flags: await orgFlags(org.id),
     billing: await billingSummary(org.id),
+    rolloffs: await listRolloffs(org.id),
     terms: await orgTerms(org.id),
     credit,
     limits: (await limitReport(org.id, credit.usedUsd)).lines,

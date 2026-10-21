@@ -5,14 +5,16 @@
  * engagement code, its Team Lead, and its first members. Only the name and a Team Lead are required; the
  * lead adds more people and assigns Teams chats later. Org Owners and Org Admins only (others see a note).
  * Picking a Member or Viewer as lead makes them a Team Lead (the summary says so before saving).
- * Saves with POST /api/workspaces and opens the new group.
+ * Saves with POST /api/workspaces and opens the new group. Past the plan's group limit the server says the
+ * cheaper way to make room (extra groups or the next plan, with monthly prices) and a button opens Usage &
+ * billing with both options (`/usage?groups=N`).
  */
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
-import { api, Icon, useReportError, useToast } from "@/components/ui";
+import { api, ApiError, Icon, useReportError, useToast } from "@/components/ui";
 import { Avatar, PeoplePicker, type OrgPerson } from "@/components/groups";
 
 const LEADABLE = ["Team Lead", "Member", "Viewer"];
@@ -29,6 +31,8 @@ export default function NewGroupPage() {
   const [members, setMembers] = useState<Set<string>>(new Set());
   const [memberQ, setMemberQ] = useState("");
   const [error, setError] = useState("");
+  // Set when the group limit was reached: how many groups are needed, for the "make room" link to Usage & billing.
+  const [needGroups, setNeedGroups] = useState(0);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -48,6 +52,7 @@ export default function NewGroupPage() {
 
   const create = async () => {
     setError("");
+    setNeedGroups(0);
     setSaving(true);
     try {
       const r = await api<{ id: string }>("/api/workspaces", { method: "POST", json: { ...form, lead, members: [...members].filter((m) => m !== lead) } });
@@ -56,6 +61,7 @@ export default function NewGroupPage() {
       router.push(`/workspaces/${encodeURIComponent(r.id)}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't create the group.");
+      if (e instanceof ApiError && e.data?.kind === "limit" && e.data.limit === "workspaces" && typeof e.data.need === "number") setNeedGroups(e.data.need);
       setSaving(false);
     }
   };
@@ -143,6 +149,7 @@ export default function NewGroupPage() {
             <button className="btn primary" disabled={!ok.basics || !ok.lead || saving} onClick={create}>{saving ? "Creating…" : "Create group"}</button>
             {(!ok.basics || !ok.lead) && <span className="hint">Add a name and pick a Team Lead to create it.</span>}
             {error && <p className="err" style={{ margin: 0 }}>{error}</p>}
+            {needGroups > 0 && <Link className="btn" href={`/usage?groups=${needGroups}`}>See both options on Usage &amp; billing</Link>}
           </div>
         </aside>
       </div>

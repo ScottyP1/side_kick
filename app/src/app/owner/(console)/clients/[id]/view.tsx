@@ -7,6 +7,8 @@
  * / "near limit"), this month's AI credit with a one-off top-up, its plan terms (custom limits for
  * Enterprise or managed clients, AI credit override, contract price, partner/referrer, questions per person
  * per hour), and its AI use by feature and model (model names are only shown here, never in the portal).
+ * Roll-off: groups ending and the organization's pending deletion, with **End client** (read-only now,
+ * deleted after 30 days) and links to Owner Console → Roll-offs to extend or cancel.
  * Operators only; opening the page is recorded in the operator log once per visit (reloads after a switch
  * flip aren't). Shows no document or meeting content.
  */
@@ -15,7 +17,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Icon, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
-import { ALL_PLANS, LIMIT_KEYS, LIMIT_LABEL, limitText, planById, STATUS_LABEL, SUB_STATUSES, type Access, type LimitKey, type PlanId, type PlanLimits, type SubStatus } from "@/lib/plans";
+import { ALL_PLANS, LIMIT_KEYS, LIMIT_LABEL, limitsWithExtras, limitText, monthlyPrice, planById, planWithExtras, STATUS_LABEL, SUB_STATUSES, usd, type Access, type LimitKey, type PlanId, type PlanLimits, type SubStatus } from "@/lib/plans";
+import { BRAND } from "@/lib/brand";
 import { Limits } from "@/app/(app)/usage/plan";
 
 type LimitLine = { key: LimitKey; label: string; used: number; limit: number | null; pct: number; over: boolean; full: boolean; near: boolean };
@@ -31,10 +34,11 @@ type Detail = {
   workspaces: Workspace[];
   flags: Flag[];
   billing: {
-    subscription: { plan: PlanId; status: SubStatus; provider: string; trial_ends_at: string | null; current_period_end: string | null; access_until: string | null; updated_by: string | null; updated_at: string } | null;
+    subscription: { plan: PlanId; status: SubStatus; provider: string; trial_ends_at: string | null; current_period_end: string | null; access_until: string | null; updated_by: string | null; updated_at: string; extra_groups: number } | null;
     access: Access;
-    usage: { seats: number; workspaces: number };
+    usage: { seats: number; workspaces: number; ending: number };
   };
+  rolloffs: { id: string; scope: "group" | "org"; group: string | null; status: string; deleteOn: string; readOnlyFrom: string | null; requestedBy: string; reason: string | null; certificate: { id: string } | null }[];
   terms: Terms;
   credit: Credit;
   limits: LimitLine[];
@@ -168,12 +172,27 @@ function PlanPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
   const sub = d.billing.subscription;
   const [plan, setPlan] = useState<PlanId>(sub?.plan ?? "team");
   const [status, setStatus] = useState<SubStatus>(sub?.status ?? "active");
+  const [extras, setExtras] = useState(sub?.extra_groups ?? 0);
+  const [ending, setEnding] = useState(false);
   const [err, setErr] = useState("");
-  const changed = !sub || plan !== sub.plan || status !== sub.status;
+  const changed = !sub || plan !== sub.plan || status !== sub.status || extras !== (sub.extra_groups ?? 0);
+  const pendingOrg = d.rolloffs.find((r) => r.scope === "org" && (r.status === "scheduled" || r.status === "running"));
+  const endClient = async () => {
+    setErr("");
+    try {
+      await api(`/api/owner/tenants/${d.org.id}/rolloff`, { method: "POST", json: {} });
+      toast(`${d.org.name} ended: read-only now, deleted in 30 days`);
+      setEnding(false);
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't end the client.");
+      setEnding(false);
+    }
+  };
   const save = async () => {
     setErr("");
     try {
-      await api(`/api/owner/tenants/${d.org.id}/billing`, { method: "PATCH", json: { plan, ...(sub && status === sub.status ? {} : { status }) } });
+      await api(`/api/owner/tenants/${d.org.id}/billing`, { method: "PATCH", json: { plan, ...(sub && status === sub.status ? {} : { status }), ...(extras !== (sub?.extra_groups ?? 0) ? { extraGroups: extras } : {}) } });
       toast(`${d.org.name}: ${planById(plan)!.name} plan, ${STATUS_LABEL[status]}`);
       onSaved();
     } catch (e) {
@@ -190,8 +209,8 @@ function PlanPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="muted" style={{ margin: 0 }}>
           {sub && p
-            ? <>{p.name} ({p.selfService ? `$${p.pricePerSeat} per person` : "custom price"}) via {sub.provider === "mock" ? "test-mode checkout" : sub.provider === "manual" ? "the Sidekick team" : sub.provider} · {d.billing.usage.seats} of {limitText(p.seats)} people · {d.billing.usage.workspaces} of {limitText(p.workspaces)} workspaces · last change by {sub.updated_by ?? "—"} {fmtTime(sub.updated_at)}</>
-            : <>No self-service plan: this client was added by the Sidekick team and has full use. Setting a plan here starts billing rules for them.</>}
+            ? <>{planWithExtras(p, sub.extra_groups ?? 0)} ({p.selfService ? `${usd(monthlyPrice(p, sub.extra_groups ?? 0))} a month` : "custom price"}) via {sub.provider === "mock" ? "test-mode checkout" : sub.provider === "manual" ? `the ${BRAND.name} team` : sub.provider} · {d.billing.usage.seats} of {limitText(limitsWithExtras(p, sub.extra_groups ?? 0).seats)} people · {d.billing.usage.workspaces} of {limitText(limitsWithExtras(p, sub.extra_groups ?? 0).workspaces)} groups{d.billing.usage.ending ? ` (+${d.billing.usage.ending} ending)` : ""} · last change by {sub.updated_by ?? "—"} {fmtTime(sub.updated_at)}</>
+            : <>No self-service plan: this client was added by the {BRAND.name} team and has full use. Setting a plan here starts billing rules for them.</>}
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <select className="input" style={{ width: "auto" }} value={plan} onChange={(e) => setPlan(e.target.value as PlanId)} aria-label="Plan">
@@ -200,11 +219,22 @@ function PlanPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
           <select className="input" style={{ width: "auto" }} value={status} onChange={(e) => setStatus(e.target.value as SubStatus)} aria-label="Status">
             {SUB_STATUSES.map((x) => <option key={x} value={x}>{STATUS_LABEL[x]}</option>)}
           </select>
+          <label className="muted" htmlFor="owner-extras">Extra groups</label>
+          <input id="owner-extras" className="input num" type="number" min={0} max={50} style={{ width: 70 }} value={extras} onChange={(e) => setExtras(Math.max(0, Math.min(50, Math.floor(Number(e.target.value) || 0))))} />
           <button className="btn primary" disabled={!changed} onClick={save}>Save plan</button>
+          <span className="spacer" style={{ flex: 1 }} />
+          {!pendingOrg && <button className="btn small danger" onClick={() => setEnding(true)}>End client…</button>}
         </div>
-        <span className="muted" style={{ fontSize: 12.5 }}>Recorded in the operator log and the client&apos;s audit log. Canceled turns the client read-only at once; Payment failed gives them 7 days.</span>
+        <span className="muted" style={{ fontSize: 12.5 }}>Recorded in the operator log and the client&apos;s audit log. Canceled turns the client read-only at once and deletes its data after 30 days (any other status stops that); Payment failed gives them 7 days.</span>
+        {pendingOrg && <div className="callout bad"><span>All of this client&apos;s data will be deleted on {fmtDate(pendingOrg.deleteOn)} ({pendingOrg.reason ?? "ended"}; asked by {pendingOrg.requestedBy}). Extend or cancel it on <Link href="/owner/rolloffs">Roll-offs</Link>.</span></div>}
+        {d.rolloffs.filter((r) => r.scope === "group" && r.status === "scheduled").map((r) => <div key={r.id} className="callout warn"><span>Group “{r.group}” is ending: deleted on {fmtDate(r.deleteOn)} (asked by {r.requestedBy}).</span></div>)}
         {err && <p className="err" style={{ margin: 0 }}>{err}</p>}
       </div>
+      {ending && (
+        <Modal title={`End ${d.org.name}?`} onClose={() => setEnding(false)} footer={<><button className="btn" onClick={() => setEnding(false)}>Back</button><button className="btn danger solid" onClick={endClient}>End client</button></>}>
+          <p style={{ margin: 0 }}>The organization turns read-only now: its people can still sign in, see everything and download it (Settings → Export your data). In 30 days every group, person, Teams link, setting and usage record is deleted, and a deletion certificate is kept on Roll-offs. You can extend or cancel it until then; paying again also cancels it.</p>
+        </Modal>
+      )}
     </div>
   );
 }

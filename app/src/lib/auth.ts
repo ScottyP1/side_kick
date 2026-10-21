@@ -35,6 +35,7 @@ import { all, get, newId, now, run, tx } from "./db";
 import { HttpError } from "./http-error";
 import { clientIp } from "./login-limit";
 import { traceScope } from "./trace";
+import { isWriteRequest } from "./request-scope";
 
 export const SESSION_COOKIE = "sk_session";
 const SESSION_DAYS = 7;
@@ -242,12 +243,25 @@ export async function workspaceIdsFor(user: User): Promise<string[]> {
  * The workspace wall. Returns the workspace id if this user may use it; otherwise throws 404 (not 403,
  * so people can't tell whether a workspace they don't belong to exists). Call it before any query that
  * reads or writes workspace data, and use the returned id in that query.
+ *
+ * A group that is **ending** (scheduled for deletion, lib/rolloff.ts) is read-only: during a request that
+ * changes something (`isWriteRequest`) it's refused with 409 and the deletion date. The roll-off routes
+ * themselves (cancel, delete now) pass `allowEnding`.
  */
-export async function requireWorkspace(user: User, workspaceId: string | null | undefined): Promise<string> {
+export async function requireWorkspace(user: User, workspaceId: string | null | undefined, opts: { allowEnding?: boolean } = {}): Promise<string> {
   if (!workspaceId || !(await workspaceIdsFor(user)).includes(workspaceId)) {
     throw new HttpError(404, "Workspace not found, or you're not a member of it.");
   }
   traceScope({ workspaceId });
+  if (!opts.allowEnding && isWriteRequest()) {
+    const ending = await get<{ delete_on: string }>(
+      "SELECT delete_on FROM rolloffs WHERE org_id = ? AND workspace_id = ? AND scope = 'group' AND status IN ('scheduled', 'running')", user.org_id, workspaceId,
+    );
+    if (ending) {
+      const when = new Date(ending.delete_on).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+      throw new HttpError(409, `This group is ending: it's read-only and everything in it will be deleted on ${when}. An Org Owner or Org Admin can download it or cancel the ending on the group's Settings tab.`);
+    }
+  }
   return workspaceId;
 }
 

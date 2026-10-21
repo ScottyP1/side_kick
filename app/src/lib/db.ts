@@ -325,6 +325,8 @@ function migrate(conn: DatabaseSync) {
   // Reminders: due dates as real dates (YYYY-MM-DD), worked out from what was said and the meeting date.
   if (!has("action_items", "due_on")) conn.exec("ALTER TABLE action_items ADD COLUMN due_on TEXT");
   if (!has("items", "due_on")) conn.exec("ALTER TABLE items ADD COLUMN due_on TEXT");
+  // Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
+  if (!has("workspaces", "client")) conn.exec("ALTER TABLE workspaces ADD COLUMN client TEXT");
 }
 
 /**

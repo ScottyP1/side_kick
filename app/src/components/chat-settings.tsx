@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The settings window for one linked Teams channel or chat (Workspaces page → Teams channels and chats →
+ * The settings window for one linked Teams channel or chat (a group's page → Teams chats →
  * Settings). Org Owners and Org Admins, and Team Leads for the workspaces they lead, choose what Sidekick does in that chat: post meeting notes, keep
  * track of every message, and send reminders (time, time zone, quiet days, kinds). They can also preview
  * the next reminder or send one now. Saved with PATCH /api/teams-links/settings (audited); preview and

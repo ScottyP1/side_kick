@@ -2,6 +2,11 @@
 
 > Last updated: October 19, 2026 (real-world re-check after deploy). Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Regroup** just below.
 
+## Onboarding, groups and Indigo palette (Oct 20, 2026, branch `claude/onboarding-palette-3c261b`, PR #23)
+- **Design**: clickable mockup `docs/mockups/onboarding.html` (setup wizard, Groups, New group, Team Lead view, Teams side, palettes). Cody picked **Indigo** and these rules: chats are assigned to a group **only in the portal** (Teams shows a "not set up yet" notice, no buttons); once assigned Sidekick reads every message there (no separate keep-track switch); only Team Leads/admins may add Sidekick to a chat (it leaves if anyone else does); unassigned chats are left after 7 days; Team Leads add members. The Teams-side rules were sent to the multitenant-teams session to build.
+- **Built**: Indigo tokens in `globals.css` (light/dark, all text pairs WCAG AA), orb, Teams icon + `accentColor`. **Groups** (portal name for workspaces): `workspaces.client` column; GET /api/workspaces adds `client`, `chats`, `overdue`, `leads`; POST takes `client`, `lead` (a Member/Viewer becomes Team Lead, audited) and `members`; `/api/workspaces/:id/members` (GET for the group, POST/DELETE for admins and the group's Team Lead, Members/Viewers only for leads). Pages: Groups cards with health labels, one-page **New group** (`/workspaces/new`), **group page** (`/workspaces/[id]`: Overview checklist, People, Teams chats, Documents, Settings). Menu item renamed "Groups".
+- **Next**: setup wizard after sign-up (needs PR #24 merged); "chats waiting for a group" list on the group page and directory import (need the multitenant-teams APIs); rename remaining "workspace" wording in other pages.
+
 ## End-to-end test results (Oct 20, 2026)
 - **Answers, documents, guardrails, workspaces** (branch `claude/e2e-answers-docs-7a3221`): chat timestamps no longer masked as phone numbers; rate/fee questions no longer refused as HR advice; too-broad custom rules ("Don't answer any questions") refused at save, clearer custom-rule refusal; workspaces can be renamed and deleted (with everything in them) by Org Owners/Admins, names unique per org; document delete asks first; unsupported/empty uploads refused before saving; Knowledge, Guardrails (phone width) and Workspaces polish.
 

@@ -29,7 +29,8 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | What | Org Owner | Org Admin | Team Lead | Billing Admin | Member | Viewer |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
 | **Everyone signed in** | | | | | | |
-| See the home page, their profile and their workspace list | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See the home page, their profile and their groups (workspaces) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See who's in their groups (emails: admins and the group's Team Lead only) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See live status on the home page (names of who's active: admins only) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Use the home assistant (it only offers actions their role allows) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See the guardrails in force | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -45,9 +46,9 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See their own AI use this month on the home page | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See Usage & billing and the whole company's AI spend | ✓ | ✓ | | ✓ | | |
 | **Running the organization** | | | | | | |
-| Create workspaces | ✓ | ✓ | | | | |
-| Rename a workspace, change its engagement code, delete it (and everything in it) | ✓ | ✓ | | | | |
-| Add people to their workspaces, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | | |
+| Create groups (workspaces), picking their client, Team Lead and first members | ✓ | ✓ | | | | |
+| Rename a group, change its client or engagement code, delete it (and everything in it) | ✓ | ✓ | | | | |
+| Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
 | Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |
 | See the audit log and Activity (traces, performance) | ✓ | ✓ | | | | |
@@ -64,7 +65,7 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 - **Role before data.** Every change checks the role first, so a refused person learns nothing about
   what exists.
 - **No one makes an Org Owner** from Users & access, and the Org Owner can't be changed or removed there.
-  Org Admins can add other Org Admins and make Team Leads.
+  Org Admins can add other Org Admins and make Team Leads (also by picking a Member or Viewer as a new group's Team Lead).
 - **Nobody changes their own role or removes themselves.** An Org Admin who wants a different role, or to
   leave, asks the Org Owner or another Org Admin, so nobody locks themselves out by accident.
 - **Temporary passwords first.** Someone added with a temporary password can do nothing but choose a new

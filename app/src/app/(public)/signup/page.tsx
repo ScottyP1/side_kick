@@ -4,8 +4,8 @@
  * Sign up (/signup): a company creates its Sidekick organization. Organization name, your name, work email,
  * password (at least 10 characters, as in Setup) and plan (from lib/plans.ts; `?plan=` from the pricing page
  * picks one). POST /api/signup creates the organization, makes you its Org Owner, starts the free trial and
- * signs you in; then you go to checkout. Shows a notice instead of the form when the Sidekick team has
- * switched sign-up off. "Sign up with Microsoft" will be added here once multi-tenant Microsoft sign-in exists.
+ * signs you in; then you go to checkout. Sign-up is off by default (lib/signup.ts): while it's closed the
+ * page shows a "not open yet, contact us" card instead of the form. "Sign up with Microsoft" will be added here once multi-tenant Microsoft sign-in exists.
  */
 
 import Link from "next/link";
@@ -53,8 +53,9 @@ export default function SignupPage() {
       <div style={{ display: "grid", placeItems: "center" }}>
         {open === false ? (
           <div className="auth-card">
-            <h1>Sign-up is closed</h1>
-            <p className="muted" style={{ margin: 0 }}>Self-service sign-up is switched off right now. Contact the Sidekick team (see <Link href="/support">Support</Link>) to get an organization set up, or <Link href="/login">sign in</Link>.</p>
+            <h1>Sign-up isn&apos;t open yet</h1>
+            <p className="muted" style={{ margin: 0 }}>Sidekick is taking new organizations by invitation for now. <Link href="/support">Contact us</Link> and we&apos;ll set yours up. Already have an account? <Link href="/login">Sign in</Link>.</p>
+            <Link className="btn primary" href="/support">Contact us</Link>
           </div>
         ) : (
           <form className="auth-card" onSubmit={submit}>

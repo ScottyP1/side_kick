@@ -15,6 +15,9 @@
  *   the platform-wide switch and that organization's switch are on.
  * - **Platform-only switches**: `signup` (self-service sign-up at /signup) is a switch for the whole platform
  *   that has no per-client meaning, so it's marked `platformOnly` and left out of the per-client list.
+ * - **Defaults**: an untouched switch is on, except `signup`, which is **off** until someone opens it (it
+ *   lets strangers create organizations that use real Claude credit). Its default comes from
+ *   `SIDEKICK_SIGNUP_OPEN=true` (to open it with a deploy); the operator's switch, once flipped, always wins.
  * - **Billing**: a client whose plan has lapsed (lib/plans.ts `accessFor`) is refused new AI work by
  *   `assertEnabled` too, as a restriction, so the portal, Teams and reminders all stop the same way.
  * - **Operator log**: owner actions are recorded in `platform_log`, separate from each client's audit log.
@@ -109,16 +112,25 @@ export const FLAGS = {
   guard: { label: "Guardrail check", help: "Checks every question first. Pausing it also pauses answers: Sidekick never answers unchecked" },
   uploads: { label: "Document uploads", help: "New files from any client" },
   remind: { label: "Reminders in Teams", help: "Daily and after-meeting reminder cards posted to Teams chats" },
-  signup: { label: "Self-service sign-up", help: "New companies creating an organization at /signup (test-mode payment). Off: only you add clients", platformOnly: true },
+  signup: { label: "Self-service sign-up", help: "New companies creating an organization at /signup (test-mode payment). Off by default: only you add clients", platformOnly: true },
 } as const;
 export type FlagKey = keyof typeof FLAGS;
 /** True for switches that only exist platform-wide (no per-client restriction), e.g. `signup`. */
 export const isPlatformOnly = (key: FlagKey) => "platformOnly" in FLAGS[key];
 
-/** Whether a feature is on. A switch nobody has touched yet counts as on. */
+/**
+ * Whether a switch is on when nobody has flipped it yet: on for every feature, except self-service sign-up,
+ * which is off unless the deploy sets `SIDEKICK_SIGNUP_OPEN=true`.
+ */
+export function flagDefault(key: FlagKey): boolean {
+  if (key === "signup") return process.env.SIDEKICK_SIGNUP_OPEN === "true";
+  return true;
+}
+
+/** Whether a feature is on: the operator's switch if it was ever flipped, otherwise `flagDefault`. */
 export async function flagEnabled(key: FlagKey): Promise<boolean> {
   const row = await get<{ enabled: number }>("SELECT enabled FROM platform_flags WHERE key = ?", key);
-  return row ? row.enabled === 1 : true;
+  return row ? row.enabled === 1 : flagDefault(key);
 }
 
 /** Whether a feature is on for one organization (its own switch only). Untouched counts as on. */

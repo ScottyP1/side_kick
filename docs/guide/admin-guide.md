@@ -3,7 +3,7 @@
 For **Org Owners** and **Org Admins**: everything needed to set Sidekick up for your organization and keep it running. New to the terms? Read [Concepts](concepts.md) first.
 
 ## 1. First sign-in
-**Signing up yourself.** A company can create its own organization at **/signup** (or **Start free trial** on the **/pricing** page): see [Sign-up, plan and billing](#15-sign-up-plan-and-billing) below.
+**Signing up yourself.** When the Sidekick team has opened sign-up, a company can create its own organization at **/signup** (or **Start free trial** on the **/pricing** page): see [Sign-up, plan and billing](#15-sign-up-plan-and-billing) below.
 
 The first person to open a new Sidekick install sets up the organization and becomes its **Org Owner**. If the Sidekick team onboarded you, sign in with the temporary password they gave you. Sidekick then shows only a **Pick your own password** screen until you choose a new one (at least 10 characters); nothing else works with a temporary password. Signing in with Microsoft instead also counts.
 
@@ -89,7 +89,7 @@ On the home page, type requests like "create a workspace for Fabrikam, code FAB"
 ## 15. Sign-up, plan and billing
 Payments are in **test mode** for now: no money moves, prices are made up, and Sidekick **never asks for card or bank details** (a blue "Test mode" note shows wherever billing appears).
 
-**Signing up.** On **/signup** enter your organization's name, your name, work email, a password (at least 10 characters) and a plan (Starter, Team or Business; compare them on **/pricing**). You become the **Org Owner**, are signed in straight away and land on **checkout**. Each email can only have one Sidekick account, in any organization. The Sidekick team can switch sign-up off; the page then says so. Too many sign-up attempts from one network (5 an hour) are paused for an hour.
+**Signing up.** On **/signup** enter your organization's name, your name, work email, a password (at least 10 characters) and a plan (Starter, Team or Business; compare them on **/pricing**). You become the **Org Owner**, are signed in straight away and land on **checkout**. Each email can only have one Sidekick account, in any organization. Sign-up is **off until the Sidekick team opens it**: until then **/signup** says "Sign-up isn't open yet" and **/pricing** shows **Contact us** instead of **Start free trial**; contact them to get an organization set up. Too many sign-up attempts from one network (5 an hour) are paused for an hour.
 
 **Free trial and paying.** Every new organization gets a **14-day free trial**. On checkout you see the plan, the price per person, how many people you have and the total every 30 days, and one **Pay (test mode)** button. **Not now** keeps the trial; everyone sees a "Free trial: N days left" note at the top until you pay.
 
@@ -125,6 +125,6 @@ Organizations set up by the Sidekick team (or the very first one on an install) 
 | "… is turned off for your organization by the Sidekick team" | Not an error: the Sidekick team switched that feature off for your organization. Org Owners: contact the Sidekick team to have it turned back on. Everyone else: ask your Org Owner. |
 | "This organization's Sidekick access is paused" | Contact the Sidekick team. |
 | "Sidekick is read-only for your organization because…" | The free trial ended, a failed payment wasn't fixed, or the plan was canceled. The Org Owner or a Billing Admin pays on **Usage & billing** to turn everything back on. |
-| "Self-service sign-up is closed right now" | The Sidekick team switched sign-up off. Contact them to get an organization set up. |
+| "Self-service sign-up isn't open yet" | Sign-up is off until the Sidekick team opens it. Contact them (see Support) to get an organization set up. |
 | A Teams link code doesn't work | Codes expire after 24 hours. Mention `@Sidekick link` in Teams for a new one. |
 | Sidekick answers "I couldn't find that" | The workspace doesn't have it yet. Upload the document; the question is already listed as a gap. |

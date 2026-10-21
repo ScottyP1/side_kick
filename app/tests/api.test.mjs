@@ -207,6 +207,8 @@ before(async () => {
     // The reminder timer is off; tests call its route themselves with this secret.
     SIDEKICK_SCHEDULER: "off",
     SIDEKICK_TICK_SECRET: TICK_SECRET,
+    // Self-service sign-up stays at its default (off) until a test opens it from the Owner Console.
+    SIDEKICK_SIGNUP_OPEN: "",
     // Microsoft sign-in against the fake Microsoft above (ENTRA_LOGIN_BASE is ignored in production).
     ENTRA_CLIENT_ID: MS_CLIENT_ID,
     ENTRA_CLIENT_SECRET: "test-entra-secret",
@@ -1170,6 +1172,23 @@ test(`[${ENGINE}] guardrails: the Test it box shows what would be refused and wh
   assert.doesNotMatch(JSON.stringify((await admin("GET", "/api/activity?view=messages")).body), /TESTBOX/);
 });
 
+test(`[${ENGINE}] sign-up is closed on a fresh install until the operator opens it`, async () => {
+  assert.deepEqual((await client()("GET", "/api/signup")).body, { open: false, testMode: true });
+  const r = await signUpAs(client(), { org: "Too Early Co", name: "T", email: "t@early.test", password: "correct horse battery", plan: "team" });
+  assert.equal(r.status, 403);
+  assert.match(r.body.error, /sign-up isn't open yet/i);
+  assert.match(r.body.error, /Contact the Sidekick team/);
+  assert.ok(!(await owner("GET", "/api/owner/tenants")).body.tenants.some((t) => t.name === "Too Early Co"), "nothing was created");
+  const flag = (await owner("GET", "/api/owner/releases")).body.flags.find((f) => f.key === "signup");
+  assert.equal(flag.enabled, false, "the Owner Console shows it off");
+  // The public pages still render (they show the "not open yet, contact us" state in the browser).
+  for (const page of ["/pricing", "/signup"]) assert.equal((await client()("GET", page)).status, 200, page);
+  // The operator opens it; that's logged.
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "signup", enabled: true })).status, 200);
+  assert.equal((await client()("GET", "/api/signup")).body.open, true);
+  assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Turned on Self-service sign-up/.test(l.action)));
+});
+
 test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, another org, Teams or the assistant`, async () => {
   const form = new FormData();
   form.append("ws", s.wsB);
@@ -1821,7 +1840,7 @@ test(`[${ENGINE}] sign-up: the operator's switch turns it off (platform-wide onl
   assert.equal((await client()("GET", "/api/signup")).body.open, false);
   const r = await signUpAs(client(), { org: "Closed Co", name: "C", email: "c@closed.test", password: "correct horse battery", plan: "team" });
   assert.equal(r.status, 403);
-  assert.match(r.body.error, /sign-up is closed/i);
+  assert.match(r.body.error, /sign-up isn't open yet/i);
   assert.ok((await owner("GET", "/api/owner/releases")).body.flags.some((f) => f.key === "signup" && !f.enabled));
   assert.equal((await owner("POST", "/api/owner/releases", { key: "signup", enabled: true })).status, 200);
   assert.equal((await signUpAs(client(), { org: "Open Again Co", name: "O", email: "o@open.test", password: "correct horse battery", plan: "starter" })).status, 200);

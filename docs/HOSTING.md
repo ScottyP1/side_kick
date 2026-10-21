@@ -75,9 +75,11 @@ the bot's messaging endpoint (the live address above). Build the package with:
 npm --prefix app run teams:package
 ```
 
-That writes `teams/build/sidekick-teams-live.zip` (version from `teams/manifest.template.json`, now 1.2.0),
+That writes `teams/build/sidekick-teams-live.zip` (version from `teams/manifest.template.json`, now 1.3.0),
 with the live address as its web address. It asks Azure for the address (`az login` needed), or uses
-`SIDEKICK_LIVE_URL` if set; the address is never written into the repo.
+`SIDEKICK_LIVE_URL` if set; the address is never written into the repo. The store listing's website,
+privacy (`/privacy`) and terms (`/terms`) links use `SIDEKICK_WEBSITE_URL` if set (e.g. a custom domain),
+otherwise the app's own address, which serves those pages.
 
 - **Install it once, for the whole org**: Teams admin center → Teams apps → Manage apps → **Upload new app**.
   People then add Sidekick from **Built for your org** in any team, channel or chat. Don't upload it per
@@ -87,6 +89,13 @@ with the live address as its web address. It asks Azure for the address (`az log
 - **Reading every message** (chat tracking) needs the package's resource-specific consent permissions
   (`ChannelMessage.Read.Group`, `ChatMessage.Read.Chat`) *and* the tenant allowing that consent. Teams and
   chats have separate tenant settings, so tracking can work in a channel but not in a group chat.
+- **1.3.0** adds the `add` / `remove` commands, store-ready website/privacy/terms links and wording for the
+  chat picker. `webApplicationInfo` names `ENTRA_CLIENT_ID` (the multi-tenant app) when it's set, otherwise the
+  bot's app as before: that's the app Microsoft treats as "Sidekick itself" for removing itself from chats.
+- **Single- or multi-tenant** is set on the server, not in the package: today `TENANT_ID` (Sidekick Labs)
+  keeps Sidekick to that tenant; `SIDEKICK_MULTI_TENANT=1` (plus a multi-tenant Entra app in `ENTRA_CLIENT_ID`
+  / `ENTRA_CLIENT_SECRET`) serves any company that signed up, with the bot still single-tenant (lib/tenants.ts).
+  Switching needs Azure/Entra/Store steps first: follow [TEAMS-MULTITENANT.md](TEAMS-MULTITENANT.md).
 - `-- --local` builds `sidekick-teams-local.zip` with the dev tunnel address instead. It's the same app to
   Teams (same ID), so uploading it replaces the live one, and it's only useful while the bot's endpoint
   points at the tunnel. Upload the live package again afterwards.

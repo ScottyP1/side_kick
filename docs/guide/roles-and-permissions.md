@@ -53,6 +53,12 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
 | Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |
+| Add Sidekick to a Teams chat (anyone else: Sidekick leaves) | ✓ | ✓ | ✓ | | | |
+| See and assign Teams chats waiting to be assigned (portal only) | ✓ | ✓ | ✓ (chats they added, to own groups) | | | |
+| Remove Sidekick from a Teams chat | ✓ | ✓ | ✓ (own groups' chats, or waiting chats they added) | | | |
+| Import people from Microsoft 365 | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | | |
+| `@Sidekick add` / `remove @name` in a linked Teams chat | ✓ | ✓ | ✓ (Members and Viewers, that chat's workspace if they lead it) | | | |
+| Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval) | ✓ | ✓ | | | | |
 | See the audit log and Activity (traces, performance) | ✓ | ✓ | | | | |
 | Change branding (logo, brand color) | ✓ | ✓ | | | | |
 | Make a workspace's guardrails stricter, write custom rules, use "Test it" | ✓ | ✓ | | | | |

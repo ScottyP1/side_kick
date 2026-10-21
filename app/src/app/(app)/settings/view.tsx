@@ -8,13 +8,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, Icon, Pill, Switch, useReportError, useToast } from "@/components/ui";
+import { takeFlash } from "@/lib/flash";
 
 type MsStatus = { configured: boolean; connected: boolean; tenantId: string | null; required: boolean; linked: boolean; canManage: boolean };
 
 /**
  * Microsoft sign-in panel. Everyone sees whether it's on and whether their own account is linked; the Org
  * Owner connects the tenant (by signing in with Microsoft), requires it, or disconnects it. Results of the
- * Microsoft round trip come back as `?microsoft=connected` or `?error=…` and are shown here.
+ * Microsoft round trip come back as `?microsoft=connected` or `?error=1` (message in a one-time cookie,
+ * lib/flash.ts) and are shown here.
  */
 function MicrosoftPanel() {
   const toast = useToast();
@@ -26,7 +28,7 @@ function MicrosoftPanel() {
     const q = new URLSearchParams(location.search);
     if (q.get("microsoft") === "connected") toast("Microsoft sign-in connected");
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (q.get("error")) setError(q.get("error")!);
+    if (q.has("error")) setError(takeFlash("Connecting Microsoft sign-in didn't finish. Try again."));
     if (q.size) history.replaceState(null, "", "/settings");
     load();
   }, [load, toast]);

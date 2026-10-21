@@ -5,6 +5,11 @@
 ## End-to-end test results (Oct 20, 2026)
 - **Answers, documents, guardrails, workspaces** (branch `claude/e2e-answers-docs-7a3221`): chat timestamps no longer masked as phone numbers; rate/fee questions no longer refused as HR advice; too-broad custom rules ("Don't answer any questions") refused at save, clearer custom-rule refusal; workspaces can be renamed and deleted (with everything in them) by Org Owners/Admins, names unique per org; document delete asks first; unsupported/empty uploads refused before saving; Knowledge, Guardrails (phone width) and Workspaces polish.
 
+## Security review: application (Oct 20, 2026)
+- Report `docs/security/2026-10-app-security-review.md` (branch `claude/app-review-411385`): nothing critical or high; walls between orgs and workspaces held on every route. Fixed on the same branch: Owner Console sign-in limit + operator log, password change ends other sessions, upload "zip bomb" and size limits, CSRF check in `handle()`, security headers (CSP, no framing, HSTS), production setup needs the one-time `SIDEKICK_SETUP_CODE` secret, admin **Unlock** for locked sign-ins, no messages from the address on /login, no Markdown links in Teams cards, guest-chat card buttons limited, reminders respect per-org restriction. Pure checks live in `app/src/lib/security.ts`. Open: Entra email auto-link (L6, needs a decision), X-Forwarded-For check on Azure.
+- ⚠️ **To create the live Owner Console account:** set `SIDEKICK_SETUP_CODE` on the Container App, open `/owner/setup`, then remove it (`docs/guide/owner-guide.md`).
+- Tests: `TEST_PORT` (and `TEST_DATABASE_URL`) let a second worktree run the suite without clashing on 3200/3201 and `sidekick_test`.
+
 ## Regroup (Oct 17, 2026)
 Many side sessions had drifted apart, so Cody paused them, merged what was ready and cleaned up. State after the regroup:
 

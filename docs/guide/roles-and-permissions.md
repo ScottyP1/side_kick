@@ -71,6 +71,12 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
   password (or sign out) until they do; every other request is refused. Signing in with Microsoft clears it.
 - **Password guessing is slowed down.** 5 wrong passwords for one email (or 20 from one network address)
   in 15 minutes pause password sign-in for 15 minutes. Failed sign-ins and sign-outs go to the audit log.
+  Users & access marks a paused person **Sign-in locked**; an Org Owner or Org Admin can press **Unlock**
+  (audited), for example when someone else's guessing locked them out.
+- **A new password signs you out everywhere else.** Changing your password ends your sessions on every other
+  browser and device, and the new password must differ from the old one.
+- **Changes only from Sidekick's own pages.** A change (anything but reading) sent by another website is
+  refused, and Sidekick can't be shown inside another site's frame.
 - **Team Leads stay inside their workspaces.** They only see, add and take off people in the workspaces
   they lead, can only give the Member or Viewer role, and can't change roles, remove anyone from the
   organization, create workspaces, or open admin pages.

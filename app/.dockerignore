@@ -1,6 +1,8 @@
 # Never send local data, secrets or build output into the image build.
 data
 .playground-data
+.preview-data
+.e2e-data-*
 .env*
 !.env.example
 .next*

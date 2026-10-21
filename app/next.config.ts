@@ -1,6 +1,48 @@
+/**
+ * @file Next.js settings for Sidekick: build output for the Docker image, files kept out of the build, and the
+ * security headers sent with every response.
+ */
 import type { NextConfig } from "next";
 
+const production = process.env.NODE_ENV === "production";
+
+/**
+ * Content Security Policy: where the browser may load scripts, styles, images and connections from. Everything
+ * Sidekick uses is its own (fonts are self-hosted by next/font, the logo is a data: URL), so the rules are
+ * "only from this site". Next.js puts small inline scripts in each page, hence 'unsafe-inline' for scripts
+ * (tighten with nonces later); `next dev` also needs eval and a websocket for hot reload. `frame-ancestors
+ * 'none'` stops other sites showing Sidekick in a frame (clickjacking); Sidekick has no Teams tab, so nothing
+ * needs to frame it. Security review M5, Oct 2026.
+ */
+const csp = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${production ? "" : " 'unsafe-eval'"}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  `connect-src 'self'${production ? "" : " ws: wss:"}`,
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+/** Security headers on every response (pages and API). HSTS only in production, where the site is HTTPS. */
+const securityHeaders = [
+  { key: "Content-Security-Policy", value: csp },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+  ...(production ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }] : []),
+];
+
 const nextConfig: NextConfig = {
+  // Don't advertise the framework in an X-Powered-By header.
+  poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
   // A separate build folder lets a test copy run next to the main dev server.
   distDir: process.env.NEXT_DIST_DIR || ".next",
   // "standalone" bundles a small server.js plus only the files it needs, which is what the Docker image

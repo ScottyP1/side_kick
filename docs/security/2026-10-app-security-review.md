@@ -30,6 +30,33 @@ separate review. Report only: nothing was fixed.
      front door never passes `Host: localhost` through, and only matters while a setup is still open.
 - Plus 9 low and 9 informational items below.
 
+## Fix status (same branch, Oct 20, 2026)
+
+Cody asked for the fixes after the review; they're on the same branch (`claude/app-review-411385`), with tests.
+
+| Finding | Status | What changed |
+|---|---|---|
+| M1 Owner Console guessing | Fixed | Same limit as client sign-in under the key `owner:<email>` (5 per email / 20 per IP in 15 min → 429); failed sign-ins on real owner accounts and the pause go to the operator log; unknown emails take as long as known ones |
+| M2 Sessions survive password change | Fixed | Changing your password ends every other session (`endOtherSessions`); the new password must differ from the current one |
+| M3 Upload bombs | Fixed | Word files whose XML unpacks to over 60 MB are refused unopened (`docxUnpackedBytes`); at most 2,000,000 characters per document, 2,000 PDF pages, 20 files per upload |
+| M4 CSRF | Fixed | `handle()` refuses POST/PUT/PATCH/DELETE whose `Sec-Fetch-Site` is cross-site/same-site or whose `Origin` isn't Sidekick's own host (`crossSiteRefusal` in `lib/security.ts`) |
+| M5 Security headers | Fixed | CSP (incl. `frame-ancestors 'none'`), `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS in production; `X-Powered-By` removed (`next.config.ts`) |
+| M6 Host-header localhost check | Fixed | Production refuses setup unless the one-time `SIDEKICK_SETUP_CODE` secret is set and sent (`setupRefusal`); localhost stays the rule on a laptop. **Action for Cody:** the live owner account doesn't exist yet (ops review M4): set the secret, create it, remove the secret |
+| L1 Lock anyone out | Mitigated | Users & access shows **Sign-in locked**; Org Owners/Admins can **Unlock** (`POST /api/users/:id {action:"unlock"}`, audited). The lock itself stays (it's what stops guessing) |
+| L2 Login timing | Fixed | Unknown emails are checked against a dummy hash |
+| L3 X-Forwarded-For | Not changed | Correct behind Azure's ingress (it appends the real address); worth one check on the live site |
+| L4 `?error=` text on /login | Fixed | The Microsoft callback puts its message in a 2-minute cookie and redirects to `?error=1`; only Microsoft's error code is shown, never its description; text in the address is never shown (`lib/flash.ts`) |
+| L5 Markdown links in cards | Fixed | `noLinks` breaks `[label](url)` in every card text block and fact |
+| L6 Entra email auto-link | Not changed | Needs a decision: require a verified-email claim (`xms_edov`, an Entra app setting) or link Microsoft accounts only while signed in. Changing it now could stop new people signing in with Microsoft |
+| L7 Guest-chat card buttons | Fixed | In a chat with client guests, only items from meetings with external guests can be changed |
+| L8 Manual reminders vs restriction | Fixed | Manual, daily and after-meeting reminders all respect the per-org Reminders restriction |
+| L9 Test folders not ignored | Fixed | `.gitignore` and `.dockerignore` cover `.e2e-data-*`, `.next-e2e-*`, `.preview-data` |
+| I2 Library error text | Fixed | Unreadable files show a plain sentence; the library error goes to the server log |
+| I5 Password reuse | Partly | New password must differ from the current one; no common-password list or owner MFA yet |
+| I6 Prompt tags | Fixed | `<`/`>` in passages and questions are escaped in the prompt (`tagSafe`) |
+| I8 Old sessions | Fixed | Expired sessions are deleted at each sign-in |
+| I1, I3, I4, I7, I9 | Not changed | Informational; see below |
+
 ## Findings
 
 Severity: **Critical** = one org can read/change another's data or anyone can take over; **High** = a

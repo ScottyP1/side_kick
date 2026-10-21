@@ -5,7 +5,7 @@ For **Org Owners** and **Org Admins**: everything needed to set Sidekick up for 
 ## 1. First sign-in
 The first person to open a new Sidekick install sets up the organization and becomes its **Org Owner**. If the Sidekick team onboarded you, sign in with the temporary password they gave you. Sidekick then shows only a **Pick your own password** screen until you choose a new one (at least 10 characters); nothing else works with a temporary password. Signing in with Microsoft instead also counts.
 
-**Signing in safely.** After 5 wrong passwords for one email (or 20 from one network address) within 15 minutes, password sign-in is paused for that email or address for 15 minutes, even with the right password. Wrong passwords on real accounts, the pause, sign-ins and sign-outs all appear on **Security & audit**. To sign out, use **Sign out** at the bottom of the sidebar, or tap your initials at the top right (the only way on a phone).
+**Signing in safely.** After 5 wrong passwords for one email (or 20 from one network address) within 15 minutes, password sign-in is paused for that email or address for 15 minutes, even with the right password. Wrong passwords on real accounts, the pause, sign-ins and sign-outs all appear on **Security & audit**. Org Owners and Org Admins see **Sign-in locked** next to a paused person on **Users & access** and can press **Unlock** to let them in straight away. Changing your password signs you out on every other browser and device. To sign out, use **Sign out** at the bottom of the sidebar, or tap your initials at the top right (the only way on a phone).
 
 ## 2. Create workspaces
 **Workspaces → New workspace.** Create one per client engagement, e.g. "Contoso Retail – Cloud Migration", with an optional engagement code. You're added as a member automatically. Names must be unique in your organization (ignoring upper/lower case).
@@ -21,7 +21,7 @@ The first person to open a new Sidekick install sets up the organization and bec
 **Team Leads.** Give the person who runs a project the **Team Lead** role and add them to that project's workspace(s). They can then add their own team to those workspaces (as Member or Viewer), take people off, and link the project's Teams chats, from **Users & access**, **Workspaces** or the home assistant, without needing you. If they add someone who already has an account in your organization, that person is simply added to the lead's workspace. Roles, removing people from the organization and new workspaces stay with you.
 
 ## 5. Add documents
-**Knowledge & docs**, in the workspace you want. Drop in PDF, Word (.docx), text, Markdown, CSV, JSON or Teams transcript (.vtt) files, up to 25 MB each. Other file types and empty files are refused straight away with the reason, and aren't added to the list. Tag each one:
+**Knowledge & docs**, in the workspace you want. Drop in PDF, Word (.docx), text, Markdown, CSV, JSON or Teams transcript (.vtt) files, up to 25 MB each and 20 at a time. Other file types and empty files are refused straight away with the reason, and aren't added to the list. A file with more than 2 million characters of text (about a 1,000-page book), a PDF over 2,000 pages, or a Word file that unpacks to far more than a real document holds is saved as **Failed** with the reason: split it into smaller files. Tag each one:
 - **Internal** for team-only material.
 - **Shareable** for anything fine to use in front of the client.
 

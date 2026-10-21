@@ -1,11 +1,13 @@
 /**
  * GET/POST /api/docs: list a workspace's documents, or upload new ones.
- * Uploads are extracted to text and indexed for search straight away. Who: workspace members (upload needs edit rights).
+ * Uploads are extracted to text and indexed for search straight away. Files of an unsupported type, empty
+ * or over 25 MB are refused before anything is saved (listed in `results`; 415 if every file was refused).
+ * Who: workspace members (upload needs edit rights).
  */
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { all, newId, now, run } from "@/lib/db";
-import { fileToText, MAX_UPLOAD_BYTES } from "@/lib/extract";
+import { fileToText, uploadProblem } from "@/lib/extract";
 import { indexText } from "@/lib/search";
 import { assertEnabled } from "@/lib/owner";
 
@@ -32,15 +34,21 @@ export const POST = handle(async (req: Request) => {
   const audience = form.get("audience") === "shareable" ? "shareable" : "internal";
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (!files.length) throw new HttpError(400, "Choose at least one file to upload.");
-  const results = [];
+  const results: { name: string; ok: boolean; error?: string }[] = [];
+  const readable = [];
   for (const file of files) {
+    const problem = uploadProblem(file.name, file.size);
+    if (problem) results.push({ name: file.name, ok: false, error: problem });
+    else readable.push(file);
+  }
+  if (!readable.length) throw new HttpError(415, results.length === 1 ? results[0].error! : `None of these files can be uploaded: ${results[0].error}`);
+  for (const file of readable) {
     const id = newId();
     await run(
       "INSERT INTO documents (id, org_id, workspace_id, name, mime, size, audience, status, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'Indexing', ?, ?)",
       id, user.org_id, ws, file.name, file.type, file.size, audience, user.id, now(),
     );
     try {
-      if (file.size > MAX_UPLOAD_BYTES) throw new HttpError(413, "File is larger than 25 MB.");
       const text = await fileToText(file.name, Buffer.from(await file.arrayBuffer()));
       if (!text.trim()) throw new HttpError(422, "No readable text found. If it's a scan, export it with text (OCR) first.");
       const n = await indexText({ orgId: user.org_id, workspaceId: ws, sourceType: "document", sourceId: id, title: file.name, audience, text });
@@ -51,6 +59,6 @@ export const POST = handle(async (req: Request) => {
       results.push({ name: file.name, ok: false, error: e instanceof Error ? e.message : "Failed" });
     }
   }
-  await audit(user, `Uploaded ${files.length} document${files.length > 1 ? "s" : ""}`, "Data", ws);
+  await audit(user, `Uploaded ${readable.length} document${readable.length > 1 ? "s" : ""}`, "Data", ws);
   return { results };
 });

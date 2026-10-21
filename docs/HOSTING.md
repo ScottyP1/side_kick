@@ -43,6 +43,31 @@ Scripts in `infra/azure/` (run after `az login`):
   database storage (~$4) are still billed while frozen. Azure restarts a stopped Postgres after 7 days.
 - `./unfreeze.sh`: starts them again.
 
+## Teams app package
+
+There is **one** Sidekick app in Teams: its app ID is the Azure Bot's ID, and Teams sends its messages to
+the bot's messaging endpoint (the live address above). Build the package with:
+
+```bash
+npm --prefix app run teams:package
+```
+
+That writes `teams/build/sidekick-teams-live.zip` (version from `teams/manifest.template.json`, now 1.2.0),
+with the live address as its web address. It asks Azure for the address (`az login` needed), or uses
+`SIDEKICK_LIVE_URL` if set; the address is never written into the repo.
+
+- **Install it once, for the whole org**: Teams admin center → Teams apps → Manage apps → **Upload new app**.
+  People then add Sidekick from **Built for your org** in any team, channel or chat. Don't upload it per
+  chat: every per-person or per-chat upload can show up as another "Sidekick" in Manage your apps.
+- **Updating**: bump `version` in the template, rebuild, then in Manage apps open Sidekick → **Upload file**.
+  Chats and channels keep the app (and their links in the portal, which belong to the chat, not the app).
+- **Reading every message** (chat tracking) needs the package's resource-specific consent permissions
+  (`ChannelMessage.Read.Group`, `ChatMessage.Read.Chat`) *and* the tenant allowing that consent. Teams and
+  chats have separate tenant settings, so tracking can work in a channel but not in a group chat.
+- `-- --local` builds `sidekick-teams-local.zip` with the dev tunnel address instead. It's the same app to
+  Teams (same ID), so uploading it replaces the live one, and it's only useful while the bot's endpoint
+  points at the tunnel. Upload the live package again afterwards.
+
 ## Budgets and alerts
 
 Monthly budgets, each emailing cody.l.scott@outlook.com and CodyScott@SidekickLabs334.onmicrosoft.com

@@ -3,6 +3,7 @@
 /**
  * Knowledge & docs (/knowledge): upload documents to the current workspace, tag them Internal or Shareable,
  * and try Ask Sidekick. Shareable documents are the only ones used when client guests are present.
+ * Deleting a document asks for confirmation first; unsupported or empty files are refused by the server.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -89,6 +90,7 @@ export default function KnowledgePage() {
     }
   };
   const remove = async (d: Doc) => {
+    if (!window.confirm(`Delete “${d.name}”? It's removed from search, so Sidekick can no longer use it in answers. This can't be undone.`)) return;
     try {
       await api(`/api/docs/${d.id}`, { method: "DELETE" });
       toast(`“${d.name}” deleted and removed from search`);
@@ -164,7 +166,7 @@ export default function KnowledgePage() {
         >
           <span style={{ color: "var(--accent)" }}>{uploading ? <Spinner /> : <Icon n="upload" />}</span>
           <b>{uploading ? "Reading and indexing…" : "Drop files here"}</b>
-          <span className="muted">PDF, Word (.docx), text, Markdown, CSV or Teams transcripts (.vtt) · up to 25 MB each</span>
+          <span className="muted">PDF, Word (.docx), text, Markdown, CSV, JSON or Teams transcripts (.vtt) · up to 25 MB each</span>
           <div className="actions" style={{ justifyContent: "center", alignItems: "center" }}>
             <span className="muted">New files are</span>
             <div className="seg">
@@ -227,7 +229,7 @@ export default function KnowledgePage() {
                     <td>
                       <b style={{ wordBreak: "break-word" }}>{d.name}</b>
                       {d.error && <div style={{ color: "var(--bad)", fontSize: 12.5 }}>{d.error}</div>}
-                      {d.status === "Ready" && <div className="muted" style={{ fontSize: 12 }}>{d.chunk_count} passages</div>}
+                      {d.status === "Ready" && <div className="muted" style={{ fontSize: 12 }}>{d.chunk_count} passage{d.chunk_count === 1 ? "" : "s"}</div>}
                     </td>
                     <td>
                       <Pill kind={d.status === "Ready" ? "good" : d.status === "Failed" ? "bad" : "info"}>{d.status}</Pill>
@@ -243,7 +245,7 @@ export default function KnowledgePage() {
                     </td>
                     <td className="muted">{d.uploaded_by ?? "—"}</td>
                     <td className="muted">{fmtDate(d.created_at)}</td>
-                    <td className="r num muted">{fmtBytes(d.size)}</td>
+                    <td className="r num muted">{d.size < 1024 ? `${d.size} bytes` : fmtBytes(d.size)}</td>
                     <td className="r">{canEdit && <button className="btn small ghost" onClick={() => remove(d)}>Delete</button>}</td>
                   </tr>
                 ))}

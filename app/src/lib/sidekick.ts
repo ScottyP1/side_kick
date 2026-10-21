@@ -21,6 +21,7 @@ import { structured } from "./claude";
 import { indexText, searchPassages } from "./search";
 import { auditAsSidekick, type User } from "./auth";
 import { assertEnabled } from "./owner";
+import { excerptFor } from "./excerpt";
 import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, type GuardPlace, type RuleId } from "./guardrails";
 
 /* ------------------------------------------------------------------ */
@@ -111,7 +112,7 @@ export async function ask(user: User, workspaceId: string, question: string, gue
   const used = new Set(result.source_ids);
   const cited = sources
     .filter((s) => used.has(s.id))
-    .map((s) => ({ id: s.id, title: s.title, loc: s.loc, type: s.source_type, sourceId: s.source_id, excerpt: clean(s.text.slice(0, 280)) }));
+    .map((s) => ({ id: s.id, title: s.title, loc: s.loc, type: s.source_type, sourceId: s.source_id, excerpt: clean(excerptFor(s.text, question)) }));
   for (const f of fired.values()) await recordGuard(place, "answer", f.rule, f.action);
   return { found: result.found, answer: result.answer, sources: cited, blocked: null as RuleId | null };
 }

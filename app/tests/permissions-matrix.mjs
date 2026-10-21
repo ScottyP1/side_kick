@@ -45,6 +45,8 @@ export const MATRIX = [
   { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ["owner", "admin", "billing"] },
   // Running the organization
   { what: "Create workspaces", method: "POST", url: () => "/api/workspaces", body: {}, allow: ADMINS },
+  { what: "Rename a workspace or change its engagement code", method: "PATCH", url: () => `/api/workspaces/${NOPE}`, body: {}, allow: ADMINS },
+  { what: "Delete a workspace and everything in it", method: "DELETE", url: () => `/api/workspaces/${NOPE}`, allow: ADMINS },
   // People and Teams links: admins everywhere, Team Leads only in the workspaces they lead (the walls test that part)
   { what: "See people (Team Leads: only people in their workspaces)", method: "GET", url: () => "/api/users", allow: MANAGERS },
   { what: "Add people (Team Leads: only as Member or Viewer, to their workspaces)", method: "POST", url: () => "/api/users", body: {}, allow: MANAGERS },

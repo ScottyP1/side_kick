@@ -11,6 +11,7 @@ import { audit, createUser, HttpError, startSession } from "@/lib/auth";
 import { get, newId, now, run, tx } from "@/lib/db";
 import { entraConfigured } from "@/lib/entra";
 import { assertSetupAllowed, setupNeedsCode } from "@/lib/owner";
+import { assertGoodPassword } from "@/lib/passwords";
 
 // First-run setup: creates the organization and its Org Owner. Only works while no users exist.
 // `microsoft` tells the sign-in page whether to show "Sign in with Microsoft"; `needsCode` whether the setup
@@ -25,7 +26,7 @@ export const POST = handle(async (req: Request) => {
   const name = requireText(body.name, "Your name", 120);
   const email = requireText(body.email, "Email", 200);
   const password = requireText(body.password, "Password", 200);
-  if (password.length < 10) throw new HttpError(400, "Use a password with at least 10 characters.");
+  await assertGoodPassword(password, { email });
   const orgId = newId();
   const userId = await tx(async () => {
     await run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", orgId, org, now());

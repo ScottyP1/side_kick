@@ -13,6 +13,7 @@ import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, managedWorkspaceIds, requireUser, ROLES, type Role } from "@/lib/auth";
 import { all, get, run, tx } from "@/lib/db";
 import { clearSignInFailures } from "@/lib/login-limit";
+import { forgetSecondFactors } from "@/lib/mfa";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -71,6 +72,7 @@ export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
   const { admin, target } = await load((await params).id);
   if (target.id === admin.id) throw new HttpError(403, "You can't remove yourself. Ask the Org Owner or another Org Admin.");
   await run("DELETE FROM users WHERE id = ?", target.id);
+  await forgetSecondFactors("user", target.id);
   await audit(admin, `Removed ${target.name}`, "Access");
   return { ok: true };
 });

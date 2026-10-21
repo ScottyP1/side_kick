@@ -2,11 +2,13 @@
 
 /**
  * Settings (/settings): Microsoft sign-in (connect the org's Microsoft tenant, require it), organization
- * branding (logo and brand color) and your own account (password).
+ * branding (logo and brand color) and your own account: password, two-step sign-in (components/two-step.tsx)
+ * and where you're signed in (sign out other sessions).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/shell";
+import { TwoStepPanel } from "@/components/two-step";
 import { api, Icon, Pill, Switch, useReportError, useToast } from "@/components/ui";
 import { takeFlash } from "@/lib/flash";
 
@@ -81,10 +83,60 @@ function MicrosoftPanel() {
               <span><b>Require Microsoft sign-in</b><span className="muted"> · turns passwords off and signs everyone else out</span></span>
             </div>
             {!s.linked && <span className="hint">Link your own account first, so you can&apos;t get locked out.</span>}
+            {!s.required && (
+              <span className="callout" style={{ margin: 0, fontSize: 13 }}>
+                Recommended: require Microsoft sign-in. Microsoft then checks every sign-in with your company&apos;s own rules (multi-factor
+                sign-in, Conditional Access), and nobody can guess a Sidekick password. If Microsoft sign-in ever breaks, the Sidekick team
+                can let you back in.
+              </span>
+            )}
             <div><button className="btn small danger" onClick={disconnect}>Disconnect</button></div>
           </>
         )}
         {error && <p className="err" role="alert" style={{ margin: 0 }}>{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+type SessionInfo = { id: string; current: boolean; started: string | null; lastUsed: string | null; device: string; ip: string | null };
+
+/** Where you're signed in: your sessions (browser, address, when), with "Sign out" per session and for all others. */
+function SessionsPanel() {
+  const toast = useToast();
+  const reportError = useReportError();
+  const [list, setList] = useState<SessionInfo[] | null>(null);
+  const load = useCallback(() => api<{ sessions: SessionInfo[] }>("/api/auth/sessions").then((r) => setList(r.sessions)).catch(reportError), [reportError]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!list) return null;
+  const end = async (id?: string) => {
+    try {
+      const r = await api<{ ended: number }>("/api/auth/sessions", { method: "DELETE", json: id ? { id } : {} });
+      toast(id ? "Signed out that session" : `Signed out everywhere else (${r.ended})`);
+      load();
+    } catch (e) {
+      reportError(e);
+    }
+  };
+  const when = (t: string | null) => (t ? new Date(t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "unknown");
+  const others = list.filter((x) => !x.current).length;
+  return (
+    <div className="panel">
+      <div className="panel-h"><h2>Where you&apos;re signed in</h2><span className="muted">{list.length} {list.length === 1 ? "session" : "sessions"}</span></div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {list.map((x) => (
+          <div key={x.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ flex: 1, minWidth: 200 }}>
+              <b>{x.device}</b>{x.current && <> <Pill kind="good">This browser</Pill></>}
+              <span className="muted" style={{ display: "block", fontSize: 12.5 }}>{x.ip ? `${x.ip} · ` : ""}signed in {when(x.started)} · last used {when(x.lastUsed)}</span>
+            </span>
+            {!x.current && <button className="btn small ghost" onClick={() => end(x.id)}>Sign out</button>}
+          </div>
+        ))}
+        <span className="hint">Don&apos;t recognise one? Sign it out and change your password (that also signs out everywhere else).</span>
+        {others > 0 && <div><button className="btn small danger" onClick={() => end()}>Sign out everywhere else</button></div>}
       </div>
     </div>
   );
@@ -171,11 +223,13 @@ export default function SettingsPage() {
           <div className="panel-h"><h2>Change password</h2></div>
           <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="field"><label htmlFor="cur">Current password</label><input id="cur" className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></div>
-            <div className="field"><label htmlFor="new">New password</label><input id="new" className="input" type="password" autoComplete="new-password" minLength={10} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 10 characters.</span></div>
+            <div className="field"><label htmlFor="new">New password</label><input id="new" className="input" type="password" autoComplete="new-password" minLength={12} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 12 characters, and not one from a known data breach. A password manager can make one.</span></div>
             {pwErr && <p className="err">{pwErr}</p>}
-            <div><button className="btn primary" type="submit" disabled={!pw.current || pw.next.length < 10}>Change password</button></div>
+            <div><button className="btn primary" type="submit" disabled={!pw.current || pw.next.length < 12}>Change password</button></div>
           </div>
         </form>
+        <TwoStepPanel base="/api/auth/mfa" note="Signing in with Microsoft skips this step: Microsoft runs its own checks." />
+        <SessionsPanel />
       </div>
     </>
   );

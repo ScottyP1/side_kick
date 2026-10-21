@@ -19,6 +19,7 @@ const NAV: [string, string, string][] = [
   ["/owner/clients", "Clients", "users"],
   ["/owner/performance", "Performance & errors", "chart"],
   ["/owner/releases", "Releases & switches", "gear"],
+  ["/owner/security", "Security", "lock"],
 ];
 
 // The Owner Console: Sidekick's operator view across every client organization.

@@ -276,3 +276,92 @@ test(`[${engine}] meeting hours: a transcript's length comes from its timestamps
   assert.equal(plans.transcriptMinutes("word ".repeat(1500)), 10, "about 150 words a minute without timestamps");
   assert.equal(plans.transcriptMinutes("short"), 1, "at least a minute");
 });
+
+/* ---------- encryption at rest for stored secrets (src/lib/secret-box.ts) ---------- */
+const box = await import("../src/lib/secret-box.ts");
+
+/** Runs `fn` with SIDEKICK_ENCRYPTION_KEY and NODE_ENV set as given, putting both back afterwards. */
+function withEnv(key, nodeEnv, fn) {
+  const saved = { key: process.env.SIDEKICK_ENCRYPTION_KEY, env: process.env.NODE_ENV };
+  if (key === undefined) delete process.env.SIDEKICK_ENCRYPTION_KEY;
+  else process.env.SIDEKICK_ENCRYPTION_KEY = key;
+  process.env.NODE_ENV = nodeEnv;
+  try {
+    return fn();
+  } finally {
+    if (saved.key === undefined) delete process.env.SIDEKICK_ENCRYPTION_KEY;
+    else process.env.SIDEKICK_ENCRYPTION_KEY = saved.key;
+    process.env.NODE_ENV = saved.env;
+  }
+}
+const KEY_A = Buffer.alloc(32, 7).toString("base64");
+const KEY_B = Buffer.alloc(32, 9).toString("base64");
+
+test(`[${engine}] secret box: sealed secrets open only with the same key and context, and tampering is caught`, () => {
+  withEnv(KEY_A, "production", () => {
+    const sealed = box.sealSecret("JBSWY3DPEHPK3PXP", "mfa_factors.secret:f1");
+    assert.ok(box.isSealed(sealed));
+    assert.doesNotMatch(sealed, /JBSWY3DPEHPK3PXP/);
+    assert.notEqual(box.sealSecret("JBSWY3DPEHPK3PXP", "mfa_factors.secret:f1"), sealed, "a fresh data key and IV every time");
+    assert.equal(box.openSecret(sealed, "mfa_factors.secret:f1"), "JBSWY3DPEHPK3PXP");
+    assert.throws(() => box.openSecret(sealed, "mfa_factors.secret:f2"), "copied onto another row, it doesn't open");
+    const parts = sealed.split(".");
+    parts[5] = Buffer.from(Buffer.from(parts[5], "base64url").map((b, i) => (i === 0 ? b ^ 1 : b))).toString("base64url");
+    assert.throws(() => box.openSecret(parts.join("."), "mfa_factors.secret:f1"), "tampering is detected");
+    assert.equal(box.openSecret("PLAINSECRET", "x"), "PLAINSECRET", "plain values from before encryption still open");
+    withEnv(KEY_B, "production", () => assert.throws(() => box.openSecret(sealed, "mfa_factors.secret:f1"), /different SIDEKICK_ENCRYPTION_KEY/));
+    withEnv(undefined, "production", () => assert.throws(() => box.openSecret(sealed, "mfa_factors.secret:f1"), /SIDEKICK_ENCRYPTION_KEY/));
+  });
+});
+
+test(`[${engine}] secret box: production refuses to store secrets without a key; a laptop stores them as they are`, () => {
+  withEnv(undefined, "production", () => {
+    assert.equal(box.canSealSecrets(), false);
+    assert.throws(() => box.sealSecret("s", "c"), (e) => e.status === 503);
+  });
+  withEnv("too-short", "production", () => assert.equal(box.canSealSecrets(), false, "a malformed key counts as missing"));
+  withEnv(undefined, "development", () => {
+    assert.equal(box.canSealSecrets(), true);
+    assert.equal(box.sealSecret("s", "c"), "s");
+  });
+  withEnv(KEY_A, "production", () => assert.equal(box.canSealSecrets(), true));
+});
+
+/* ---------- breached-password check (src/lib/passwords.ts) ---------- */
+const passwords = await import("../src/lib/passwords.ts");
+
+test(`[${engine}] breached-password check: only a 5-character hash prefix is sent, and it fails open`, async () => {
+  const http = await import("node:http");
+  const crypto = await import("node:crypto");
+  const seen = [];
+  const hash = crypto.createHash("sha1").update("hunter2 hunter2").digest("hex").toUpperCase();
+  const server = http.createServer((req, res) => {
+    seen.push({ url: req.url, padding: req.headers["add-padding"] });
+    res.end(`${hash.slice(5)}:7\r\n0000000000000000000000000000000000A:0`);
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const saved = process.env.PWNED_PASSWORDS_URL;
+  try {
+    process.env.PWNED_PASSWORDS_URL = `http://127.0.0.1:${server.address().port}`;
+    assert.equal(await passwords.breachCount("hunter2 hunter2"), 7);
+    assert.equal(await passwords.breachCount("something nobody has used"), 0);
+    assert.deepEqual(seen[0], { url: `/range/${hash.slice(0, 5)}`, padding: "true" }, "only the prefix leaves Sidekick");
+    assert.ok(seen.every((s) => !s.url.includes("hunter2") && s.url.length === "/range/".length + 5));
+    await new Promise((r) => server.close(r));
+    // Unreachable: accepted (null), with a warning in the log.
+    const warned = [];
+    const warn = console.warn;
+    console.warn = (m) => warned.push(String(m));
+    try {
+      assert.equal(await passwords.breachCount("hunter2 hunter2"), null);
+    } finally {
+      console.warn = warn;
+    }
+    assert.match(warned.join("\n"), /^\[passwords\] Breached-password check unavailable/);
+    assert.doesNotMatch(warned.join("\n"), /hunter2|[0-9A-F]{40}/);
+  } finally {
+    if (saved === undefined) delete process.env.PWNED_PASSWORDS_URL;
+    else process.env.PWNED_PASSWORDS_URL = saved;
+    server.close();
+  }
+});

@@ -24,9 +24,13 @@ The first person to open a new Sidekick install sets up the organization and bec
 You can change the tag later; it takes effect immediately.
 
 ## 6. Import meetings
-**Meetings → Import transcript.** Upload the Teams transcript (`.vtt`), a Word file or paste the text, give it a title and date, and tick **Client guests attended** if the client was there. Notes are ready in about 15–30 seconds. If processing fails (for example, Sidekick was paused), open the meeting and choose **Try again**.
+**Meetings → Import transcript.** Upload the Teams transcript (`.vtt`), a Word file or paste the text, give it a title and date, and tick **Client guests attended** if the client was there. Notes are usually ready in 20–60 seconds.
+- **Limits:** files up to 25 MB, and the transcript text (pasted or from the file) up to 300,000 characters, about five hours of talk. The whole transcript goes to Claude in one request, so this keeps each import within what Claude can read at once and its cost predictable. Split a longer meeting into parts.
+- **If writing the notes fails** (for example, Claude was busy), the meeting is still saved: the dialog closes and the meeting opens with a **Failed** label and the reason. Choose **Try again** there; don't import it again.
+- **On the meeting's page:** the summary, decisions, open questions and facts, plus the **action items**, which you can edit right there like on Memory & gaps: tick them done, set the owner, pick a due date and change the status. The **Transcript** tab shows a long transcript in pieces (**Show more**).
+- **Delete** asks first: it removes the meeting together with its notes, action items and transcript.
 
-If the workspace has linked Teams channels, Sidekick posts the notes and action items there automatically.
+If the workspace has linked Teams chats or channels, Sidekick posts the notes and action items there automatically.
 
 ## 7. Link Teams chats and channels
 See [Sidekick in Teams](teams-guide.md) for what people see. To link:
@@ -37,7 +41,7 @@ See [Sidekick in Teams](teams-guide.md) for what people see. To link:
 
 The **Teams chats and channels** table on the Workspaces page shows every link. Use the switch to change the client-guests setting, or **Unlink** to stop Sidekick answering and posting there (this also deletes the messages it saved from that chat).
 
-**Settings** (Org Owners and Org Admins, and Team Leads for the workspaces they lead) chooses what Sidekick does in each chat; every change is in the audit log:
+The **Settings** button on each row of that table (Org Owners and Org Admins, and Team Leads for the workspaces they lead) chooses what Sidekick does in that chat; every change is in the audit log:
 - **Meeting notes**: post notes and action items here after each meeting (on by default). Turn it off in the other chats to keep notes in one dedicated chat.
 - **Keep track of every message** (channels and group chats): Sidekick reads every message, keeps it 90 days and uses it for answers, the knowledge map and reminders. It announces the change in the chat. This needs the Sidekick Teams app version 1.1 or later (it asks the team or chat owner for permission to read messages when it's added).
 - **Reminders**: a daily card at the time and time zone you pick, skipping the quiet days, plus one right after each meeting if you want. Choose which kinds: overdue or unowned action items, open questions and decisions, out-of-date documents, sources that disagree. **Preview** shows what the next one would say without posting; **Send now** posts it. The row shows when the last reminder went out (or why it failed).
@@ -45,15 +49,15 @@ The **Teams chats and channels** table on the Workspaces page shows every link. 
 Reminders only cover the chat's own workspace, and a chat with client guests only gets items whose sources are all Shareable. Out-of-date documents and disagreeing sources come from the knowledge map, so refresh it now and then (see below).
 
 ## 8. Keep knowledge healthy
-**Memory & gaps → Refresh knowledge map** after adding material (Members and Admins can; Viewers and Billing Admins can't, since each refresh is a paid AI request). Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place.
+**Memory & gaps → Refresh knowledge map** after adding material (Members and Admins can; Viewers and Billing Admins can't, since each refresh is a paid AI request). Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place: tick them done, set the owner, the due date (pick a date; a due date said in the meeting, like "next Friday", shows underneath until you do) and the status. Every change is in the audit log with what changed. The same edits work on the meeting's own page.
 
 ## 9. Watch usage and activity
-- **Usage & billing**: AI cost by feature, workspace and day (also open to Billing Admins).
+- **Usage & billing**: AI cost by feature, workspace and day for the whole month (also open to Billing Admins). Work that isn't tied to a workspace, such as the home assistant, shows as **Organization-wide**.
 - **Security & audit**: who did what and when, including everything Sidekick did on its own.
 
 ## 10. See what Sidekick is doing (Activity)
 - **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, Claude, search, database) with their health, and who's active.
-- **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, Claude and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored.
+- **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, Claude and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored. Teams steps after a meeting import only appear when there's a linked chat to post to, and a feature the Sidekick team paused or turned off counts as refused, not as a Sidekick or Claude error.
 
 ## 11. Set your guardrails (Org Owner and Org Admins)
 **Govern → Guardrails** shows the rules Sidekick follows in every workspace, in the portal, in Teams and in the home assistant. Everyone can read it; who can change what is listed below.
@@ -72,6 +76,10 @@ On the home page, type requests like "create a workspace for Fabrikam, code FAB"
 ## 13. Branding
 **Settings**: upload your logo and pick a brand color. They're applied across the portal.
 
+## 14. AI models & agent, and Connectors
+- **AI models & agent** (everyone can read it): which Claude model each feature uses (answers, meeting notes, knowledge map, assistant, guardrail check, reminders), how Sidekick is told to behave, and what's ready versus planned. Models are set by the Sidekick team; your documents and meetings are never used to train a model.
+- **Connectors**: the sources Sidekick can use. Available now: document upload, Teams transcripts and Teams chats and channels (linked on **Workspaces**). Outlook, SharePoint, Jira and the others are planned; each will connect with its own sign-in, without storing passwords.
+
 ## Troubleshooting
 | You see | What to do |
 |---|---|
@@ -83,6 +91,7 @@ On the home page, type requests like "create a workspace for Fabrikam, code FAB"
 | "This page hit a problem" | Click **Try again**, or use the menu. If it repeats, send the reference code to the Sidekick team. |
 | "Claude isn't connected yet" | The Sidekick team needs to configure the AI key. Contact them. |
 | "… is paused by the Sidekick team" | A feature was paused for maintenance. Try again later. |
+| "… is turned off for your organization by the Sidekick team" | Not an error: the Sidekick team switched that feature off for your organization. Org Owners: contact the Sidekick team to have it turned back on. Everyone else: ask your Org Owner. |
 | "This organization's Sidekick access is paused" | Contact the Sidekick team. |
 | A Teams link code doesn't work | Codes expire after 24 hours. Mention `@Sidekick link` in Teams for a new one. |
 | Sidekick answers "I couldn't find that" | The workspace doesn't have it yet. Upload the document; the question is already listed as a gap. |

@@ -51,6 +51,7 @@ export default function MeetingsPage() {
     if (openId) setDetail(await api<Detail>(`/api/meetings/${openId}`));
   }, [openId]);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch when a meeting opens; state is set after the request resolves
     loadDetail().catch(reportError);
   }, [loadDetail, reportError]);
   const updateAction = useUpdateAction(

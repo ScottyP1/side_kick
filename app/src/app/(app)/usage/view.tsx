@@ -54,7 +54,7 @@ export default function UsagePage() {
           ["AI spend this month", usd(u.totals.cost), `On pace for ${usd(projected)}`],
           ["Claude requests", u.totals.calls.toLocaleString(), `${u.totals.errors} failed`],
           ["Tokens", `${((u.totals.input + u.totals.output) / 1000).toFixed(1)}k`, `${(u.totals.input / 1000).toFixed(1)}k in · ${(u.totals.output / 1000).toFixed(1)}k out`],
-          ["Avg response time", `${(u.totals.latency / 1000).toFixed(1)} s`, u.totals.calls ? `Average over ${u.totals.calls.toLocaleString()} requests` : "No requests yet"],
+          ["Avg response time", `${(u.totals.latency / 1000).toFixed(1)} s`, u.totals.calls ? `Average over ${u.totals.calls.toLocaleString()} request${u.totals.calls === 1 ? "" : "s"}` : "No requests yet"],
         ].map(([l, v, d]) => (
           <div key={l} className="kpi" style={{ cursor: "default" }}>
             <span className="eyebrow">{l}</span>

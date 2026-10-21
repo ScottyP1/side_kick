@@ -27,6 +27,10 @@ Many side sessions had drifted apart, so Cody paused them, merged what was ready
 6. **Pitch prep:** lawyer check on the employment agreement (IP), then a dry run with the deck and videos.
 7. Microsoft 365 trial ends **Nov 14, 2026**: decide keep ($8.40/month) or cancel before Nov 15.
 
+## E2E test results (Oct 20, 2026)
+Four agents tested the whole portal end to end on isolated local copies: about 45 findings, none high. Fixed in three parallel PRs:
+- **Meetings, action items, activity, owner signals, assistant wording** (`claude/e2e-meetings-signals-4b2ce7`): delete asks first; a failed import opens the saved meeting with **Try again** (no duplicates); transcripts capped at 300,000 characters and shown in pieces; action items editable on the meeting page with a real due date (validated, audit says what changed); meeting dates must be YYYY-MM-DD; no Teams traces after an import when no chat is linked; a per-client restriction or pause is a notice (`FeatureOffError`, `kind` in the JSON), not an app error or a Claude error, worded for the reader; failed traces say why; trace names normalise ids; assistant never promises a dropped action; Owner Console logs one view per visit; roadmap notes replaced with the real setup; Usage shows the whole month and org-wide usage; guides cover AI models & agent and Connectors.
+
 ## Real-world check: status (Oct 18, 2026, branch `fix/real-teams-check`)
 Tried reminders and guardrails with **real Claude** on the live Azure site and **real Teams** (Sidekick Labs, team "Contoso Migration (test)", channel Project). Real-Claude cost of the check: **about $0.49** (Usage page: $0.21 → $0.70 this month; mostly the guardrail check, 74 calls).
 

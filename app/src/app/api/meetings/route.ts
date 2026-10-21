@@ -13,6 +13,13 @@ import { assertEnabled } from "@/lib/owner";
 import { postMeetingNotes } from "@/lib/teams/bot";
 import { remindAfterMeeting } from "@/lib/reminders";
 
+/** A real calendar day written as YYYY-MM-DD (2026-02-30 and "notadate" are not). */
+function isDay(s: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
 export const GET = handle(async (req: Request) => {
   const user = await requireUser();
   const ws = await requireWorkspace(user, new URL(req.url).searchParams.get("ws"));
@@ -56,7 +63,7 @@ export const POST = handle(async (req: Request) => {
   if (!title) throw new HttpError(400, "Give the meeting a title.");
   const heldAt = String(form.get("held_at") ?? "").trim() || now().slice(0, 10);
   // Dates sort as text, so anything but a real YYYY-MM-DD date would jump above real meetings.
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(heldAt) || isNaN(Date.parse(heldAt))) throw new HttpError(400, "Meeting date must be a date like 2026-10-20.");
+  if (!isDay(heldAt)) throw new HttpError(400, "Meeting date must be a date like 2026-10-20.");
   const id = newId();
   await run(
     "INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?)",

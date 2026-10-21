@@ -85,6 +85,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 - **Secrets**: only in `app/.env.local` (git-ignored). The Teams bot never runs without token checks in production.
 - **Both databases**: SQL must run on SQLite and Postgres; `npm test` checks both.
 - **No silent failures**: routes use `handle()`; pages use `api()` (opens the problem modal for network/server/paused problems) and `useReportError()` instead of empty catches; page crashes land on `error.tsx`.
+- **Refusals aren't errors**: a feature paused (kill switch) or turned off for one client throws `FeatureOffError` (`assertEnabled` in `lib/owner.ts`). `handle()` answers 503 with `kind: "paused" | "restricted"`, without a reference code, an App errors row or a failed trace; check it before starting a Claude step so it never counts as a Claude error. Trace names replace ids with `:id` (`normalisePath` in `lib/api.ts`: add new `[id]` collections there).
 - **Tests**: add or update tests in `app/tests/` with any behaviour change; `npm test` (which ends with a production `next build`) must pass before committing, and the same suite runs on every pull request in GitHub Actions.
 
 ## Documentation conventions

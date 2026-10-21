@@ -41,6 +41,11 @@ export default function MemoryPage() {
     load().catch(reportError);
   }, [load, reportError]);
 
+  const updateAction = useUpdateAction(
+    (id, patch) => setData((d) => (d ? { ...d, actions: d.actions.map((x) => (x.id === id ? { ...x, ...patch } : x)) } : d)),
+    () => load().catch(reportError),
+  );
+
   if (!ws) return <NeedsWorkspace />;
 
   const refresh = async () => {
@@ -55,10 +60,6 @@ export default function MemoryPage() {
       setRefreshing(false);
     }
   };
-  const updateAction = useUpdateAction(
-    (id, patch) => setData((d) => (d ? { ...d, actions: d.actions.map((x) => (x.id === id ? { ...x, ...patch } : x)) } : d)),
-    () => load().catch(reportError),
-  );
   const gapAction = async (g: Gap, status: "Open" | "Resolved", assignee?: string) => {
     try {
       await api("/api/gaps", { method: "POST", json: { ws, gap: g.text, status, assignee } });

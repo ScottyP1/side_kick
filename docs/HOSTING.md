@@ -37,7 +37,9 @@ The image is pulled with the app's managed identity (AcrPull role); the registry
 
 Scripts in `infra/azure/` (run after `az login`):
 
-- `./deploy.sh`: builds `origin/main` in the registry and switches the app to it.
+- `./deploy.sh`: builds `origin/main` in the registry and switches the app to it. It prints the version
+  that was live before, waits up to 5 minutes for `/api/health` to answer ok, and otherwise prints the
+  rollback command. What to do when things go wrong (rollback, restore, rotate secrets, incident): `docs/RUNBOOKS.md`.
 - `./status.sh`: is the app/database running, and every budget's limit and spend this month.
 - `./freeze.sh`: stops the app and the database (use when a budget alert arrives). Registry (~$5) and
   database storage (~$4) are still billed while frozen. Azure restarts a stopped Postgres after 7 days.
@@ -76,6 +78,26 @@ otherwise the app's own address, which serves those pages.
   Teams (same ID), so uploading it replaces the live one, and it's only useful while the bot's endpoint
   points at the tunnel. Upload the live package again afterwards.
 
+## Monitoring and alerts (October 20, 2026)
+
+- **Health probes** on `sidekick-app`: *startup* and *readiness* call `/api/health` (200 only when the
+  database answers); *liveness* is a plain port check, so a database blip takes the app out of traffic
+  instead of restarting it in a loop. Probes are part of the revision template: a deploy keeps them.
+- **Logs**: the Container Apps environment sends console and system logs to the Log Analytics workspace
+  `sidekick-logs` (East US, 30-day retention, **hard cap 0.1 GB/day**, so at most ~3 GB/month, within the
+  5 GB/month free allowance). Query `ContainerAppConsoleLogs_CL` / `ContainerAppSystemLogs_CL` in the portal
+  (Log Analytics → Logs), or the live stream with `az containerapp logs show`.
+- **Uptime test**: Application Insights `sidekick-insights` (on the same workspace) runs a standard test
+  `sidekick-health-test` of `/api/health` every 15 minutes from East US and Central US (with retry and a
+  TLS-certificate check: warns 14 days before expiry). Billed per run: $0.0005 × 5,760 runs ≈ **$2.90/month**.
+- **Alerts** (action group `sidekick-alerts-ag`, emails both budget addresses):
+  - `sidekick-site-down` (severity 1): availability below 50% over 30 minutes, i.e. about two failed checks.
+  - `sidekick-app-restarts` (severity 2): the container restarted in the last 15 minutes.
+  - What to do: `docs/RUNBOOKS.md` → The site is down.
+- **Security headers** (`app/next.config.ts`): HSTS, `X-Frame-Options: DENY`, `nosniff`, a strict
+  referrer policy, no `x-powered-by`, and a Content-Security-Policy in **report-only** mode (switch it to
+  enforcing once the browser console shows no reports).
+
 ## Budgets and alerts
 
 Monthly budgets, each emailing cody.l.scott@outlook.com and CodyScott@SidekickLabs334.onmicrosoft.com
@@ -106,6 +128,10 @@ first if it would trip again). Not test-fired yet, because firing it takes the l
 - Bot: single tenant; Teams channel plus Azure's default Web Chat test channel (needs a secret).
 
 ## Data
+
+Backups: Postgres point-in-time backups are kept **35 days** (raised from 7 on Oct 20, 2026; included in
+the server's storage, $0), in one region (geo-redundant backup can only be chosen when a server is
+created). Restore steps: `docs/RUNBOOKS.md` → Restore the database. Not yet done: one test restore.
 
 The cloud database started empty. Org "Test Suite" (Org Owner Cody, cody.l.scott@outlook.com) with the
 made-up Contoso workspace from `samples/` (9 documents, 8 meetings). Local data on the Mac is separate.

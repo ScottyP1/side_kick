@@ -1,11 +1,41 @@
-/** Root layout for every page: fonts, page title and the global stylesheet. */
+/**
+ * Root layout for every page: fonts, page title and the global stylesheet.
+ *
+ * Fonts are self-hosted from `./fonts` (Instrument Sans, IBM Plex Sans, IBM Plex Mono; latin, only the
+ * weights used; SIL Open Font License, see the LICENSE files there, from the @fontsource 5.3.0 packages).
+ * They used to come from `next/font/google`, which downloads them during `next build`: when Google didn't
+ * answer, the Azure image build failed (Oct 21, 2026). Local files make builds work without the internet.
+ */
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans, Instrument_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const display = Instrument_Sans({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-display" });
-const body = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-body" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
+const display = localFont({
+  src: [
+    { path: "./fonts/instrument-sans-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/instrument-sans-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "./fonts/instrument-sans-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
+  variable: "--font-display",
+  display: "swap",
+});
+const body = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-sans-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/ibm-plex-sans-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/ibm-plex-sans-latin-600-normal.woff2", weight: "600", style: "normal" },
+  ],
+  variable: "--font-body",
+  display: "swap",
+});
+const mono = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-mono-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/ibm-plex-mono-latin-500-normal.woff2", weight: "500", style: "normal" },
+  ],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Sidekick",

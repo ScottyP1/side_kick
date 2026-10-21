@@ -35,7 +35,8 @@ export const GET = handle(async (req: Request) => {
     mode = saved.mode;
     if (saved.mode === "link") {
       await connectTenant(saved.user_id, who);
-      return go("/settings?microsoft=connected");
+      // Back to where connecting started: the setup wizard or Settings.
+      return go(`${saved.next_path === "/get-started" ? "/get-started" : "/settings"}?microsoft=connected`);
     }
     const userId = await signInAs(who);
     await startSession(userId);

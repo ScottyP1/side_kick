@@ -33,6 +33,8 @@ export const MATRIX = [
   { what: "Read meetings in their workspaces", method: "GET", url: (s) => `/api/meetings?ws=${s.wsA}`, allow: EVERYONE },
   { what: "Read the knowledge map and gaps", method: "GET", url: (s) => `/api/memory?ws=${s.wsA}`, allow: EVERYONE },
   { what: "Ask Sidekick questions", method: "POST", url: (s) => "/api/ask", body: (s) => ({ ws: s.wsA, question: "" }), allow: EVERYONE },
+  { what: "Rate answers 👍/👎", method: "POST", url: () => "/api/feedback", body: (s) => ({ ws: s.wsA, questionId: NOPE, vote: "up" }), allow: EVERYONE },
+  { what: "See the firm library", method: "GET", url: () => "/api/firm", allow: EVERYONE },
   // Change workspace content
   { what: "Upload documents", method: "POST", url: () => "/api/docs", form: (s) => ({ ws: s.wsA }), allow: EDITORS },
   { what: "Change or delete a document", method: "DELETE", url: () => `/api/docs/${NOPE}`, allow: EDITORS },
@@ -55,6 +57,9 @@ export const MATRIX = [
   { what: "Export a group (zip)", method: "GET", url: () => `/api/workspaces/${NOPE}/export`, allow: ADMINS },
   { what: "Export the whole organization's data (zip)", method: "GET", url: () => "/api/export", allow: ADMINS },
   { what: "See roll-offs and deletion certificates", method: "GET", url: () => "/api/rolloffs", allow: ADMINS },
+  { what: "Add to the firm library", method: "POST", url: () => "/api/firm", form: () => ({}), allow: ADMINS },
+  { what: "Change or delete a firm library document", method: "DELETE", url: () => `/api/firm/${NOPE}`, allow: ADMINS },
+  { what: "See answer quality (👍/👎 counts)", method: "GET", url: () => "/api/feedback", allow: ADMINS },
   { what: "Download a deletion certificate", method: "GET", url: () => `/api/rolloffs/${NOPE}/certificate`, allow: ADMINS },
   // People and Teams links: admins everywhere, Team Leads only in the workspaces they lead (the walls test that part)
   { what: "See people (Team Leads: only people in their workspaces)", method: "GET", url: () => "/api/users", allow: MANAGERS },

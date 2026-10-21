@@ -1,0 +1,115 @@
+{
+  "name": "contoso",
+  "engagement": "Contoso Retail – Cloud Migration (made-up sample data, see samples/contoso/README.md)",
+  "about": "Accuracy test set for answers: fixed questions with the facts and sources a good answer must have. Run with `npm --prefix app run eval:answers` (real Claude, costs a little, not in CI). Paths are relative to samples/. A fact is a list of alternatives (any one counts, case-insensitive); `sources` are patterns that some cited source title must match; `absent` must not appear in the answer or cited titles; `found: false` means the right answer is \"I don't know\".",
+  "setup": {
+    "documents": [
+      { "path": "contoso/docs-shareable/Wave 2 cutover runbook v0.3.md", "audience": "shareable" },
+      { "path": "contoso/docs-shareable/Contoso glossary.md", "audience": "shareable" },
+      { "path": "contoso/docs-shareable/Architecture overview.md", "audience": "shareable" },
+      { "path": "ADR-007 Cosmos DB for store inventory.md", "audience": "shareable" },
+      { "path": "Contoso SOW v3 - summary.md", "audience": "shareable" },
+      { "path": "contoso/docs-internal/Staffing plan (internal).md", "audience": "internal" },
+      { "path": "contoso/docs-internal/RAID log.csv", "audience": "internal" },
+      { "path": "contoso/docs-internal/Teams chat - Priya and Jordan.txt", "audience": "internal" },
+      { "path": "contoso/docs-internal/Teams chat - contoso-delivery channel.txt", "audience": "internal" },
+      { "path": "contoso/docs-internal/Wave 2 cutover travel note.md", "audience": "internal" }
+    ],
+    "meetings": [
+      { "path": "contoso/meetings/2026-09-30 Contoso - Wave 1 retro and wave 2 kickoff.vtt", "held_at": "2026-09-30", "guests": true },
+      { "path": "contoso/meetings/2026-10-02 Contoso - Daily standup.vtt", "held_at": "2026-10-02" },
+      { "path": "contoso/meetings/2026-10-06 Contoso - Architecture review (rollback and PCI).vtt", "held_at": "2026-10-06" },
+      { "path": "contoso/meetings/2026-10-07 Contoso - Weekly client status.vtt", "held_at": "2026-10-07", "guests": true },
+      { "path": "contoso/meetings/2026-10-08 Contoso - Daily standup.vtt", "held_at": "2026-10-08" },
+      { "path": "contoso/meetings/2026-10-13 Contoso - Daily standup.vtt", "held_at": "2026-10-13" },
+      { "path": "Contoso - Sprint 14 planning.vtt", "held_at": "2026-10-14", "guests": true },
+      { "path": "contoso/meetings/2026-10-15 Contoso - Daily standup.vtt", "held_at": "2026-10-15" }
+    ],
+    "firm": [
+      { "path": "firm-library/Expense policy v2.md", "title": "Expense policy v2", "audience": "internal", "effective_on": "2025-01-01" },
+      { "path": "firm-library/Expense policy v3.md", "title": "Expense policy v3", "audience": "internal", "effective_on": "2026-07-01", "replaces": "Expense policy v2" },
+      { "path": "firm-library/Travel policy.md", "title": "Travel policy", "audience": "shareable", "effective_on": "2026-01-01" },
+      { "path": "firm-library/Rate card rules.md", "title": "Rate card rules", "audience": "internal", "effective_on": "2026-04-01" },
+      { "path": "firm-library/Client data handling standard.md", "title": "Client data handling standard", "audience": "shareable", "effective_on": "2026-03-01" }
+    ]
+  },
+  "questions": [
+    {
+      "id": "cutover-date",
+      "q": "When is the wave 2 cutover?",
+      "facts": [["November 12", "Nov 12", "12 November", "Nov. 12"]],
+      "sources": ["client status|Sprint 14|Priya and Jordan|standup|travel note"],
+      "followUp": { "q": "and how many stores?", "facts": [["48"]] }
+    },
+    {
+      "id": "outdated-runbook",
+      "q": "Does the cutover runbook still have the right cutover date?",
+      "facts": [["November 5", "Nov 5", "5 November"], ["November 12", "Nov 12", "12 November"]],
+      "sources": ["runbook"]
+    },
+    {
+      "id": "rollback-rule",
+      "q": "What's the rollback rule if a store can't take payments?",
+      "facts": [["30 minutes", "30-minute", "30 min"], ["45 minutes", "45-minute", "45 min"]],
+      "sources": ["Architecture review"]
+    },
+    {
+      "id": "rollback-owner",
+      "q": "Who owns the wave 2 rollback?",
+      "facts": [["Dev Patel", "Dev"]],
+      "sources": ["standup|Staffing plan|RAID"]
+    },
+    {
+      "id": "cosmos-why",
+      "q": "Why did we choose Cosmos DB?",
+      "facts": [["offline", "without a network", "4 hours"]],
+      "sources": ["ADR-007"]
+    },
+    {
+      "id": "budget-internal",
+      "q": "Are we over budget on hours?",
+      "facts": [["6%", "6 percent", "6 per cent"]],
+      "sources": ["Staffing plan|Architecture review"]
+    },
+    {
+      "id": "budget-guests",
+      "q": "Are we over budget on hours?",
+      "guests": true,
+      "absent": ["6%", "6 percent", "Staffing plan"]
+    },
+    {
+      "id": "hourly-rate",
+      "q": "What's Sam's hourly rate?",
+      "found": false,
+      "absent": ["\\$\\d+ (an|per) hour"]
+    },
+    {
+      "id": "meal-allowance",
+      "q": "How much can I spend on meals per day when travelling for Contoso?",
+      "facts": [["$75", "75 dollars", "75 per"]],
+      "sources": ["Expense policy v3"],
+      "firm": true
+    },
+    {
+      "id": "travel-conflict",
+      "q": "Is it OK that the team flies business class to Chicago for the cutover?",
+      "facts": [["economy"], ["business"]],
+      "sources": ["Travel policy", "travel note"],
+      "conflict": true,
+      "firm": true
+    },
+    {
+      "id": "rate-card-guests",
+      "q": "What are the rules for quoting day rates to the client?",
+      "guests": true,
+      "absent": ["Rate card rules", "10%"]
+    },
+    {
+      "id": "pci-data",
+      "q": "Can consultants copy card data to their laptops for testing?",
+      "facts": [["no", "never", "not"]],
+      "sources": ["Client data handling standard"],
+      "firm": true
+    }
+  ]
+}

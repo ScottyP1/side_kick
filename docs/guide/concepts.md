@@ -25,7 +25,25 @@ Owners and Admins see every workspace. Everyone else, Team Leads included, sees 
 The workspace you're in shows at the top of the pages that belong to one workspace (**Knowledge & docs**, **Meetings**, **Memory & gaps**). If you're in just one workspace it's a plain label; if you're in two or more it's a small menu to switch between them. Org-wide pages (Overview, Usage & billing, Users & access, Activity, Security & audit, Settings and the rest) don't show a workspace at all.
 
 ## Sources and citations
-When Sidekick answers, it first searches the workspace for the passages most related to your question (by keyword and by meaning, so different wording still finds the right passage), then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, and a short excerpt. If two sources disagree, Sidekick says so and cites both.
+When Sidekick answers, it first searches the group, and your organization's **firm library**, for the passages most related to your question (by keyword and by meaning, so different wording still finds the right passage), then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, its date and a short excerpt. Sources from the firm library are labelled **Firm policy**. If two sources disagree, Sidekick says so ("the sources disagree") and cites both.
+
+Before answering, Sidekick puts the passages it found in order of how well they fit your whole question, and:
+- **Newer wins**: on the same topic a recent meeting or document counts a little more than an old one.
+- **Out of date is flagged**: a firm document marked *superseded*, or a group document with a newer version uploaded (same name apart from "v2", "final" or a date), counts less and is shown as "may be out of date".
+- **Notes first**: the meeting notes Sidekick wrote (summary and decisions) come before raw transcript lines, which are still there for the detail.
+- **No duplicates**: the same document uploaded twice, or a chat reply quoting the message it answers, is used once.
+- **Policy vs. project**: for policy questions (expenses, travel, approvals, rate cards, data handling) the firm library comes first; for facts about the engagement, the group's own sources do.
+
+**Filters** in Ask narrow the sources to documents, meetings, Teams chats, decisions & notes or the firm library, and to a date range.
+
+## Firm library
+Your organization's own policies, standards, templates, methods and rate-card rules, kept once for the whole organization on the **Firm library** page and used in **every** group's answers (cited as "Firm policy · Expense policy v3"). Groups still never see each other's documents. Each firm document has a title, an **Internal**/**Shareable** tag (client guests only ever see Shareable ones), an optional **effective date**, and can be marked **superseded** by a newer one. Everyone can see the list; Org Owners and Org Admins manage it. Firm documents count toward your plan's document limit.
+
+## Follow-up questions
+Ask builds on your last questions in the same group, so "and wave 3?" after "When is the wave 2 cutover?" is understood as "When is the wave 3 cutover?". The answer shows **Following up on "…"**; press **New question** to start afresh. Your conversation is yours alone, in one group (and one guests setting): nobody else can continue it, and it's forgotten 24 hours after your last question. Guardrails check every turn, so a refused topic can't be reached with a short follow-up. In Teams, a follow-up is a reply in the same channel thread, or a message in the same chat within 30 minutes.
+
+## 👍/👎 on answers
+Every answer has **👍 Helpful** and **👎 Not helpful** (portal and Teams). Org Owners and Org Admins see the counts for the last 30 days under Ask; the Sidekick team sees the trend per organization. Only counts are kept with a vote, never the question or answer.
 
 ## "I couldn't find that" and knowledge gaps
 If the workspace doesn't contain the answer, Sidekick says so instead of guessing. The question is saved as a **knowledge gap** so someone can fill it in, for example by uploading the missing document. Gaps also come from questions nobody answered in a meeting, conflicting facts, out-of-date documents, and decisions that only exist in a transcript.
@@ -50,7 +68,7 @@ Every document is tagged:
 - **Internal**: for your team only (rates, staffing, internal risks).
 - **Shareable**: fine to use when the client is in the room.
 
-When **client guests are present** (in a meeting marked "Client guests attended", or a Teams channel marked as having client guests), Sidekick only uses Shareable sources. Notes from an internal-only meeting are never posted to a channel that has client guests.
+When **client guests are present** (in a meeting marked "Client guests attended", or a Teams channel marked as having client guests), Sidekick only uses Shareable sources, from the group and from the firm library. Notes from an internal-only meeting are never posted to a channel that has client guests.
 
 ## Sidekick in Teams
 Sidekick can be added to Teams channels and chats. Each channel or chat is **linked to one workspace** by an admin, and Sidekick only answers from that workspace there. See [Sidekick in Teams](teams-guide.md).

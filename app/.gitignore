@@ -54,3 +54,6 @@ next-env.d.ts
 # throwaway test copies (.claude/launch.json e2e-*: data folders and build folders)
 /.e2e-data-*/
 /.next-e2e-*/
+
+# answer accuracy check (scripts/answer-eval.mjs): its throwaway build folder
+/.next-eval/

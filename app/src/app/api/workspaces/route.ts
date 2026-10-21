@@ -1,10 +1,12 @@
 /**
  * GET/POST /api/workspaces: the workspaces this user can see (with counts), or create one.
- * Who: everyone can list their own; only Org Owners and Org Admins can create.
+ * Who: everyone can list their own; only Org Owners and Org Admins can create. Names are unique within the
+ * organization (ignoring case). Rename and delete: /api/workspaces/:id.
  */
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, isAdmin, requireUser, workspaceIdsFor, HttpError } from "@/lib/auth";
 import { all, newId, now, run } from "@/lib/db";
+import { assertUniqueName, MAX_CODE, MAX_NAME } from "@/lib/workspaces";
 
 const COLORS = ["#0f6b5c", "#2a5ba8", "#7a5a2a", "#8b3f6b", "#5a6b1f", "#9a4a1f", "#3d4a52"];
 
@@ -30,10 +32,13 @@ export const POST = handle(async (req: Request) => {
   const user = await requireUser();
   if (!isAdmin(user)) throw new HttpError(403, "Only Org Owners and Org Admins can create workspaces.");
   const body = await readJson<{ name?: string; code?: string }>(req);
-  const name = requireText(body.name, "Workspace name", 120);
+  const name = requireText(body.name, "Workspace name", MAX_NAME);
+  const code = typeof body.code === "string" ? body.code.trim() || null : null;
+  if (code && code.length > MAX_CODE) throw new HttpError(400, `Engagement code is too long (max ${MAX_CODE} characters).`);
+  await assertUniqueName(user.org_id, name);
   const id = newId();
   const count = (await all("SELECT id FROM workspaces WHERE org_id = ?", user.org_id)).length;
-  await run("INSERT INTO workspaces (id, org_id, name, code, color, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, user.org_id, name, body.code?.trim() || null, COLORS[count % COLORS.length], now());
+  await run("INSERT INTO workspaces (id, org_id, name, code, color, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, user.org_id, name, code, COLORS[count % COLORS.length], now());
   await run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", id, user.id);
   await audit(user, `Created workspace “${name}”`, "Access", id);
   return { id };

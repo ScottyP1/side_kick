@@ -198,6 +198,7 @@ export default function GuardrailsPage() {
         <div className="panel">
           <div className="panel-h"><h2>Last 30 days</h2><span className="muted">How often each rule fired. Counts only: the questions and answers themselves are never stored here.</span></div>
           {r.summary.rules.length ? (
+            <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Rule</th><th className="r">Questions refused</th><th className="r">Answers cleaned</th><th className="r">From Teams</th></tr></thead>
               <tbody>
@@ -211,6 +212,7 @@ export default function GuardrailsPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <div className="panel-b muted">Nothing has been refused or cleaned up yet.</div>
           )}

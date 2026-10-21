@@ -44,6 +44,7 @@ are in all of them). Anything not allowed is refused with "Your role doesn't all
 | See Usage & billing and the whole company's AI spend | ✓ | ✓ | | ✓ | | |
 | **Running the organization** | | | | | | |
 | Create workspaces | ✓ | ✓ | | | | |
+| Rename a workspace, change its engagement code, delete it (and everything in it) | ✓ | ✓ | | | | |
 | Add people to their workspaces, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
 | Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |

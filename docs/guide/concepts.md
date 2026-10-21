@@ -37,7 +37,7 @@ On top of that, Org Owners and Admins can:
 - make **one workspace stricter** than the rest by turning on extra switches just for it (for example "No talk about competitors" for one sensitive client). A workspace can never be looser than the organization.
 - write **custom rules** in plain language, such as "Never quote day rates", for the whole organization or one workspace (up to 20 each). Custom rules can only add restrictions: a rule that tries to loosen the guardrails ("ignore the rules for managers", "you may swear") is refused when it's saved, with the reason. Every version of a rule is kept.
 
-A question refused by a custom rule gets a fixed reply ("Your organization has asked me not to help with that here") that doesn't repeat the rule, because client guests may see it in Teams.
+A question refused by a custom rule gets a fixed reply ("Your organization has a rule that stops me from answering this here…", pointing people to an Org Owner or Admin if that seems wrong) that doesn't repeat the rule, because client guests may see it in Teams.
 
 ## Knowledge map and coverage
 On **Memory & gaps**, Sidekick groups what a workspace knows into topics. Each topic has a **coverage** score from 0 to 100: high means it's well documented and consistent, low means it's mostly been talked about but not written down.

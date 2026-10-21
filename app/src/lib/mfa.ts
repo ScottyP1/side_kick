@@ -6,8 +6,9 @@
  *   `platform_admins`). Both use the same tables here, told apart by `account_kind`.
  * - **Factors** (`mfa_factors`): what someone can use as their second step.
  *   - **Authenticator app** (`totp`): a 6-digit code that changes every 30 seconds (RFC 6238, the standard
- *     every authenticator app supports). Sidekick keeps the shared secret; each code works only once
- *     (`last_step`), and codes from 30 seconds either side are accepted for clock drift.
+ *     every authenticator app supports). Sidekick keeps the shared secret, encrypted at rest with
+ *     lib/secret-box.ts (`SIDEKICK_ENCRYPTION_KEY`; in production authenticator setup is refused without it).
+ *     Each code works only once (`last_step`), and codes from 30 seconds either side are accepted for clock drift.
  *   - **Passkey** (`passkey`): Face ID, Touch ID, Windows Hello or a security key (WebAuthn, via
  *     @simplewebauthn/server). Sidekick keeps only the public key; passkeys only work on Sidekick's own
  *     address, so a look-alike phishing site can't use them.
@@ -37,6 +38,7 @@ import {
 } from "@simplewebauthn/server";
 import { HttpError } from "./auth";
 import { all, get, newId, now, run, tx } from "./db";
+import { canSealSecrets, openSecret, sealSecret, SecretKeyMissingError } from "./secret-box";
 import { span, spanAttrs } from "./trace";
 
 /** Whose account: a portal user or an Owner Console owner. */
@@ -117,6 +119,8 @@ export function relyingParty(req: Request) {
   return { rpID: u.hostname, origin: u.origin, rpName: "Sidekick" };
 }
 const registerKey = (a: Pick<Account, "kind" | "id">) => `register:${a.kind}:${a.id}`;
+/** The encryption context of a factor's secret: a sealed secret only opens on its own row. */
+const secretContext = (factorId: string) => `mfa_factors.secret:${factorId}`;
 
 /* ---------- reading factors ---------- */
 type FactorRow = {
@@ -126,11 +130,14 @@ type FactorRow = {
 const enabledFactors = (kind: AccountKind, id: string) =>
   all<FactorRow>("SELECT * FROM mfa_factors WHERE account_kind = ? AND account_id = ? AND enabled = 1 ORDER BY created_at", kind, id);
 
-/** The account's working factors and how many unused backup codes it has left. */
-export async function secondFactorStatus(a: Pick<Account, "kind" | "id">): Promise<{ factors: FactorInfo[]; backupCodesLeft: number }> {
+/**
+ * The account's working factors, how many unused backup codes it has left, and whether authenticator apps
+ * can be added here (false in production until SIDEKICK_ENCRYPTION_KEY is set; passkeys don't need it).
+ */
+export async function secondFactorStatus(a: Pick<Account, "kind" | "id">): Promise<{ factors: FactorInfo[]; backupCodesLeft: number; authenticatorAvailable: boolean }> {
   const factors = (await enabledFactors(a.kind, a.id)).map((f) => ({ id: f.id, kind: f.kind, label: f.label, added: f.created_at, lastUsed: f.last_used }));
   const left = await get<{ n: number | string }>("SELECT COUNT(*) AS n FROM mfa_backup_codes WHERE account_kind = ? AND account_id = ? AND used_at IS NULL", a.kind, a.id);
-  return { factors, backupCodesLeft: Number(left?.n ?? 0) };
+  return { factors, backupCodesLeft: Number(left?.n ?? 0), authenticatorAvailable: canSealSecrets() };
 }
 
 /** Which second steps this account can use at sign-in (empty = no two-step sign-in). */
@@ -142,15 +149,17 @@ export async function secondFactorMethods(kind: AccountKind, id: string): Promis
 /**
  * Starts adding an authenticator app: makes a new secret (kept unconfirmed until `confirmTotpSetup`) and
  * returns it with the `otpauth://` link and a QR code (PNG data URL) for the app to scan. Replaces any
- * earlier unconfirmed one.
+ * earlier unconfirmed one. The secret is stored encrypted (lib/secret-box.ts); in production without
+ * SIDEKICK_ENCRYPTION_KEY this refuses with 503 rather than store it in the clear.
  */
 export async function startTotpSetup(a: Account) {
+  if (!canSealSecrets()) throw new SecretKeyMissingError("Authenticator apps aren't available yet: the Sidekick team needs to set this server's encryption key. Use a passkey instead.");
   const secret = base32Encode(crypto.randomBytes(20));
   const id = newId();
   await run("DELETE FROM mfa_factors WHERE account_kind = ? AND account_id = ? AND kind = 'totp' AND enabled = 0", a.kind, a.id);
   await run(
     "INSERT INTO mfa_factors (id, account_kind, account_id, kind, label, secret, enabled, created_at) VALUES (?, ?, ?, 'totp', ?, ?, 0, ?)",
-    id, a.kind, a.id, "Authenticator app", secret, now(),
+    id, a.kind, a.id, "Authenticator app", sealSecret(secret, secretContext(id)), now(),
   );
   const issuer = a.kind === "owner" ? "Sidekick Owner Console" : "Sidekick";
   const uri = `otpauth://totp/${encodeURIComponent(`${issuer}:${a.email}`)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
@@ -165,7 +174,7 @@ export async function confirmTotpSetup(a: Account, id: string, code: string): Pr
   return span("auth", "Add authenticator app", async () => {
     const f = await get<FactorRow>("SELECT * FROM mfa_factors WHERE id = ? AND account_kind = ? AND account_id = ? AND kind = 'totp' AND enabled = 0", id, a.kind, a.id);
     if (!f?.secret) throw new HttpError(404, "That setup has expired. Start again.");
-    const step = matchTotp(f.secret, code, null);
+    const step = matchTotp(openSecret(f.secret, secretContext(f.id)), code, null);
     if (step === null) throw new HttpError(400, "That code doesn't match. Check the time on your phone is right, and type the newest code.");
     const first = (await enabledFactors(a.kind, a.id)).length === 0;
     await run("UPDATE mfa_factors SET enabled = 1, last_step = ? WHERE id = ?", step, f.id);
@@ -355,7 +364,7 @@ async function checkProof(kind: AccountKind, id: string, hash: string, proof: { 
   const code = String(proof.code ?? "").trim();
   if (/^\d{3}\s?\d{3}$/.test(code)) {
     for (const f of factors.filter((x) => x.kind === "totp" && x.secret)) {
-      const step = matchTotp(f.secret!, code, f.last_step === null ? null : Number(f.last_step));
+      const step = matchTotp(openSecret(f.secret!, secretContext(f.id)), code, f.last_step === null ? null : Number(f.last_step));
       if (step !== null) {
         await run("UPDATE mfa_factors SET last_step = ?, last_used = ? WHERE id = ?", step, now(), f.id);
         return "authenticator code";

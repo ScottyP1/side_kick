@@ -160,7 +160,8 @@ Organizations set up by the Sidekick team (or the very first one on an install) 
 | "… is paused by the Sidekick team" | A feature was paused for maintenance. Try again later. |
 | "… is turned off for your organization by the Sidekick team" | Not an error: the Sidekick team switched that feature off for your organization. Org Owners: contact the Sidekick team to have it turned back on. Everyone else: ask your Org Owner. |
 | "This organization's Sidekick access is paused" | Contact the Sidekick team. |
-| "That password has appeared in a known data breach" | Attackers try those first. Pick another (a password manager can make one). Sidekick checks this without sending your password anywhere. |
+| "That password has appeared in a known data breach" | Attackers try those first. Pick another (a password manager can make one). Sidekick checks this against Have I Been Pwned without sending your password anywhere: only the first 5 characters of a scrambled version (its hash) leave Sidekick, and the match is made on Sidekick's side. If that service is down, the password is accepted on length alone. |
+| "Authenticator apps aren't available on this server yet" | The Sidekick team still needs to set the server's encryption key. Add a passkey instead, or ask them. |
 | "That code doesn't match" at sign-in | Type the newest code from your authenticator app (check your phone's clock is set automatically), or a backup code. After 5 wrong codes, sign in again with your password. |
 | "Sidekick is read-only for your organization because…" | The free trial ended, a failed payment wasn't fixed, or the plan was canceled. The Org Owner or a Billing Admin pays on **Usage & billing** to turn everything back on. |
 | "Self-service sign-up isn't open yet" | Sign-up is off until the Sidekick team opens it. Contact them (see Support) to get an organization set up. |

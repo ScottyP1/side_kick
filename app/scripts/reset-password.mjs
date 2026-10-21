@@ -20,6 +20,9 @@
 // - signs that account out everywhere (deletes its sessions) and clears its failed sign-in count;
 // - with --reset-2fa, removes the account's two-step sign-in so it can be set up again after signing in;
 // - writes an entry to the organization's audit log (portal) or the operator log (Owner Console).
+// Secrets: the database URL (and its password) is never printed. Errors are shown with it, and anything that
+// looks like a connection string or password, blanked out (`safeMessage`); only the database's host name is
+// shown, so you can see which database you changed. The temporary password is the only secret printed.
 // Who may run it: only someone who already has the database (DATABASE_URL, or the laptop's data folder),
 // which is full control anyway; there is deliberately no web route that can do this.
 import { DatabaseSync } from "node:sqlite";
@@ -75,6 +78,23 @@ function temporaryPassword() {
 function hashPassword(password) {
   const salt = crypto.randomBytes(16);
   return `scrypt$${salt.toString("hex")}$${crypto.scryptSync(password, salt, 64).toString("hex")}`;
+}
+
+/**
+ * An error message that is safe to print: the DATABASE_URL, its password, and anything shaped like a
+ * connection string are blanked out (pg and node errors can quote them).
+ */
+function safeMessage(e) {
+  let msg = String(e?.message ?? e);
+  const url = process.env.DATABASE_URL;
+  if (url) {
+    msg = msg.split(url).join("[database url]");
+    try {
+      const pw = decodeURIComponent(new URL(url).password);
+      if (pw) msg = msg.split(pw).join("[hidden]");
+    } catch {}
+  }
+  return msg.replace(/postgres(ql)?:\/\/[^\s'"]+/gi, "[database url]").replace(/password=[^\s&'"]+/gi, "password=[hidden]");
 }
 
 /* ---------- database (both engines, `?` placeholders like lib/db.ts) ---------- */
@@ -139,7 +159,13 @@ async function open() {
   };
 }
 
-const db = await open();
+let db;
+try {
+  db = await open();
+} catch (e) {
+  console.error(`✗ Couldn't open the database: ${safeMessage(e)}`);
+  process.exit(1);
+}
 
 /**
  * Removes two-step sign-in for one account when --reset-2fa was given (the tables may not exist yet on an
@@ -157,7 +183,7 @@ let done;
 try {
   done = forOwner ? await resetOwner() : await resetUser();
 } catch (e) {
-  console.error(`✗ ${e.message}`);
+  console.error(`✗ ${safeMessage(e)}`);
   await db.close();
   process.exit(1);
 }

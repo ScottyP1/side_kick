@@ -231,6 +231,8 @@ before(async () => {
     ENTRA_TENANT: "organizations",
     ENTRA_LOGIN_BASE: "",
     PWNED_PASSWORDS_URL: "",
+    // Authenticator secrets are encrypted at rest (lib/secret-box.ts) with a key made up for this run.
+    SIDEKICK_ENCRYPTION_KEY: crypto.randomBytes(32).toString("base64"),
   };
   env.PWNED_PASSWORDS_URL = `http://127.0.0.1:${pwned.address().port}`;
   env.ENTRA_LOGIN_BASE = MS_BASE;
@@ -1355,6 +1357,18 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
 /* ---------- Workspaces: rename, delete, unique names; answers about rates; too-broad rules ---------- */
 
 /** Rows in `table` where `col` = `id`, read straight from the test database (ids are generated hex, safe to inline). */
+/** One value read straight from the test database (test-made SQL only). */
+async function dbValue(sql) {
+  if (ENGINE === "postgres") return (await promisify(execFile)("psql", [PG_URL, "-tAc", sql], { timeout: 20000 })).stdout.trim();
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { readOnly: true });
+  try {
+    return String(Object.values(db.prepare(sql).get() ?? {})[0] ?? "");
+  } finally {
+    db.close();
+  }
+}
+
 async function rows(table, col, id) {
   const sql = `SELECT COUNT(*) AS n FROM ${table} WHERE ${col} = '${id}'`;
   if (ENGINE === "postgres") {
@@ -2342,6 +2356,13 @@ test(`[${ENGINE}] reset-password: a temporary password, signed out everywhere, c
   // Unknown emails and bad arguments fail without changing anything.
   assert.notEqual((await resetPassword("nobody@test.local")).code, 0);
   assert.notEqual((await resetPassword()).code, 0);
+  // A database it can't reach: the error never shows the URL or its password.
+  const bad = await new Promise((resolve) => execFile(process.execPath, ["--no-warnings", "scripts/reset-password.mjs", "rita@test.local"],
+    { cwd: APP, env: { ...process.env, DATABASE_URL: "postgresql://sidekick:TopSecretPw123@127.0.0.1:1/sidekick" } },
+    (err, stdout, stderr) => resolve({ code: err?.code ?? 0, out: `${stdout}${stderr}` })));
+  assert.notEqual(bad.code, 0);
+  assert.match(bad.out, /Couldn't open the database/);
+  assert.doesNotMatch(bad.out, /TopSecretPw123|postgresql:\/\//);
 });
 
 test(`[${ENGINE}] reset-password --owner: the Owner Console account gets a temporary password it must change`, async () => {
@@ -2483,7 +2504,7 @@ test(`[${ENGINE}] sessions: people see only their own, and can sign out one or a
 
 test(`[${ENGINE}] two-step sign-in: authenticator app, one-time codes, backup codes, and turning it off`, async () => {
   const { call, password } = s.pat;
-  assert.deepEqual((await call("GET", "/api/auth/mfa/status")).body, { factors: [], backupCodesLeft: 0 });
+  assert.deepEqual((await call("GET", "/api/auth/mfa/status")).body, { factors: [], backupCodesLeft: 0, authenticatorAvailable: true });
   const setup = (await call("POST", "/api/auth/mfa/totp-start", {})).body;
   assert.match(setup.uri, /^otpauth:\/\/totp\/Sidekick%3Apax%40test\.local\?secret=/);
   assert.match(setup.qr, /^data:image\/png;base64,/);
@@ -2492,6 +2513,10 @@ test(`[${ENGINE}] two-step sign-in: authenticator app, one-time codes, backup co
   const on = await call("POST", "/api/auth/mfa/totp-confirm", { id: setup.id, code: usedCode });
   assert.equal(on.status, 200, JSON.stringify(on.body));
   assert.equal(on.body.backupCodes.length, 10);
+  // The secret is stored encrypted, never as the key the app showed.
+  const stored = await dbValue(`SELECT secret FROM mfa_factors WHERE id = '${setup.id}'`);
+  assert.match(stored, /^enc1\./);
+  assert.ok(!stored.includes(setup.secret));
   // Signing in now needs the code: the password alone starts no session.
   const b = client();
   const first = await b("POST", "/api/auth/login", { email: "pax@test.local", password });
@@ -2536,7 +2561,7 @@ test(`[${ENGINE}] two-step sign-in: authenticator app, one-time codes, backup co
   assert.equal((await call("POST", "/api/auth/mfa/backup-codes", { password })).body.backupCodes.length, 10);
   const off = await call("POST", "/api/auth/mfa/remove", { id: factor.id, password });
   assert.equal(off.body.twoStepOff, true);
-  assert.deepEqual((await call("GET", "/api/auth/mfa/status")).body, { factors: [], backupCodesLeft: 0 });
+  assert.deepEqual((await call("GET", "/api/auth/mfa/status")).body, { factors: [], backupCodesLeft: 0, authenticatorAvailable: true });
   assert.deepEqual((await client()("POST", "/api/auth/login", { email: "pax@test.local", password })).body, { ok: true });
 });
 

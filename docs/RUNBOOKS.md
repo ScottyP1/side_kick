@@ -79,6 +79,7 @@ shows names only). After changing one, start a new revision (step at the end) so
 | `client-secret` | Entra admin center → App registrations → **Sidekick Bot** → Certificates & secrets | Current secret "sidekick dev" **expires 2027-04-13**. Create a new one, set it, delete the old one. Also update `app/.env.local` if the laptop should keep working. |
 | `azure-search-api-key` | `az search admin-key renew -g sidekick-rg --service-name sidekick-labs-search --key-kind secondary` | Switch the app to the secondary key, then renew the primary (no downtime). |
 | `azure-openai-api-key` | `az cognitiveservices account keys regenerate -g sidekick-rg -n codyscott-9578-resource --key-name key2` | Same two-key swap as Search. |
+| `encryption-key` (`SIDEKICK_ENCRYPTION_KEY`) | `openssl rand -base64 32` (HOSTING → Settings and secrets) | **Don't rotate casually**: authenticator-app secrets encrypted with the old key stop opening, so everyone with an authenticator app must remove and re-add it (passkeys and backup codes keep working). Rotate only if it leaked. |
 | `database-url` | `az postgres flexible-server update -g sidekick-rg -n sidekick-labs-db --admin-password "<new>"` | Then rebuild the connection string with the new password. |
 
 Set a new value (repeat per secret):
@@ -165,9 +166,12 @@ The next sign-in must pick a new password before anything else works.
   `--allow-password` at the end: it also turns that setting off (audited). Turn it back on in Settings
   once you're in.
 - The live database only accepts Azure traffic, so the script lets this Mac's public IP address in for
-  the run only (firewall rule `reset-password-tmp`, takes about a minute) and removes it afterwards, even
-  on Ctrl-C. It reads the `database-url` secret into a variable; the secret is never shown or saved. If it
-  ever says it couldn't remove the rule, run the command it prints.
+  the run only (firewall rule `reset-password-tmp`, takes about a minute) and removes it afterwards (an exit
+  trap: also when the reset fails or you press Ctrl-C). If it ever says it couldn't remove the rule, run the
+  command it prints.
+- **Nothing secret is printed** except the temporary password: the `database-url` secret is read into a
+  variable and handed only to the reset script, never shown or saved, and any error has the database URL and
+  its password blanked out. Only the database's host name is shown, so you know which one you changed.
 - The database must be running (`./infra/azure/status.sh`; if frozen, `./infra/azure/unfreeze.sh`).
 
 **Laptop copy** (SQLite in `app/data`, or whatever `DATABASE_URL` points to):

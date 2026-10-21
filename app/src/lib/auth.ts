@@ -32,6 +32,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { all, get, newId, now, run, tx } from "./db";
+import { HttpError } from "./http-error";
 import { clientIp } from "./login-limit";
 import { traceScope } from "./trace";
 
@@ -177,15 +178,7 @@ export async function endSessionById(userId: string, id: string): Promise<boolea
   return true;
 }
 
-/**
- * An error with an HTTP status and a message that is safe to show the user. API routes wrapped in
- * `handle()` (api.ts) turn it into a JSON `{ error }` response with that status.
- */
-export class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
+export { HttpError } from "./http-error";
 
 /**
  * Returns the signed-in user or throws 401. Pass `roles` to also require one of those roles (403 otherwise).

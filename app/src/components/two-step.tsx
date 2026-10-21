@@ -16,7 +16,7 @@ import { api, Icon, Pill, useReportError, useToast } from "@/components/ui";
 
 type Method = "totp" | "passkey";
 type Factor = { id: string; kind: Method; label: string; added: string; lastUsed: string | null };
-type Status = { factors: Factor[]; backupCodesLeft: number };
+type Status = { factors: Factor[]; backupCodesLeft: number; authenticatorAvailable: boolean };
 
 /** A passkey prompt the person cancelled (or that timed out) is not an error worth more than a short note. */
 const passkeyMessage = (e: unknown) =>
@@ -197,10 +197,11 @@ export function TwoStepPanel({ base, note }: { base: string; note?: string }) {
         ) : (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="btn small" onClick={addPasskey}><Icon n="plus" />Add a passkey</button>
-            {!s.factors.some((f) => f.kind === "totp") && <button className="btn small" onClick={startTotp}><Icon n="plus" />Add an authenticator app</button>}
+            {!s.factors.some((f) => f.kind === "totp") && s.authenticatorAvailable && <button className="btn small" onClick={startTotp}><Icon n="plus" />Add an authenticator app</button>}
             {on && <button className="btn small ghost" onClick={newCodes}>New backup codes ({s.backupCodesLeft} left)</button>}
           </div>
         )}
+        {!s.authenticatorAvailable && <span className="hint">Authenticator apps aren&apos;t available on this server yet (its encryption key isn&apos;t set). Passkeys work.</span>}
         {error && <p className="err" role="alert">{error}</p>}
       </div>
     </div>

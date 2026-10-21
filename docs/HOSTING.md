@@ -45,11 +45,31 @@ Scripts in `infra/azure/` (run after `az login`):
   database storage (~$4) are still billed while frozen. Azure restarts a stopped Postgres after 7 days.
 - `./unfreeze.sh`: starts them again.
 
+## Automatic deploys (GitHub Actions)
+
+Every merge to `main` that changes the app (`app/`, `teams/` or the workflows) deploys itself:
+`.github/workflows/deploy.yml` runs the full test suite on the merged code, builds the image in
+`sidekicklabsacr`, switches `sidekick-app` to it and waits until the new revision gets all traffic, is
+healthy and `/api/health` answers ok. If not within ~5 minutes it **rolls back** to the previous image and
+the run fails (GitHub emails the repo owner). One deploy at a time. Docs-only merges don't deploy; the
+Actions tab has **Run workflow** for a manual deploy, and `./infra/azure/deploy.sh` still works from the Mac.
+
+- **No stored Azure password.** GitHub's own login token (OIDC) is exchanged for the user-assigned managed
+  identity `sidekick-deployer` (resource group `sidekick-rg`), which has a federated credential trusting
+  only `repo:ScottyP1/side_kick:ref:refs/heads/main`. Its roles: Contributor on `sidekicklabsacr` (image
+  builds) and on `sidekick-app` (switch the image). Nothing else: not the database, the other services or
+  the subscription.
+- **Repository variables** (Settings → Secrets and variables → Actions → Variables; ids, not secrets):
+  `AZURE_CLIENT_ID` (the identity's client id), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+- **No manual approval gate:** GitHub's "required reviewers" for environments needs a paid plan on private
+  repos, so merging *is* releasing. Keep the rule: merge only reviewed PRs with a green `test` check.
+- **Stop automatic deploys** (e.g. during an incident): Actions → Deploy → ⋯ → Disable workflow.
+- Rollback by hand: `docs/RUNBOOKS.md` → Roll back.
+
 **Release facts for the Owner Console.** The console's **Business** page shows which commit is running and
 when it was released, read from two settings on the container: `SIDEKICK_COMMIT` (short git commit) and
-`SIDEKICK_RELEASED_AT` (ISO time). The automatic deploy (`.github/workflows/deploy.yml`, PR #28) should set
-them in its "Switch the app to the new image" step, e.g.
-`az containerapp update … --image $ACR.azurecr.io/sidekick:$TAG --set-env-vars SIDEKICK_COMMIT=$TAG SIDEKICK_RELEASED_AT=$(date -u +%FT%TZ)`.
+`SIDEKICK_RELEASED_AT` (ISO time). The automatic deploy (`.github/workflows/deploy.yml`) sets them when it switches the app to the new image
+(and again on a rollback, to the previous image's tag).
 Without them the page falls back to the git checkout (laptop) or says "Not set by the deploy". Each app
 copy records the release it runs (`app_releases`) the first time `/api/health` answers, so the page lists
 the recent deploys without needing Azure.
@@ -63,9 +83,11 @@ the bot's messaging endpoint (the live address above). Build the package with:
 npm --prefix app run teams:package
 ```
 
-That writes `teams/build/sidekick-teams-live.zip` (version from `teams/manifest.template.json`, now 1.2.0),
+That writes `teams/build/sidekick-teams-live.zip` (version from `teams/manifest.template.json`, now 1.3.0),
 with the live address as its web address. It asks Azure for the address (`az login` needed), or uses
-`SIDEKICK_LIVE_URL` if set; the address is never written into the repo.
+`SIDEKICK_LIVE_URL` if set; the address is never written into the repo. The store listing's website,
+privacy (`/privacy`) and terms (`/terms`) links use `SIDEKICK_WEBSITE_URL` if set (e.g. a custom domain),
+otherwise the app's own address, which serves those pages.
 
 - **Install it once, for the whole org**: Teams admin center → Teams apps → Manage apps → **Upload new app**.
   People then add Sidekick from **Built for your org** in any team, channel or chat. Don't upload it per
@@ -75,6 +97,13 @@ with the live address as its web address. It asks Azure for the address (`az log
 - **Reading every message** (chat tracking) needs the package's resource-specific consent permissions
   (`ChannelMessage.Read.Group`, `ChatMessage.Read.Chat`) *and* the tenant allowing that consent. Teams and
   chats have separate tenant settings, so tracking can work in a channel but not in a group chat.
+- **1.3.0** adds the `add` / `remove` commands, store-ready website/privacy/terms links and wording for the
+  chat picker. `webApplicationInfo` names `ENTRA_CLIENT_ID` (the multi-tenant app) when it's set, otherwise the
+  bot's app as before: that's the app Microsoft treats as "Sidekick itself" for removing itself from chats.
+- **Single- or multi-tenant** is set on the server, not in the package: today `TENANT_ID` (Sidekick Labs)
+  keeps Sidekick to that tenant; `SIDEKICK_MULTI_TENANT=1` (plus a multi-tenant Entra app in `ENTRA_CLIENT_ID`
+  / `ENTRA_CLIENT_SECRET`) serves any company that signed up, with the bot still single-tenant (lib/tenants.ts).
+  Switching needs Azure/Entra/Store steps first: follow [TEAMS-MULTITENANT.md](TEAMS-MULTITENANT.md).
 - `-- --local` builds `sidekick-teams-local.zip` with the dev tunnel address instead. It's the same app to
   Teams (same ID), so uploading it replaces the live one, and it's only useful while the bot's endpoint
   points at the tunnel. Upload the live package again afterwards.
@@ -100,8 +129,9 @@ the safety net that alerts when the app itself is down.
   - `sidekick-app-restarts` (severity 2): the container restarted in the last 15 minutes.
   - What to do: `docs/RUNBOOKS.md` → The site is down.
 - **Security headers** (`app/next.config.ts`): HSTS, `X-Frame-Options: DENY`, `nosniff`, a strict
-  referrer policy, no `x-powered-by`, and a Content-Security-Policy in **report-only** mode (switch it to
-  enforcing once the browser console shows no reports).
+  referrer policy, no `x-powered-by`, and an enforced Content-Security-Policy (started report-only in PR #25;
+  enforced by the app security fixes in PR #22 after the portal showed no violations under it). If a page
+  breaks after a deploy, look for "Content Security Policy" errors in the browser console.
 
 ## Budgets and alerts
 
@@ -123,7 +153,10 @@ first if it would trip again). Not test-fired yet, because firing it takes the l
 
 - App: HTTPS only (insecure off); Teams calls without Microsoft's signature are refused (401).
 - First-run Setup is open until the first account exists; it was claimed by Cody right after deploy.
-  The Owner Console setup only works from localhost. Proposed: a one-time setup code for production.
+- Owner Console setup (and first-run setup) in production needs the one-time `SIDEKICK_SETUP_CODE` secret
+  (at least 16 characters; without it production refuses setup). To create the owner account: add the
+  secret to the Container App, open `/owner/setup`, enter it, then remove the secret. (Oct 2026: the
+  live owner account didn't exist yet; see `docs/security/`.)
 - Registry: admin user and anonymous pull off.
 - Database: TLS required, random 32-character password; firewall allows Azure services only (the app's
   outgoing addresses are a long shared list that can change, so they aren't pinned). Private networking

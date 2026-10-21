@@ -65,12 +65,22 @@ export function verifyPassword(password: string, stored: string): boolean {
   return expected.length === key.length && crypto.timingSafeEqual(expected, key);
 }
 
+/**
+ * A hash of a random password nobody knows. Sign-in checks an unknown email against it, so a wrong email
+ * takes as long to refuse as a wrong password and the timing doesn't reveal which emails have accounts.
+ */
+export const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString("hex"));
+
 const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
-/** Signs a user in: creates a session row and sets the `sk_session` cookie (httpOnly, 7 days). */
+/**
+ * Signs a user in: creates a session row and sets the `sk_session` cookie (httpOnly, 7 days). Also drops
+ * expired session rows (anyone's), so the table doesn't grow forever.
+ */
 export async function startSession(userId: string) {
   const token = crypto.randomBytes(32).toString("base64url");
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
+  await run("DELETE FROM sessions WHERE expires_at < ?", new Date().toISOString());
   await run("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)", sha256(token), userId, expires.toISOString());
   await run("UPDATE users SET last_active = ? WHERE id = ?", now(), userId);
   (await cookies()).set(SESSION_COOKIE, token, {
@@ -88,6 +98,16 @@ export async function endSession() {
   const token = jar.get(SESSION_COOKIE)?.value;
   if (token) await run("DELETE FROM sessions WHERE token_hash = ?", sha256(token));
   jar.delete(SESSION_COOKIE);
+}
+
+/**
+ * Ends every other session of this user (other browsers and devices), keeping the one making this request.
+ * Called after a password change, so a stolen session cookie stops working when the password is changed.
+ * @returns how many sessions were ended
+ */
+export async function endOtherSessions(userId: string): Promise<number> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  return (await run("DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?", userId, sha256(token))).changes;
 }
 
 /**

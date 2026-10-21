@@ -1,18 +1,18 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
   "manifestVersion": "1.30",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "id": "{{BOT_ID}}",
   "developer": {
     "name": "Sidekick",
-    "websiteUrl": "{{PUBLIC_URL}}",
-    "privacyUrl": "{{PUBLIC_URL}}",
-    "termsOfUseUrl": "{{PUBLIC_URL}}"
+    "websiteUrl": "{{WEBSITE_URL}}",
+    "privacyUrl": "{{WEBSITE_URL}}/privacy",
+    "termsOfUseUrl": "{{WEBSITE_URL}}/terms"
   },
   "name": { "short": "Sidekick", "full": "Sidekick: AI teammate for client teams" },
   "description": {
     "short": "Answers from your workspace's documents and meetings, with sources.",
-    "full": "Mention @Sidekick in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. After each meeting Sidekick posts the notes, decisions and action items, and you can assign or close action items right from the card. In chats an admin chooses to track, Sidekick reads the messages to keep track of decisions and dates, and posts reminders about what's still open."
+    "full": "Mention @Sidekick in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. Your organization signs up at Sidekick first; when someone adds Sidekick to a chat, an admin or the group's leader assigns it to a workspace in the Sidekick portal, and leaders can add teammates right from the chat with @Sidekick add. After each meeting Sidekick posts the notes, decisions and action items, and you can assign or close action items right from the card. In chats an admin chooses to track, Sidekick reads the messages to keep track of decisions and dates, and posts reminders about what's still open."
   },
   "icons": { "color": "color.png", "outline": "outline.png" },
   "accentColor": "#4F46E5",
@@ -28,14 +28,16 @@
           "scopes": ["personal", "team", "groupChat"],
           "commands": [
             { "title": "help", "description": "What Sidekick can do here" },
-            { "title": "link", "description": "Get the code to link this chat to a workspace" }
+            { "title": "link", "description": "Get the code to link this chat to a workspace" },
+            { "title": "add", "description": "Add someone to this workspace: add @name (Team Lead or Org Admin)" },
+            { "title": "remove", "description": "Take someone off this workspace: remove @name (Team Lead or Org Admin)" }
           ]
         }
       ]
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],
-  "webApplicationInfo": { "id": "{{BOT_ID}}", "resource": "api://{{PUBLIC_HOST}}/{{BOT_ID}}" },
+  "webApplicationInfo": { "id": "{{AAD_APP_ID}}", "resource": "api://{{PUBLIC_HOST}}/{{AAD_APP_ID}}" },
   "authorization": {
     "permissions": {
       "resourceSpecific": [
@@ -44,5 +46,5 @@
       ]
     }
   },
-  "validDomains": ["{{PUBLIC_HOST}}"]
+  "validDomains": ["{{PUBLIC_HOST}}", "{{WEBSITE_HOST}}"]
 }

@@ -55,6 +55,12 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
 | Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |
+| Add Sidekick to a Teams chat (anyone else: Sidekick leaves) | ✓ | ✓ | ✓ | | | |
+| See and assign Teams chats waiting to be assigned (portal only) | ✓ | ✓ | ✓ (chats they added, to own groups) | | | |
+| Remove Sidekick from a Teams chat | ✓ | ✓ | ✓ (own groups' chats, or waiting chats they added) | | | |
+| Import people from Microsoft 365 | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | | |
+| `@Sidekick add` / `remove @name` in a linked Teams chat | ✓ | ✓ | ✓ (Members and Viewers, that chat's workspace if they lead it) | | | |
+| Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval) | ✓ | ✓ | | | | |
 | See the audit log and Activity (traces, performance) | ✓ | ✓ | | | | |
 | Change branding (logo, brand color) | ✓ | ✓ | | | | |
 | Make a workspace's guardrails stricter, write custom rules, use "Test it" | ✓ | ✓ | | | | |
@@ -76,6 +82,12 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
   password (or sign out) until they do; every other request is refused. Signing in with Microsoft clears it.
 - **Password guessing is slowed down.** 5 wrong passwords for one email (or 20 from one network address)
   in 15 minutes pause password sign-in for 15 minutes. Failed sign-ins and sign-outs go to the audit log.
+  Users & access marks a paused person **Sign-in locked**; an Org Owner or Org Admin can press **Unlock**
+  (audited), for example when someone else's guessing locked them out.
+- **A new password signs you out everywhere else.** Changing your password ends your sessions on every other
+  browser and device, and the new password must differ from the old one.
+- **Changes only from Sidekick's own pages.** A change (anything but reading) sent by another website is
+  refused, and Sidekick can't be shown inside another site's frame.
 - **Team Leads stay inside their workspaces.** They only see, add and take off people in the workspaces
   they lead, can only give the Member or Viewer role, and can't change roles, remove anyone from the
   organization, create workspaces, or open admin pages.

@@ -24,6 +24,8 @@ export type Me = {
   branding: { logo?: string | null; accent?: string | null };
   /** What the organization's plan allows now (lib/plans.ts accessFor) and the notice to show, if any. */
   billing?: { mode: "full" | "read_only"; notice: string | null };
+  /** Org Owners/Admins: the setup wizard was opened but isn't finished (shows the "Finish setting up" banner). */
+  setupPending?: boolean;
 };
 
 type Ctx = { me: Me; ws: string; setWs: (id: string) => void; reload: () => Promise<void> };
@@ -187,6 +189,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     ? <>Your organization has used {me.credit.pct}% of this month&apos;s AI credit. At 100%, Sidekick keeps answering questions but pauses extras like reminders and the knowledge map.</>
                     : <><b>This month&apos;s AI credit is used up.</b> Sidekick still answers questions; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st.</>}{" "}
                   <Link href="/usage">Open Usage &amp; billing</Link>
+                </span>
+              </div>
+            )}
+            {me.setupPending && !path.startsWith("/get-started") && (
+              <div className="banner info">
+                <Icon n="check" />
+                <span>
+                  Finish setting up Sidekick: connect Microsoft 365, choose your rules and create your first groups.{" "}
+                  <Link href="/get-started">Continue setup</Link>
                 </span>
               </div>
             )}

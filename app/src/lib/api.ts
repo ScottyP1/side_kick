@@ -19,6 +19,7 @@ import { HttpError } from "./auth";
 import { FeatureOffError } from "./owner";
 import { now, run } from "./db";
 import { failureReason, traceFailed, withTrace } from "./trace";
+import { crossSiteRefusal } from "./security";
 import { readOnlyRefusal } from "./billing";
 
 /**
@@ -109,7 +110,7 @@ const detailsOf = (e: unknown) => ((e && typeof e === "object" && (e as Record<s
 
 /**
  * Wraps a route handler so its return value becomes JSON and thrown errors become clean JSON errors the
- * UI can show. Nothing fails silently:
+ * UI can show. Changes coming from another website are refused first (`crossSiteRefusal`, 403). Nothing fails silently:
  * - `HttpError`s (expected problems: not signed in, not allowed, invalid input) return their message.
  * - Claude API errors (bad key, rate limit, outage) become plain-language messages with a reference code.
  * - Anything unexpected returns a 500 with a generic message and a reference code; the full details go to
@@ -121,6 +122,9 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
   return async (...args: A) =>
     withTrace({ name: routeName(args[0]), channel: "portal" }, async () => {
     try {
+      // Changes from another website first (CSRF), then a read-only (unpaid/ended) plan.
+      const crossSite = args[0] instanceof Request ? crossSiteRefusal(args[0]) : null;
+      if (crossSite) throw new HttpError(403, crossSite);
       const readOnly = args[0] instanceof Request ? await readOnlyRefusal(args[0]) : null;
       if (readOnly) throw new HttpError(402, readOnly);
       const out = await fn(...args);

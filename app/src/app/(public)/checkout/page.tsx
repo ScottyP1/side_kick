@@ -42,7 +42,9 @@ export default function CheckoutPage() {
     setError("");
     try {
       await api("/api/billing", { method: "POST", json: { action: "pay", plan } });
-      location.href = "/usage?paid=1";
+      // A new organization carries on with the setup wizard; one that's already set up goes back to billing.
+      const me = await api<{ setupPending?: boolean }>("/api/me");
+      location.href = me.setupPending ? "/get-started?paid=1" : "/usage?paid=1";
     } catch (e) {
       setError(e instanceof Error ? e.message : "Payment failed.");
       setBusy(false);
@@ -80,7 +82,7 @@ export default function CheckoutPage() {
               </div>
               <span className="muted" style={{ fontSize: 13 }}>The total follows the number of people in your organization. Nothing is charged in test mode.</span>
               <button className="btn primary" onClick={payNow} disabled={busy}>{busy ? "Paying…" : "Pay (test mode)"}</button>
-              {b.subscription.status === "trialing" && <Link className="btn ghost" href="/">Not now: use the {TRIAL_DAYS}-day free trial</Link>}
+              {b.subscription.status === "trialing" && <Link className="btn ghost" href="/get-started">Not now: use the {TRIAL_DAYS}-day free trial</Link>}
             </>
           )}
         </div>

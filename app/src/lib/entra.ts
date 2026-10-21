@@ -20,9 +20,17 @@
  *
  * Configuration (app/.env.local): uses the same Entra app as the Teams bot: `CLIENT_ID`, `CLIENT_SECRET`
  * and `TENANT_ID` (or `ENTRA_CLIENT_ID` / `ENTRA_CLIENT_SECRET` / `ENTRA_TENANT` to use a separate app).
- * `ENTRA_TENANT=organizations` lets people from any company's tenant sign in (the Entra app must then be
- * set to "multiple organizations"). The redirect address `<portal>/api/auth/microsoft/callback` must be
- * added to the Entra app as a Web redirect URI.
+ * - **Single tenant** (single-tenant mode, lib/tenants.ts: `TENANT_ID` or `ENTRA_TENANT` = one tenant id):
+ *   Microsoft only signs in that tenant's people, and a token from any other tenant is refused here too.
+ * - **Multi-tenant** (multi-tenant mode, or `ENTRA_TENANT` = `organizations`/`common`): people from any
+ *   company's tenant can sign in. The Entra app must be set to "multiple organizations"; with
+ *   `SIDEKICK_MULTI_TENANT=1` that's a separate app in `ENTRA_CLIENT_ID`/`ENTRA_CLIENT_SECRET`, while the bot
+ *   keeps its single-tenant app (see docs/TEAMS-MULTITENANT.md). Each token is verified
+ *   against its own tenant's issuer (`https://login.microsoftonline.com/<tid>/v2.0`), and the callback only
+ *   lets someone into the Sidekick org tied to that exact tenant (lib/tenants.ts), so one company's token can
+ *   never open another company's org.
+ * The redirect address `<portal>/api/auth/microsoft/callback` must be added to the Entra app as a Web
+ * redirect URI (the admin-consent round trip in lib/directory.ts comes back to the same address).
  *
  * Tests point `ENTRA_LOGIN_BASE` at a fake Microsoft on localhost; that override is ignored in production.
  */
@@ -31,9 +39,10 @@ import crypto from "node:crypto";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { HttpError } from "./auth";
 import { get, now, run } from "./db";
+import { tenantMode } from "./tenants";
 
 /** Microsoft's sign-in service. Overridable only outside production (for the fake Microsoft in tests). */
-const LOGIN_BASE =
+export const LOGIN_BASE =
   process.env.NODE_ENV !== "production" && process.env.ENTRA_LOGIN_BASE ? process.env.ENTRA_LOGIN_BASE.replace(/\/$/, "") : "https://login.microsoftonline.com";
 
 /** The tenant id Microsoft uses for personal accounts (outlook.com, hotmail.com): never a company. */
@@ -43,16 +52,28 @@ const STATE_MINUTES = 10;
 /** Browser cookie that ties the Microsoft round trip to the browser that started it (stops login CSRF). */
 export const OIDC_COOKIE = "sk_oidc";
 
-const config = () => ({
-  clientId: process.env.ENTRA_CLIENT_ID || process.env.CLIENT_ID || "",
-  clientSecret: process.env.ENTRA_CLIENT_SECRET || process.env.CLIENT_SECRET || "",
-  tenant: process.env.ENTRA_TENANT || process.env.TENANT_ID || "",
-});
+/**
+ * The Entra app Sidekick signs in with. `tenant` is the sign-in authority: one tenant id (single-tenant) or
+ * "organizations" (any work or school account; "common" is treated the same, personal accounts are refused).
+ * `singleTenant` is that one tenant id, or null in multi-tenant mode.
+ */
+export const entraConfig = () => {
+  // In multi-tenant mode TENANT_ID is only the bot's home tenant, never the sign-in authority.
+  const raw = (process.env.ENTRA_TENANT || (tenantMode() === "multi" ? "" : process.env.TENANT_ID) || "").trim();
+  const any = !raw || ["common", "organizations"].includes(raw.toLowerCase());
+  return {
+    clientId: process.env.ENTRA_CLIENT_ID || process.env.CLIENT_ID || "",
+    clientSecret: process.env.ENTRA_CLIENT_SECRET || process.env.CLIENT_SECRET || "",
+    tenant: any ? "organizations" : raw,
+    singleTenant: any ? null : raw,
+  };
+};
+const config = entraConfig;
 
-/** True when Microsoft sign-in is set up (app id, secret and tenant are in .env.local). */
+/** True when Microsoft sign-in is set up (app id and secret are in .env.local; no tenant means any tenant). */
 export function entraConfigured(): boolean {
   const c = config();
-  return Boolean(c.clientId && c.clientSecret && c.tenant);
+  return Boolean(c.clientId && c.clientSecret);
 }
 
 /**
@@ -130,8 +151,12 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
   const q = new URL(req.url).searchParams;
   if (q.get("error")) {
     // The person cancelled, or their company blocked the app (e.g. admin consent needed).
-    const desc = (q.get("error_description") ?? "").split("\n")[0].replace(/^AADSTS\d+:\s*/, "").slice(0, 300);
-    throw new HttpError(400, q.get("error") === "access_denied" ? "Microsoft sign-in was cancelled." : `Microsoft didn't sign you in: ${desc || q.get("error")}`);
+    // Only Microsoft's error code is shown, never the description text: anyone can make a link to this
+    // address, so free text here could put their words on Sidekick's page (security review L4). The full
+    // description goes to the server log for whoever investigates.
+    if (q.get("error") !== "access_denied") console.error("Microsoft sign-in error", q.get("error"), (q.get("error_description") ?? "").split("\n")[0].slice(0, 300));
+    const code = (q.get("error_description") ?? "").match(/AADSTS\d{3,8}/)?.[0] ?? (q.get("error") ?? "").replace(/[^a-z_]/gi, "").slice(0, 40);
+    throw new HttpError(400, q.get("error") === "access_denied" ? "Microsoft sign-in was cancelled." : `Microsoft didn't sign you in${code ? ` (${code})` : ""}. Try again; if it keeps happening, your IT team may need to approve Sidekick for your organization.`);
   }
   const state = q.get("state") ?? "";
   const code = q.get("code") ?? "";
@@ -173,6 +198,8 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
   }
   if (claims.nonce !== saved.nonce) throw new HttpError(400, "That sign-in reply doesn't match this browser. Try again.");
   if (tid === PERSONAL_TENANT) throw new HttpError(403, "Personal Microsoft accounts can't sign in. Use your work account.");
+  // Single-tenant: Microsoft shouldn't issue anyone else a token for this app, but never rely on that alone.
+  if (c.singleTenant && tid.toLowerCase() !== c.singleTenant.toLowerCase()) throw new HttpError(403, "Your Microsoft organization can't sign in to this Sidekick.");
   const email = String(claims.email ?? claims.preferred_username ?? "").trim().toLowerCase();
   const oid = String(claims.oid ?? "");
   if (!oid) throw new HttpError(400, "Microsoft's reply didn't include your account id.");

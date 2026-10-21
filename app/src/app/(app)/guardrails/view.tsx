@@ -411,7 +411,7 @@ function TestBox({ workspace, limit }: { workspace: Rules["workspace"]; limit: n
                 <Pill kind="warn">Would be refused</Pill>
                 <p style={{ margin: "8px 0 4px" }}>
                   <b>{result.label}</b>
-                  {result.draft ? " (your draft)" : result.locked ? " (locked)" : ""} · caught by the {result.checker === "local" ? "quick check" : "Claude check"}
+                  {result.draft ? " (your draft)" : result.locked ? " (locked)" : ""} · caught by the {result.checker === "local" ? "quick check" : "AI check"}
                 </p>
                 <p className="muted" style={{ margin: 0 }}>They&apos;d see: “{result.message}”</p>
               </>

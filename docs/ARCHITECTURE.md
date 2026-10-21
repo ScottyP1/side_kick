@@ -31,6 +31,11 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `db/schema.postgres.sql` | The Postgres schema, mirroring the SQLite one |
 | `lib/auth.ts` | Sessions, roles, `requireUser` (also blocks everything but the password change while a temporary password is pending), `requireWorkspace` (the workspace wall), audit log |
 | `lib/login-limit.ts` | Sign-in rate limit: failed password sign-ins per email and per IP, stored in `login_failures` (works across several app copies) |
+| `lib/security.ts` | Small security checks with no I/O, unit-tested: one-time setup rule (`SIDEKICK_SETUP_CODE` in production), the cross-site request (CSRF) check `handle()` runs on every change, Word "zip bomb" size check, prompt tag escaping |
+| `lib/flash.ts` | One-time messages from a server redirect to the page (Microsoft sign-in errors), in a short-lived cookie instead of the address |
+| `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification (issuer checked per tenant; single-tenant mode also checks the tenant) |
+| `lib/tenants.ts` | Single- vs multi-tenant mode (`TENANT_ID`), which Sidekick org a Microsoft tenant belongs to, `tieOrgToTenant` (also for the sign-up flow) |
+| `lib/directory.ts` | The customer's Microsoft 365 directory via Microsoft Graph (app permission `User.Read.All`): admin-consent round trip, search, import as Microsoft-sign-in people |
 | `lib/plans.ts` | The plans (Starter/Team/Business for sale, Enterprise set up by the team: made-up per-person prices and every limit: people, groups, tracked chats, meeting hours, documents, connectors, monthly AI credit), trial/grace lengths, `accessFor` (full or read-only), `limitState`, `parseCustomLimits`, `transcriptMinutes`. Pure, shared by pages and server, unit-tested |
 | `lib/limits.ts` | Plan limits: effective limits (plan + the Sidekick team's custom terms in `org_terms`), what's used, `assertCanAdd` (402 `kind: "limit"`) called where each thing is created, `limitReport` (near / over), `saveTerms` |
 | `lib/credit.ts` | The monthly AI credit: this month's cost vs the plan's credit (+ top-ups), 30-second cache updated by every call, 80% notice, 100% "essentials only" (`creditGate`: cheaper models for answers/checks/short notes, `FeatureOffError("credit")` for the extras), `skipCredit` opt-out, `grantTopUp` |
@@ -52,7 +57,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/guard-text.ts` | The quick guardrail text checks with no I/O (slurs, jailbreaks, swearing, loosening and too-broad rules, masking contact details but not dates), unit-tested in `tests/db.test.mjs` |
 | `lib/excerpt.ts` | Plain-text source excerpts for answers, taken from the part of a passage that matches the question |
 | `lib/workspaces.ts` | Unique workspace names, renaming, and deleting a workspace with everything scoped to it (both engines, plus Azure search) |
-| `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards |
+| `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards; tenant check, waiting chats |
+| `lib/teams/install.ts` | Who may add Sidekick to a chat (Team Leads/admins), and Sidekick leaving chats through Graph (refused installer, 7 days unassigned, removed in the portal) |
+| `lib/teams/members.ts` | `@Sidekick add` / `remove @name`: who may, who can be added, auditing |
 | `lib/reminders.ts` | Per-chat settings (notes, tracking, reminders), saving tracked chat messages, building reminder digests (items picked in code, worded by Claude feature `remind`, every point with a source) and their card buttons |
 | `lib/reminder-rules.ts` | Plain rules for chat settings and reminder timing (defaults, validation, time zones, quiet days); no I/O, unit-tested |
 | `instrumentation.ts` | Starts the in-app timer that calls `POST /api/reminders/tick` every 5 minutes (off with `SIDEKICK_SCHEDULER=off`) |
@@ -93,8 +100,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 **A Teams message**
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
 2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
-3. Unlinked conversation → link-code card. Linked → typing indicator now, answer card after the request returns.
-4. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
+3. `tenantGate`: in multi-tenant mode an activity from a Microsoft tenant no Sidekick org is tied to gets the sign-up card and nothing is stored.
+4. Unlinked conversation in a tied tenant (channel/group chat): on install the installer must be a Team Lead/admin (else Sidekick leaves, install.ts); it then waits to be assigned in the portal, and Sidekick reads, saves and answers nothing there (mentions get the "not set up yet" notice). Elsewhere (untied tenant, 1:1) the link-code card. Assigned via the picker → every message is tracked. Linked → `add`/`remove @name` commands (members.ts), or typing indicator now and the answer card after the request returns.
+5. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
 
 ## Rules every change must keep
 - **Walls**: filter every query by `org_id`, and by a workspace id that went through `requireWorkspace` (or a linked Teams conversation). Never trust an id from the request on its own.
@@ -108,6 +116,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 - **Audit**: access changes, deletions and anything Sidekick does on its own call `audit()` / `auditAsSidekick()`.
 - **Parameters**: SQL values always go in `?` parameters, never into the SQL string.
 - **Secrets**: only in `app/.env.local` (git-ignored). The Teams bot never runs without token checks in production.
+- **Browser safety**: every change (POST/PUT/PATCH/DELETE) through `handle()` is refused if it came from another website; security headers (CSP, no framing) are set in `next.config.ts`. Don't put user or document text in a URL that a page displays; use `lib/flash.ts`.
 - **Both databases**: SQL must run on SQLite and Postgres; `npm test` checks both.
 - **No silent failures**: routes use `handle()`; pages use `api()` (opens the problem modal for network/server/paused problems) and `useReportError()` instead of empty catches; page crashes land on `error.tsx`.
 - **Refusals aren't errors**: a feature paused (kill switch) or turned off for one client throws `FeatureOffError` (`assertEnabled` in `lib/owner.ts`). `handle()` answers 503 with `kind: "paused" | "restricted"`, without a reference code, an App errors row or a failed trace; check it before starting a Claude step so it never counts as a Claude error. Trace names replace ids with `:id` (`normalisePath` in `lib/api.ts`: add new `[id]` collections there).

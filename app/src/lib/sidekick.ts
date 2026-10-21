@@ -25,6 +25,7 @@ import { takeQuestion } from "./rate-limit";
 import { creditStatus } from "./credit";
 import { excerptFor } from "./excerpt";
 import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, type GuardPlace, type RuleId } from "./guardrails";
+import { tagSafe } from "./security";
 
 /* ------------------------------------------------------------------ */
 /* Ask Sidekick: answer from this workspace's documents and meetings   */
@@ -89,8 +90,8 @@ export async function ask(user: User, workspaceId: string, question: string, gue
   } else {
     const content =
       sources
-        .map((s) => `<source id="${s.id}" type="${s.source_type}" title="${esc(s.title)}"${s.loc ? ` location="${esc(s.loc)}"` : ""}>\n${s.text}\n</source>`)
-        .join("\n\n") + `\n\nQuestion: ${question}`;
+        .map((s) => `<source id="${s.id}" type="${s.source_type}" title="${esc(s.title)}"${s.loc ? ` location="${esc(s.loc)}"` : ""}>\n${tagSafe(s.text)}\n</source>`)
+        .join("\n\n") + `\n\nQuestion: ${tagSafe(question)}`;
     const raw = await structured("ask", { orgId: user.org_id, workspaceId }, { system: `${ASK_SYSTEM}\n\n${answerRules(policy)}`, content, schema: AnswerSchema, effort: "low", maxTokens: 4000 });
     const grounded = checkGrounding(raw, sources.map((s) => s.id));
     if (grounded.ungrounded) await recordGuard(place, "answer", "ungrounded", "replaced");

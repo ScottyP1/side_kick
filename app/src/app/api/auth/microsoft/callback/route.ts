@@ -3,7 +3,8 @@
  * Verifies the reply (lib/entra.ts), then either:
  * - signs the person in: their Microsoft tenant must be connected to a Sidekick organization and they
  *   must have been added there (matched by Microsoft account id, or by email the first time); or
- * - (mode "link") connects the Org Owner's organization to their Microsoft tenant.
+ * - (mode "link") connects the Org Owner's organization to their Microsoft tenant; or
+ * - (admin consent) records that the organization's Microsoft admin approved Sidekick (lib/directory.ts).
  * Problems never fail silently: the browser lands on the sign-in page (or Settings) with the reason.
  * Audited: "Signed in with Microsoft", "Connected Microsoft sign-in".
  */
@@ -12,27 +13,39 @@ import { NextResponse } from "next/server";
 import { errorMessageFor, handle } from "@/lib/api";
 import { audit, HttpError, startSession } from "@/lib/auth";
 import { get, run } from "@/lib/db";
+import { FLASH_COOKIE, FLASH_SECONDS } from "@/lib/flash";
 import { finishMicrosoftSignIn, OIDC_COOKIE, redirectUri, safeNext, type MicrosoftIdentity } from "@/lib/entra";
+import { finishAdminConsent, isConsentReply } from "@/lib/directory";
+import { tieOrgToTenant } from "@/lib/tenants";
 
 export const GET = handle(async (req: Request) => {
   const jar = await cookies();
   const cookieState = jar.get(OIDC_COOKIE)?.value;
   jar.delete({ name: OIDC_COOKIE, path: "/api/auth/microsoft" });
   const go = (path: string) => NextResponse.redirect(new URL(path, redirectUri(req)));
-  let mode: "signin" | "link" = "signin";
+  let mode: "signin" | "link" | "consent" = "signin";
   try {
+    // The admin-consent round trip ("Approve Sidekick for your organization") comes back here too.
+    if (await isConsentReply(req)) {
+      mode = "consent";
+      await finishAdminConsent(req, cookieState);
+      return go("/users?microsoft=approved");
+    }
     const { who, saved } = await finishMicrosoftSignIn(req, cookieState);
     mode = saved.mode;
     if (saved.mode === "link") {
       await connectTenant(saved.user_id, who);
-      return go("/settings?microsoft=connected");
+      // Back to where connecting started: the setup wizard or Settings.
+      return go(`${saved.next_path === "/get-started" ? "/get-started" : "/settings"}?microsoft=connected`);
     }
     const userId = await signInAs(who);
     await startSession(userId);
     return go(safeNext(saved.next_path));
   } catch (e) {
     const message = await errorMessageFor(req, e);
-    return go(`${mode === "link" ? "/settings" : "/login"}?error=${encodeURIComponent(message)}`);
+    // The message travels in a short-lived cookie, not the address, so a link can't put its own words on the page (lib/flash.ts).
+    jar.set(FLASH_COOKIE, message, { path: "/", maxAge: FLASH_SECONDS, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
+    return go(`${mode === "link" ? "/settings" : mode === "consent" ? "/users" : "/login"}?error=1`);
   }
 });
 
@@ -53,18 +66,9 @@ async function signInAs(who: MicrosoftIdentity): Promise<string> {
   return user.id;
 }
 
-/** Connects the Org Owner's organization to the Microsoft tenant they just signed in with. */
+/** Connects the Org Owner's organization to the Microsoft tenant they just signed in with (lib/tenants.ts). */
 async function connectTenant(userId: string | null, who: MicrosoftIdentity) {
   const owner = userId ? await get<{ id: string; org_id: string; name: string; role: string }>("SELECT id, org_id, name, role FROM users WHERE id = ?", userId) : undefined;
   if (!owner || owner.role !== "Org Owner") throw new HttpError(403, "Only an Org Owner can connect Microsoft sign-in.");
-  const taken = await get<{ id: string }>("SELECT id FROM orgs WHERE entra_tenant_id = ? AND id <> ?", who.tenantId, owner.org_id);
-  if (taken) throw new HttpError(409, "That Microsoft organization is already connected to another Sidekick organization. Contact the Sidekick team.");
-  const org = await get<{ entra_tenant_id: string | null }>("SELECT entra_tenant_id FROM orgs WHERE id = ?", owner.org_id);
-  if (org?.entra_tenant_id && org.entra_tenant_id !== who.tenantId) {
-    throw new HttpError(409, "This organization is already connected to a different Microsoft organization. Disconnect it first.");
-  }
-  await run("UPDATE orgs SET entra_tenant_id = ? WHERE id = ?", who.tenantId, owner.org_id);
-  await run("UPDATE users SET entra_oid = NULL WHERE org_id = ? AND entra_oid = ? AND id <> ?", owner.org_id, who.objectId, owner.id);
-  await run("UPDATE users SET entra_oid = ? WHERE id = ?", who.objectId, owner.id);
-  await audit(owner, `Connected Microsoft sign-in (tenant ${who.tenantId})`, "Policy change");
+  await tieOrgToTenant(owner.org_id, who.tenantId, owner, who.objectId);
 }

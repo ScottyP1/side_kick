@@ -23,7 +23,8 @@ import { EVERYONE, MATRIX } from "./permissions-matrix.mjs";
 
 const APP = path.resolve(import.meta.dirname, "..");
 const ENGINE = process.env.TEST_DB === "postgres" ? "postgres" : "sqlite";
-const PORT = ENGINE === "postgres" ? 3201 : 3200;
+// TEST_PORT lets parallel worktrees run the suite without sharing a port (default 3200/3201).
+const PORT = Number(process.env.TEST_PORT) || (ENGINE === "postgres" ? 3201 : 3200);
 const BASE = `http://localhost:${PORT}`;
 const PG_URL = process.env.TEST_DATABASE_URL || "postgres:///sidekick_test";
 
@@ -148,7 +149,7 @@ function client() {
     } catch {
       json = text;
     }
-    return { status: res.status, body: json, location: res.headers.get("location") };
+    return { status: res.status, body: json, location: res.headers.get("location"), cookies: Object.fromEntries(jar), headers: res.headers };
   };
 }
 
@@ -202,7 +203,9 @@ before(async () => {
     TEAMS_LOCAL_PLAYGROUND: "true",
     CLIENT_ID: "",
     CLIENT_SECRET: "",
-    TENANT_ID: "",
+    // Single-tenant mode (lib/tenants.ts): Teams works for every chat as before multi-tenant support.
+    // Multi-tenant mode has its own suite: tests/teams-multitenant.test.mjs.
+    TENANT_ID: "tenant-1",
     SIDEKICK_PUBLIC_URL: "",
     // The reminder timer is off; tests call its route themselves with this secret.
     SIDEKICK_SCHEDULER: "off",
@@ -326,7 +329,7 @@ test(`[${ENGINE}] unsupported or empty files are refused before anything is save
     const form = new FormData();
     form.append("ws", s.wsA);
     for (const f of files) form.append("files", f);
-    return member("POST", "/api/docs", undefined, { form });
+    return admin("POST", "/api/docs", undefined, { form });
   };
   const exe = await upload(new File(["MZ"], "virus.exe"));
   assert.equal(exe.status, 415);
@@ -456,6 +459,11 @@ test(`[${ENGINE}] Teams: card buttons update action items, but only inside the l
   const bItem = (await admin("GET", `/api/meetings/${bm.body.id}`)).body.actions[0].id;
   const refused = await (await toBot(activity({ type: "invoke", name: "adaptiveCard/action", value: { action: { type: "Action.Execute", verb: "sidekick.action.done", data: { itemId: bItem } } } }))).json();
   assert.match(JSON.stringify(refused), /couldn't find that action item/);
+  // With client guests in the chat, items from internal meetings (never posted there) can't be changed from it.
+  assert.equal((await admin("PATCH", "/api/teams-links", { id: "conv-1", guests: true })).status, 200);
+  const internal = await (await toBot(activity({ type: "invoke", name: "adaptiveCard/action", value: { action: { type: "Action.Execute", verb: "sidekick.action.done", data: { itemId: s.actionA } } } }))).json();
+  assert.match(JSON.stringify(internal), /couldn't find that action item/);
+  assert.equal((await admin("PATCH", "/api/teams-links", { id: "conv-1", guests: false })).status, 200);
 });
 
 test(`[${ENGINE}] Teams Playground mode refuses requests that would reply to a non-local address`, async () => {
@@ -516,7 +524,7 @@ test(`[${ENGINE}] every response carries the browser security headers and doesn'
     assert.equal(h.get("x-frame-options"), "DENY", url);
     assert.equal(h.get("x-content-type-options"), "nosniff", url);
     assert.equal(h.get("referrer-policy"), "strict-origin-when-cross-origin", url);
-    assert.match(h.get("content-security-policy-report-only") ?? "", /frame-ancestors 'none'/, url);
+    assert.match(h.get("content-security-policy") ?? "", /frame-ancestors 'none'/, url);
     assert.equal(h.get("x-powered-by"), null, url);
   }
 });
@@ -1286,6 +1294,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   const r = await owner("POST", "/api/owner/tenants", { org: "Leak Org", name: "Leak Admin", email: "leak@test.local" });
   await firstSignIn(other, "leak@test.local", r.body.tempPassword);
   for (const url of [`/api/docs?ws=${s.wsB}`, `/api/memory?ws=${s.wsB}`]) assert.equal((await other("GET", url)).status, 404, url);
+  assert.equal((await other("GET", "/api/directory?q=vault")).status, 400, "no Microsoft 365 directory without its own connected tenant");
   assert.equal((await other("POST", "/api/ask", { ws: s.wsB, question: "vault code" })).status, 404);
   // Guardrails: workspace B's settings and rules, and this org's custom rules, are out of reach.
   const ruleB = (await admin("POST", "/api/guardrails/rules", { text: "Never mention the ZEBRA vault", ws: s.wsB })).body.rule.id;
@@ -1454,7 +1463,15 @@ test(`[${ENGINE}] workspaces: deleting one removes everything in it, leaves the 
 });
 
 /* ---------- Microsoft sign-in (Entra ID) ---------- */
-const errorOf = (r) => decodeURIComponent(r.to?.searchParams.get("error") ?? "");
+/** The message a Microsoft round trip left for the page: the address only says `?error=1`, the text is in the one-time cookie. */
+const flashOf = (res) => {
+  if (!res.location) return "";
+  const q = new URL(res.location, BASE).searchParams;
+  if (!q.has("error")) return "";
+  assert.equal(q.get("error"), "1", "the address never carries the message itself");
+  return decodeURIComponent(res.cookies.sk_flash ?? "");
+};
+const errorOf = (r) => flashOf(r.back);
 
 const billing = client();
 
@@ -1544,9 +1561,9 @@ test(`[${ENGINE}] Microsoft: forged, replayed or cross-browser replies are refus
   const first = await microsoftSignIn(c, claims, { replay: true });
   assert.equal(first.to.pathname, "/");
   const back = await c("GET", `/api/auth/microsoft/callback?code=x&state=${new URL(first.start.location).searchParams.get("state")}`);
-  assert.match(decodeURIComponent(new URL(back.location).searchParams.get("error")), /expired|took too long|different browser/);
+  assert.match(flashOf(back), /expired|took too long|different browser/);
   const cancelled = await c("GET", "/api/auth/microsoft/callback?error=access_denied&error_description=AADSTS65004%3A+User+declined");
-  assert.match(decodeURIComponent(new URL(cancelled.location).searchParams.get("error")), /cancelled/);
+  assert.match(flashOf(cancelled), /cancelled/);
 });
 
 test(`[${ENGINE}] Microsoft: Teams messages from a linked account use that person's name and role`, async () => {
@@ -1589,6 +1606,38 @@ test(`[${ENGINE}] Microsoft: requiring it turns passwords off and signs password
 
 /* ---------- proactive reminders and per-chat settings (lib/reminders.ts) ---------- */
 const GROUP = "conv-group-reminders";
+test(`[${ENGINE}] single-tenant mode: other tenants still get a link code; chats in the connected tenant wait quietly for this org only`, async () => {
+  const OLD = "conv-single-tenant-old";
+  const NEW = "19:connected-tenant@thread.v2";
+  // The test above disconnected Microsoft; connect it again for this one (and disconnect at the end).
+  assert.equal((await microsoftSignIn(admin, { tid: TENANT, oid: "oid-admin", email: "admin@test.local", name: "Test Admin" }, { mode: "link" })).to.search, "?microsoft=connected");
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: OLD, conversationType: "groupChat", tenantId: "tenant-1" } }));
+  const old = await waitForSent((m) => decodeURIComponent(m.url).includes(OLD));
+  assert.match(JSON.stringify(old.body), /Link this chat to a group[\s\S]*[A-Z2-9]{4}-[A-Z2-9]{4}/, "unchanged: the classic link-code card");
+  // The Org Owner (recognised by their Microsoft account) adds Sidekick in the connected tenant: it waits quietly.
+  await toBot(activity({ type: "installationUpdate", action: "add", from: { id: "29:w", name: "Test Admin in Teams", aadObjectId: "oid-admin" }, conversation: { id: NEW, conversationType: "groupChat", tenantId: TENANT, name: "Cutover crew" } }));
+  const card = await waitForSent((m) => decodeURIComponent(m.url).includes(NEW));
+  assert.match(JSON.stringify(card.body), /not set up for this chat yet/);
+  const waiting = (await admin("GET", "/api/teams-links")).body.waiting;
+  assert.deepEqual(waiting.map((w) => [w.id, w.name, w.added_by]), [[NEW, "Cutover crew", "Test Admin in Teams"]], "only the connected tenant's chat waits");
+  // Requiring Microsoft sign-in (above) ended the member's password session: Mia signs in with Microsoft.
+  const mia = client();
+  assert.equal((await microsoftSignIn(mia, { tid: TENANT, oid: "oid-member", email: "member@test.local" })).to.pathname, "/");
+  assert.deepEqual((await mia("GET", "/api/teams-links")).body.waiting, [], "Members don't see waiting chats");
+  const other = client();
+  const r = await owner("POST", "/api/owner/tenants", { org: "Picker Org", name: "Picker Admin", email: "picker@test.local" });
+  await firstSignIn(other, "picker@test.local", r.body.tempPassword);
+  const theirWs = (await other("POST", "/api/workspaces", { name: "Theirs" })).body.id;
+  assert.deepEqual((await other("GET", "/api/teams-links")).body.waiting, [], "another org never sees it");
+  assert.equal((await other("POST", "/api/teams-links", { id: NEW, ws: theirWs })).status, 404, "or assigns it");
+  const assigned = await admin("POST", "/api/teams-links", { id: NEW, ws: s.wsA });
+  assert.equal(assigned.status, 200);
+  assert.equal(assigned.body.tracking, true, "assigned in the portal means Sidekick reads every message");
+  assert.ok((await admin("GET", "/api/teams-links")).body.links.some((l) => l.id === NEW && l.workspace_id === s.wsA && l.settings.track));
+  assert.equal((await admin("DELETE", `/api/teams-links?id=${encodeURIComponent(NEW)}`)).status, 200);
+  assert.equal((await admin("DELETE", "/api/auth/microsoft")).status, 200);
+});
+
 const groupMsg = (overrides) => activity({ conversation: { id: GROUP, conversationType: "groupChat", tenantId: "tenant-1", name: "Wave 2 team" }, ...overrides });
 const mia = client();
 
@@ -1910,6 +1959,54 @@ test(`[${ENGINE}] sign-up: creates the organization, its Org Owner and a free tr
   assert.equal((await client()("GET", "/checkout")).status, 307);
   assert.equal((await c("GET", "/checkout")).status, 200);
   s.fay = c;
+});
+
+test(`[${ENGINE}] setup wizard: sign-up starts it, admins record steps and finish it, other roles and orgs can't`, async () => {
+  const fay = s.fay;
+  assert.equal((await fay("GET", "/api/me")).body.setupPending, true, "a new sign-up gets the Finish setting up banner");
+  assert.equal((await admin("GET", "/api/me")).body.setupPending, false, "an organization that never opened the wizard doesn't");
+  const g = await fay("GET", "/api/setup");
+  assert.equal(g.status, 200, JSON.stringify(g.body));
+  assert.equal(g.body.org, "Fabrikam Labs");
+  assert.deepEqual(g.body.steps, {});
+  assert.deepEqual(g.body.facts, { microsoftConnected: false, groups: 0 });
+  assert.equal(g.body.rules.current, "standard");
+  assert.equal(g.body.rules.canChange, true);
+  assert.ok(g.body.rules.presets.strict.small_talk && !g.body.rules.presets.standard.small_talk);
+  assert.ok(!JSON.stringify(g.body).includes("admin@test.local"), "only its own people");
+
+  assert.equal((await fay("PUT", "/api/setup", { step: "teams", state: "done" })).status, 200);
+  assert.equal((await fay("PUT", "/api/setup", { step: "microsoft", state: "skipped" })).status, 200);
+  assert.equal((await fay("PUT", "/api/setup", { step: "nope", state: "done" })).status, 400);
+  assert.equal((await fay("PUT", "/api/setup", { step: "rules", state: "maybe" })).status, 400);
+  // The Strict preset goes through the normal guardrails route.
+  assert.equal((await fay("PUT", "/api/guardrails", g.body.rules.presets.strict)).status, 200);
+  const g2 = (await fay("GET", "/api/setup")).body;
+  assert.deepEqual(g2.steps, { teams: "done", microsoft: "skipped" });
+  assert.equal(g2.rules.current, "strict");
+  assert.equal((await admin("GET", "/api/guardrails")).body.switches.find((x) => x.key === "small_talk").on, false, "another org's rules are untouched");
+
+  // Other roles can't read or change it.
+  // (In a separate signed-up organization: earlier tests signed this file's password users out, and later
+  // tests count the people in Fay's organization.)
+  const boss = client();
+  assert.equal((await signUpAs(boss, { org: "Setup Roles Co", name: "Rhea Roles", email: "rhea@setuproles.test", password: "correct horse battery", plan: "team" })).status, 200);
+  for (const [role, email] of [["Member", "mo@setuproles.test"], ["Team Lead", "tl@setuproles.test"], ["Billing Admin", "bill@setuproles.test"]]) {
+    const added = await boss("POST", "/api/users", { name: role, email, role, workspaces: [] });
+    assert.equal(added.status, 200, JSON.stringify(added.body));
+    const who = client();
+    assert.equal((await firstSignIn(who, email, added.body.tempPassword)).status, 200);
+    assert.equal((await who("GET", "/api/setup")).status, 403, role);
+    assert.equal((await who("PUT", "/api/setup", { finished: true })).status, 403, role);
+    assert.equal((await who("GET", "/api/me")).body.setupPending, false, `${role}s don't get the banner`);
+  }
+  assert.equal((await client()("GET", "/api/setup")).status, 401);
+
+  assert.equal((await fay("PUT", "/api/setup", { finished: true })).status, 200);
+  assert.equal((await fay("GET", "/api/me")).body.setupPending, false);
+  assert.match(JSON.stringify((await fay("GET", "/api/audit")).body), /Finished setting up Sidekick/);
+  assert.equal((await admin("GET", "/api/me")).body.setupPending, false);
+  assert.equal((await fay("PUT", "/api/guardrails", g.body.rules.presets.standard)).status, 200, "back to Standard for the tests after this");
 });
 
 test(`[${ENGINE}] sign-up: duplicate emails, weak passwords, unknown plans and missing fields are refused`, async () => {
@@ -2301,3 +2398,134 @@ test(`[${ENGINE}] Owner Console business view: revenue, margin, trials, payments
   assert.equal((await owner("PATCH", `/api/owner/tenants/${await limitOrg()}/billing`, { plan: "enterprise" })).status, 200);
   assert.equal((await s.lee("GET", "/api/me")).body.plan.name, "Enterprise");
 });
+/* ---------- Security review fixes (Oct 2026, docs/security/2026-10-app-security-review.md) ---------- */
+
+/**
+ * Signs in from a made-up network address of its own, so this test's wrong passwords don't count toward (or
+ * trip on) the per-address limit shared by the whole run on localhost. Returns the status and JSON body.
+ */
+async function loginFrom(ip, email, password, path = "/api/auth/login") {
+  const r = await fetch(BASE + path, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify({ email, password }) });
+  return { status: r.status, body: await r.json() };
+}
+
+test(`[${ENGINE}] password change signs the person out everywhere else, and must pick a different password`, async () => {
+  const { call } = await newPerson("Pat Phone", "pat@test.local", "Member");
+  const laptop = client();
+  assert.equal((await laptop("POST", "/api/auth/login", { email: "pat@test.local", password: NEW_PASSWORD })).status, 200);
+  assert.equal((await laptop("GET", "/api/workspaces")).status, 200);
+  const same = await call("POST", "/api/auth/password", { current: NEW_PASSWORD, next: NEW_PASSWORD });
+  assert.equal(same.status, 400);
+  assert.match(same.body.error, /different from your current one/);
+  assert.equal((await call("POST", "/api/auth/password", { current: NEW_PASSWORD, next: "another new password 456" })).status, 200);
+  assert.equal((await laptop("GET", "/api/workspaces")).status, 401, "the other session ended");
+  assert.equal((await call("GET", "/api/workspaces")).status, 200, "the session that changed it stays");
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Changed password \(signed out 1 other session\)/);
+});
+
+test(`[${ENGINE}] Org Owners and Org Admins can unlock a person's password sign-in; others can't`, async () => {
+  const lena = await newPerson("Lou Locked", "lou@test.local", "Viewer");
+  const lead = await newPerson("Lia Lead", "lia@test.local", "Team Lead");
+  for (let i = 0; i < 5; i++) await loginFrom("192.0.2.10", "lou@test.local", `wrong ${i}`);
+  assert.equal((await loginFrom("192.0.2.10", "lou@test.local", NEW_PASSWORD)).status, 429);
+  assert.equal((await admin("GET", "/api/users")).body.users.find((p) => p.id === lena.id).signin_locked, true);
+  const mem = await newPerson("Mo Unlock", "mo-unlock@test.local", "Member");
+  assert.equal((await mem.call("POST", `/api/users/${lena.id}`, { action: "unlock" })).status, 403);
+  assert.equal((await lead.call("POST", `/api/users/${lena.id}`, { action: "unlock" })).status, 403);
+  assert.equal((await admin("POST", `/api/users/${lena.id}`, { action: "nonsense" })).status, 400);
+  assert.equal((await admin("POST", `/api/users/${lena.id}`, { action: "unlock" })).status, 200);
+  assert.equal((await loginFrom("192.0.2.10", "lou@test.local", NEW_PASSWORD)).status, 200);
+  assert.equal((await admin("GET", "/api/users")).body.users.find((p) => p.id === lena.id).signin_locked, false);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Unlocked password sign-in for Lou Locked/);
+  // Another org's admin can't touch this person.
+  const other = client();
+  const o = await owner("POST", "/api/owner/tenants", { org: "Unlock Other Org", name: "Una Other", email: "una@test.local" });
+  await firstSignIn(other, "una@test.local", o.body.tempPassword);
+  assert.equal((await other("POST", `/api/users/${lena.id}`, { action: "unlock" })).status, 404);
+});
+
+test(`[${ENGINE}] changes sent from another website are refused (CSRF), same-site requests work`, async () => {
+  const adminCookie = () => Object.entries(adminJar).map(([k, v]) => `${k}=${v}`).join("; ");
+  const adminJar = (await admin("GET", "/api/me")).cookies;
+  const send = (headers) => fetch(`${BASE}/api/settings`, { method: "PUT", headers: { "content-type": "application/json", cookie: adminCookie(), ...headers }, body: JSON.stringify({ logo: null, accent: "#123456" }) });
+  for (const h of [{ origin: "https://evil.example" }, { "sec-fetch-site": "cross-site" }, { "sec-fetch-site": "same-site" }, { origin: "null" }]) {
+    const r = await send(h);
+    assert.equal(r.status, 403, JSON.stringify(h));
+    assert.match((await r.json()).error, /came from another website/);
+  }
+  assert.equal((await send({ origin: BASE, "sec-fetch-site": "same-origin" })).status, 200);
+  assert.equal((await send({})).status, 200, "no browser headers: not a browser, no cookie riding");
+  // A plain form post (text/plain body) from another site is refused before anything happens.
+  const form = await fetch(`${BASE}/api/workspaces`, { method: "POST", headers: { "content-type": "text/plain", origin: "https://evil.example", cookie: adminCookie() }, body: JSON.stringify({ name: "CSRF made" }) });
+  assert.equal(form.status, 403);
+  assert.ok(!(await admin("GET", "/api/workspaces")).body.workspaces.some((w) => w.name === "CSRF made"));
+  // Reading is never blocked.
+  assert.equal((await fetch(`${BASE}/api/me`, { headers: { origin: "https://evil.example", cookie: adminCookie() } })).status, 200);
+});
+
+test(`[${ENGINE}] uploads: Word "zip bombs", huge text and too many files are refused`, async () => {
+  const up = (files) => {
+    const form = new FormData();
+    form.append("ws", s.wsA);
+    for (const [name, data] of files) form.append("files", new Blob([data]), name);
+    return admin("POST", "/api/docs", undefined, { form });
+  };
+  // A .docx whose zip directory says word/document.xml unpacks to 200 MB (the bytes needn't exist: it's refused unopened).
+  const bomb = await up([["bomb.docx", zipClaiming("word/document.xml", 200 * 1024 * 1024)]]);
+  assert.equal(bomb.status, 200);
+  assert.equal(bomb.body.results[0].ok, false);
+  assert.match(bomb.body.results[0].error, /unpacks to far more text/);
+  const big = await up([["big.txt", "lorem ipsum ".repeat(170_000)]]);
+  assert.equal(big.body.results[0].ok, false);
+  assert.match(big.body.results[0].error, /the limit is 2,000,000 per document/);
+  const many = await up(Array.from({ length: 21 }, (_, i) => [`f${i}.txt`, "hello"]));
+  assert.equal(many.status, 413);
+  assert.match(many.body.error, /at most 20 files/);
+  // A library's own error isn't shown; a plain sentence is.
+  const broken = await up([["broken.pdf", "%PDF-1.7\ngarbage"]]);
+  assert.equal(broken.body.results[0].ok, false);
+  assert.match(broken.body.results[0].error, /Couldn't read this file/);
+  assert.doesNotMatch(broken.body.results[0].error, /Invalid PDF/);
+});
+
+test(`[${ENGINE}] Microsoft sign-in errors never put text in the address (no spoofed messages on /login)`, async () => {
+  const c = client();
+  const r = await c("GET", "/api/auth/microsoft/callback?error=server_error&error_description=AADSTS50020%3A+Call+555+0100+to+unlock+your+account");
+  assert.equal(new URL(r.location).search, "?error=1");
+  const shown = decodeURIComponent(r.cookies.sk_flash);
+  assert.match(shown, /Microsoft didn't sign you in \(AADSTS50020\)/);
+  assert.doesNotMatch(shown, /555/, "Microsoft's (or a link's) free text is never shown");
+});
+
+test(`[${ENGINE}] Owner Console sign-in: too many wrong passwords pause it, and failures go to the operator log`, async () => {
+  // Kept last: it locks the test owner's password sign-in for 15 minutes (the signed-in `owner` client keeps working).
+  const ownerLogin = (email, password) => loginFrom("192.0.2.20", email, password, "/api/owner/auth/login");
+  for (let i = 0; i < 5; i++) assert.equal((await ownerLogin("owner@test.local", `wrong guess ${i}`)).status, 401);
+  const locked = await ownerLogin("OWNER@test.local ", "correct horse battery");
+  assert.equal(locked.status, 429, "even the right password waits");
+  assert.match(locked.body.error, /Too many sign-in attempts/);
+  assert.doesNotMatch(locked.body.error, /Org Admin/);
+  const log = JSON.stringify((await owner("GET", "/api/owner/releases")).body.log);
+  assert.match(log, /Failed Owner Console sign-in for owner@test.local/);
+  assert.match(log, /Owner Console sign-in paused for owner@test.local/);
+  // Unknown emails are limited too, but not logged.
+  for (let i = 0; i < 6; i++) await loginFrom("192.0.2.21", "nobody-owner@test.local", "x", "/api/owner/auth/login");
+  assert.doesNotMatch(JSON.stringify((await owner("GET", "/api/owner/releases")).body.log), /nobody-owner/);
+});
+
+/** A minimal zip (no file data) whose central directory claims `name` unpacks to `size` bytes. */
+function zipClaiming(name, size) {
+  const n = Buffer.from(name);
+  const cd = Buffer.alloc(46 + n.length);
+  cd.writeUInt32LE(0x02014b50, 0);
+  cd.writeUInt32LE(size, 24);
+  cd.writeUInt16LE(n.length, 28);
+  n.copy(cd, 46);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(cd.length, 12);
+  end.writeUInt32LE(0, 16);
+  return Buffer.concat([cd, end]);
+}

@@ -1,6 +1,50 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 19, 2026 (real-world re-check after deploy). Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Regroup** just below.
+> Last updated: October 21, 2026 (checkpoint: everything merged and live). Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Roadmap & queue** just below.
+
+## Roadmap & queue (checkpoint Oct 21, 2026)
+The single list of what's done, in flight and next. Sessions work one tight scope each; the coordinating session reviews and merges PRs (Cody asked it to); **merges to `main` deploy automatically** (HOSTING → Automatic deploys). Run at most ~3 sessions at once (more hit the usage limit). Before starting a test run in a worktree, use your own `TEST_PORT` / `TEST_MT_PORT` / `TEST_DATABASE_URL` (two runs on the default ports break each other).
+
+**Checkpoint (Oct 21): everything below is merged and live** (`main` deploys itself; live is the latest `main`)
+- E2E fixes #18–#20; live Teams package 1.2.0 (#17); security headers, runbooks, health-checked deploy (#25); Azure: 35-day backups, capped logs, probes, uptime + restart alerts.
+- #23 Indigo + Groups; #24 sign-up (off by default) + test-mode payment + public pricing/privacy/terms/support; #27 setup wizard after sign-up.
+- #26 multi-tenant Microsoft/Teams (live stays single-tenant until Cody switches: `docs/TEAMS-MULTITENANT.md`): waiting chats, directory import, `@Sidekick add`, only leads/admins add Sidekick, portal-only assignment, leaves unassigned chats after 7 days.
+- #22 security fixes (CSRF Origin check, enforced CSP, Owner Console sign-in limit, sign out on password change, upload/zip-bomb limits, setup via `SIDEKICK_SETUP_CODE`, admin Unlock, Teams card hardening) + #21/#22 reports in `docs/security/`.
+- #28 automatic deploys (GitHub OIDC → managed identity `sidekick-deployer`, no stored secret; federated subjects for both repo-name and repo-id forms); #32 self-hosted fonts (a Google font download had failed a deploy).
+- Checked live after deploy: health OK, enforced CSP with no console violations on public pages, security headers on. **The deploy signed existing sessions out** (the browser pane had to sign in again).
+
+**Paused (draft PRs, resume after the checkpoint)**
+- #31 plan limits, AI credit, owner business view (Cody removed bring-your-own-AI from it).
+- #30 sign-in security: two-step sign-in (authenticator, passkeys, backup codes), stricter passwords, session list, `reset-password` recovery (`infra/azure/reset-password.sh`). Overlaps #22: reconcile before merge, and **encrypt the authenticator secrets** first.
+- Design session's group page: waiting chats + Microsoft 365 import UI (local branch `claude/group-chats-directory`, PR after the checkpoint).
+
+**Decided (Oct 21)**
+- Code and releases stay on **GitHub** (no Azure DevOps); **no Azure dashboard**: the **Owner Console** is Cody's single place (business view incl. infrastructure health and deploys).
+- One Anthropic API account for all customers (stateless requests; data walls are in Sidekick). Anthropic Console: separate **workspaces** for production vs testing and a **spend limit** (Cody's to-do).
+- **Live Sidekick in meetings = Enterprise** (included live hours; on-demand Windows media-bot pool); notes after every meeting for all plans.
+- Scale: one app, two process kinds later (web + **job queue/workers**); per-company fairness; shared database/search for most, dedicated for Enterprise.
+
+**Next, in this order** (next round: items 1–3 in parallel)
+1. **Public website & help center** in the same app: home at `/` for visitors (signed-in people go to their portal), features, how it works, security & trust ("Powered by Claude"), pricing (from `lib/plans.ts`), docs/help center (guides + public support articles), support, changelog, legal, Sign in / Get started → register → pay → setup wizard → portal; later `sidekick.ai` + `app.sidekick.ai`.
+2. **Resume #31 plan limits & AI credit** (update from `main`): per-plan limits incl. **live meeting hours (0 except Enterprise)**, monthly AI credit (80% warning, essentials-only at 100%, owner override), per-person rate limits, hide Claude/model status from customers, usage export by engagement code, Owner Console business view; plus Claude-side resilience: retry/backoff on 429, prompt-caching review, Batch API for non-urgent work, model per feature (measure Haiku 5.5 for cheap jobs), Azure Foundry as a second route.
+3. **Finish #30 sign-in security**: reconcile with #22, encrypt authenticator secrets, then merge.
+4. Group page: waiting chats + directory import UI (design session's branch).
+5. **Support tickets + support assistant + hidden support knowledge base** (scope unchanged, see below).
+6. **Job queue + watchers** ("always on"): exactly-once scheduled/background jobs (reminders, digests, meeting notes, indexing, connector syncs) replacing the in-app timer (needed before >1 app copy); watchers for unanswered questions, failed @Sidekick replies, chats no longer tracked/removed/consent lost, overdue/unowned items, open decisions, stale docs, groups without lead or notes chat, broken connectors, Sidekick's own health; AI only when a watcher fires; escalation chat → Team Lead → admin → Owner Console.
+7. **Next wave**: notes chat per group + automatic Teams transcripts (on the job queue), "save to knowledge" cards, Azure DevOps then Jira connectors.
+8. **Scale readiness**: load test (simulated 100 companies / 10,000 groups), auto-scaling web copies, per-company fair limits, paid search tier, bigger database + pooling, chat-message archiving, Teams posting pacing.
+9. Later: Step 3 live voice (Enterprise, on-demand server pool); Teams Store submission; own domain; real Stripe; Enterprise dedicated database/index option.
+
+Support scope (item 5): portal Help → Contact support (auto contact details, category, priority, attachments, page) and My tickets; public `/support` form; Owner Console Support inbox (filters, client context: plan + recent errors by reference code, replies, internal notes, assign, resolve/reopen, audit), notifications; AI support assistant (answers from guides, checks the customer's own setup, safe fixes behind Confirm, turns the chat into a ticket; own small limit, not the customer's AI credit); AI triage + draft replies + recurring issues for Cody; support articles at three levels (public / customer-visible / internal), managed in the Owner Console, drafted from resolved tickets with approval, seeded with known issues.
+
+**Cody's to-dos** (only he can do these)
+- Teams cleanup: remove the old Sidekick apps (Manage your apps, the Project team, Wave 2 cutover chat, Teams admin center), check the tenant's **chat** resource-specific consent setting, then upload `teams/build/sidekick-teams-live.zip` once to the org catalog.
+- Manual security checks from #21: MFA everywhere (Microsoft, GitHub, Anthropic), an Anthropic monthly spend limit, `app/.env.local` not synced to iCloud/Dropbox.
+- Mark the GitGuardian finding on #18 as a false positive.
+- Anthropic Console: a production and a testing workspace, and a monthly spend limit.
+- Sign in to the live portal again (the Oct 21 deploy signed sessions out); if you don't have a working password, use the recovery command from #30 once it's merged.
+- Microsoft 365 trial ends **Nov 14, 2026**: keep ($8.40/month) or cancel before Nov 15 (`docs/RUNBOOKS.md` → Trial end).
+- Pitch prep: lawyer check (IP, privacy/terms drafts), dry run.
 
 ## Plan limits & AI credit (Oct 20, 2026, branch `claude/plan-limits-ai-credit-e04f04`)
 - **Limits** in `lib/plans.ts` (Starter 10 people / 2 groups / 5 tracked chats / 20 meeting h / 200 docs / no connectors / $20 AI; Team 50 / 10 / 30 / 100 h / 2,000 / 1 / $150; Business 500 / unlimited / 200 / 500 h / 20,000 / all / $1,000; **Enterprise** custom, operator-only). Enforced where created (`assertCanAdd`, 402 `kind: "limit"`), never deletes ("Over limit" shown). Operator terms per client (`org_terms`: custom limits, credit override, contract price, partner, questions/hour).
@@ -15,11 +59,19 @@
 ## Onboarding, groups and Indigo palette (Oct 20, 2026, branch `claude/onboarding-palette-3c261b`, PR #23)
 - **Design**: clickable mockup `docs/mockups/onboarding.html` (setup wizard, Groups, New group, Team Lead view, Teams side, palettes). Cody picked **Indigo** and these rules: chats are assigned to a group **only in the portal** (Teams shows a "not set up yet" notice, no buttons); once assigned Sidekick reads every message there (no separate keep-track switch); only Team Leads/admins may add Sidekick to a chat (it leaves if anyone else does); unassigned chats are left after 7 days; Team Leads add members. The Teams-side rules were sent to the multitenant-teams session to build.
 - **Built**: Indigo tokens in `globals.css` (light/dark, all text pairs WCAG AA), orb, Teams icon + `accentColor`. **Groups** (portal name for workspaces): `workspaces.client` column; GET /api/workspaces adds `client`, `chats`, `overdue`, `leads`; POST takes `client`, `lead` (a Member/Viewer becomes Team Lead, audited) and `members`; `/api/workspaces/:id/members` (GET for the group, POST/DELETE for admins and the group's Team Lead, Members/Viewers only for leads). Pages: Groups cards with health labels, one-page **New group** (`/workspaces/new`), **group page** (`/workspaces/[id]`: Overview checklist, People, Teams chats, Documents, Settings). Menu item renamed "Groups".
-- **Next**: setup wizard after sign-up (needs PR #24 merged); "chats waiting for a group" list on the group page and directory import (need the multitenant-teams APIs); rename remaining "workspace" wording in other pages.
+- **Setup wizard** (branch `claude/setup-wizard`, built on PR #24 + #23): `/get-started` after checkout (Welcome, Microsoft 365, Teams, Rules Standard/Strict, First groups incl. a new Team Lead, Done); progress in `org_setup` (lib/setup.ts, /api/setup), started at sign-up; "Finish setting up" banner via `/api/me` `setupPending`; Microsoft connect can return to the wizard.
+- **Next**: "chats waiting for a group" list on the group page and directory import (need the multitenant-teams APIs); rename remaining "workspace" wording in other pages.
 
 ## End-to-end test results (Oct 20, 2026)
 - **Answers, documents, guardrails, workspaces** (branch `claude/e2e-answers-docs-7a3221`): chat timestamps no longer masked as phone numbers; rate/fee questions no longer refused as HR advice; too-broad custom rules ("Don't answer any questions") refused at save, clearer custom-rule refusal; workspaces can be renamed and deleted (with everything in them) by Org Owners/Admins, names unique per org; document delete asks first; unsupported/empty uploads refused before saving; Knowledge, Guardrails (phone width) and Workspaces polish.
 
+## Security review: application (Oct 20, 2026)
+- Report `docs/security/2026-10-app-security-review.md` (branch `claude/app-review-411385`): nothing critical or high; walls between orgs and workspaces held on every route. Fixed on the same branch: Owner Console sign-in limit + operator log, password change ends other sessions, upload "zip bomb" and size limits, CSRF check in `handle()`, security headers (CSP, no framing, HSTS), production setup needs the one-time `SIDEKICK_SETUP_CODE` secret, admin **Unlock** for locked sign-ins, no messages from the address on /login, no Markdown links in Teams cards, guest-chat card buttons limited, reminders respect per-org restriction. Pure checks live in `app/src/lib/security.ts`. Open: Entra email auto-link (L6, needs a decision), X-Forwarded-For check on Azure.
+- ⚠️ **To create the live Owner Console account:** set `SIDEKICK_SETUP_CODE` on the Container App, open `/owner/setup`, then remove it (`docs/guide/owner-guide.md`).
+- Tests: `TEST_PORT` (and `TEST_DATABASE_URL`) let a second worktree run the suite without clashing on 3200/3201 and `sidekick_test`.
+
+## Multi-tenant Microsoft/Teams (Oct 20, 2026, branch `claude/multitenant-teams-492546`)
+Code ready, **off** until Cody switches (checklist: [TEAMS-MULTITENANT.md](TEAMS-MULTITENANT.md)): `SIDEKICK_MULTI_TENANT=1` serves any company tied to a Sidekick org (others get a "sign up first" card, nothing stored; the Azure Bot stays single-tenant, since Microsoft no longer creates multi-tenant bots, and goes to the Teams Store); sign-in checks each token against its own tenant; **chat picker** per Cody's rules (only Team Leads/admins add Sidekick to a chat, otherwise it leaves; it then reads/saves/answers nothing until a lead or admin assigns it to a group in the portal; assigned = reads every message; leaves after 7 days unassigned; "Remove Sidekick from this chat" via Graph `TeamsAppInstallation.ReadWriteSelfForChat.All`; APIs only, the Groups pages wire them; codes stay for untied tenants and 1:1 chats); **Import from Microsoft 365** on Users & access (Graph `User.Read.All` app permission, admin-approval round trip, Microsoft-sign-in users without passwords); **`@Sidekick add/remove @name`** in Teams (Team Lead / Org Admin, audited); manifest 1.3.0 with `/privacy` `/terms` links. For the sign-up flow: `tieOrgToTenant` in `lib/tenants.ts`. New test suite `tests/teams-multitenant.test.mjs` (ports 3210/3211).
 ## Sign-up and mock billing (Oct 20, 2026, branch `claude/signup-mock-billing-f16afb`)
 Self-service sign-up at `/signup` (org + Org Owner + 14-day trial; **off by default**: open it with the Owner Console switch "Self-service sign-up" or `SIDEKICK_SIGNUP_OPEN=true`; 5 attempts per IP per hour), plans in `lib/plans.ts` (Starter $8 / Team $15 / Business $25 per person, made up), **test-mode** checkout (`lib/billing.ts`, `mock` provider, no payment details ever; Stripe documented for later), Plan section on Usage & billing (Org Owner + Billing Admin manage, Org Admin sees), lapsed plan = read-only portal + no AI work, operator sets plan/status per client. Public pages: `/pricing`, `/privacy`, `/terms`, `/support` (legal text = drafts for a lawyer). Next: real Stripe, "Sign up with Microsoft" (hook in `lib/signup.ts`), seat limit when adding people (shown, not enforced yet).
 

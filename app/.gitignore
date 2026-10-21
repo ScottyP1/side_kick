@@ -50,5 +50,7 @@ next-env.d.ts
 /devTools/
 /.next-preview/
 /.preview-data/
+
+# throwaway test copies (.claude/launch.json e2e-*: data folders and build folders)
 /.e2e-data-*/
 /.next-e2e-*/

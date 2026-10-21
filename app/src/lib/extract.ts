@@ -12,11 +12,24 @@ import "server-only";
 import path from "node:path";
 import { HttpError } from "./auth";
 import { span } from "./trace";
+import { docxUnpackedBytes } from "./security";
 
 /** File types Sidekick can read: PDF, Word, Teams transcripts (.vtt) and text formats. */
 export const ACCEPTED = [".pdf", ".docx", ".txt", ".md", ".vtt", ".csv", ".json"];
 /** Largest file accepted, per file (25 MB). */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/** Most files in one upload. */
+export const MAX_FILES_PER_UPLOAD = 20;
+/**
+ * Most text kept from one document (2 million characters: a 1,000-page book, about 1,700 passages). A Word
+ * or PDF file is compressed, so a small file can unpack into gigabytes of text ("zip bomb"); without a cap one
+ * upload could exhaust the server's memory or, with Azure AI Search, cost thousands of embeddings.
+ */
+export const MAX_DOCUMENT_CHARS = 2_000_000;
+/** Most a Word file's XML parts may unpack to (60 MB), checked before the file is opened. */
+export const MAX_DOCX_UNPACKED_BYTES = 60 * 1024 * 1024;
+/** Most pages read from one PDF. */
+export const MAX_PDF_PAGES = 2000;
 /** The accepted types in words, for error messages and the upload box. */
 export const ACCEPTED_TEXT = "PDF, Word (.docx), text, Markdown, CSV, JSON or a Teams transcript (.vtt)";
 
@@ -57,10 +70,12 @@ async function readFileText(name: string, buf: Buffer): Promise<string> {
   if (ext === ".pdf") {
     const { extractText, getDocumentProxy } = await import("unpdf");
     const pdf = await getDocumentProxy(new Uint8Array(buf));
+    if (pdf.numPages > MAX_PDF_PAGES) throw new HttpError(413, `This PDF has ${pdf.numPages.toLocaleString("en-US")} pages; the limit is ${MAX_PDF_PAGES.toLocaleString("en-US")}. Split it into smaller files.`);
     const { text } = await extractText(pdf, { mergePages: false });
     return (Array.isArray(text) ? text : [text]).map((t, i) => `[Page ${i + 1}]\n${t}`).join("\n\n");
   }
   if (ext === ".docx") {
+    if (docxUnpackedBytes(buf) > MAX_DOCX_UNPACKED_BYTES) throw new HttpError(413, "This Word file unpacks to far more text than a real document holds, so it wasn't read. Save it again from Word, or split it.");
     const mammoth = await import("mammoth");
     const { value } = await mammoth.extractRawText({ buffer: buf });
     return value;

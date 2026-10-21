@@ -16,7 +16,8 @@ export const POST = handle(async (req: Request) => {
   const body = await readJson<{ id?: string; action?: string }>(req);
   const conv = await managedLinkedChat(user, body.id);
   traceScope({ workspaceId: conv.workspace_id });
-  await assertEnabled("remind");
+  // Both the platform-wide switch and this organization's own switch (Owner Console restriction).
+  await assertEnabled("remind", user.org_id, user.role);
   if (body.action === "preview") return { preview: await previewReminder(conv) };
   if (body.action === "send") return await sendReminder(conv, "manual", `manual:${newId()}`);
   throw new HttpError(400, "Choose preview or send.");

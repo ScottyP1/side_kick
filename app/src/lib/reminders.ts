@@ -37,7 +37,7 @@ import { all, get, newId, now, run } from "./db";
 import { audit, auditAsSidekick, canEdit, HttpError, isAdmin, isLead, requireManage, type User } from "./auth";
 import { structured } from "./claude";
 import { answerRules, cleanOutput, getGuardPolicy, recordGuard, type RuleId } from "./guardrails";
-import { assertEnabled, flagEnabled } from "./owner";
+import { assertEnabled, flagEnabled, orgFlagEnabled } from "./owner";
 import { indexText, removeIndexed } from "./search";
 import { chatTitle } from "./sidekick";
 import { span, spanAttrs, traceScope, withTrace } from "./trace";
@@ -379,7 +379,8 @@ export type Digest = { intro: string; points: (ReminderPointInput & { shareable:
  */
 export async function buildDigest(orgId: string, workspaceId: string, candidates: Candidate[]): Promise<Digest | null> {
   if (!candidates.length) return null;
-  await assertEnabled("remind");
+  // Platform-wide pause and this organization's own restriction (Owner Console) both stop it.
+  await assertEnabled("remind", orgId);
   const policy = await getGuardPolicy(orgId, workspaceId);
   const ids = new Map(candidates.map((c, i) => [`R${i + 1}`, c]));
   const content = [...ids]
@@ -495,7 +496,7 @@ const linkedChats = (workspaceId?: string) =>
 export async function remindAfterMeeting(orgId: string, meetingId: string): Promise<number> {
   // Worked out before any trace starts: with reminders paused, no chat linked (Teams not set up) or no chat
   // wanting a reminder after meetings, nothing is recorded, so Activity doesn't count Teams work that never ran.
-  if (!(await flagEnabled("remind"))) return 0;
+  if (!(await flagEnabled("remind")) || !(await orgFlagEnabled(orgId, "remind"))) return 0;
   const m = await get<{ workspace_id: string; status: string }>("SELECT workspace_id, status FROM meetings WHERE id = ? AND org_id = ?", meetingId, orgId);
   if (!m || m.status !== "Ready") return 0;
   const chats: TeamsConversation[] = [];
@@ -528,6 +529,8 @@ export async function runDueReminders(at = new Date()): Promise<number> {
   if (!(await flagEnabled("remind"))) return 0;
   let posted = 0;
   for (const conv of await linkedChats()) {
+    // Organizations the Sidekick team turned reminders off for are skipped quietly (not an error).
+    if (conv.org_id && !(await orgFlagEnabled(conv.org_id, "remind"))) continue;
     const settings = await getChatSettings(conv);
     const slot = dailySlotDue(settings, at);
     if (!slot) continue;

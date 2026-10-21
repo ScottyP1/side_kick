@@ -12,10 +12,13 @@
  *   address is refused too. Stops one machine trying many accounts.
  * - A successful sign-in clears that email's failures. Microsoft sign-in isn't limited here (Microsoft
  *   protects its own sign-in).
+ * - **Unlock**: because anyone can lock an email by guessing wrong 5 times, Org Owners and Org Admins can
+ *   clear a locked person's failures on Users & access (`POST /api/users/:id`, `lockedEmails` shows who).
+ * - **Owner Console** sign-in uses the same limits under the key `owner:<email>`.
  */
 import "server-only";
 import { headers } from "next/headers";
-import { get, newId, now, run } from "./db";
+import { all, get, newId, now, run } from "./db";
 
 /** Failures allowed per email within the window before password sign-in is refused for it. */
 export const EMAIL_LIMIT = 5;
@@ -63,4 +66,17 @@ export async function recordSignInFailure(email: string, ip: string): Promise<bo
 /** Clears an email's failures after a successful sign-in. */
 export async function clearSignInFailures(email: string) {
   await run("DELETE FROM login_failures WHERE email = ?", email);
+}
+
+/**
+ * Which of these emails are locked right now (used up `EMAIL_LIMIT` failures within the window), so
+ * Users & access can show "Sign-in locked" with an Unlock button. One query for the whole list.
+ */
+export async function lockedEmails(emails: string[]): Promise<Set<string>> {
+  if (!emails.length) return new Set();
+  const rows = await all<{ email: string }>(
+    `SELECT email FROM login_failures WHERE created_at > ? AND email IN (${emails.map(() => "?").join(",")}) GROUP BY email HAVING COUNT(*) >= ?`,
+    since(), ...emails, EMAIL_LIMIT,
+  );
+  return new Set(rows.map((r) => r.email));
 }

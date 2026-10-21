@@ -237,3 +237,5 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   past_due_since TEXT, canceled_at TEXT, access_until TEXT,
   updated_by TEXT, updated_at TEXT NOT NULL, created_at TEXT NOT NULL
 );
+-- Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS client TEXT;

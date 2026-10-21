@@ -8,3 +8,5 @@ node_modules
 tests
 devTools
 *.log
+.preview-data
+.e2e-data-*

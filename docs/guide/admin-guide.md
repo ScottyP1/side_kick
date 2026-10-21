@@ -9,10 +9,20 @@ The first person to open a new Sidekick install sets up the organization and bec
 
 **Signing in safely.** After 5 wrong passwords for one email (or 20 from one network address) within 15 minutes, password sign-in is paused for that email or address for 15 minutes, even with the right password. Wrong passwords on real accounts, the pause, sign-ins and sign-outs all appear on **Security & audit**. To sign out, use **Sign out** at the bottom of the sidebar, or tap your initials at the top right (the only way on a phone).
 
-## 2. Create workspaces
-**Workspaces → New workspace.** Create one per client engagement, e.g. "Contoso Retail – Cloud Migration", with an optional engagement code. You're added as a member automatically. Names must be unique in your organization (ignoring upper/lower case).
+## 2. Create groups
+A **group** (called a workspace in older screens) is one client team: its people, Teams chats and documents. **Groups → New group** sets one up on a single page:
+1. **Basics**: the group's name (e.g. "Payments Platform"), the **client** it's for (e.g. "Northwind Bank") and an optional engagement code. Names must be unique in your organization (ignoring upper/lower case).
+2. **Team Lead**: search for the person who runs the team day to day. If they're a Member or Viewer today, they become a **Team Lead** (the summary says so before you save, and it's in the audit log). Org Owners and Admins can't be a group's Team Lead; they already manage every group.
+3. **Members** (optional): tick people already in your organization. They keep their role. The Team Lead can add more later.
+4. **Teams chats**: assigned later, from the group's page (see section 7).
 
-**Rename or delete.** On the workspace's card, choose **Edit** to change its name or engagement code. **Delete workspace…** first shows what will go (documents, meetings, action items, asked questions, linked Teams chats) and asks you to confirm. Deleting removes everything in that workspace for good: documents and their search entries, meetings and their notes, questions and gaps, the knowledge map, its guardrail switches and custom rules, saved Teams messages and reminders. Linked Teams chats are unlinked. The audit log and usage records are kept. Renames, code changes and deletions are recorded on **Security & audit**.
+You're added to the group automatically. **Create group** opens the group's page.
+
+**The Groups page** shows a card per group with its client, Team Lead, and how many people, Teams chats, documents and meetings it has. A label says what needs attention, most urgent first: **No Team Lead**, **Setting up** (nobody, no chats and no documents added yet), **overdue action items**, **No documents**, or **Healthy**. **Needs attention** and **Setting up** filter the cards.
+
+**A group's page** (click its card) has tabs: **Overview** (a setup checklist and counts), **People** (add people already in your organization, or take someone off the group; their account and other groups stay), **Teams chats**, **Documents** (what Sidekick answers from; **Upload or manage** opens Knowledge & docs for that group) and **Settings**.
+
+**Rename or delete.** On the group's **Settings** tab, change its name, client or engagement code. **Delete group…** first shows what will go (documents, meetings, action items, asked questions, linked Teams chats) and asks you to confirm. Deleting removes everything in that workspace for good: documents and their search entries, meetings and their notes, questions and gaps, the knowledge map, its guardrail switches and custom rules, saved Teams messages and reminders. Linked Teams chats are unlinked. The audit log and usage records are kept. Renames, client and code changes and deletions are recorded on **Security & audit**.
 
 ## 3. Turn on Microsoft sign-in (Org Owner)
 **Settings → Microsoft sign-in → Connect with Microsoft**, then sign in with your work account. This connects your organization to your company's Microsoft directory (tenant). From then on, people you've added can use **Sign in with Microsoft**. When everyone is set, switch on **Require Microsoft sign-in**: passwords stop working and anyone signed in with a password is signed out. You must have signed in with Microsoft yourself first, so you can't lock yourself out. **Disconnect** turns it off again (passwords work again).
@@ -20,7 +30,7 @@ The first person to open a new Sidekick install sets up the organization and bec
 ## 4. Add people
 **Users & access → Add person.** Pick their role and the workspaces they can see. Sidekick shows a **temporary password once**: share it with them privately; they must change it at first sign-in. Change roles or workspaces at any time from the same page. **Remove** asks you to confirm first. Nobody can change their own role or remove themselves (so you can't lock yourself out by accident): ask the Org Owner or another Org Admin. If your organization uses Microsoft sign-in, people can ignore the temporary password and use **Sign in with Microsoft** with that same email; the list shows a **Microsoft** badge once they have.
 
-**Team Leads.** Give the person who runs a project the **Team Lead** role and add them to that project's workspace(s). They can then add their own team to those workspaces (as Member or Viewer), take people off, and link the project's Teams chats, from **Users & access**, **Workspaces** or the home assistant, without needing you. If they add someone who already has an account in your organization, that person is simply added to the lead's workspace. Roles, removing people from the organization and new workspaces stay with you.
+**Team Leads.** Give the person who runs a project the **Team Lead** role and add them to that project's workspace(s). They can then add their own team to those workspaces (as Member or Viewer), take people off, and assign the project's Teams chats, from their group's page, **Users & access** or the home assistant, without needing you. You can also make someone a Team Lead by picking them when you create a group. If they add someone who already has an account in your organization, that person is simply added to the lead's workspace. Roles, removing people from the organization and new workspaces stay with you.
 
 ## 5. Add documents
 **Knowledge & docs**, in the workspace you want. Drop in PDF, Word (.docx), text, Markdown, CSV, JSON or Teams transcript (.vtt) files, up to 25 MB each. Other file types and empty files are refused straight away with the reason, and aren't added to the list. Tag each one:
@@ -42,12 +52,12 @@ If the workspace has linked Teams chats or channels, Sidekick posts the notes an
 See [Sidekick in Teams](teams-guide.md) for what people see. To link:
 1. Someone adds Sidekick to the Teams group chat or channel (Sidekick posts a code; or mention it: `@Sidekick link`).
 2. Sidekick replies with an 8-character code, valid for 24 hours.
-3. In the portal: **Workspaces → Link a Teams chat or channel**, enter the code, pick the workspace.
+3. In the portal: open the group (**Groups**, then its card) → **Teams chats → Assign a chat**, and enter the code.
 4. Tick **Client guests are in this chat or channel** if the client can read it.
 
-The **Teams chats and channels** table on the Workspaces page shows every link. Use the switch to change the client-guests setting, or **Unlink** to stop Sidekick answering and posting there (this also deletes the messages it saved from that chat).
+The group's **Teams chats** tab lists its chats. Use the switch to change the client-guests setting, or **Unassign** to stop Sidekick answering and posting there (this also deletes the messages it saved from that chat).
 
-The **Settings** button on each row of that table (Org Owners and Org Admins, and Team Leads for the workspaces they lead) chooses what Sidekick does in that chat; every change is in the audit log:
+The **Settings** button on each row of that list (Org Owners and Org Admins, and Team Leads for the workspaces they lead) chooses what Sidekick does in that chat; every change is in the audit log:
 - **Meeting notes**: post notes and action items here after each meeting (on by default). Turn it off in the other chats to keep notes in one dedicated chat.
 - **Keep track of every message** (channels and group chats): Sidekick reads every message, keeps it 90 days and uses it for answers, the knowledge map and reminders. It announces the change in the chat. This needs the Sidekick Teams app version 1.1 or later (it asks the team or chat owner for permission to read messages when it's added).
 - **Reminders**: a daily card at the time and time zone you pick, skipping the quiet days, plus one right after each meeting if you want. Choose which kinds: overdue or unowned action items, open questions and decisions, out-of-date documents, sources that disagree. **Preview** shows what the next one would say without posting; **Send now** posts it. The row shows when the last reminder went out (or why it failed).
@@ -84,7 +94,7 @@ On the home page, type requests like "create a workspace for Fabrikam, code FAB"
 
 ## 14. AI models & agent, and Connectors
 - **AI models & agent** (everyone can read it): which Claude model each feature uses (answers, meeting notes, knowledge map, assistant, guardrail check, reminders), how Sidekick is told to behave, and what's ready versus planned. Models are set by the Sidekick team; your documents and meetings are never used to train a model.
-- **Connectors**: the sources Sidekick can use. Available now: document upload, Teams transcripts and Teams chats and channels (linked on **Workspaces**). Outlook, SharePoint, Jira and the others are planned; each will connect with its own sign-in, without storing passwords.
+- **Connectors**: the sources Sidekick can use. Available now: document upload, Teams transcripts and Teams chats and channels (assigned on each group's page). Outlook, SharePoint, Jira and the others are planned; each will connect with its own sign-in, without storing passwords.
 
 ## 15. Sign-up, plan and billing
 Payments are in **test mode** for now: no money moves, prices are made up, and Sidekick **never asks for card or bank details** (a blue "Test mode" note shows wherever billing appears).

@@ -153,7 +153,7 @@ export default function SettingsPage() {
                 <label>Brand color</label>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {ACCENTS.map(([n, c]) => (
-                    <button key={n} className="swatch-btn" aria-pressed={accent === c} title={n} aria-label={`Brand color ${n}`} onClick={() => setAccent(c)} style={{ background: c ?? "#0f6b5c" }} />
+                    <button key={n} className="swatch-btn" aria-pressed={accent === c} title={n} aria-label={`Brand color ${n}`} onClick={() => setAccent(c)} style={{ background: c ?? "#4f46e5" }} />
                   ))}
                   <label className="btn small" style={{ position: "relative" }}>
                     Custom

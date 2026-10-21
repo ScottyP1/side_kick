@@ -9,14 +9,14 @@ Sidekick works inside Microsoft Teams group chats, channels and 1:1 chats. It an
 
    Teams asks the chat or team owner to let Sidekick **read messages** there. Accept it: that's what lets an admin later turn on *Keep track of every message* (Sidekick still only does that once an admin switches it on, and announces it).
 2. Sidekick posts an 8-character link code (or mention it: `@Sidekick link`).
-3. Ask an Org Admin (or the workspace's Team Lead) to enter that code in the Sidekick portal (**Workspaces → Link a Teams chat or channel**). Sidekick confirms in the chat when it's done.
+3. Ask an Org Admin (or the workspace's Team Lead) to enter that code in the Sidekick portal (open the group under **Groups**, then **Teams chats → Assign a chat**). Sidekick confirms in the chat when it's done.
 
 ### Group chat or channel?
 Both work the same for Sidekick; use whatever your team already uses.
 - **Group chat**: one running conversation. Sidekick's answers, notes, action-item cards and reminders appear in the chat in order.
 - **Channel**: posts with replies. Meeting notes are a new post and their action items go in that post's thread; reminders are a new post; answers are replies to the post that mentioned Sidekick.
 - A **meeting chat** (the chat of a scheduled Teams meeting) is a group chat to Sidekick, so it's a natural place for that meeting series' notes.
-- **Names on the Workspaces page**: a group chat shows its name if someone gave it one. A channel shows as "Team › Channel"; a team's first channel shows only the team name until it's renamed, because Teams doesn't tell apps that channel's name (it's "General" unless someone renamed it).
+- **Names on a group's Teams chats tab**: a group chat shows its name if someone gave it one. A channel shows as "Team › Channel"; a team's first channel shows only the team name until it's renamed, because Teams doesn't tell apps that channel's name (it's "General" unless someone renamed it).
 
 ## Asking questions
 Mention Sidekick with your question:

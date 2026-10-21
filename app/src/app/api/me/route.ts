@@ -1,12 +1,14 @@
 /**
  * GET /api/me: the signed-in user, their organization, branding, and the workspaces they can open.
  * The portal loads this first to build its menus and workspace picker. `user.admin` = Org Owner/Admin;
- * `user.lead` = Team Lead (manages people and Teams links in their own workspaces only).
+ * `user.lead` = Team Lead (manages people and Teams links in their own workspaces only). `billing` is what the
+ * organization's plan allows right now (`mode` full | read_only) and the notice to show everyone, if any.
  */
 import { handle } from "@/lib/api";
 import { isAdmin, isLead, requireUser, workspaceIdsFor } from "@/lib/auth";
 import { all, get } from "@/lib/db";
 import { claudeConfigured, MODELS } from "@/lib/claude";
+import { orgAccess } from "@/lib/billing";
 
 export const GET = handle(async () => {
   const user = await requireUser(undefined, { allowPendingPassword: true });
@@ -22,5 +24,6 @@ export const GET = handle(async () => {
     workspaces,
     claude: { configured: claudeConfigured(), models: MODELS },
     branding: settings ? JSON.parse(settings.json) : {},
+    billing: await orgAccess(user.org_id),
   };
 });

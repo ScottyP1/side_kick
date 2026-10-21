@@ -1,5 +1,6 @@
 /**
- * GET/POST /api/owner/tenants: every client organization with its usage, or onboard a new one.
+ * GET/POST /api/owner/tenants: every client organization with its usage and plan, or onboard a new one.
+ * `plan`/`sub_status` are null for clients without a self-service subscription (managed by the Sidekick team).
  * Who: platform operators only.
  */
 import crypto from "node:crypto";
@@ -23,8 +24,9 @@ export const GET = handle(async () => {
        (SELECT COUNT(*) FROM usage_events e WHERE e.org_id = o.id AND e.created_at >= ?) AS month_calls,
        (SELECT COALESCE(SUM(1-ok),0) FROM usage_events e WHERE e.org_id = o.id AND e.created_at >= ?) AS month_errors,
        (SELECT MAX(created_at) FROM usage_events e WHERE e.org_id = o.id) AS last_activity,
-       (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'Org Owner' LIMIT 1) AS owner_email
-     FROM orgs o ORDER BY o.created_at`,
+       (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'Org Owner' LIMIT 1) AS owner_email,
+       sub.plan AS plan, sub.status AS sub_status
+     FROM orgs o LEFT JOIN subscriptions sub ON sub.org_id = o.id ORDER BY o.created_at`,
     since7, monthStart, monthStart, monthStart,
   );
   return { tenants };

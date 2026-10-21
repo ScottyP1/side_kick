@@ -17,6 +17,8 @@ export type Me = {
   workspaces: Workspace[];
   claude: { configured: boolean; models: Record<string, string> };
   branding: { logo?: string | null; accent?: string | null };
+  /** What the organization's plan allows now (lib/plans.ts accessFor) and the notice to show, if any. */
+  billing?: { mode: "full" | "read_only"; notice: string | null };
 };
 
 type Ctx = { me: Me; ws: string; setWs: (id: string) => void; reload: () => Promise<void> };
@@ -169,6 +171,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Icon n="alert" />
                 <span>
                   <b>Claude isn&apos;t connected yet.</b> Add your key as <code>ANTHROPIC_API_KEY</code> in <code>app/.env.local</code>, then restart the app. Uploads and search work without it; answers and meeting notes need it.
+                </span>
+              </div>
+            )}
+            {me.billing?.notice && (
+              <div className="banner">
+                <Icon n="alert" />
+                <span>
+                  {me.billing.notice}{" "}
+                  {["Org Owner", "Org Admin", "Billing Admin"].includes(me.user.role) && <Link href="/usage">Open Usage &amp; billing</Link>}
                 </span>
               </div>
             )}

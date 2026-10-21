@@ -1,0 +1,92 @@
+# Continuous deployment: every merge to main that changes the app goes live on Azure automatically.
+# 1. Runs the full test suite on the merged code (test.yml); nothing deploys if it fails.
+# 2. Signs in to Azure without any stored password: GitHub's own login token (OIDC) is exchanged for the
+#    user-assigned managed identity `sidekick-deployer`, which trusts only this repo's main branch and may
+#    only build images in `sidekicklabsacr` and update `sidekick-app` (docs/HOSTING.md → Automatic deploys).
+# 3. Builds the image in Azure Container Registry, switches the app to it, then waits for /api/health.
+#    If the new version isn't healthy within ~5 minutes it rolls back to the previous image and fails, so
+#    GitHub emails the repo owner. One deploy at a time; a second merge waits for the first.
+# The three ids it needs are repository *variables* (not secrets): AZURE_CLIENT_ID, AZURE_TENANT_ID and
+# AZURE_SUBSCRIPTION_ID. Docs-only merges don't deploy. Run it by hand from the Actions tab if needed.
+# Only the Azure CLI that GitHub's runners already include; no third-party actions.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "teams/**"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RG: sidekick-rg
+      APP: sidekick-app
+      ACR: sidekicklabsacr
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Sign in to Azure (OIDC, no stored secret)
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$AZURE_CLIENT_ID" -a -n "$AZURE_TENANT_ID" -a -n "$AZURE_SUBSCRIPTION_ID" || { echo "::error::Set the AZURE_* repository variables (docs/HOSTING.md → Automatic deploys)"; exit 1; }
+          TOKEN=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r .value)
+          echo "::add-mask::$TOKEN"
+          az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID" --federated-token "$TOKEN" --allow-no-subscriptions -o none
+          az account set -s "$AZURE_SUBSCRIPTION_ID"
+
+      - name: Remember the live version (for a rollback)
+        run: |
+          set -euo pipefail
+          echo "PREV=$(az containerapp show -g $RG -n $APP --query 'properties.template.containers[0].image' -o tsv)" >> "$GITHUB_ENV"
+          echo "HOST=$(az containerapp show -g $RG -n $APP --query properties.configuration.ingress.fqdn -o tsv)" >> "$GITHUB_ENV"
+          echo "TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build the image in Azure Container Registry
+        run: |
+          set -euo pipefail
+          echo "Live now: $PREV"
+          # Only the app folder from git: no .env files or local data exist in a fresh checkout.
+          az acr build -r $ACR -t sidekick:$TAG -t sidekick:latest app -o none
+
+      - name: Switch the app to the new image
+        run: az containerapp update -g $RG -n $APP --image $ACR.azurecr.io/sidekick:$TAG -o none
+
+      - name: Wait for the health check (roll back if it fails)
+        run: |
+          # Healthy means: the revision running the new image gets all traffic, Azure's probes say it's
+          # healthy, and /api/health answers ok (so it isn't the old revision answering).
+          for i in $(seq 1 30); do
+            REV=$(az containerapp revision list -g $RG -n $APP --query "[?properties.template.containers[0].image=='$ACR.azurecr.io/sidekick:$TAG' && properties.active] | [0].{h:properties.healthState,t:properties.trafficWeight}" -o tsv 2>/dev/null || true)
+            if [ "$REV" = "$(printf 'Healthy\t100')" ] && curl -fsS "https://$HOST/api/health" | grep -q '"ok":true'; then
+              echo "✓ $TAG is live and healthy (was $PREV)."
+              exit 0
+            fi
+            echo "waiting… ($REV)"
+            sleep 10
+          done
+          echo "::error::$TAG didn't report healthy within 5 minutes. Rolling back to $PREV."
+          az containerapp update -g $RG -n $APP --image "$PREV" -o none
+          exit 1

@@ -53,14 +53,14 @@ Plans and their limits live in one file, `app/src/lib/plans.ts` (Starter, Team, 
 - **Limits this month**: every limit with its use and Near / Over flags.
 - **AI credit**: used of included (with top-ups), and **Add top-up**: a one-off amount for this month, with an optional note. The table below shows their AI use by feature **and model**: model names are shown only here, never in the client portal (clients see "AI answers: working").
 - **Plan terms**: custom limits (leave empty for the plan's number, type "unlimited" for none), the **AI credit per month** override, the **contract price per month** (Enterprise and managed clients; it's their revenue in MRR and margin), the **partner or referrer** who brought them, and **questions per person per hour** (default 60). **Save plan terms**.
-- **Plan**: you can also put a client on **Enterprise** (not offered to buyers). Enterprise starts from the Business limits until you set terms.
+- **Plan**: you can also put a client on **Enterprise** (not offered to buyers). Enterprise starts from its own defaults (unlimited groups, 1,000 people, 2,400 meeting hours, $3,200 AI credit, 100 live meeting hours) until you set terms.
 - **AI use by model** includes **Cached**: the share of input read from the prompt cache (cheaper). The stable part of each prompt (instructions and the client's guardrail rules) is cached; short prompts are below the model's minimum and won't show cache reads.
 
 **AI running costs and resilience** (all in `app/src/lib/claude.ts`): busy or overloaded answers from Claude are retried with backoff (`SIDEKICK_CLAUDE_RETRIES`, default 3); after that people see "Sidekick's AI is very busy right now. Try again in a minute." Daily reminder digests go through Claude's **Batch API** at half price and are posted a few minutes later than before (`SIDEKICK_BATCH=off` makes them live again). Each feature's model stays configurable (`SIDEKICK_MODEL_*`); change one only after comparing answers. Claude Haiku 5.5 is the candidate for cheap jobs such as the guardrail check and reminder wording. Live meeting hours are an Enterprise-only limit, ready for when Sidekick can join calls.
 
 Top-ups and terms are recorded in the operator log and the client's own audit log ("Sidekick team").
 
-**Revenue rules (test-mode prices):** an active Starter/Team/Business plan = people × price per person; Enterprise and managed = the contract price you set; trials, failed payments and canceled plans = $0. Margin = revenue − this month's AI cost.
+**Revenue rules (test-mode prices):** an active Starter/Team/Business plan = the plan price plus $129 per extra group (whatever the number of people); Enterprise and managed = the contract price you set; trials, failed payments and canceled plans = $0. Margin = revenue − this month's AI cost.
 
 ## One client's page
 Click a client on **Clients** to see:

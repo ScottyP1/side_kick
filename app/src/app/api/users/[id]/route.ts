@@ -1,5 +1,8 @@
 /**
  * PATCH/DELETE /api/users/:id: change a person's role or workspaces, or remove them.
+ * POST /api/users/:id { action: "unlock" }: clear a person's failed sign-ins, so a password sign-in locked
+ * by too many wrong passwords (lib/login-limit.ts, maybe someone else guessing) works again at once.
+ * Org Owners and Org Admins only, for anyone in their organization including the Org Owner.
  * Who: Org Owners and Org Admins. Nobody can be made Org Owner here. A Team Lead may only change which of
  * *their* workspaces a Member or Viewer is in (their other workspaces stay as they are); changing roles
  * and removing people from the organization stay with admins. Nobody changes their own role or removes
@@ -9,6 +12,7 @@
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, managedWorkspaceIds, requireUser, ROLES, type Role } from "@/lib/auth";
 import { all, get, run, tx } from "@/lib/db";
+import { clearSignInFailures } from "@/lib/login-limit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -68,5 +72,17 @@ export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
   if (target.id === admin.id) throw new HttpError(403, "You can't remove yourself. Ask the Org Owner or another Org Admin.");
   await run("DELETE FROM users WHERE id = ?", target.id);
   await audit(admin, `Removed ${target.name}`, "Access");
+  return { ok: true };
+});
+
+export const POST = handle(async (req: Request, { params }: Ctx) => {
+  // Role first, like every other route; unlike `load`, this also works on the Org Owner (who may be the one locked out).
+  const admin = await requireUser(["Org Owner", "Org Admin"]);
+  const { action } = await readJson<{ action?: string }>(req);
+  if (action !== "unlock") throw new HttpError(400, "Unknown action. Use “unlock”.");
+  const target = await get<{ id: string; name: string; email: string }>("SELECT id, name, email FROM users WHERE id = ? AND org_id = ?", (await params).id, admin.org_id);
+  if (!target) throw new HttpError(404, "Person not found.");
+  await clearSignInFailures(target.email);
+  await audit(admin, `Unlocked password sign-in for ${target.name}`, "Sign-in");
   return { ok: true };
 });

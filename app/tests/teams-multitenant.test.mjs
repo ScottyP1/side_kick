@@ -180,7 +180,18 @@ async function microsoftSignIn(call, claims, { mode } = {}) {
   const back = await call("GET", `/api/auth/microsoft/callback?code=${code}&state=${u.searchParams.get("state")}`);
   return { start, back, to: back.location ? new URL(back.location) : null };
 }
-const errorOf = (r) => r.to?.searchParams.get("error") ?? "";
+/**
+ * The message a redirect left for the page: the address only says `?error=1`, the text travels in the one-time
+ * `sk_flash` cookie (lib/flash.ts), so a link can't put its own words on Sidekick's pages.
+ */
+const flashOf = (res) => {
+  if (!res?.location) return "";
+  const q = new URL(res.location, BASE).searchParams;
+  if (!q.has("error")) return "";
+  assert.equal(q.get("error"), "1", "the address never carries the message itself");
+  return decodeURIComponent(res.cookies?.sk_flash ?? "");
+};
+const errorOf = (r) => flashOf(r.back);
 
 /** A tiny HTTP client with its own cookie jar. */
 function client() {
@@ -202,7 +213,7 @@ function client() {
     } catch {
       json = text;
     }
-    return { status: res.status, body: json, location: res.headers.get("location") };
+    return { status: res.status, body: json, location: res.headers.get("location"), cookies: Object.fromEntries(jar) };
   };
 }
 async function firstSignIn(call, email, temp) {
@@ -528,7 +539,8 @@ test(`[${ENGINE}] directory import: needs the Microsoft admin's approval, then i
 
   // Only Org Owners/Admins start the approval; it goes to Microsoft for Org A's own tenant.
   const leadTry = await lou("GET", "/api/auth/microsoft/consent");
-  assert.match(decodeURIComponent(leadTry.location ?? ""), /\/users\?error=Only Org Owners and Org Admins/);
+  assert.equal(new URL(leadTry.location).pathname + new URL(leadTry.location).search, "/users?error=1");
+  assert.match(flashOf(leadTry), /Only Org Owners and Org Admins/);
   const start = await ann("GET", "/api/auth/microsoft/consent");
   assert.equal(start.status, 307);
   const u = new URL(start.location);
@@ -536,7 +548,7 @@ test(`[${ENGINE}] directory import: needs the Microsoft admin's approval, then i
   assert.equal(u.searchParams.get("client_id"), MS_CLIENT_ID);
   // An approval reported for another tenant is refused; then the real one is recorded.
   const wrong = await ann("GET", `/api/auth/microsoft/callback?admin_consent=True&tenant=${TB}&state=${u.searchParams.get("state")}`);
-  assert.match(decodeURIComponent(wrong.location), /different Microsoft organization/);
+  assert.match(flashOf(wrong), /different Microsoft organization/);
   const again = new URL((await ann("GET", "/api/auth/microsoft/consent")).location);
   consented.add(TA);
   const back = await ann("GET", `/api/auth/microsoft/callback?admin_consent=True&tenant=${TA}&state=${again.searchParams.get("state")}`);

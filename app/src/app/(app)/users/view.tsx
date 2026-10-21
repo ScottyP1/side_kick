@@ -6,13 +6,16 @@
  * and can add people to those workspaces (as Member or Viewer) or take them off; roles and removing people
  * from the organization stay with admins. New people get a temporary password they must change at first sign-in.
  * Removing someone asks for confirmation first. Nobody can change their own role or remove themselves here.
+ * After "Approve Sidekick for your organization" Microsoft comes back here with `?microsoft=approved`, or
+ * `?error=1` with the reason in a one-time cookie (lib/flash.ts), shown as a note.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, useToast } from "@/components/ui";
+import { takeFlash } from "@/lib/flash";
 
-type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; microsoft: number; workspaces: string[] };
+type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; microsoft: number; signin_locked?: boolean; workspaces: string[] };
 const ROLES = ["Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"];
 /** Roles a Team Lead can give (same rule as the server: LEAD_ASSIGNABLE_ROLES in lib/auth.ts). */
 const LEAD_ROLES = ["Member", "Viewer"];
@@ -42,6 +45,13 @@ export default function UsersPage() {
   useEffect(() => {
     load();
   }, [load]);
+  // The result of the Microsoft admin-approval round trip (the reason never travels in the address).
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.get("microsoft") === "approved") toast("Sidekick is approved for your organization's Microsoft directory");
+    if (q.has("error")) toast(takeFlash("Approving Sidekick in Microsoft didn't finish. Try again."), "error");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const wsName = (id: string) => me.workspaces.find((w) => w.id === id)?.name ?? "Workspace";
 
   const add = async () => {
@@ -64,6 +74,16 @@ export default function UsersPage() {
       load();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Couldn't update.");
+    }
+  };
+  // Clears a lock left by too many wrong passwords (anyone can cause one by guessing), so they can sign in now.
+  const unlock = async (p: P) => {
+    try {
+      await api(`/api/users/${p.id}`, { method: "POST", json: { action: "unlock" } });
+      toast(`${p.name} can sign in again`);
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't unlock.");
     }
   };
   const remove = async (p: P) => {
@@ -121,6 +141,12 @@ export default function UsersPage() {
                       <span className="avatar">{p.name.split(" ").map((x) => x[0]).join("").slice(0, 2)}</span>
                       <div style={{ minWidth: 0 }}>
                         <b>{p.name}</b> {p.microsoft ? <Pill kind="good">Microsoft</Pill> : p.must_change_password ? <Pill kind="info">Temporary password</Pill> : null}
+                        {p.signin_locked && (
+                          <>
+                            {" "}<Pill kind="warn">Sign-in locked</Pill>
+                            {!lead && <button className="btn small ghost" onClick={() => unlock(p)} title="Too many wrong passwords in the last 15 minutes. Unlock lets them sign in now.">Unlock</button>}
+                          </>
+                        )}
                         <div className="muted" style={{ fontSize: 12.5 }}>{p.email}</div>
                       </div>
                     </div>

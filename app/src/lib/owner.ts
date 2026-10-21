@@ -26,8 +26,9 @@ import "server-only";
 import crypto from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { get, newId, now, run } from "./db";
-import { hashPassword, HttpError, verifyPassword } from "./auth";
+import { DUMMY_HASH, hashPassword, HttpError, verifyPassword } from "./auth";
 import { orgAccess } from "./billing";
+import { setupRefusal } from "./security";
 
 // Owner sessions are shorter than client sessions (12 hours) because the console sees every client.
 export const OWNER_COOKIE = "sk_owner";
@@ -44,15 +45,25 @@ export async function ownerExists() {
 }
 
 /**
- * Throws 403 unless the request was made to localhost. Used where something may only be set up on the
- * machine running Sidekick: the first owner account, and first-run setup of the first organization.
+ * Throws 403 unless a one-time setup may go ahead (see `setupRefusal`). Used by the first owner account
+ * (/api/owner/auth/setup) and first-run setup of the first organization (/api/auth/setup).
  *
- * @param message what to tell someone who tried from elsewhere
+ * @param sentCode the `setupCode` from the request body
+ * @param message what to tell someone who tried from elsewhere than localhost (no setup code configured)
  */
-export async function assertLocalRequest(message = "The first owner account can only be created on the machine running Sidekick (localhost).") {
-  const host = (await headers()).get("host") ?? "";
-  if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host)) throw new HttpError(403, message);
+export async function assertSetupAllowed(sentCode: unknown, message = "The first owner account can only be created on the machine running Sidekick (localhost).") {
+  const refusal = setupRefusal({
+    production: process.env.NODE_ENV === "production",
+    code: process.env.SIDEKICK_SETUP_CODE ?? "",
+    sent: sentCode,
+    host: (await headers()).get("host") ?? "",
+    message,
+  });
+  if (refusal) throw new HttpError(403, refusal);
 }
+
+/** Whether setup needs a code (so the setup pages show the "Setup code" field). */
+export const setupNeedsCode = () => Boolean(process.env.SIDEKICK_SETUP_CODE) || process.env.NODE_ENV === "production";
 
 /** Creates an owner account (password stored as an scrypt hash). */
 export async function createOwner(name: string, email: string, password: string) {
@@ -61,10 +72,15 @@ export async function createOwner(name: string, email: string, password: string)
   return id;
 }
 
-/** Returns the owner if the email and password match, otherwise null. */
-export async function checkOwnerPassword(email: string, password: string): Promise<Owner | null> {
+/**
+ * Returns the owner if the email and password match, otherwise null. `exists` says whether the email
+ * belongs to an owner at all (for the operator log; never shown to the caller). An unknown email is checked
+ * against a dummy hash so both answers take the same time.
+ */
+export async function checkOwnerPassword(email: string, password: string): Promise<{ owner: Owner | null; exists: boolean }> {
   const row = await get<Owner & { password_hash: string }>("SELECT id, name, email, password_hash FROM platform_admins WHERE email = ?", email.trim().toLowerCase());
-  return row && verifyPassword(password, row.password_hash) ? { id: row.id, name: row.name, email: row.email } : null;
+  const ok = verifyPassword(password, row?.password_hash ?? DUMMY_HASH);
+  return { owner: row && ok ? { id: row.id, name: row.name, email: row.email } : null, exists: Boolean(row) };
 }
 
 /** Signs an owner in: session row + `sk_owner` cookie (httpOnly, sameSite strict, 12 hours). */

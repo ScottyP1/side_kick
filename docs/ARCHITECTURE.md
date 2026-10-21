@@ -31,6 +31,8 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `db/schema.postgres.sql` | The Postgres schema, mirroring the SQLite one |
 | `lib/auth.ts` | Sessions, roles, `requireUser` (also blocks everything but the password change while a temporary password is pending), `requireWorkspace` (the workspace wall), audit log |
 | `lib/login-limit.ts` | Sign-in rate limit: failed password sign-ins per email and per IP, stored in `login_failures` (works across several app copies) |
+| `lib/security.ts` | Small security checks with no I/O, unit-tested: one-time setup rule (`SIDEKICK_SETUP_CODE` in production), the cross-site request (CSRF) check `handle()` runs on every change, Word "zip bomb" size check, prompt tag escaping |
+| `lib/flash.ts` | One-time messages from a server redirect to the page (Microsoft sign-in errors), in a short-lived cookie instead of the address |
 | `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification (issuer checked per tenant; single-tenant mode also checks the tenant) |
 | `lib/tenants.ts` | Single- vs multi-tenant mode (`TENANT_ID`), which Sidekick org a Microsoft tenant belongs to, `tieOrgToTenant` (also for the sign-up flow) |
 | `lib/directory.ts` | The customer's Microsoft 365 directory via Microsoft Graph (app permission `User.Read.All`): admin-consent round trip, search, import as Microsoft-sign-in people |
@@ -102,6 +104,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 - **Audit**: access changes, deletions and anything Sidekick does on its own call `audit()` / `auditAsSidekick()`.
 - **Parameters**: SQL values always go in `?` parameters, never into the SQL string.
 - **Secrets**: only in `app/.env.local` (git-ignored). The Teams bot never runs without token checks in production.
+- **Browser safety**: every change (POST/PUT/PATCH/DELETE) through `handle()` is refused if it came from another website; security headers (CSP, no framing) are set in `next.config.ts`. Don't put user or document text in a URL that a page displays; use `lib/flash.ts`.
 - **Both databases**: SQL must run on SQLite and Postgres; `npm test` checks both.
 - **No silent failures**: routes use `handle()`; pages use `api()` (opens the problem modal for network/server/paused problems) and `useReportError()` instead of empty catches; page crashes land on `error.tsx`.
 - **Refusals aren't errors**: a feature paused (kill switch) or turned off for one client throws `FeatureOffError` (`assertEnabled` in `lib/owner.ts`). `handle()` answers 503 with `kind: "paused" | "restricted"`, without a reference code, an App errors row or a failed trace; check it before starting a Claude step so it never counts as a Claude error. Trace names replace ids with `:id` (`normalisePath` in `lib/api.ts`: add new `[id]` collections there).

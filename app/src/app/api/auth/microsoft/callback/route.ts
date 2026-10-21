@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
 import { errorMessageFor, handle } from "@/lib/api";
 import { audit, HttpError, startSession } from "@/lib/auth";
 import { get, run } from "@/lib/db";
+import { FLASH_COOKIE, FLASH_SECONDS } from "@/lib/flash";
 import { finishMicrosoftSignIn, OIDC_COOKIE, redirectUri, safeNext, type MicrosoftIdentity } from "@/lib/entra";
 import { finishAdminConsent, isConsentReply } from "@/lib/directory";
 import { tieOrgToTenant } from "@/lib/tenants";
@@ -42,7 +43,9 @@ export const GET = handle(async (req: Request) => {
     return go(safeNext(saved.next_path));
   } catch (e) {
     const message = await errorMessageFor(req, e);
-    return go(`${mode === "link" ? "/settings" : mode === "consent" ? "/users" : "/login"}?error=${encodeURIComponent(message)}`);
+    // The message travels in a short-lived cookie, not the address, so a link can't put its own words on the page (lib/flash.ts).
+    jar.set(FLASH_COOKIE, message, { path: "/", maxAge: FLASH_SECONDS, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
+    return go(`${mode === "link" ? "/settings" : mode === "consent" ? "/users" : "/login"}?error=1`);
   }
 });
 

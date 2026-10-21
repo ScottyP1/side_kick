@@ -16,6 +16,10 @@
  * - **Workspace walls**: a user only ever sees the workspaces they're a member of (admins see all in
  *   their org). Every API route that touches workspace data calls `requireWorkspace` first.
  * - **Audit log**: important actions are recorded with `await audit()` and shown on Security & audit.
+ * - **Temporary password**: people added on Users & access get a one-time password (`must_change_password`).
+ *   Until they pick their own, `requireUser` refuses every request except the few that opt in with
+ *   `allowPendingPassword` (/api/me, the password change); signing out doesn't need a check. Microsoft sign-in clears it.
+ * - **Sign-in limit**: password guessing is slowed down in lib/login-limit.ts.
  *
  * Production replaces passwords with Microsoft (Entra ID) sign-in; roles and walls stay the same.
  */
@@ -117,12 +121,38 @@ export class HttpError extends Error {
  * Returns the signed-in user or throws 401. Pass `roles` to also require one of those roles (403 otherwise).
  * The first line of almost every API route.
  */
-export async function requireUser(roles?: readonly Role[]): Promise<User> {
+export async function requireUser(roles?: readonly Role[], opts: { allowPendingPassword?: boolean } = {}): Promise<User> {
   const user = await currentUser();
   if (!user) throw new HttpError(401, "Sign in to continue.");
   traceScope({ orgId: user.org_id, actor: user.name, userId: user.id });
-  if (roles && !roles.includes(user.role)) throw new HttpError(403, "Your role doesn't allow this. Ask an Org Admin.");
+  // A temporary password must be changed before anything else (only /api/me and the password change pass this).
+  if (user.must_change_password && !opts.allowPendingPassword) throw new HttpError(403, PASSWORD_CHANGE_REQUIRED);
+  if (roles && !roles.includes(user.role)) throw new HttpError(403, onlyRolesMessage(roles));
   return user;
+}
+
+/**
+ * The refusal for someone whose role isn't in `roles`, naming who can do it, e.g. "Only the Org Owner can do
+ * this." or "Only Org Owners, Org Admins and Billing Admins can do this. Ask one of them."
+ */
+export function onlyRolesMessage(roles: readonly Role[]): string {
+  if (roles.length === 1 && roles[0] === "Org Owner") return "Only the Org Owner can do this. Ask them if you need it.";
+  const names = roles.map((r) => `${r}s`);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  return `Only ${list} can do this. Ask one of them if you need it.`;
+}
+
+/** The refusal while someone still has a temporary password; the portal shows the change-password screen instead. */
+export const PASSWORD_CHANGE_REQUIRED = "Change your temporary password first. Then you can use Sidekick.";
+
+/**
+ * The user behind this browser's session, or null, without the paused-organization check. Only for
+ * signing out, which must work even when the organization is paused.
+ */
+export async function sessionUser(): Promise<Pick<User, "org_id" | "name"> | null> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token) return null;
+  return (await get<{ org_id: string; name: string }>("SELECT u.org_id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?", sha256(token))) ?? null;
 }
 
 /** Org Owners and Org Admins can manage users, workspaces, Teams links and settings. */

@@ -20,6 +20,13 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TEXT NOT NULL
 );
+-- Failed portal sign-ins (wrong password or unknown email), for the sign-in rate limit in
+-- lib/login-limit.ts. Kept one day.
+CREATE TABLE IF NOT EXISTS login_failures (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL, ip TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS login_failures_email ON login_failures(email, created_at);
+CREATE INDEX IF NOT EXISTS login_failures_ip ON login_failures(ip, created_at);
 -- Microsoft sign-in in progress: one row per "Sign in with Microsoft" click, kept 10 minutes. state is
 -- the random value sent to Microsoft and back; verifier (PKCE) and nonce prove the reply belongs to it.
 -- mode = signin | link (an Org Owner connecting their organization's Microsoft tenant).

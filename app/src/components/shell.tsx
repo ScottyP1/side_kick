@@ -7,7 +7,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, Icon, Pill, ToastProvider } from "./ui";
 
 export type Workspace = { id: string; name: string; code: string | null; color: string };
@@ -111,15 +111,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     } else ["--accent", "--accent-soft", "--accent-fg"].forEach((k) => r.removeProperty(k));
   }, [me?.branding.accent]);
 
-  if (error) return <div className="auth-wrap"><div className="auth-card"><h2>Something went wrong</h2><p className="err">{error}</p><button className="btn" onClick={() => location.reload()}>Try again</button></div></div>;
+  // Also offered on the error screen (e.g. organization paused), so nobody is stuck signed in.
+  if (error) return <div className="auth-wrap"><div className="auth-card"><h2>Something went wrong</h2><p className="err">{error}</p><div style={{ display: "flex", gap: 8 }}><button className="btn" onClick={() => location.reload()}>Try again</button><button className="btn ghost" onClick={signOut}><Icon n="logout" />Sign out</button></div></div></div>;
   if (!me) return <div className="auth-wrap"><span className="muted">Loading Sidekick…</span></div>;
+  // The server refuses everything else until a temporary password is changed, so show only that.
+  if (me.user.mustChangePassword) return <ChangeTemporaryPassword name={me.user.name} onDone={reload} />;
 
   const items = NAV.map((g) => ({ g: g.g, items: g.items.filter((i) => !i[3] || i[3](me)) })).filter((g) => g.items.length);
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
-  const logout = async () => {
-    await api("/api/auth/logout", { method: "POST" });
-    location.href = "/login";
-  };
+  const logout = signOut;
 
   return (
     <AppCtx.Provider value={{ me, ws, setWs, reload }}>
@@ -172,15 +172,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </span>
               </div>
             )}
-            {me.user.mustChangePassword && (
-              <div className="banner">
-                <Icon n="lock" />
-                <span>You&apos;re using a temporary password.</span>
-                <Link className="btn small" href="/settings">
-                  Change it now
-                </Link>
-              </div>
-            )}
             <header className="topbar">
               <div className="mobile-nav">
                 <span className="brand-mark">S</span>
@@ -195,11 +186,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               {WS_PAGES.some((p) => path.startsWith(p)) && <WorkspacePick workspaces={me.workspaces} ws={ws} setWs={setWs} />}
               <span className="spacer" />
               <Pill kind={me.claude.configured ? "good" : "warn"}>{me.claude.configured ? "Claude connected" : "Claude not connected"}</Pill>
-              <span className="avatar" title={`${me.user.name} · ${me.user.role}`}>
-                {me.user.name.split(" ").map((p) => p[0]).join("").slice(0, 2)}
-              </span>
+              <UserMenu name={me.user.name} detail={me.user.role} onSignOut={logout} />
             </header>
-            <main className="content" key={ws}>{children}</main>
+            {/* Workspace pages restart when the workspace changes; org-wide pages (incl. the home assistant) keep their state. */}
+            <main className="content" key={WS_PAGES.some((p) => path.startsWith(p)) ? ws : "org"}>{children}</main>
           </div>
         </div>
       </ToastProvider>
@@ -224,6 +214,86 @@ export function NeedsWorkspace() {
           <span>Ask an Org Admin to add you to one.</span>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Signs the portal user out on this browser and goes to the sign-in page. */
+async function signOut() {
+  // A failure (network) opens the problem modal from api(); the person stays here and can try again.
+  await api("/api/auth/logout", { method: "POST" });
+  location.href = "/login";
+}
+
+/**
+ * The avatar in the top bar: opens a small menu with the person's name, role and Sign out. It's the only
+ * way to sign out at phone width, where the sidebar is hidden. Used by the portal and the Owner Console.
+ */
+export function UserMenu({ name, detail, onSignOut }: { name: string; detail: string; onSignOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+  return (
+    <div className="user-menu" ref={ref}>
+      <button className="avatar" title={`${name} · ${detail}`} aria-label="Account menu" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((o) => !o)}>
+        {name.split(" ").map((p) => p[0]).join("").slice(0, 2)}
+      </button>
+      {open && (
+        <div className="user-menu-pop" role="menu">
+          <b>{name}</b>
+          <span className="muted">{detail}</span>
+          <button className="btn small" role="menuitem" onClick={onSignOut}><Icon n="logout" />Sign out</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Full-screen step shown while the person still has the temporary password they were given: they pick a
+ * new one (or sign out) before anything else. Microsoft sign-in also clears this step.
+ */
+function ChangeTemporaryPassword({ name, onDone }: { name: string; onDone: () => Promise<void> }) {
+  const [pw, setPw] = useState({ current: "", next: "" });
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr("");
+    setBusy(true);
+    try {
+      await api("/api/auth/password", { method: "POST", json: pw });
+      await onDone();
+    } catch (x) {
+      setErr(x instanceof Error ? x.message : "Couldn't change the password.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="auth-wrap">
+      <form className="auth-card" onSubmit={submit}>
+        <h2>Pick your own password</h2>
+        <p className="muted">Welcome, {name}. You signed in with a temporary password; choose a new one to start using Sidekick.</p>
+        <div className="field"><label htmlFor="tmp-cur">Temporary password</label><input id="tmp-cur" className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></div>
+        <div className="field"><label htmlFor="tmp-new">New password</label><input id="tmp-new" className="input" type="password" autoComplete="new-password" minLength={10} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 10 characters.</span></div>
+        {err && <p className="err">{err}</p>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn primary" type="submit" disabled={busy || !pw.current || pw.next.length < 10}>Save password</button>
+          <button className="btn ghost" type="button" onClick={signOut}>Sign out</button>
+        </div>
+      </form>
     </div>
   );
 }

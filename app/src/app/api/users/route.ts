@@ -47,7 +47,8 @@ export const POST = handle(async (req: Request) => {
   const email = requireText(body.email, "Email", 200).toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, "Enter a valid email address.");
   const role = (body.role ?? "Member") as Role;
-  if (!ROLES.includes(role) || role === "Org Owner") throw new HttpError(400, "Pick a role other than Org Owner.");
+  if (role === "Org Owner") throw new HttpError(400, "Nobody can be added as Org Owner. Pick another role.");
+  if (!ROLES.includes(role)) throw new HttpError(400, `“${String(body.role).slice(0, 40)}” isn't a role. Pick one of: ${ROLES.filter((r) => r !== "Org Owner").join(", ")}.`);
   const allowed = new Set(await managedWorkspaceIds(admin));
   const workspaces = (body.workspaces ?? []).filter((ws) => allowed.has(ws));
   if (isLead(admin)) {

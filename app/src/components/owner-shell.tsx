@@ -2,11 +2,13 @@
 
 /**
  * The Owner Console frame: sidebar and header around every Owner Console page, and the owner sign-in check.
+ * Signing out: the sidebar footer, or the avatar menu in the header (the only way at phone width).
  */
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { UserMenu } from "./shell";
 import { api, Icon, Pill, ToastProvider } from "./ui";
 
 const NAV: [string, string, string][] = [
@@ -78,6 +80,8 @@ export function OwnerShell({ children }: { children: ReactNode }) {
             <span className="eyebrow">Owner Console · all clients</span>
             <span className="spacer" />
             <Pill kind="accent" nodot>Operator</Pill>
+            {/* Sign out at phone width, where the sidebar is hidden. */}
+            <UserMenu name={owner.name} detail="Platform owner" onSignOut={logout} />
           </header>
           <main className="content">{children}</main>
         </div>

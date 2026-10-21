@@ -116,6 +116,9 @@ td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
 tr:last-child td{border-bottom:0}
 tbody tr.clickable{cursor:pointer}
 tbody tr.clickable:hover td{background:var(--sunken)}
+/* A button that looks like the text around it (e.g. a table row title), so rows can be opened by keyboard. */
+.linklike{background:none;border:0;padding:0;text-align:left;cursor:pointer}
+.linklike:focus-visible{outline:2px solid var(--accent, currentColor);outline-offset:2px;border-radius:3px}
 td.r,th.r{text-align:right}
 
 .meter{height:10px;background:var(--sunken);border-radius:99px;overflow:hidden;position:relative}

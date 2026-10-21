@@ -2,7 +2,8 @@
 
 /**
  * Connectors (/connectors): the tools Sidekick will read from (Outlook, SharePoint, Jira, ...).
- * Today uploads and transcript import work; real connectors with their own sign-in come in step 2.
+ * Uploads, transcript import and Teams (chats and channels linked on the Workspaces page) work today; the
+ * other tools are planned and will each connect with their own sign-in.
  */
 
 import { Pill } from "@/components/ui";
@@ -11,7 +12,7 @@ const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; de
   { name: "Document upload", g: "Available now", mono: "⇪", bg: "var(--accent)", desc: "PDF, Word, text, Teams transcripts", live: true },
   { name: "Teams transcripts", g: "Available now", mono: "T", bg: "#5B5FC7", desc: "Import .vtt or .docx from meeting recaps", live: true },
   { name: "Outlook", g: "Microsoft 365", mono: "O", bg: "#0F6CBD", desc: "Calendar and email" },
-  { name: "Teams", g: "Microsoft 365", mono: "T", bg: "#5B5FC7", desc: "Live meetings, chats, channels" },
+  { name: "Teams chats and channels", g: "Available now", mono: "T", bg: "#5B5FC7", desc: "Link them on the Workspaces page", live: true },
   { name: "SharePoint", g: "Microsoft 365", mono: "S", bg: "#038387", desc: "Sites and document libraries" },
   { name: "OneDrive", g: "Microsoft 365", mono: "OD", bg: "#0364B8", desc: "Shared files and folders" },
   { name: "Planner", g: "Microsoft 365", mono: "P", bg: "#31752F", desc: "Tasks and plans" },
@@ -31,7 +32,7 @@ export default function ConnectorsPage() {
         <div>
           <div className="eyebrow">Connectors</div>
           <h1>Give Sidekick access to your tools</h1>
-          <p>Uploads and transcript import work today. Each tool below connects with its own sign-in (no passwords stored) in step 2.</p>
+          <p>Uploads, transcript import and Teams chats and channels work today. The other tools are planned; each will connect with its own sign-in (no passwords stored).</p>
         </div>
       </div>
       {GROUPS.map((g) => (
@@ -43,7 +44,7 @@ export default function ConnectorsPage() {
                 <span className="app-ico" style={{ background: a.bg, color: a.fg ?? "#fff", width: 48, height: 48, fontSize: 17 }} aria-hidden="true">{a.mono}</span>
                 <b>{a.name}</b>
                 <span className="muted">{a.desc}</span>
-                {a.live ? <Pill kind="good">Ready</Pill> : <span className="app-cta" style={{ opacity: 0.8 }}>Step 2</span>}
+                {a.live ? <Pill kind="good">Ready</Pill> : <span className="app-cta" style={{ opacity: 0.8 }}>Planned</span>}
               </div>
             ))}
           </div>

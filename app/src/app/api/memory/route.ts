@@ -24,7 +24,7 @@ export const GET = handle(async (req: Request) => {
     ws,
   );
   const actions = await all(
-    `SELECT a.id, a.text, a.owner, a.due, a.status, a.ticket, m.title AS meeting, m.held_at
+    `SELECT a.id, a.text, a.owner, a.due, a.due_on, a.status, a.ticket, m.title AS meeting, m.held_at
        FROM action_items a LEFT JOIN meetings m ON m.id = a.meeting_id WHERE a.workspace_id = ? ORDER BY a.status = 'Done', m.held_at DESC, a.rowid`,
     ws,
   );

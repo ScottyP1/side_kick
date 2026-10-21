@@ -16,7 +16,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useApp } from "./shell";
-import { api, ApiError, Spinner } from "./ui";
+import { api, ApiError, Icon, Spinner } from "./ui";
 
 /** A confirm card's action, as built by lib/assistant.ts `checkAction`. */
 type ReadyAction = {
@@ -73,6 +73,8 @@ export function Assistant({ onThinking }: { onThinking?: (on: boolean) => void }
   const [text, setText] = useState("");
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState("");
+  // A notice rather than an error: the Sidekick team turned the assistant off for this organization.
+  const [notice, setNotice] = useState("");
   const nextId = useRef(1);
   const thread = useRef<HTMLDivElement>(null);
 
@@ -86,6 +88,7 @@ export function Assistant({ onThinking }: { onThinking?: (on: boolean) => void }
     const m = message.trim();
     if (!m || thinking) return;
     setError("");
+    setNotice("");
     setText("");
     const history = turns.map((t) => ({ role: t.role, text: t.text }));
     setTurns((ts) => [...ts, { id: nextId.current++, role: "user", text: m }]);
@@ -95,8 +98,10 @@ export function Assistant({ onThinking }: { onThinking?: (on: boolean) => void }
       const r = await api<{ reply: string; action: ReadyAction | null }>("/api/assistant", { method: "POST", json: { message: m, history } });
       setTurns((ts) => [...ts, { id: nextId.current++, role: "assistant", text: r.reply, action: r.action, card: r.action?.confirm ? { state: "ready" } : undefined }]);
     } catch (e) {
-      // 4xx (e.g. paused, too long) shown here; network/server problems also open the problem modal.
-      setError(e instanceof Error ? e.message : "The assistant couldn't answer. Try again.");
+      // A restriction is shown as a calm notice; 4xx (too long, not allowed) as an error here;
+      // network/server/paused problems also open the problem modal.
+      if (e instanceof ApiError && e.kind === "restricted") setNotice(e.message);
+      else setError(e instanceof Error ? e.message : "The assistant couldn't answer. Try again.");
     } finally {
       setThinking(false);
       onThinking?.(false);
@@ -153,6 +158,7 @@ export function Assistant({ onThinking }: { onThinking?: (on: boolean) => void }
         <button className="btn primary" type="submit" disabled={thinking || !text.trim()}>{thinking ? <Spinner /> : "Send"}</button>
       </form>
       {error && <p className="err" style={{ margin: 0 }}>{error}</p>}
+      {notice && <div className="callout info" role="status"><Icon n="lock" /><div>{notice}</div></div>}
       {turns.length === 0 && (
         <div className="assist-chips">
           {suggestionsFor(me.user.role, me.user.admin).map((s) => (
@@ -178,7 +184,7 @@ function resultOf(a: ReadyAction, out: Record<string, unknown>): CardState {
         link: { href: "/users", label: "Open Users & access" },
       };
     case "link_teams":
-      return { state: "done", note: `Linked${out.name ? ` “${out.name}”` : ""}. Sidekick posted a confirmation in Teams.`, link: { href: "/connectors", label: "Open Connectors" } };
+      return { state: "done", note: `Linked${out.name ? ` “${out.name}”` : ""}. Sidekick posted a confirmation in Teams.`, link: { href: "/workspaces", label: "Open Workspaces" } };
     case "refresh_map":
       return { state: "done", note: "Knowledge map refreshed.", link: { href: "/memory", label: "Open Memory & gaps" } };
     default:

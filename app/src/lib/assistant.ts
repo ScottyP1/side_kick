@@ -36,6 +36,7 @@ import { z } from "zod";
 import { canEdit, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, workspaceIdsFor, type User } from "./auth";
 import { all, get } from "./db";
 import { structured } from "./claude";
+import { assertEnabled } from "./owner";
 import { cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, type GuardPlace } from "./guardrails";
 
 /** Pages the assistant can send someone to, with who may see each (mirrors the sidebar in shell.tsx). */
@@ -198,6 +199,8 @@ Sign-in: email and password, or Microsoft (Entra ID) once the Org Owner connects
  * @param history the last few turns, so follow-ups like "call it Fabrikam" work
  */
 export async function assist(user: User, message: string, history: Turn[]): Promise<{ reply: string; action: ReadyAction | null }> {
+  // Before the guardrail check, so a paused or restricted assistant doesn't spend a Claude call first.
+  await assertEnabled("assist", user.org_id, user.role);
   const place: GuardPlace = { orgId: user.org_id, workspaceId: null, channel: "assistant" };
   // Not tied to one workspace: the org's switches and org-wide custom rules apply.
   const policy = await getGuardPolicy(user.org_id, null);
@@ -241,7 +244,7 @@ export async function assist(user: User, message: string, history: Turn[]): Prom
     allowed_actions: allowedActions(user),
   };
 
-  const out = await structured("assist", { orgId: user.org_id, workspaceId: null }, {
+  const out = await structured("assist", { orgId: user.org_id, workspaceId: null, role: user.role }, {
     system: `You are the in-app assistant inside Sidekick's web portal. You help the signed-in person use the app: answer questions about how it works, and offer to do one of their allowed actions.
 
 How Sidekick works:
@@ -265,7 +268,26 @@ Rules:
     effort: "low",
     maxTokens: 2000,
   });
-  const reply = cleanOutput(out.reply, settings);
+  const action = checkAction(user, out.action, workspaces);
+  // Claude's text may promise an action ("Here's what I'll do…") that checkAction just dropped: say what
+  // will actually happen instead, so the words always match the card (or the lack of one).
+  const replyText = out.action && !action ? droppedActionReply(user, out.action) : out.reply;
+  const reply = cleanOutput(replyText, settings);
   for (const f of reply.fired) await recordGuard(place, "answer", f.rule, f.action);
-  return { reply: reply.text, action: checkAction(user, out.action, workspaces) };
+  return { reply: reply.text, action };
 }
+
+/**
+ * The fixed reply when Claude proposed an action `checkAction` refused: nothing will happen, and why
+ * (no new organizations from here; not allowed for this role; or details missing or not matching a
+ * workspace this person can use).
+ */
+export function droppedActionReply(user: User, a: { type: string }): string {
+  if (!(a.type in ACTION_TYPES)) return "I can't do that from here, so nothing has been done. New organizations are set up by the Sidekick team, not from inside Sidekick.";
+  if (!(a.type in allowedActions(user))) return "Your role can't do that, so nothing has been done. An Org Owner or Org Admin can (a Team Lead can for people and Teams links in their own workspaces).";
+  if (a.type === "open_page") return "That page isn't available to your role, so I can't open it for you.";
+  return "I can't set that up yet, so nothing has been done: a detail is missing or doesn't match a workspace you can use. Tell me the exact workspace name (and the email, for a new person).";
+}
+
+/** Every action type the assistant knows (anything else Claude returns is made up). */
+const ACTION_TYPES = { create_workspace: 1, add_person: 1, link_teams: 1, refresh_map: 1, open_page: 1 } as const;

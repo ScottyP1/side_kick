@@ -13,13 +13,19 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
  * What kind of failure this was, so the UI can say the right thing:
  * - "network": the browser couldn't reach Sidekick at all (offline, server down, tunnel stopped)
  * - "server":  Sidekick hit an unexpected problem (5xx); comes with a reference code (`ref`)
- * - "paused":  a feature or the whole organization is paused by the Sidekick team (503 "paused")
+ * - "paused":  a feature or the whole organization is paused by the Sidekick team (503, `kind: "paused"`)
+ * - "restricted": the Sidekick team turned this feature off for this organization (503, `kind: "restricted"`).
+ *   Deliberate and lasting, not a fault: left to the page like "request", which shows it as a notice
  * - "request": the request itself was refused (4xx: not allowed, not found, invalid input)
  */
-export type ProblemKind = "network" | "server" | "paused" | "request";
+export type ProblemKind = "network" | "server" | "paused" | "restricted" | "request";
 
+/** Kinds the page shows itself (next to what failed); the others open the problem modal. */
+const inPlace = (k: ProblemKind) => k === "request" || k === "restricted";
+
+/** A failed API call. `data` is the whole error body, for routes that send more than `error` (e.g. `meeting_id`). */
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public kind: ProblemKind = "request", public ref?: string) {
+  constructor(public status: number, message: string, public kind: ProblemKind = "request", public ref?: string, public data?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -52,15 +58,17 @@ export async function api<T = unknown>(url: string, init?: RequestInit & { json?
     raiseProblem(e);
     throw e;
   }
-  const data = (await res.json().catch(() => null)) as { error?: string; ref?: string } | null;
+  const data = (await res.json().catch(() => null)) as { error?: string; ref?: string; kind?: string; [k: string]: unknown } | null;
   if (res.status === 401 && typeof window !== "undefined" && !url.startsWith("/api/auth") && !url.startsWith("/api/owner/auth")) {
     window.location.href = url.startsWith("/api/owner") ? "/owner/login" : "/login";
   }
   if (!res.ok) {
     const message = data?.error ?? (res.status >= 500 ? `Sidekick had a problem answering (error ${res.status}). Try again in a minute.` : `Request failed (${res.status}).`);
-    const kind: ProblemKind = res.status === 503 && /paused/i.test(message) ? "paused" : res.status >= 500 ? "server" : "request";
-    const e = new ApiError(res.status, message, kind, data?.ref);
-    if (kind !== "request") raiseProblem(e);
+    // The server says when a 503 is a deliberate pause or restriction (lib/owner.ts FeatureOffError).
+    const kind: ProblemKind =
+      data?.kind === "restricted" ? "restricted" : data?.kind === "paused" || (res.status === 503 && /paused/i.test(message)) ? "paused" : res.status >= 500 ? "server" : "request";
+    const e = new ApiError(res.status, message, kind, data?.ref, data ?? undefined);
+    if (!inPlace(kind)) raiseProblem(e);
     throw e;
   }
   return (data ?? {}) as T;
@@ -84,7 +92,7 @@ export function useReportError() {
   const toast = useToast();
   return useCallback(
     (e: unknown) => {
-      if (e instanceof ApiError && e.kind !== "request") return;
+      if (e instanceof ApiError && !inPlace(e.kind)) return;
       toast(e instanceof Error ? e.message : "Something didn't work. Try again.", "error");
     },
     [toast],
@@ -105,7 +113,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onUnhandled = (ev: PromiseRejectionEvent) => {
       const e = ev.reason;
-      if (e instanceof ApiError && e.kind !== "request") return; // already shown in the modal
+      if (e instanceof ApiError && !inPlace(e.kind)) return; // already shown in the modal
       toast(e instanceof Error && e.message ? e.message : "Something didn't work. Try again.", "error");
     };
     window.addEventListener("unhandledrejection", onUnhandled);
@@ -127,7 +135,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-const PROBLEM_TITLES: Record<Exclude<ProblemKind, "request">, string> = {
+const PROBLEM_TITLES: Record<Exclude<ProblemKind, "request" | "restricted">, string> = {
   network: "Can't reach Sidekick",
   server: "Something went wrong on our side",
   paused: "Paused by the Sidekick team",
@@ -153,7 +161,7 @@ function ProblemProvider({ children }: { children: ReactNode }) {
     setProblem(null);
     setCopied(false);
   }, []);
-  const kind = problem?.e.kind as Exclude<ProblemKind, "request"> | undefined;
+  const kind = problem?.e.kind as Exclude<ProblemKind, "request" | "restricted"> | undefined;
   const details = problem
     ? [`What happened: ${problem.e.message}`, problem.e.ref ? `Reference: ${problem.e.ref}` : "", `Page: ${typeof location !== "undefined" ? location.pathname : ""}`, `Time: ${new Date().toISOString()}`].filter(Boolean).join("\n")
     : "";

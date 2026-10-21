@@ -2,6 +2,8 @@
  * GET/PATCH /api/owner/tenants/:id: one client organization in detail, or pause/resume it.
  * Who: platform operators only (a client account, even an Org Owner, gets 401). Both are logged in the
  * operator log, so there's a record of every time someone at Sidekick looked at a client's people.
+ * GET with `?reload=1` is the page refreshing itself after a change (e.g. a restriction switch) during the
+ * same visit: it isn't logged again, since opening the page already was.
  */
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError } from "@/lib/auth";
@@ -15,7 +17,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * person (role, workspaces, Microsoft-linked, last active), every workspace (members, documents, meetings)
  * and its feature switches. Never any document or meeting content.
  */
-export const GET = handle(async (_req: Request, { params }: Ctx) => {
+export const GET = handle(async (req: Request, { params }: Ctx) => {
   const owner = await requireOwner();
   const org = await get<{ id: string; name: string; status: string; created_at: string; entra_tenant_id: string | null; sso_required: number }>(
     "SELECT id, name, status, created_at, entra_tenant_id, sso_required FROM orgs WHERE id = ?", (await params).id,
@@ -35,7 +37,8 @@ export const GET = handle(async (_req: Request, { params }: Ctx) => {
     "SELECT wm.user_id, wm.workspace_id FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id WHERE w.org_id = ?", org.id,
   );
   const wsName = new Map(workspaces.map((w) => [w.id, w.name]));
-  await platformLog(owner.name, `Viewed the people and workspaces of ${org.name}`);
+  // Once per visit: the page's own reloads after a change send ?reload=1.
+  if (new URL(req.url).searchParams.get("reload") !== "1") await platformLog(owner.name, `Viewed the people and workspaces of ${org.name}`);
   return {
     org: { id: org.id, name: org.name, status: org.status, created_at: org.created_at, microsoft_connected: Boolean(org.entra_tenant_id), microsoft_required: org.sso_required === 1 },
     people: people.map((p) => ({

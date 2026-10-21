@@ -49,7 +49,7 @@ export default function AgentPage() {
           <h1>How Sidekick thinks</h1>
           <p>What each AI feature does for your team. The Sidekick team picks and runs the AI behind them. Your documents and meetings are never used to train any model.</p>
         </div>
-        <div className="actions"><Pill kind={me.ai.working && !essentials ? "good" : "warn"}>{!me.ai.working ? "AI answers: not set up" : essentials ? "AI answers: essentials only" : "AI answers: working"}</Pill></div>
+        {(!me.ai.working || essentials) && <div className="actions"><Pill kind="warn">{!me.ai.working ? "AI answers: not set up" : "AI answers: essentials only"}</Pill></div>}
       </div>
       {essentials && <div className="callout warn"><span>This month&apos;s AI credit is used up, so Sidekick runs on essentials until the 1st: answers, guardrail checks and notes for shorter meetings keep working; the rest is paused.</span></div>}
       <div className="grid g3">

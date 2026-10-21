@@ -223,7 +223,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
               {WS_PAGES.some((p) => path.startsWith(p)) && <WorkspacePick workspaces={me.workspaces} ws={ws} setWs={setWs} />}
               <span className="spacer" />
-              <Pill kind={!me.ai.working ? "warn" : me.credit?.level === "essentials" ? "warn" : "good"}>{!me.ai.working ? "AI answers: not set up" : me.credit?.level === "essentials" ? "AI answers: essentials only" : "AI answers: working"}</Pill>
+              {/* Only problems are shown: a "working" badge on every page is noise. */}
+              {(!me.ai.working || me.credit?.level === "essentials") && (
+                <Pill kind="warn">{!me.ai.working ? "AI answers: not set up" : "AI answers: essentials only"}</Pill>
+              )}
               <UserMenu name={me.user.name} detail={me.user.role} onSignOut={logout} />
             </header>
             {/* Workspace pages restart when the workspace changes; org-wide pages (incl. the home assistant) keep their state. */}

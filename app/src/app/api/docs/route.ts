@@ -2,12 +2,14 @@
  * GET/POST /api/docs: list a workspace's documents, or upload new ones.
  * Uploads are extracted to text and indexed for search straight away. Files of an unsupported type, empty
  * or over 25 MB are refused before anything is saved (listed in `results`; 415 if every file was refused).
+ * At most 20 files per upload; a file whose text is over 2 million characters, or a Word file that unpacks
+ * to far more than it should (a "zip bomb"), is saved as Failed with the reason (see lib/extract.ts).
  * Who: workspace members (upload needs edit rights).
  */
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { all, newId, now, run } from "@/lib/db";
-import { fileToText, uploadProblem } from "@/lib/extract";
+import { fileToText, MAX_DOCUMENT_CHARS, MAX_FILES_PER_UPLOAD, uploadProblem } from "@/lib/extract";
 import { indexText } from "@/lib/search";
 import { assertEnabled } from "@/lib/owner";
 
@@ -34,6 +36,7 @@ export const POST = handle(async (req: Request) => {
   const audience = form.get("audience") === "shareable" ? "shareable" : "internal";
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (!files.length) throw new HttpError(400, "Choose at least one file to upload.");
+  if (files.length > MAX_FILES_PER_UPLOAD) throw new HttpError(413, `Upload at most ${MAX_FILES_PER_UPLOAD} files at a time.`);
   const results: { name: string; ok: boolean; error?: string }[] = [];
   const readable = [];
   for (const file of files) {
@@ -51,12 +54,19 @@ export const POST = handle(async (req: Request) => {
     try {
       const text = await fileToText(file.name, Buffer.from(await file.arrayBuffer()));
       if (!text.trim()) throw new HttpError(422, "No readable text found. If it's a scan, export it with text (OCR) first.");
+      if (text.length > MAX_DOCUMENT_CHARS) {
+        throw new HttpError(413, `This file holds ${text.length.toLocaleString("en-US")} characters of text; the limit is ${MAX_DOCUMENT_CHARS.toLocaleString("en-US")} per document. Split it into smaller files.`);
+      }
       const n = await indexText({ orgId: user.org_id, workspaceId: ws, sourceType: "document", sourceId: id, title: file.name, audience, text });
       await run("UPDATE documents SET status = 'Ready', chunk_count = ? WHERE id = ?", n, id);
       results.push({ name: file.name, ok: true });
     } catch (e) {
-      await run("UPDATE documents SET status = 'Failed', error = ? WHERE id = ?", e instanceof Error ? e.message : "Couldn't read this file.", id);
-      results.push({ name: file.name, ok: false, error: e instanceof Error ? e.message : "Failed" });
+      // Our own refusals explain themselves; a library's error (a broken PDF, a damaged zip) is logged and
+      // replaced by a plain sentence, so its internal wording never reaches people.
+      if (!(e instanceof HttpError)) console.error(`Couldn't read uploaded file "${file.name}"`, e);
+      const message = e instanceof HttpError ? e.message : "Couldn't read this file. It may be damaged or password-protected; open it, save it again and re-upload.";
+      await run("UPDATE documents SET status = 'Failed', error = ? WHERE id = ?", message, id);
+      results.push({ name: file.name, ok: false, error: message });
     }
   }
   await audit(user, `Uploaded ${readable.length} document${readable.length > 1 ? "s" : ""}`, "Data", ws);

@@ -1,21 +1,24 @@
 "use client";
 
 /**
- * First-run setup (/setup): creates the organization and its Org Owner on a new install.
+ * First-run setup (/setup): creates the organization and its Org Owner on a new install. On a production
+ * server it also asks for the one-time setup code (`SIDEKICK_SETUP_CODE`, see lib/owner.ts).
  */
 
 import { useEffect, useState } from "react";
 import { api } from "@/components/ui";
 
 export default function SetupPage() {
-  const [f, setF] = useState({ org: "", name: "", email: "", password: "" });
+  const [f, setF] = useState({ org: "", name: "", email: "", password: "", setupCode: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [needsCode, setNeedsCode] = useState(false);
 
   useEffect(() => {
-    api<{ needsSetup: boolean }>("/api/auth/setup").then((r) => {
+    api<{ needsSetup: boolean; needsCode: boolean }>("/api/auth/setup").then((r) => {
       if (!r.needsSetup) location.href = "/login";
-    }).catch(() => {});
+      setNeedsCode(r.needsCode);
+    }).catch((e) => setError(e instanceof Error ? e.message : "Couldn't reach Sidekick."));
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -50,6 +53,7 @@ export default function SetupPage() {
         {field("name", "Your name", "text", undefined, "name")}
         {field("email", "Work email", "email", undefined, "username")}
         {field("password", "Password", "password", "At least 12 characters, and not one from a known data breach.", "new-password")}
+        {needsCode && field("setupCode", "Setup code", "password", "The one-time code set as SIDEKICK_SETUP_CODE on the server.", "off")}
         {error && <p className="err" role="alert">{error}</p>}
         <button className="btn primary" type="submit" disabled={busy}>{busy ? "Creating…" : "Create organization"}</button>
       </form>

@@ -31,8 +31,15 @@ type Block = Record<string, unknown>;
 /** Builds a card from body elements and (optional) buttons. Version 1.5 is what Teams supports today. */
 const card = (body: Block[], actions: Block[] = []): IAdaptiveCard =>
   ({ type: "AdaptiveCard", $schema: "http://adaptivecards.io/schemas/adaptive-card.json", version: "1.5", body, ...(actions.length ? { actions } : {}) }) as unknown as IAdaptiveCard;
-/** A wrapping TextBlock; `extra` sets size, weight, color and so on. */
-const text = (t: string, extra: Block = {}): Block => ({ type: "TextBlock", text: t, wrap: true, ...extra });
+/**
+ * Breaks Markdown link syntax (`[label](url)` becomes `[label] (url)`), so text Sidekick didn't write itself
+ * (answers, excerpts, document and meeting titles, action items, names typed on cards) can't show a
+ * clickable link with a misleading label inside a Sidekick card. Citations like [S1] still read the same.
+ * Sidekick's own cards never use Markdown links (links are Action.OpenUrl buttons). Security review L5.
+ */
+export const noLinks = (t: string) => t.replace(/\]\s*\(/g, "] (");
+/** A wrapping TextBlock; `extra` sets size, weight, color and so on. Markdown links are neutralised (`noLinks`). */
+const text = (t: string, extra: Block = {}): Block => ({ type: "TextBlock", text: noLinks(t), wrap: true, ...extra });
 /** Small accent label above a large bold title: the top of every Sidekick card. */
 const header = (eyebrow: string, title: string): Block[] => [
   text(eyebrow.toUpperCase(), { size: "Small", weight: "Bolder", color: "Accent", spacing: "None" }),
@@ -202,8 +209,8 @@ export function actionItemCard(a: ActionItemInput): IAdaptiveCard {
       type: "FactSet",
       spacing: "Small",
       facts: [
-        { title: "Owner", value: a.owner || "Unassigned" },
-        { title: "Due", value: a.due || "No date" },
+        { title: "Owner", value: noLinks(a.owner || "Unassigned") },
+        { title: "Due", value: noLinks(a.due || "No date") },
       ],
     },
   ];

@@ -1,6 +1,7 @@
 /**
  * POST /api/auth/login: sign in to the client portal with email and password; sets the session cookie.
- * Wrong email and wrong password give the same message, so it doesn't reveal which accounts exist.
+ * Wrong email and wrong password give the same message and take the same time (an unknown email is checked
+ * against a dummy hash), so it doesn't reveal which accounts exist.
  * Refused (after the password checks out) when the organization requires Microsoft sign-in.
  * Rate limited (lib/login-limit.ts): after too many failures for one email or from one IP address, sign-in
  * is refused with 429 for a while, even with the right password. Failed sign-ins on a real account and the
@@ -10,7 +11,7 @@
  * cookie; the sign-in page then finishes with POST /api/auth/mfa/verify.
  */
 import { handle, readJson } from "@/lib/api";
-import { audit, HttpError, startSession, verifyPassword } from "@/lib/auth";
+import { audit, DUMMY_HASH, HttpError, startSession, verifyPassword } from "@/lib/auth";
 import { get } from "@/lib/db";
 import { secondFactorMethods, startSecondStep } from "@/lib/mfa";
 import { setSecondStepCookie } from "@/lib/mfa-routes";
@@ -25,7 +26,9 @@ export const POST = handle(async (req: Request) => {
     "SELECT u.id, u.org_id, u.name, u.password_hash, o.sso_required FROM users u JOIN orgs o ON o.id = u.org_id WHERE u.email = ?",
     email,
   );
-  if (!user || !verifyPassword(String(password ?? ""), user.password_hash)) {
+  // Always run the slow check, even for an unknown email, so timing can't tell the two apart.
+  const passwordOk = verifyPassword(String(password ?? ""), user?.password_hash ?? DUMMY_HASH);
+  if (!user || !passwordOk) {
     const lockedNow = await recordSignInFailure(email, ip);
     // Unknown emails have no organization to log to; they still count towards the limit.
     if (user) {

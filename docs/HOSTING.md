@@ -117,8 +117,9 @@ otherwise the app's own address, which serves those pages.
   - `sidekick-app-restarts` (severity 2): the container restarted in the last 15 minutes.
   - What to do: `docs/RUNBOOKS.md` → The site is down.
 - **Security headers** (`app/next.config.ts`): HSTS, `X-Frame-Options: DENY`, `nosniff`, a strict
-  referrer policy, no `x-powered-by`, and a Content-Security-Policy in **report-only** mode (switch it to
-  enforcing once the browser console shows no reports).
+  referrer policy, no `x-powered-by`, and an enforced Content-Security-Policy (started report-only in PR #25;
+  enforced by the app security fixes in PR #22 after the portal showed no violations under it). If a page
+  breaks after a deploy, look for "Content Security Policy" errors in the browser console.
 
 ## Budgets and alerts
 
@@ -140,7 +141,10 @@ first if it would trip again). Not test-fired yet, because firing it takes the l
 
 - App: HTTPS only (insecure off); Teams calls without Microsoft's signature are refused (401).
 - First-run Setup is open until the first account exists; it was claimed by Cody right after deploy.
-  The Owner Console setup only works from localhost. Proposed: a one-time setup code for production.
+- Owner Console setup (and first-run setup) in production needs the one-time `SIDEKICK_SETUP_CODE` secret
+  (at least 16 characters; without it production refuses setup). To create the owner account: add the
+  secret to the Container App, open `/owner/setup`, enter it, then remove the secret. (Oct 2026: the
+  live owner account didn't exist yet; see `docs/security/`.)
 - Registry: admin user and anonymous pull off.
 - Database: TLS required, random 32-character password; firewall allows Azure services only (the app's
   outgoing addresses are a long shared list that can change, so they aren't pinned). Private networking

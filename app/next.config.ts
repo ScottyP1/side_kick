@@ -1,6 +1,55 @@
+/**
+ * @file Next.js settings for Sidekick: build output for the Docker image, files kept out of the build, and the
+ * security headers sent with every response.
+ */
 import type { NextConfig } from "next";
 
+const production = process.env.NODE_ENV === "production";
+
+/**
+ * Content Security Policy: where the browser may load scripts, styles, images and connections from. Everything
+ * Sidekick uses is its own (fonts are self-hosted by next/font, the logo is a data: URL), so the rules are
+ * "only from this site". Next.js puts small inline scripts in each page, hence 'unsafe-inline' for scripts
+ * (tighten with nonces later); `next dev` also needs eval and a websocket for hot reload. `frame-ancestors
+ * 'none'` stops other sites showing Sidekick in a frame (clickjacking); Sidekick has no Teams tab, so nothing
+ * needs to frame it. Security review M5, Oct 2026.
+ */
+const csp = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${production ? "" : " 'unsafe-eval'"}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  `connect-src 'self'${production ? "" : " ws: wss:"}`,
+  "object-src 'none'",
+  "base-uri 'self'",
+  // The sign-in form's Microsoft round trip goes to Microsoft's sign-in page.
+  "form-action 'self' https://login.microsoftonline.com",
+  "frame-ancestors 'none'",
+].join("; ");
+
+/**
+ * Security headers on every response (pages and API; security review Oct 2026, docs/HOSTING.md → Security):
+ * HSTS (always HTTPS; browsers ignore it on plain-http localhost), no framing by other sites (clickjacking), no
+ * MIME sniffing, a short referrer. The content policy is enforced (the ops review started it as report-only;
+ * the app review checked the portal under it with no violations). If Sidekick ever gets a Teams tab,
+ * `frame-ancestors` and X-Frame-Options must allow Teams.
+ */
+const securityHeaders = [
+  { key: "Content-Security-Policy", value: csp },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+];
+
 const nextConfig: NextConfig = {
+  // Don't advertise the framework in an X-Powered-By header.
+  poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
   // A separate build folder lets a test copy run next to the main dev server.
   distDir: process.env.NEXT_DIST_DIR || ".next",
   // "standalone" bundles a small server.js plus only the files it needs, which is what the Docker image
@@ -15,42 +64,6 @@ const nextConfig: NextConfig = {
   turbopack: { root: process.cwd() },
   cacheComponents: true,
   partialPrefetching: true,
-  // Don't advertise the framework ("x-powered-by: Next.js").
-  poweredByHeader: false,
-  // Browser security headers on every response (security review Oct 2026, docs/HOSTING.md → Security):
-  // HSTS (always HTTPS), no framing by other sites (clickjacking), no MIME sniffing, a short referrer.
-  // The content policy starts in report-only mode: the browser only reports what it would block, so a
-  // missed source can't break the portal. Switch it to `Content-Security-Policy` once the console is clean.
-  // Teams cards only link to the portal; if Sidekick ever gets a Teams tab, framing must allow Teams.
-  async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: [
-          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
-          { key: "X-Frame-Options", value: "DENY" },
-          { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-          {
-            key: "Content-Security-Policy-Report-Only",
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline'",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob:",
-              "font-src 'self' data:",
-              "connect-src 'self'",
-              "frame-ancestors 'none'",
-              "form-action 'self' https://login.microsoftonline.com",
-              "base-uri 'self'",
-              "object-src 'none'",
-            ].join("; "),
-          },
-        ],
-      },
-    ];
-  },
 };
 
 export default nextConfig;

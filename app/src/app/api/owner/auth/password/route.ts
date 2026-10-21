@@ -15,7 +15,7 @@ export const POST = handle(async (req: Request) => {
   const row = (await get<{ password_hash: string }>("SELECT password_hash FROM platform_admins WHERE id = ?", owner.id))!;
   if (!verifyPassword(String(current ?? ""), row.password_hash)) throw new HttpError(400, "Your current password is incorrect.");
   const nextPassword = String(next ?? "");
-  if (nextPassword === String(current)) throw new HttpError(400, "Pick a password different from the current one.");
+  if (nextPassword === String(current)) throw new HttpError(400, "Pick a new password that's different from your current one.");
   await assertGoodPassword(nextPassword, { email: owner.email });
   await run("UPDATE platform_admins SET password_hash = ?, must_change_password = 0 WHERE id = ?", hashPassword(nextPassword), owner.id);
   // Everywhere else is signed out; this browser gets a fresh session.

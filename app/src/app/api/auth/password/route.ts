@@ -15,7 +15,7 @@ export const POST = handle(async (req: Request) => {
   const row = (await get<{ password_hash: string }>("SELECT password_hash FROM users WHERE id = ?", user.id))!;
   if (!verifyPassword(String(current ?? ""), row.password_hash)) throw new HttpError(400, "Your current password is incorrect.");
   const nextPassword = String(next ?? "");
-  if (nextPassword === String(current)) throw new HttpError(400, "Pick a password different from the current one.");
+  if (nextPassword === String(current)) throw new HttpError(400, "Pick a new password that's different from your current one.");
   await assertGoodPassword(nextPassword, { email: user.email });
   await run("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?", hashPassword(nextPassword), user.id);
   const others = await endOtherSessions(user.id);

@@ -2,7 +2,8 @@
 
 /**
  * Sign in (/login) to the client portal: "Sign in with Microsoft" (when set up; see lib/entra.ts) or email
- * and password. Problems from the Microsoft round trip come back as `?error=…` and are shown here. With
+ * and password. Problems from the Microsoft round trip come back as `?error=1` with the message in a one-time
+ * cookie (lib/flash.ts) and are shown here; text in the address itself is never shown. With
  * two-step sign-in on, a correct password leads to the second step (components/two-step.tsx).
  */
 
@@ -10,6 +11,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SecondStepForm } from "@/components/two-step";
 import { api } from "@/components/ui";
+import { takeFlash } from "@/lib/flash";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -23,9 +25,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     // Read after mount: the page is static, and the error comes back from Microsoft in the address.
-    const back = new URLSearchParams(location.search).get("error");
+    const back = new URLSearchParams(location.search).has("error");
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (back) setError(back);
+    if (back) setError(takeFlash("Microsoft sign-in didn't finish. Try again."));
     api<{ needsSetup: boolean; microsoft: boolean }>("/api/auth/setup").then((r) => {
       if (r.needsSetup) location.href = "/setup";
       setNeedsSetup(r.needsSetup);

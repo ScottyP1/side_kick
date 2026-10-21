@@ -521,12 +521,16 @@ function registerHandlers(app: App) {
       if ("error" in out) return fail(out.error);
       return { statusCode: 200 as const, type: "application/vnd.microsoft.card.adaptive" as const, value: out.card };
     }
-    // Workspace wall: the card only works in a conversation linked to the item's own workspace.
-    const item = await get<ActionItemInput & { workspace_id: string }>(
-      "SELECT id, text, owner, due, status, workspace_id FROM action_items WHERE id = ? AND org_id = ? AND workspace_id = ?",
+    // Workspace wall: the card only works in a conversation linked to the item's own workspace. In a chat with
+    // client guests, only items from meetings that had external guests (the only ones whose cards are posted
+    // there), so a guest can't change internal action items by sending another item's id.
+    const item = await get<ActionItemInput & { workspace_id: string; external_guests: number | null }>(
+      `SELECT a.id, a.text, a.owner, a.due, a.status, a.workspace_id, m.external_guests
+         FROM action_items a LEFT JOIN meetings m ON m.id = a.meeting_id
+        WHERE a.id = ? AND a.org_id = ? AND a.workspace_id = ?`,
       String(data?.itemId ?? ""), conv.org_id, conv.workspace_id,
     );
-    if (!item) return fail("I couldn't find that action item in this workspace.");
+    if (!item || (conv.guests === 1 && item.external_guests !== 1)) return fail("I couldn't find that action item in this workspace.");
     const actor = await teamsActor(conv, activity);
     if (!canEdit(actor)) return fail(`Your Sidekick role (${actor.role}) can't change action items. Ask a Member or an Org Admin.`);
     if (verb === VERBS.assign) {

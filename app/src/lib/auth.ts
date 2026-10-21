@@ -71,6 +71,12 @@ export function verifyPassword(password: string, stored: string): boolean {
   return expected.length === key.length && crypto.timingSafeEqual(expected, key);
 }
 
+/**
+ * A hash of a random password nobody knows. Sign-in checks an unknown email against it, so a wrong email
+ * takes as long to refuse as a wrong password and the timing doesn't reveal which emails have accounts.
+ */
+export const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString("hex"));
+
 const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 /** How often a session's "last used" time is written (not on every request, to save database writes). */
 const LAST_SEEN_EVERY_MS = 5 * 60_000;
@@ -78,11 +84,13 @@ const LAST_SEEN_EVERY_MS = 5 * 60_000;
 /**
  * Signs a user in: creates a session row (with when, the browser and the network address) and sets the
  * `sk_session` cookie (httpOnly, 7 days). Callers must have checked the password and any second step.
+ * Also drops expired session rows (anyone's), so the table doesn't grow forever.
  */
 export async function startSession(userId: string) {
   const token = crypto.randomBytes(32).toString("base64url");
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
   const userAgent = ((await headers()).get("user-agent") ?? "").slice(0, 300);
+  await run("DELETE FROM sessions WHERE expires_at < ?", new Date().toISOString());
   await run(
     "INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen, user_agent, ip) VALUES (?, ?, ?, ?, ?, ?, ?)",
     sha256(token), userId, expires.toISOString(), now(), now(), userAgent || null, (await clientIp()) || null,
@@ -103,6 +111,16 @@ export async function endSession() {
   const token = jar.get(SESSION_COOKIE)?.value;
   if (token) await run("DELETE FROM sessions WHERE token_hash = ?", sha256(token));
   jar.delete(SESSION_COOKIE);
+}
+
+/**
+ * Ends every other session of this user (other browsers and devices), keeping the one making this request.
+ * Called after a password change, so a stolen session cookie stops working when the password is changed.
+ * @returns how many sessions were ended
+ */
+export async function endOtherSessions(userId: string): Promise<number> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  return (await run("DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?", userId, sha256(token))).changes;
 }
 
 /**
@@ -148,13 +166,6 @@ export async function listSessions(user: Pick<User, "id">): Promise<SessionInfo[
   return rows
     .map((r) => ({ id: r.token_hash.slice(0, 16), current: Boolean(mine) && r.token_hash === sha256(mine!), started: r.created_at, lastUsed: r.last_seen, device: describeDevice(r.user_agent), ip: r.ip }))
     .sort((a, b) => Number(b.current) - Number(a.current) || String(b.lastUsed ?? "").localeCompare(String(a.lastUsed ?? "")));
-}
-
-/** Signs this user out everywhere except this browser. Returns how many sessions ended. */
-export async function endOtherSessions(userId: string): Promise<number> {
-  const mine = (await cookies()).get(SESSION_COOKIE)?.value;
-  const r = await run("DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?", userId, mine ? sha256(mine) : "");
-  return r.changes;
 }
 
 /** Ends one of this user's sessions by its public id (from `listSessions`). Returns false if there's no such session. */

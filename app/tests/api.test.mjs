@@ -161,7 +161,7 @@ function client() {
     } catch {
       json = text;
     }
-    return { status: res.status, body: json, location: res.headers.get("location") };
+    return { status: res.status, body: json, location: res.headers.get("location"), cookies: Object.fromEntries(jar), headers: res.headers };
   };
 }
 
@@ -345,7 +345,7 @@ test(`[${ENGINE}] unsupported or empty files are refused before anything is save
     const form = new FormData();
     form.append("ws", s.wsA);
     for (const f of files) form.append("files", f);
-    return member("POST", "/api/docs", undefined, { form });
+    return admin("POST", "/api/docs", undefined, { form });
   };
   const exe = await upload(new File(["MZ"], "virus.exe"));
   assert.equal(exe.status, 415);
@@ -475,6 +475,11 @@ test(`[${ENGINE}] Teams: card buttons update action items, but only inside the l
   const bItem = (await admin("GET", `/api/meetings/${bm.body.id}`)).body.actions[0].id;
   const refused = await (await toBot(activity({ type: "invoke", name: "adaptiveCard/action", value: { action: { type: "Action.Execute", verb: "sidekick.action.done", data: { itemId: bItem } } } }))).json();
   assert.match(JSON.stringify(refused), /couldn't find that action item/);
+  // With client guests in the chat, items from internal meetings (never posted there) can't be changed from it.
+  assert.equal((await admin("PATCH", "/api/teams-links", { id: "conv-1", guests: true })).status, 200);
+  const internal = await (await toBot(activity({ type: "invoke", name: "adaptiveCard/action", value: { action: { type: "Action.Execute", verb: "sidekick.action.done", data: { itemId: s.actionA } } } }))).json();
+  assert.match(JSON.stringify(internal), /couldn't find that action item/);
+  assert.equal((await admin("PATCH", "/api/teams-links", { id: "conv-1", guests: false })).status, 200);
 });
 
 test(`[${ENGINE}] Teams Playground mode refuses requests that would reply to a non-local address`, async () => {
@@ -535,7 +540,7 @@ test(`[${ENGINE}] every response carries the browser security headers and doesn'
     assert.equal(h.get("x-frame-options"), "DENY", url);
     assert.equal(h.get("x-content-type-options"), "nosniff", url);
     assert.equal(h.get("referrer-policy"), "strict-origin-when-cross-origin", url);
-    assert.match(h.get("content-security-policy-report-only") ?? "", /frame-ancestors 'none'/, url);
+    assert.match(h.get("content-security-policy") ?? "", /frame-ancestors 'none'/, url);
     assert.equal(h.get("x-powered-by"), null, url);
   }
 });
@@ -1468,7 +1473,15 @@ test(`[${ENGINE}] workspaces: deleting one removes everything in it, leaves the 
 });
 
 /* ---------- Microsoft sign-in (Entra ID) ---------- */
-const errorOf = (r) => decodeURIComponent(r.to?.searchParams.get("error") ?? "");
+/** The message a Microsoft round trip left for the page: the address only says `?error=1`, the text is in the one-time cookie. */
+const flashOf = (res) => {
+  if (!res.location) return "";
+  const q = new URL(res.location, BASE).searchParams;
+  if (!q.has("error")) return "";
+  assert.equal(q.get("error"), "1", "the address never carries the message itself");
+  return decodeURIComponent(res.cookies.sk_flash ?? "");
+};
+const errorOf = (r) => flashOf(r.back);
 
 const billing = client();
 
@@ -1558,9 +1571,9 @@ test(`[${ENGINE}] Microsoft: forged, replayed or cross-browser replies are refus
   const first = await microsoftSignIn(c, claims, { replay: true });
   assert.equal(first.to.pathname, "/");
   const back = await c("GET", `/api/auth/microsoft/callback?code=x&state=${new URL(first.start.location).searchParams.get("state")}`);
-  assert.match(decodeURIComponent(new URL(back.location).searchParams.get("error")), /expired|took too long|different browser/);
+  assert.match(flashOf(back), /expired|took too long|different browser/);
   const cancelled = await c("GET", "/api/auth/microsoft/callback?error=access_denied&error_description=AADSTS65004%3A+User+declined");
-  assert.match(decodeURIComponent(new URL(cancelled.location).searchParams.get("error")), /cancelled/);
+  assert.match(flashOf(cancelled), /cancelled/);
 });
 
 test(`[${ENGINE}] Microsoft: Teams messages from a linked account use that person's name and role`, async () => {
@@ -2114,6 +2127,138 @@ test(`[${ENGINE}] Owner Console: the operator sets a client's plan and status, a
   assert.equal((await s.fay("PATCH", `/api/owner/tenants/${fab}/billing`, { status: "active" })).status, 401);
 });
 
+/* ---------- Security review fixes (Oct 2026, docs/security/2026-10-app-security-review.md) ---------- */
+
+/**
+ * Signs in from a made-up network address of its own, so this test's wrong passwords don't count toward (or
+ * trip on) the per-address limit shared by the whole run on localhost. Returns the status and JSON body.
+ */
+async function loginFrom(ip, email, password, path = "/api/auth/login") {
+  const r = await fetch(BASE + path, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify({ email, password }) });
+  return { status: r.status, body: await r.json() };
+}
+
+test(`[${ENGINE}] password change signs the person out everywhere else, and must pick a different password`, async () => {
+  const { call } = await newPerson("Pat Phone", "pat@test.local", "Member");
+  const laptop = client();
+  assert.equal((await laptop("POST", "/api/auth/login", { email: "pat@test.local", password: NEW_PASSWORD })).status, 200);
+  assert.equal((await laptop("GET", "/api/workspaces")).status, 200);
+  const same = await call("POST", "/api/auth/password", { current: NEW_PASSWORD, next: NEW_PASSWORD });
+  assert.equal(same.status, 400);
+  assert.match(same.body.error, /different from your current one/);
+  assert.equal((await call("POST", "/api/auth/password", { current: NEW_PASSWORD, next: "another new password 456" })).status, 200);
+  assert.equal((await laptop("GET", "/api/workspaces")).status, 401, "the other session ended");
+  assert.equal((await call("GET", "/api/workspaces")).status, 200, "the session that changed it stays");
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Changed password \(signed out 1 other session\)/);
+});
+
+test(`[${ENGINE}] Org Owners and Org Admins can unlock a person's password sign-in; others can't`, async () => {
+  const lena = await newPerson("Lou Locked", "lou@test.local", "Viewer");
+  const lead = await newPerson("Lia Lead", "lia@test.local", "Team Lead");
+  for (let i = 0; i < 5; i++) await loginFrom("192.0.2.10", "lou@test.local", `wrong ${i}`);
+  assert.equal((await loginFrom("192.0.2.10", "lou@test.local", NEW_PASSWORD)).status, 429);
+  assert.equal((await admin("GET", "/api/users")).body.users.find((p) => p.id === lena.id).signin_locked, true);
+  const mem = await newPerson("Mo Unlock", "mo-unlock@test.local", "Member");
+  assert.equal((await mem.call("POST", `/api/users/${lena.id}`, { action: "unlock" })).status, 403);
+  assert.equal((await lead.call("POST", `/api/users/${lena.id}`, { action: "unlock" })).status, 403);
+  assert.equal((await admin("POST", `/api/users/${lena.id}`, { action: "nonsense" })).status, 400);
+  assert.equal((await admin("POST", `/api/users/${lena.id}`, { action: "unlock" })).status, 200);
+  assert.equal((await loginFrom("192.0.2.10", "lou@test.local", NEW_PASSWORD)).status, 200);
+  assert.equal((await admin("GET", "/api/users")).body.users.find((p) => p.id === lena.id).signin_locked, false);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Unlocked password sign-in for Lou Locked/);
+  // Another org's admin can't touch this person.
+  const other = client();
+  const o = await owner("POST", "/api/owner/tenants", { org: "Unlock Other Org", name: "Una Other", email: "una@test.local" });
+  await firstSignIn(other, "una@test.local", o.body.tempPassword);
+  assert.equal((await other("POST", `/api/users/${lena.id}`, { action: "unlock" })).status, 404);
+});
+
+test(`[${ENGINE}] changes sent from another website are refused (CSRF), same-site requests work`, async () => {
+  const adminCookie = () => Object.entries(adminJar).map(([k, v]) => `${k}=${v}`).join("; ");
+  const adminJar = (await admin("GET", "/api/me")).cookies;
+  const send = (headers) => fetch(`${BASE}/api/settings`, { method: "PUT", headers: { "content-type": "application/json", cookie: adminCookie(), ...headers }, body: JSON.stringify({ logo: null, accent: "#123456" }) });
+  for (const h of [{ origin: "https://evil.example" }, { "sec-fetch-site": "cross-site" }, { "sec-fetch-site": "same-site" }, { origin: "null" }]) {
+    const r = await send(h);
+    assert.equal(r.status, 403, JSON.stringify(h));
+    assert.match((await r.json()).error, /came from another website/);
+  }
+  assert.equal((await send({ origin: BASE, "sec-fetch-site": "same-origin" })).status, 200);
+  assert.equal((await send({})).status, 200, "no browser headers: not a browser, no cookie riding");
+  // A plain form post (text/plain body) from another site is refused before anything happens.
+  const form = await fetch(`${BASE}/api/workspaces`, { method: "POST", headers: { "content-type": "text/plain", origin: "https://evil.example", cookie: adminCookie() }, body: JSON.stringify({ name: "CSRF made" }) });
+  assert.equal(form.status, 403);
+  assert.ok(!(await admin("GET", "/api/workspaces")).body.workspaces.some((w) => w.name === "CSRF made"));
+  // Reading is never blocked.
+  assert.equal((await fetch(`${BASE}/api/me`, { headers: { origin: "https://evil.example", cookie: adminCookie() } })).status, 200);
+});
+
+test(`[${ENGINE}] uploads: Word "zip bombs", huge text and too many files are refused`, async () => {
+  const up = (files) => {
+    const form = new FormData();
+    form.append("ws", s.wsA);
+    for (const [name, data] of files) form.append("files", new Blob([data]), name);
+    return admin("POST", "/api/docs", undefined, { form });
+  };
+  // A .docx whose zip directory says word/document.xml unpacks to 200 MB (the bytes needn't exist: it's refused unopened).
+  const bomb = await up([["bomb.docx", zipClaiming("word/document.xml", 200 * 1024 * 1024)]]);
+  assert.equal(bomb.status, 200);
+  assert.equal(bomb.body.results[0].ok, false);
+  assert.match(bomb.body.results[0].error, /unpacks to far more text/);
+  const big = await up([["big.txt", "lorem ipsum ".repeat(170_000)]]);
+  assert.equal(big.body.results[0].ok, false);
+  assert.match(big.body.results[0].error, /the limit is 2,000,000 per document/);
+  const many = await up(Array.from({ length: 21 }, (_, i) => [`f${i}.txt`, "hello"]));
+  assert.equal(many.status, 413);
+  assert.match(many.body.error, /at most 20 files/);
+  // A library's own error isn't shown; a plain sentence is.
+  const broken = await up([["broken.pdf", "%PDF-1.7\ngarbage"]]);
+  assert.equal(broken.body.results[0].ok, false);
+  assert.match(broken.body.results[0].error, /Couldn't read this file/);
+  assert.doesNotMatch(broken.body.results[0].error, /Invalid PDF/);
+});
+
+test(`[${ENGINE}] Microsoft sign-in errors never put text in the address (no spoofed messages on /login)`, async () => {
+  const c = client();
+  const r = await c("GET", "/api/auth/microsoft/callback?error=server_error&error_description=AADSTS50020%3A+Call+555+0100+to+unlock+your+account");
+  assert.equal(new URL(r.location).search, "?error=1");
+  const shown = decodeURIComponent(r.cookies.sk_flash);
+  assert.match(shown, /Microsoft didn't sign you in \(AADSTS50020\)/);
+  assert.doesNotMatch(shown, /555/, "Microsoft's (or a link's) free text is never shown");
+});
+
+test(`[${ENGINE}] Owner Console sign-in: too many wrong passwords pause it, and failures go to the operator log`, async () => {
+  // Kept last: it locks the test owner's password sign-in for 15 minutes (the signed-in `owner` client keeps working).
+  const ownerLogin = (email, password) => loginFrom("192.0.2.20", email, password, "/api/owner/auth/login");
+  for (let i = 0; i < 5; i++) assert.equal((await ownerLogin("owner@test.local", `wrong guess ${i}`)).status, 401);
+  const locked = await ownerLogin("OWNER@test.local ", "correct horse battery");
+  assert.equal(locked.status, 429, "even the right password waits");
+  assert.match(locked.body.error, /Too many sign-in attempts/);
+  assert.doesNotMatch(locked.body.error, /Org Admin/);
+  const log = JSON.stringify((await owner("GET", "/api/owner/releases")).body.log);
+  assert.match(log, /Failed Owner Console sign-in for owner@test.local/);
+  assert.match(log, /Owner Console sign-in paused for owner@test.local/);
+  // Unknown emails are limited too, but not logged.
+  for (let i = 0; i < 6; i++) await loginFrom("192.0.2.21", "nobody-owner@test.local", "x", "/api/owner/auth/login");
+  assert.doesNotMatch(JSON.stringify((await owner("GET", "/api/owner/releases")).body.log), /nobody-owner/);
+});
+
+/** A minimal zip (no file data) whose central directory claims `name` unpacks to `size` bytes. */
+function zipClaiming(name, size) {
+  const n = Buffer.from(name);
+  const cd = Buffer.alloc(46 + n.length);
+  cd.writeUInt32LE(0x02014b50, 0);
+  cd.writeUInt32LE(size, 24);
+  cd.writeUInt16LE(n.length, 28);
+  n.copy(cd, 46);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(cd.length, 12);
+  end.writeUInt32LE(0, 16);
+  return Buffer.concat([cd, end]);
+}
+
 /* ---------- access recovery: scripts/reset-password.mjs (run last: it resets the Owner Console account) ---------- */
 /** Runs the operator's reset script against this run's database and returns { code, out, password }. */
 async function resetPassword(...args) {
@@ -2249,14 +2394,14 @@ function fakePasskey() {
 }
 
 test(`[${ENGINE}] passwords: at least 12 characters, not breached, not the email; a change signs out everywhere else`, async () => {
-  const pat = await newPerson("Pat Password", "pat@test.local", "Member");
+  const pat = await newPerson("Pat Password", "pax@test.local", "Member");
   const otherBrowser = client();
-  assert.equal((await otherBrowser("POST", "/api/auth/login", { email: "pat@test.local", password: NEW_PASSWORD })).status, 200);
+  assert.equal((await otherBrowser("POST", "/api/auth/login", { email: "pax@test.local", password: NEW_PASSWORD })).status, 200);
   const change = (next) => pat.call("POST", "/api/auth/password", { current: NEW_PASSWORD, next });
   assert.match((await change("eleven char")).body.error, /at least 12 characters/);
   assert.match((await change("breached password 1")).body.error, /known data breach/);
-  assert.match((await change("pat@test.local")).body.error, /email address/);
-  assert.match((await change(NEW_PASSWORD)).body.error, /different from the current one/);
+  assert.match((await change("pax@test.local")).body.error, /email address/);
+  assert.match((await change(NEW_PASSWORD)).body.error, /different from your current one/);
   assert.equal((await change("pat's long new password")).status, 200);
   assert.equal((await otherBrowser("GET", "/api/me")).status, 401, "the other browser was signed out");
   assert.equal((await pat.call("GET", "/api/me")).status, 200, "this browser stays signed in");
@@ -2268,7 +2413,7 @@ test(`[${ENGINE}] sessions: people see only their own, and can sign out one or a
   const { call, password } = s.pat;
   const b = client();
   const c = client();
-  for (const x of [b, c]) assert.equal((await x("POST", "/api/auth/login", { email: "pat@test.local", password })).status, 200);
+  for (const x of [b, c]) assert.equal((await x("POST", "/api/auth/login", { email: "pax@test.local", password })).status, 200);
   const list = (await call("GET", "/api/auth/sessions")).body.sessions;
   assert.equal(list.length, 3);
   assert.equal(list.filter((x) => x.current).length, 1);
@@ -2292,7 +2437,7 @@ test(`[${ENGINE}] two-step sign-in: authenticator app, one-time codes, backup co
   const { call, password } = s.pat;
   assert.deepEqual((await call("GET", "/api/auth/mfa/status")).body, { factors: [], backupCodesLeft: 0 });
   const setup = (await call("POST", "/api/auth/mfa/totp-start", {})).body;
-  assert.match(setup.uri, /^otpauth:\/\/totp\/Sidekick%3Apat%40test\.local\?secret=/);
+  assert.match(setup.uri, /^otpauth:\/\/totp\/Sidekick%3Apax%40test\.local\?secret=/);
   assert.match(setup.qr, /^data:image\/png;base64,/);
   assert.equal((await call("POST", "/api/auth/mfa/totp-confirm", { id: setup.id, code: "000000" === totp(setup.secret) ? "111111" : "000000" })).status, 400);
   const usedCode = totp(setup.secret);
@@ -2301,7 +2446,7 @@ test(`[${ENGINE}] two-step sign-in: authenticator app, one-time codes, backup co
   assert.equal(on.body.backupCodes.length, 10);
   // Signing in now needs the code: the password alone starts no session.
   const b = client();
-  const first = await b("POST", "/api/auth/login", { email: "pat@test.local", password });
+  const first = await b("POST", "/api/auth/login", { email: "pax@test.local", password });
   assert.deepEqual(first.body, { ok: true, secondStep: { methods: ["totp"] } });
   assert.equal((await b("GET", "/api/me")).status, 401);
   assert.equal((await b("POST", "/api/auth/mfa/verify", { code: "12345" })).status, 400);
@@ -2313,10 +2458,10 @@ test(`[${ENGINE}] two-step sign-in: authenticator app, one-time codes, backup co
   assert.equal((await client()("POST", "/api/auth/mfa/verify", { code: totp(setup.secret, 1) })).status, 401);
   // A backup code works once.
   const c = client();
-  await c("POST", "/api/auth/login", { email: "pat@test.local", password });
+  await c("POST", "/api/auth/login", { email: "pax@test.local", password });
   assert.equal((await c("POST", "/api/auth/mfa/verify", { code: on.body.backupCodes[0].toUpperCase() })).status, 200);
   const d = client();
-  await d("POST", "/api/auth/login", { email: "pat@test.local", password });
+  await d("POST", "/api/auth/login", { email: "pax@test.local", password });
   assert.equal((await d("POST", "/api/auth/mfa/verify", { code: on.body.backupCodes[0] })).status, 400, "a used backup code fails");
   assert.equal((await call("GET", "/api/auth/mfa/status")).body.backupCodesLeft, 9);
   // Five wrong codes end that sign-in attempt (on another person, as they also pause password sign-in).
@@ -2344,7 +2489,7 @@ test(`[${ENGINE}] two-step sign-in: authenticator app, one-time codes, backup co
   const off = await call("POST", "/api/auth/mfa/remove", { id: factor.id, password });
   assert.equal(off.body.twoStepOff, true);
   assert.deepEqual((await call("GET", "/api/auth/mfa/status")).body, { factors: [], backupCodesLeft: 0 });
-  assert.deepEqual((await client()("POST", "/api/auth/login", { email: "pat@test.local", password })).body, { ok: true });
+  assert.deepEqual((await client()("POST", "/api/auth/login", { email: "pax@test.local", password })).body, { ok: true });
 });
 
 test(`[${ENGINE}] two-step sign-in: passkeys work only on Sidekick's own address`, async () => {
@@ -2358,7 +2503,7 @@ test(`[${ENGINE}] two-step sign-in: passkeys work only on Sidekick's own address
   // The same challenge can't be used twice.
   assert.equal((await call("POST", "/api/auth/mfa/passkey-add", { response: key.register(options), label: "Again" })).status, 400);
   const b = client();
-  assert.deepEqual((await b("POST", "/api/auth/login", { email: "pat@test.local", password })).body.secondStep, { methods: ["passkey"] });
+  assert.deepEqual((await b("POST", "/api/auth/login", { email: "pax@test.local", password })).body.secondStep, { methods: ["passkey"] });
   const signIn = (await b("POST", "/api/auth/mfa/signin-options", {})).body.options;
   assert.equal(signIn.allowCredentials.length, 1);
   assert.equal((await b("POST", "/api/auth/mfa/verify", { passkey: key.sign(signIn, { otherOrigin: "https://sidekick-login.example" }) })).status, 400, "a look-alike site's answer is refused");
@@ -2373,11 +2518,11 @@ test(`[${ENGINE}] two-step sign-in: passkeys work only on Sidekick's own address
 });
 
 test(`[${ENGINE}] reset-password --reset-2fa: removes two-step sign-in for someone who lost their phone`, async () => {
-  const r = await resetPassword("pat@test.local", "--reset-2fa");
+  const r = await resetPassword("pax@test.local", "--reset-2fa");
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /Two-step sign-in removed/);
   const c = client();
-  assert.deepEqual((await c("POST", "/api/auth/login", { email: "pat@test.local", password: r.password })).body, { ok: true });
+  assert.deepEqual((await c("POST", "/api/auth/login", { email: "pax@test.local", password: r.password })).body, { ok: true });
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Removed Pat Password's two-step sign-in/);
 });
 

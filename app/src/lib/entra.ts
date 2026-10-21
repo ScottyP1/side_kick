@@ -151,8 +151,12 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
   const q = new URL(req.url).searchParams;
   if (q.get("error")) {
     // The person cancelled, or their company blocked the app (e.g. admin consent needed).
-    const desc = (q.get("error_description") ?? "").split("\n")[0].replace(/^AADSTS\d+:\s*/, "").slice(0, 300);
-    throw new HttpError(400, q.get("error") === "access_denied" ? "Microsoft sign-in was cancelled." : `Microsoft didn't sign you in: ${desc || q.get("error")}`);
+    // Only Microsoft's error code is shown, never the description text: anyone can make a link to this
+    // address, so free text here could put their words on Sidekick's page (security review L4). The full
+    // description goes to the server log for whoever investigates.
+    if (q.get("error") !== "access_denied") console.error("Microsoft sign-in error", q.get("error"), (q.get("error_description") ?? "").split("\n")[0].slice(0, 300));
+    const code = (q.get("error_description") ?? "").match(/AADSTS\d{3,8}/)?.[0] ?? (q.get("error") ?? "").replace(/[^a-z_]/gi, "").slice(0, 40);
+    throw new HttpError(400, q.get("error") === "access_denied" ? "Microsoft sign-in was cancelled." : `Microsoft didn't sign you in${code ? ` (${code})` : ""}. Try again; if it keeps happening, your IT team may need to approve Sidekick for your organization.`);
   }
   const state = q.get("state") ?? "";
   const code = q.get("code") ?? "";

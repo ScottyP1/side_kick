@@ -3,13 +3,24 @@
 For the **Sidekick operator** (whoever runs Sidekick as a service), not for client users. The console lives at `/owner` and has its own sign-in, separate from every client account.
 
 ## First sign-in
-The first owner account can only be created **on the machine running Sidekick** (open `http://localhost:3000/owner`). After that, sign in at `/owner/login`. Owner sessions last 12 hours. Owner passwords need at least 12 characters and must not be one from a known data breach (use a different password from your client login); after 5 wrong passwords for one email (or 20 from one network address) in 15 minutes, owner sign-in waits 15 minutes, and failures show in the operator log.
+The first owner account is created once, at `/owner/setup`:
+- **On a laptop:** open `http://localhost:3000/owner` on the machine running Sidekick.
+- **On the live site:** setup is off until you give the server a one-time **setup code**. Put a long random
+  value (at least 16 characters) in the Container App secret `SIDEKICK_SETUP_CODE`, open `/owner/setup`,
+  enter the code with your details, then **remove the secret** again. Without it, production refuses setup
+  outright (the old "only from localhost" check trusted an address the caller can fake).
+
+After that, sign in at `/owner/login`. Owner sessions last 12 hours. 5 wrong passwords for one owner email
+(or 20 from one network address) in 15 minutes pause owner sign-in for 15 minutes, even with the right
+password; failed sign-ins on real owner accounts and the pause are in the operator log (Releases & switches).
+Owner passwords need at least 12 characters and must not be one from a known data breach (use a different password from your client login).
 
 **Security** (in the menu): change the owner password (signs out your other browsers) and turn on **two-step sign-in** with a passkey or an authenticator app, exactly like a client's Settings page. Strongly recommended: the console sees every client. Save the backup codes in your password manager.
 
-**Lost the owner password, or a client's Org Owner is locked out?** Run the reset command on the Mac (`docs/RUNBOOKS.md` → Locked out). It prints a one-time password in your terminal only; signing in with it asks for a new password first. Lost the phone too? Add `--reset-2fa` to remove two-step sign-in from that account.
+**Lost the owner password, or a client's Org Owner is locked out?** Run the reset command on the Mac (`docs/RUNBOOKS.md` → Locked out). It prints a one-time password in your terminal only; signing in with it asks for a new password first. Lost the phone too? Add `--reset-2fa` to remove two-step sign-in from that account. (If there's no owner account on the live site yet, `--owner` creates one, as an alternative to the setup code.)
 
-The portal's own first-run setup (the very first organization on an empty install) is also localhost-only. After that, organizations are created in two ways: **self-service sign-up** at `/signup` (a company signs itself up; **off until you open it**, see below), or **Add a client** here. Nobody inside a client organization can create another one, and the home assistant can't either.
+The portal's own first-run setup (the very first organization on an empty install) follows the same rule
+(localhost on a laptop, the setup code in production). After that, organizations are created in two ways: **self-service sign-up** at `/signup` (a company signs itself up; **off until you open it**, see below), or **Add a client** here. Nobody inside a client organization can create another one, and the home assistant can't either.
 
 ## Pages
 | Page | Shows |

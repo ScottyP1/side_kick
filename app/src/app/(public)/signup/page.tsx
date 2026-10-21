@@ -2,7 +2,7 @@
 
 /**
  * Sign up (/signup): a company creates its Sidekick organization. Organization name, your name, work email,
- * password (at least 10 characters, as in Setup) and plan (from lib/plans.ts; `?plan=` from the pricing page
+ * password (at least 12 characters and not breached, lib/passwords.ts) and plan (from lib/plans.ts; `?plan=` from the pricing page
  * picks one). POST /api/signup creates the organization, makes you its Org Owner, starts the free trial and
  * signs you in; then you go to checkout. Sign-up is off by default (lib/signup.ts): while it's closed the
  * page shows a "not open yet, contact us" card instead of the form. "Sign up with Microsoft" will be added here once multi-tenant Microsoft sign-in exists.
@@ -68,7 +68,7 @@ export default function SignupPage() {
             {field("org", "Organization name")}
             {field("name", "Your name", "text", undefined, "name")}
             {field("email", "Work email", "email", "One Sidekick account per email.", "username")}
-            {field("password", "Password", "password", "At least 10 characters.", "new-password")}
+            {field("password", "Password", "password", "At least 12 characters, and not one from a known data breach.", "new-password")}
             <div className="field">
               <label htmlFor="plan">Plan</label>
               <select id="plan" className="input" value={f.plan} onChange={(e) => setF({ ...f, plan: e.target.value as PlanId })}>

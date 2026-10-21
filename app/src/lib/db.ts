@@ -158,6 +158,28 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE TABLE IF NOT EXISTS settings (
   org_id TEXT PRIMARY KEY, json TEXT NOT NULL
 );
+-- Two-step sign-in (lib/mfa.ts), for portal users (account_kind 'user') and Owner Console owners ('owner').
+-- A factor is an authenticator app (kind 'totp': secret, last_step stops a code being used twice) or a
+-- passkey (kind 'passkey': credential_id, public_key, counter). enabled = 0 while still being set up.
+CREATE TABLE IF NOT EXISTS mfa_factors (
+  id TEXT PRIMARY KEY, account_kind TEXT NOT NULL, account_id TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL,
+  secret TEXT, last_step INTEGER, credential_id TEXT, public_key TEXT, counter INTEGER NOT NULL DEFAULT 0, transports TEXT,
+  enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, last_used TEXT
+);
+CREATE INDEX IF NOT EXISTS mfa_factors_account ON mfa_factors(account_kind, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS mfa_factors_credential ON mfa_factors(credential_id);
+-- One-time backup codes (only their hashes), for when the phone or passkey is lost.
+CREATE TABLE IF NOT EXISTS mfa_backup_codes (
+  id TEXT PRIMARY KEY, account_kind TEXT NOT NULL, account_id TEXT NOT NULL, code_hash TEXT NOT NULL,
+  used_at TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mfa_backup_codes_account ON mfa_backup_codes(account_kind, account_id);
+-- Short-lived challenges: a sign-in waiting for its second step ('signin', keyed by a hashed cookie token),
+-- or a passkey being added ('register'). challenge = the WebAuthn challenge, attempts = wrong codes so far.
+CREATE TABLE IF NOT EXISTS mfa_challenges (
+  token_hash TEXT PRIMARY KEY, account_kind TEXT NOT NULL, account_id TEXT NOT NULL, purpose TEXT NOT NULL,
+  challenge TEXT, attempts INTEGER NOT NULL DEFAULT 0, expires_at TEXT NOT NULL
+);
 -- Owner Console: platform operators (Sidekick's owner), separate from client users.
 CREATE TABLE IF NOT EXISTS platform_admins (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
@@ -357,6 +379,10 @@ function migrate(conn: DatabaseSync) {
   if (!has("teams_conversations", "leave_tried_at")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN leave_tried_at TEXT");
   // Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
   if (!has("workspaces", "client")) conn.exec("ALTER TABLE workspaces ADD COLUMN client TEXT");
+  // Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.
+  // Where each session was started and when it was last used (Settings → Where you're signed in).
+  for (const col of ["created_at", "last_seen", "user_agent", "ip"]) if (!has("sessions", col)) conn.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
+  if (!has("platform_admins", "must_change_password")) conn.exec("ALTER TABLE platform_admins ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
 }
 
 /**

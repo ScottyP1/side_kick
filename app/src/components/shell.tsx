@@ -309,10 +309,10 @@ function ChangeTemporaryPassword({ name, onDone }: { name: string; onDone: () =>
         <h2>Pick your own password</h2>
         <p className="muted">Welcome, {name}. You signed in with a temporary password; choose a new one to start using Sidekick.</p>
         <div className="field"><label htmlFor="tmp-cur">Temporary password</label><input id="tmp-cur" className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></div>
-        <div className="field"><label htmlFor="tmp-new">New password</label><input id="tmp-new" className="input" type="password" autoComplete="new-password" minLength={10} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 10 characters.</span></div>
+        <div className="field"><label htmlFor="tmp-new">New password</label><input id="tmp-new" className="input" type="password" autoComplete="new-password" minLength={12} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 12 characters, and not one from a known data breach. A password manager can make one.</span></div>
         {err && <p className="err">{err}</p>}
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn primary" type="submit" disabled={busy || !pw.current || pw.next.length < 10}>Save password</button>
+          <button className="btn primary" type="submit" disabled={busy || !pw.current || pw.next.length < 12}>Save password</button>
           <button className="btn ghost" type="button" onClick={signOut}>Sign out</button>
         </div>
       </form>

@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { LiveOrb } from "@/components/live-orb";
 import { api, fmtDate, Pill, usd, useReportError } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Overview = {
   stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; spendMonth: number; aiCallsMonth: number; spendScope: "org" | "you" };
@@ -36,7 +37,7 @@ export default function OverviewPage() {
     { done: (s?.workspaces ?? 0) > 0, label: "Create a workspace for a client engagement", href: "/workspaces" },
     { done: (s?.documents ?? 0) > 0, label: "Upload project documents (SOW, designs, runbooks)", href: "/knowledge" },
     { done: (s?.meetings ?? 0) > 0, label: "Import a Teams meeting transcript", href: "/meetings" },
-    { done: (s?.questions ?? 0) > 0, label: "Ask Sidekick a question about the project", href: "/knowledge" },
+    { done: (s?.questions ?? 0) > 0, label: `Ask ${BRAND.name} a question about the project`, href: "/knowledge" },
   ];
   const attention = data
     ? [
@@ -52,12 +53,12 @@ export default function OverviewPage() {
         <div>
           <div className="eyebrow">Overview</div>
           <h1>{me.org.name}</h1>
-          <p>Here&apos;s what Sidekick knows and what needs attention across your workspaces.</p>
+          <p>Here&apos;s what {BRAND.name} knows and what needs attention across your workspaces.</p>
         </div>
         <div className="actions">
           {/* Only roles that can change workspace content import meetings (canEdit in lib/auth.ts). */}
           {!["Viewer", "Billing Admin"].includes(me.user.role) && <Link className="btn" href="/meetings">Import meeting</Link>}
-          <Link className="btn primary" href="/knowledge">Ask Sidekick</Link>
+          <Link className="btn primary" href="/knowledge">Ask {BRAND.name}</Link>
         </div>
       </div>
 
@@ -93,7 +94,7 @@ export default function OverviewPage() {
             <Link className="btn small" href="/meetings">All meetings</Link>
           </div>
           <div className="list">
-            {!data?.recentMeetings.length && <div className="li muted">No meetings yet. Import a Teams transcript to see Sidekick&apos;s notes.</div>}
+            {!data?.recentMeetings.length && <div className="li muted">No meetings yet. Import a Teams transcript to see {BRAND.name}&apos;s notes.</div>}
             {data?.recentMeetings.map((m) => (
               <div key={m.id} className="li">
                 <span className="swatch" style={{ background: m.color, marginTop: 6 }} />

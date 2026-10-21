@@ -1,5 +1,6 @@
 import "server-only";
 import type { IAdaptiveCard } from "@microsoft/teams.cards";
+import { BRAND } from "../brand";
 
 /**
  * @file The Adaptive Cards Sidekick posts in Teams.
@@ -59,7 +60,7 @@ export type CardSource = { id: string; title: string; loc: string | null; type: 
  */
 export function answerCard(question: string, answer: { found: boolean; answer: string; sources: CardSource[]; blocked?: string | null }, workspace: string): IAdaptiveCard {
   const body: Block[] = [
-    ...header(`Sidekick · ${workspace}`, question),
+    ...header(`${BRAND.name} · ${workspace}`, question),
     text(answer.answer, { spacing: "Medium" }),
   ];
   if (answer.sources.length) {
@@ -86,9 +87,9 @@ export function answerCard(question: string, answer: { found: boolean; answer: s
 export function linkCard(code: string, kind: string): IAdaptiveCard {
   const where = kind === "channel" ? "channel" : "chat";
   return card([
-    ...header("Sidekick", `Link this ${where} to a group`),
+    ...header(BRAND.name, `Link this ${where} to a group`),
     text(`I don't know which group this ${where} belongs to yet, so I can't answer from its documents and meetings.`),
-    text("A Team Lead or admin can link it on the group's page in the Sidekick portal (**Teams chats**), with this code:"),
+    text(`A Team Lead or admin can link it on the group's page in the ${BRAND.name} portal (**Teams chats**), with this code:`),
     text(code, { size: "ExtraLarge", weight: "Bolder", fontType: "Monospace", horizontalAlignment: "Center", spacing: "Medium" }),
     text("The code works for 24 hours. Mention me with **link** to get a new one.", { size: "Small", isSubtle: true }),
   ]);
@@ -102,8 +103,8 @@ export function linkCard(code: string, kind: string): IAdaptiveCard {
 export function notSetUpCard(kind: string, days: number): IAdaptiveCard {
   const where = kind === "channel" ? "channel" : "chat";
   return card([
-    ...header("Sidekick", `I'm not set up for this ${where} yet`),
-    text(`A Team Lead needs to assign this ${where} to a group in the Sidekick portal. Until then I won't read, save or answer anything here.`),
+    ...header(BRAND.name, `I'm not set up for this ${where} yet`),
+    text(`A Team Lead needs to assign this ${where} to a group in the ${BRAND.name} portal. Until then I won't read, save or answer anything here.`),
     text(`If nobody assigns it within ${days} days, I'll leave the ${where}.`, { size: "Small", isSubtle: true }),
   ]);
 }
@@ -114,17 +115,17 @@ export function notSetUpCard(kind: string, days: number): IAdaptiveCard {
  */
 export function assignedCard(workspace: string, by: string, retentionDays: number): IAdaptiveCard {
   return card([
-    ...header("Sidekick", `Assigned to ${workspace}`),
-    text(`${by} assigned this chat to **${workspace}** in the Sidekick portal. From now on I read every message here to keep track of decisions, dates and to-dos, and only ${workspace}'s team can search what I learn. Messages are kept ${retentionDays} days.`),
+    ...header(BRAND.name, `Assigned to ${workspace}`),
+    text(`${by} assigned this chat to **${workspace}** in the ${BRAND.name} portal. From now on I read every message here to keep track of decisions, dates and to-dos, and only ${workspace}'s team can search what I learn. Messages are kept ${retentionDays} days.`),
     {
       type: "FactSet",
       facts: [
-        { title: "@Sidekick <question>", value: "Answer with sources" },
-        { title: "@Sidekick add @name", value: "Add someone to the group (Team Lead or admin)" },
-        { title: "@Sidekick help", value: "What I can do here" },
+        { title: `@${BRAND.name} <question>`, value: "Answer with sources" },
+        { title: `@${BRAND.name} add @name`, value: "Add someone to the group (Team Lead or admin)" },
+        { title: `@${BRAND.name} help`, value: "What I can do here" },
       ],
     },
-    text("To stop, a Team Lead or admin removes me from this chat on the group's page in Sidekick.", { size: "Small", isSubtle: true }),
+    text(`To stop, a Team Lead or admin removes me from this chat on the group's page in ${BRAND.name}.`, { size: "Small", isSubtle: true }),
   ]);
 }
 
@@ -135,7 +136,7 @@ export function assignedCard(workspace: string, by: string, retentionDays: numbe
 export function unknownTenantCard(signupUrl: string): IAdaptiveCard {
   return card(
     [
-      ...header("Sidekick", "Sidekick isn't set up for your organization yet"),
+      ...header(BRAND.name, `${BRAND.name} isn't set up for your organization yet`),
       text(`Sign up at ${signupUrl} and connect your Microsoft 365 organization. Then a Team Lead or admin adds me to this chat again and assigns it to a group.`),
       text("Until then I don't read or keep anything from this chat.", { size: "Small", isSubtle: true }),
     ],
@@ -146,16 +147,16 @@ export function unknownTenantCard(signupUrl: string): IAdaptiveCard {
 /** What Sidekick can do here, and which workspace this conversation is linked to (if any). */
 export function helpCard(workspace: string | null): IAdaptiveCard {
   return card([
-    ...header("Sidekick", workspace ? `Linked to ${workspace}` : "Not linked to a group yet"),
+    ...header(BRAND.name, workspace ? `Linked to ${workspace}` : "Not linked to a group yet"),
     text("Mention me with a question and I'll answer from this workspace's documents and meetings, with sources."),
     {
       type: "FactSet",
       facts: [
-        { title: "@Sidekick <question>", value: "Answer with sources" },
-        { title: "@Sidekick link", value: "Show which group this chat belongs to" },
-        { title: "@Sidekick add @name", value: "Add someone to this group (Team Lead or admin)" },
-        { title: "@Sidekick remove @name", value: "Take someone off this group (Team Lead or admin)" },
-        { title: "@Sidekick help", value: "Show this card" },
+        { title: `@${BRAND.name} <question>`, value: "Answer with sources" },
+        { title: `@${BRAND.name} link`, value: "Show which group this chat belongs to" },
+        { title: `@${BRAND.name} add @name`, value: "Add someone to this group (Team Lead or admin)" },
+        { title: `@${BRAND.name} remove @name`, value: "Take someone off this group (Team Lead or admin)" },
+        { title: `@${BRAND.name} help`, value: "Show this card" },
       ],
     },
     text("Depending on how an admin set up this chat, I post meeting notes and action items here after each meeting, and reminders about what's still open.", { size: "Small", isSubtle: true }),
@@ -185,7 +186,7 @@ export function meetingNotesCard(m: NotesInput): IAdaptiveCard {
   list("Decisions", m.decisions);
   list("Still open", m.openQuestions);
   if (m.actionCount) body.push(text(`${m.actionCount} action item${m.actionCount === 1 ? "" : "s"} below. Assign them or mark them done right here.`, { size: "Small", isSubtle: true, spacing: "Large" }));
-  return card(body, [{ type: "Action.OpenUrl", title: "Open in Sidekick", url: m.portalUrl }]);
+  return card(body, [{ type: "Action.OpenUrl", title: `Open in ${BRAND.name}`, url: m.portalUrl }]);
 }
 
 /** One action item as stored in `action_items`; `updatedBy` shows who last changed it from Teams. */
@@ -225,7 +226,7 @@ export function actionItemCard(a: ActionItemInput): IAdaptiveCard {
 
 /** A short announcement from Sidekick, e.g. that message tracking was switched on in this chat. */
 export function noticeCard(title: string, body: string, footnote?: string): IAdaptiveCard {
-  return card([...header("Sidekick", title), text(body), ...(footnote ? [text(footnote, { size: "Small", isSubtle: true })] : [])]);
+  return card([...header(BRAND.name, title), text(body), ...(footnote ? [text(footnote, { size: "Small", isSubtle: true })] : [])]);
 }
 
 /** Where a reminder point came from: a meeting, document or tracked Teams chat, with its date. */
@@ -288,5 +289,5 @@ export function reminderCard(r: { runId: string; workspace: string; intro: strin
     }
     body.push({ type: "Container", separator: true, spacing: "Medium", items });
   });
-  return card(body, [{ type: "Action.OpenUrl", title: "Open in Sidekick", url: r.portalUrl }]);
+  return card(body, [{ type: "Action.OpenUrl", title: `Open in ${BRAND.name}`, url: r.portalUrl }]);
 }

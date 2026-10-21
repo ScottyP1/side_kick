@@ -12,10 +12,11 @@ import { get } from "@/lib/db";
 import type { TeamsConversation } from "@/lib/teams/bot";
 import { leaveChat } from "@/lib/teams/install";
 import { tenantOfOrg } from "@/lib/tenants";
+import { BRAND } from "@/lib/brand";
 
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
-  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the group's Team Lead can remove Sidekick from a chat.");
+  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, `Only Org Owners, Org Admins and the group's Team Lead can remove ${BRAND.name} from a chat.`);
   const { id } = await readJson<{ id?: unknown }>(req);
   const tenant = await tenantOfOrg(user.org_id);
   const conv = typeof id === "string" ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", id) : undefined;
@@ -28,7 +29,7 @@ export const POST = handle(async (req: Request) => {
       : Boolean(conv.added_by_oid) && (await get<{ entra_oid: string | null }>("SELECT entra_oid FROM users WHERE id = ?", user.id))?.entra_oid === conv.added_by_oid;
     if (!mine) throw new HttpError(404, "Teams chat not found.");
   }
-  if (conv.kind === "personal") throw new HttpError(400, "1:1 chats with Sidekick are removed in Teams by the person themselves.");
+  if (conv.kind === "personal") throw new HttpError(400, `1:1 chats with ${BRAND.name} are removed in Teams by the person themselves.`);
   await leaveChat(conv, "removed", { by: user, strict: true });
   return { ok: true };
 });

@@ -10,6 +10,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { BRAND } from "@/lib/brand";
 
 let cached: Promise<boolean | null> | null = null;
 /** Whether sign-up is open (null = unknown). One request per page load, shared by every button. */
@@ -28,7 +29,7 @@ export function SignupClosedNotice() {
   return (
     <div className="callout warn" role="note">
       <span>
-        <b>Sign-up isn&apos;t open yet.</b> Sidekick is taking new organizations by invitation for now. <Link href="/support">Contact us</Link> and we&apos;ll set yours up.
+        <b>Sign-up isn&apos;t open yet.</b> {BRAND.name} is taking new organizations by invitation for now. <Link href="/support">Contact us</Link> and we&apos;ll set yours up.
       </span>
     </div>
   );

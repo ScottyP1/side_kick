@@ -17,6 +17,7 @@ import { FLASH_COOKIE, FLASH_SECONDS } from "@/lib/flash";
 import { finishMicrosoftSignIn, OIDC_COOKIE, redirectUri, safeNext, type MicrosoftIdentity } from "@/lib/entra";
 import { finishAdminConsent, isConsentReply } from "@/lib/directory";
 import { tieOrgToTenant } from "@/lib/tenants";
+import { BRAND } from "@/lib/brand";
 
 export const GET = handle(async (req: Request) => {
   const jar = await cookies();
@@ -52,14 +53,14 @@ export const GET = handle(async (req: Request) => {
 /** Finds the Sidekick person for this Microsoft account, remembering their account id on first sign-in. */
 async function signInAs(who: MicrosoftIdentity): Promise<string> {
   const org = await get<{ id: string; name: string; status: string }>("SELECT id, name, status FROM orgs WHERE entra_tenant_id = ?", who.tenantId);
-  if (!org) throw new HttpError(403, "Your Microsoft organization isn't connected to Sidekick yet. Ask your Org Owner to connect it in Settings, or sign in with your email and password.");
-  if (org.status === "Suspended") throw new HttpError(403, "This organization's Sidekick access is paused. Contact the Sidekick team.");
+  if (!org) throw new HttpError(403, `Your Microsoft organization isn't connected to ${BRAND.name} yet. Ask your Org Owner to connect it in Settings, or sign in with your email and password.`);
+  if (org.status === "Suspended") throw new HttpError(403, `This organization's ${BRAND.name} access is paused. Contact the ${BRAND.name} team.`);
   let user = await get<{ id: string; org_id: string; name: string }>("SELECT id, org_id, name FROM users WHERE org_id = ? AND entra_oid = ?", org.id, who.objectId);
   if (!user && who.email) {
     user = await get<{ id: string; org_id: string; name: string }>("SELECT id, org_id, name FROM users WHERE org_id = ? AND lower(email) = ? AND entra_oid IS NULL", org.id, who.email);
     if (user) await run("UPDATE users SET entra_oid = ? WHERE id = ?", who.objectId, user.id);
   }
-  if (!user) throw new HttpError(403, `You haven't been added to ${org.name} in Sidekick yet. Ask an Org Admin to add ${who.email || "your work email"} on Users & access.`);
+  if (!user) throw new HttpError(403, `You haven't been added to ${org.name} in ${BRAND.name} yet. Ask an Org Admin to add ${who.email || "your work email"} on Users & access.`);
   // Microsoft handles the password now, so a pending "pick a new password" step no longer applies.
   await run("UPDATE users SET must_change_password = 0 WHERE id = ?", user.id);
   await audit(user, "Signed in with Microsoft", "Sign-in");

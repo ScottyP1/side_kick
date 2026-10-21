@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, Icon, Pill, useReportError } from "@/components/ui";
 import { Avatar, groupHealth, type Group } from "@/components/groups";
+import { BRAND } from "@/lib/brand";
 
 type Filter = "all" | "attention" | "setup";
 
@@ -37,7 +38,7 @@ export default function GroupsPage() {
         <div>
           <div className="eyebrow">Groups</div>
           <h1>{admin ? "Your client teams" : "Your groups"}</h1>
-          <p>One group per client team. Each has its own people, Teams chats and documents, and Sidekick never mixes them.</p>
+          <p>One group per client team. Each has its own people, Teams chats and documents, and {BRAND.name} never mixes them.</p>
         </div>
         {admin && (
           <div className="actions">

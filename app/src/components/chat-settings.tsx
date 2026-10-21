@@ -10,6 +10,7 @@
 
 import { useMemo, useState } from "react";
 import { api, fmtTime, Modal, Pill, Switch, useToast } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 /** A linked chat's settings, as returned by GET /api/teams-links. */
 export type ChatSettings = {
@@ -129,13 +130,13 @@ export function ChatSettingsModal({
       }
     >
       <p className="muted" style={{ marginTop: 0 }}>
-        Choose what Sidekick does in this {where}. {chat.guests ? "Client guests are in it, so it only ever gets Shareable items." : "It's internal, so it can get internal items too."} Changes are recorded in the audit log.
+        Choose what {BRAND.name} does in this {where}. {chat.guests ? "Client guests are in it, so it only ever gets Shareable items." : "It's internal, so it can get internal items too."} Changes are recorded in the audit log.
       </p>
       <div className="list">
         {row("Meeting notes", `Post the notes and action items here after each meeting in ${chat.workspace}. Turn it off in the other chats to keep notes in one dedicated chat.`, s.notes, (v) => setS({ ...s, notes: v }))}
         {row(
           "Keep track of every message",
-          `Sidekick reads the messages here (not only @mentions), so it can answer from them and spot what changed, like a new cutover date. Everyone here is told when you switch it. Kept 90 days.${chat.savedMessages ? ` ${chat.savedMessages} saved so far.` : ""}`,
+          `${BRAND.name} reads the messages here (not only @mentions), so it can answer from them and spot what changed, like a new cutover date. Everyone here is told when you switch it. Kept 90 days.${chat.savedMessages ? ` ${chat.savedMessages} saved so far.` : ""}`,
           s.track,
           (v) => setS({ ...s, track: v }),
           personal,

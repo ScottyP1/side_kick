@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { api, fmtTime, Icon, useReportError } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Row = { id: number; actor: string; action: string; kind: string; created_at: string; workspace: string | null };
 
@@ -16,12 +17,12 @@ type Health = { database: { engine: string }; claude: boolean; search: string; t
 
 /** The data path, step by step, for the setup that is running now. */
 function flowFor(h: Health | null): [string, string][] {
-  const search = !h ? "…" : h.search === "azure-hybrid" ? "Azure AI Search (keyword + meaning), filtered to your workspace" : h.search === "azure-keyword" ? "Azure AI Search (keyword), filtered to your workspace" : "Keyword search inside Sidekick's own database";
+  const search = !h ? "…" : h.search === "azure-hybrid" ? "Azure AI Search (keyword + meaning), filtered to your workspace" : h.search === "azure-keyword" ? "Azure AI Search (keyword), filtered to your workspace" : `Keyword search inside ${BRAND.name}'s own database`;
   return [
     ["Your browser", "Signed-in session, HTTPS in production"],
-    ["Sidekick server", "Checks role and workspace on every request"],
+    [`${BRAND.name} server`, "Checks role and workspace on every request"],
     ["AI answers", !h ? "…" : h.claude ? "Working: the AI sees only the passages needed for one answer, and never trains on your data" : "Not set up yet"],
-    ["Database", !h ? "…" : h.database.engine === "postgres" ? "PostgreSQL" : "SQLite on the machine running Sidekick"],
+    ["Database", !h ? "…" : h.database.engine === "postgres" ? "PostgreSQL" : `SQLite on the machine running ${BRAND.name}`],
     ["Search", search],
     ...(h?.teams ? [["Microsoft Teams", "Only chats and channels an admin linked to a workspace"] as [string, string]] : []),
   ];
@@ -49,7 +50,7 @@ export default function AuditPage() {
         <div>
           <div className="eyebrow">Security & audit</div>
           <h1>Every action, recorded</h1>
-          <p>Sign-ins, access changes, uploads, deletions and every action Sidekick takes.</p>
+          <p>Sign-ins, access changes, uploads, deletions and every action {BRAND.name} takes.</p>
         </div>
       </div>
       <div className="panel">
@@ -88,7 +89,7 @@ export default function AuditPage() {
               {shown.map((r) => (
                 <tr key={r.id}>
                   <td className="ts" style={{ whiteSpace: "nowrap" }}>{fmtTime(r.created_at)}</td>
-                  <td>{r.actor === "Sidekick" ? <b style={{ color: "var(--accent)" }}>Sidekick</b> : r.actor}</td>
+                  <td>{r.actor === BRAND.name ? <b style={{ color: "var(--accent)" }}>{BRAND.name}</b> : r.actor}</td>
                   <td>{r.action}</td>
                   <td className="muted">{r.workspace ?? "—"}</td>
                   <td><span className="tag">{r.kind}</span></td>

@@ -22,9 +22,10 @@
 import "server-only";
 import { audit, HttpError } from "./auth";
 import { get, now, run } from "./db";
-import { getSubscription } from "./billing";
+import { activeGroupCount, getSubscription } from "./billing";
 import { withErrorDetails } from "./api";
-import { ENTERPRISE, LIMIT_KEYS, LIMIT_LABEL, limitsOf, limitState, parseCustomLimits, planById, UNLIMITED, type LimitKey, type Plan, type PlanLimits } from "./plans";
+import { ENTERPRISE, groupOptions, LIMIT_KEYS, LIMIT_LABEL, limitsWithExtras, limitState, parseCustomLimits, planById, planWithExtras, UNLIMITED, usd, type GroupOption, type LimitKey, type Plan, type PlanLimits } from "./plans";
+import { BRAND } from "./brand";
 
 /** The custom terms the Sidekick team set for one organization (Owner Console). */
 export type OrgTerms = {
@@ -54,17 +55,21 @@ export async function orgTerms(orgId: string): Promise<OrgTerms> {
 }
 
 /**
- * The organization's plan (null = managed by the Sidekick team, no subscription) and its effective limits:
- * the plan's (Enterprise: Business numbers), or none for a managed client, overlaid with the team's custom
- * limits, and the AI credit override (`org_terms.ai_credit_usd`) on top.
+ * The organization's plan (null = managed by the Sidekick team, no subscription), its extra groups and its
+ * effective limits: the plan's (Enterprise: the `ENTERPRISE` defaults) plus what each extra group adds, or
+ * none for a managed client, overlaid with the team's custom limits, and the AI credit override
+ * (`org_terms.ai_credit_usd`) on top. A plan id this version doesn't know is treated as Enterprise.
  */
-export async function orgPlan(orgId: string): Promise<{ plan: Plan | null; limits: PlanLimits; terms: OrgTerms }> {
+export async function orgPlan(orgId: string): Promise<{ plan: Plan | null; extras: number; limits: PlanLimits; terms: OrgTerms }> {
   const [sub, terms] = await Promise.all([getSubscription(orgId), orgTerms(orgId)]);
   const plan = sub ? (planById(sub.plan) ?? ENTERPRISE) : null;
-  const limits: PlanLimits = { ...(plan ? limitsOf(plan) : UNLIMITED), ...terms.limits };
+  const extras = plan?.selfService ? Number(sub?.extra_groups ?? 0) : 0;
+  const limits: PlanLimits = { ...(plan ? limitsWithExtras(plan, extras) : UNLIMITED), ...terms.limits };
   if (terms.aiCreditUsd !== null) limits.aiCreditUsd = terms.aiCreditUsd;
-  return { plan, limits, terms };
+  return { plan, extras, limits, terms };
 }
+
+
 
 /** Start of this calendar month in UTC, as an ISO string (meeting hours and the AI credit reset then). */
 export function monthStart(at = new Date()) {
@@ -76,14 +81,15 @@ export const monthKey = (at = new Date()) => monthStart(at).slice(0, 7);
 const count = async (sql: string, ...p: string[]) => Number((await get<{ n: number | string | null }>(sql, ...p))?.n ?? 0);
 
 /**
- * How much of each limit the organization uses now. Meeting hours are this month's; the AI credit's use
+ * How much of each limit the organization uses now. Groups that are ending (scheduled for deletion) don't
+ * count. Meeting hours are this month's; the AI credit's use
  * is filled in by lib/credit.ts (here it's 0, so limits stay cheap to count). Connectors are 0 until
  * connectors to outside tools exist.
  */
 export async function usageCounts(orgId: string): Promise<Record<LimitKey, number>> {
   const [seats, workspaces, chats, minutes, documents] = await Promise.all([
     count("SELECT COUNT(*) AS n FROM users WHERE org_id = ?", orgId),
-    count("SELECT COUNT(*) AS n FROM workspaces WHERE org_id = ?", orgId),
+    activeGroupCount(orgId),
     count("SELECT COUNT(*) AS n FROM teams_conversations WHERE org_id = ? AND workspace_id IS NOT NULL", orgId),
     count("SELECT COALESCE(SUM(duration_min), 0) AS n FROM meetings WHERE org_id = ? AND created_at >= ?", orgId, monthStart()),
     count("SELECT COUNT(*) AS n FROM documents WHERE org_id = ?", orgId),
@@ -105,12 +111,32 @@ export async function limitReport(orgId: string, aiUsedUsd = 0): Promise<{ plan:
   return { plan, lines: LIMIT_KEYS.map((key) => ({ key, label: LIMIT_LABEL[key].many, ...limitState(used[key], limits[key]) })) };
 }
 
-/** A limit was reached: 402 with `kind: "limit"` and the limit's key, so the page can show an upgrade note. */
+/**
+ * A limit was reached: 402 with `kind: "limit"` and the limit's key, so the page can show an upgrade note.
+ * For the group limit on a self-service plan it also carries `options` (see `groupOptions` in lib/plans.ts):
+ * the extra groups and the upgrade that would make room, with their monthly prices, and `need` (groups).
+ */
 export class LimitError extends HttpError {
-  constructor(public limit: LimitKey, message: string) {
+  constructor(public limit: LimitKey, message: string, extra: { options?: ReturnType<typeof groupOptions>; need?: number } = {}) {
     super(402, message);
-    withErrorDetails(this, { kind: "limit", limit });
+    withErrorDetails(this, { kind: "limit", limit, ...(extra.options ? { options: extra.options, need: extra.need ?? 0 } : {}) });
   }
+}
+
+const optionText = (o: GroupOption) => `${planWithExtras(planById(o.plan)!, o.extras)} for ${usd(o.priceUsd)} a month`;
+
+/**
+ * The plain "how to get more groups" sentence for a self-service plan: the cheaper of adding extra groups or
+ * upgrading first, both with their monthly price, e.g. "An Org Owner or Billing Admin can add 2 extra groups
+ * (Starter + 2 extra groups for $457 a month), or move to Team for $699 a month on Usage & billing."
+ */
+export function groupOptionsText(o: ReturnType<typeof groupOptions>, extras: number): string {
+  const add = o.extra.extras - extras;
+  const extraLine = `add ${add} extra group${add === 1 ? "" : "s"} (${optionText(o.extra)})`;
+  const upLine = o.upgrade ? `move to ${optionText(o.upgrade)}` : null;
+  const lines = !upLine ? [extraLine] : o.cheaper === "extra" ? [extraLine, upLine] : [upLine, extraLine];
+  const text = lines.join(", or ");
+  return `An Org Owner or Billing Admin can ${text} on Usage & billing.`;
 }
 
 const fmt = (key: LimitKey, n: number) => (key === "meetingHours" || key === "liveMeetingHours" ? `${Math.round(n * 10) / 10}` : String(n));
@@ -122,7 +148,7 @@ const fmt = (key: LimitKey, n: number) => (key === "meetingHours" || key === "li
  * Not for the AI credit (see lib/credit.ts).
  */
 export async function assertCanAdd(orgId: string, key: Exclude<LimitKey, "aiCreditUsd">, amount = 1) {
-  const { plan, limits } = await orgPlan(orgId);
+  const { plan, extras, limits, terms } = await orgPlan(orgId);
   const limit = limits[key];
   if (limit === null) return;
   const used = (await usageCounts(orgId))[key];
@@ -135,8 +161,16 @@ export async function assertCanAdd(orgId: string, key: Exclude<LimitKey, "aiCred
     : used ? ` and you have ${used}` : "";
   const how = plan?.selfService
     ? "An Org Owner or Billing Admin can move to a bigger plan on Usage & billing."
-    : "Contact the Sidekick team to raise it.";
+    : `Contact the ${BRAND.name} team to raise it.`;
   const keep = key === "meetingHours" || key === "liveMeetingHours" ? " Meeting hours start again on the 1st of next month." : "";
+  // Groups on a self-service plan: say exactly what would make room, cheapest first, with the prices
+  // (not when the Sidekick team set a custom group limit: extra groups wouldn't change that).
+  if (key === "workspaces" && plan?.selfService && !("workspaces" in terms.limits)) {
+    const need = Math.ceil(used + amount);
+    const options = groupOptions(plan, extras, need);
+    const planLabel = `Your ${planWithExtras(plan, extras)} plan`;
+    throw new LimitError(key, `${planLabel} ${allows}${now}. ${groupOptionsText(options, extras)} Groups that are ending don't count.`, { options, need });
+  }
   throw new LimitError(key, `${planName} ${allows}${now}. ${how}${keep}`);
 }
 
@@ -195,6 +229,6 @@ export async function saveTerms(orgId: string, body: Record<string, unknown>, ow
     orgId, Object.keys(next.limits).length ? JSON.stringify(next.limits) : null, next.aiCreditUsd, next.monthlyPriceUsd, next.partner, next.askPerHour, ownerName, now(),
   );
   const summary = changes.join("; ");
-  await audit({ org_id: orgId, name: "Sidekick team" }, `Set plan terms: ${summary}`, "Billing");
+  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Set plan terms: ${summary}`, "Billing");
   return summary;
 }

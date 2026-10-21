@@ -4,18 +4,18 @@
   "version": "1.3.0",
   "id": "{{BOT_ID}}",
   "developer": {
-    "name": "Sidekick",
+    "name": "{{BRAND_NAME}}",
     "websiteUrl": "{{WEBSITE_URL}}",
     "privacyUrl": "{{WEBSITE_URL}}/privacy",
     "termsOfUseUrl": "{{WEBSITE_URL}}/terms"
   },
-  "name": { "short": "Sidekick", "full": "Sidekick: AI teammate for client teams" },
+  "name": { "short": "{{BRAND_SHORT}}", "full": "{{BRAND_NAME}}: {{BRAND_TAGLINE}}" },
   "description": {
     "short": "Answers from your workspace's documents and meetings, with sources.",
-    "full": "Mention @Sidekick in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. Your organization signs up at Sidekick first; when someone adds Sidekick to a chat, an admin or the group's leader assigns it to a workspace in the Sidekick portal, and leaders can add teammates right from the chat with @Sidekick add. After each meeting Sidekick posts the notes, decisions and action items, and you can assign or close action items right from the card. In chats an admin chooses to track, Sidekick reads the messages to keep track of decisions and dates, and posts reminders about what's still open."
+    "full": "Mention @{{BRAND_SHORT}} in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. Your organization signs up at {{BRAND_SHORT}} first; when someone adds {{BRAND_SHORT}} to a chat, an admin or the group's leader assigns it to a workspace in the {{BRAND_SHORT}} portal, and leaders can add teammates right from the chat with @{{BRAND_SHORT}} add. After each meeting {{BRAND_SHORT}} posts the notes, decisions and action items, and you can assign or close action items right from the card. In chats an admin chooses to track, {{BRAND_SHORT}} reads the messages to keep track of decisions and dates, and posts reminders about what's still open."
   },
   "icons": { "color": "color.png", "outline": "outline.png" },
-  "accentColor": "#4F46E5",
+  "accentColor": "{{BRAND_ACCENT}}",
   "supportsChannelFeatures": "tier1",
   "bots": [
     {
@@ -27,7 +27,7 @@
         {
           "scopes": ["personal", "team", "groupChat"],
           "commands": [
-            { "title": "help", "description": "What Sidekick can do here" },
+            { "title": "help", "description": "What {{BRAND_SHORT}} can do here" },
             { "title": "link", "description": "Get the code to link this chat to a workspace" },
             { "title": "add", "description": "Add someone to this workspace: add @name (Team Lead or Org Admin)" },
             { "title": "remove", "description": "Take someone off this workspace: remove @name (Team Lead or Org Admin)" }

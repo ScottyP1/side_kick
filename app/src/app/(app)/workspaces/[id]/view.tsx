@@ -8,7 +8,10 @@
  * - **Teams chats**: the chats assigned to the group, with their settings (notes, reminders, client guests;
  *   components/chat-settings.tsx), unassign, and assigning a chat with the code Sidekick shows in Teams;
  * - **Documents**: what Sidekick answers from, with a link to Knowledge & docs to upload;
- * - **Settings** (Org Owners/Admins): name, client, engagement code, delete.
+ * - **Settings** (Org Owners/Admins): name, client, engagement code, **Export** (zip of everything in it),
+ *   **End this group** (engagement over: read-only now, deleted on a date, with a deletion certificate;
+ *   lib/rolloff.ts) or cancel the ending, and delete now.
+ * An ending group shows a banner with its deletion date on every tab.
  * Anyone in the group can open it; people outside it get "not found" (the workspace wall).
  */
 
@@ -16,9 +19,11 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
+import { GROUP_DEFAULT_DAYS, MAX_ROLLOFF_DAYS, MIN_GROUP_DAYS } from "@/lib/rolloff-policy";
 import { api, fmtDate, Icon, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
 import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
 import { Avatar, groupHealth, PeoplePicker, type Group, type OrgPerson } from "@/components/groups";
+import { BRAND } from "@/lib/brand";
 
 type Member = { id: string; name: string; email?: string; role: string; microsoft: number };
 type TeamsLink = {
@@ -84,10 +89,15 @@ export default function GroupView() {
         <div>
           {group.client && <div className="eyebrow">{group.client}</div>}
           <h1>{group.name}</h1>
-          <p>{group.leads.some((l) => l.id === me.user.id) ? "You lead this group. Add your people, assign your team's Teams chats and keep the key documents up to date." : "One client team: its people, Teams chats and documents. Sidekick only answers from what's in this group."}</p>
+          <p>{group.leads.some((l) => l.id === me.user.id) ? "You lead this group. Add your people, assign your team's Teams chats and keep the key documents up to date." : `One client team: its people, Teams chats and documents. ${BRAND.name} only answers from what's in this group.`}</p>
         </div>
         <div className="actions"><span title={why}><Pill kind={k}>{label}</Pill></span>{group.code && <span className="tag mono">{group.code}</span>}</div>
       </div>
+      {group.ending && (
+        <div className="callout bad" style={{ marginBottom: 14 }}>
+          <span>This group is ending: it&apos;s read-only and everything in it will be deleted on <b>{fmtDate(group.ending.deleteOn)}</b>.{me.user.admin ? " Download it or cancel the ending on the Settings tab." : " Ask an Org Owner or Org Admin if you need anything from it."}</span>
+        </div>
+      )}
       <div className="tabs" role="tablist">
         {tb("overview", "Overview")}
         {tb("people", "People", members.length)}
@@ -100,7 +110,7 @@ export default function GroupView() {
       {tab === "chats" && <Chats group={group} links={links} canManage={canManage} reload={load} />}
       {tab === "docs" && <Docs docs={docs} openDocs={openDocs} />}
       {tab === "settings" && me.user.admin && (
-        <Settings group={group} onSaved={async () => { await reload(); await load(); toast("Group updated."); }} onDeleted={async () => { await reload(); router.push("/workspaces"); }} />
+        <Settings group={group} onSaved={async () => { await reload(); await load(); toast("Group updated."); }} onChanged={async () => { await reload(); await load(); }} onDeleted={async () => { await reload(); router.push("/workspaces"); }} />
       )}
     </>
   );
@@ -241,7 +251,7 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
       const r = await api<{ name: string | null }>("/api/teams-links", { method: "POST", json: { ...form, ws: group.id } });
       setLinking(false);
       await reload();
-      toast(`Assigned “${r.name ?? "Teams chat"}” to ${group.name}. Sidekick confirmed it in Teams.`);
+      toast(`Assigned “${r.name ?? "Teams chat"}” to ${group.name}. ${BRAND.name} confirmed it in Teams.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't assign that chat.");
     }
@@ -255,7 +265,7 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
     }
   };
   const unlink = async (l: TeamsLink) => {
-    if (!confirm(`Unassign “${l.name ?? "this chat"}” from ${group.name}? Sidekick stops answering and posting there, and forgets the messages it saved from it.`)) return;
+    if (!confirm(`Unassign “${l.name ?? "this chat"}” from ${group.name}? ${BRAND.name} stops answering and posting there, and forgets the messages it saved from it.`)) return;
     try {
       await api(`/api/teams-links?id=${encodeURIComponent(l.id)}`, { method: "DELETE" });
       await reload();
@@ -271,16 +281,16 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
         <div className="panel-h">
           <div>
             <h2>Teams chats</h2>
-            <span className="muted" style={{ fontSize: 12.5 }}>In these chats Sidekick answers from {group.name} only. Choose per chat whether it posts meeting notes and reminders.</span>
+            <span className="muted" style={{ fontSize: 12.5 }}>In these chats {BRAND.name} answers from {group.name} only. Choose per chat whether it posts meeting notes and reminders.</span>
           </div>
           {canManage && <button className="btn" onClick={() => { setForm({ code: "", guests: false }); setError(""); setLinking(true); }}><Icon n="plus" />Assign a chat</button>}
         </div>
         {!links.length ? (
-          <div className="empty"><span>{canManage ? "No chats yet. Add Sidekick to your team's Teams chat, mention it with “link”, then assign the chat here with the code it shows." : "No chats yet. The group's Team Lead assigns Teams chats here."}</span></div>
+          <div className="empty"><span>{canManage ? `No chats yet. Add ${BRAND.name} to your team's Teams chat, mention it with “link”, then assign the chat here with the code it shows.` : "No chats yet. The group's Team Lead assigns Teams chats here."}</span></div>
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Chat</th><th>Client guests</th><th>Sidekick here</th><th>Assigned</th><th>Last activity</th>{canManage && <th />}</tr></thead>
+              <thead><tr><th>Chat</th><th>Client guests</th><th>{BRAND.name} here</th><th>Assigned</th><th>Last activity</th>{canManage && <th />}</tr></thead>
               <tbody>
                 {links.map((l) => (
                   <tr key={l.id}>
@@ -320,7 +330,7 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
       {settingsFor && <ChatSettingsModal chat={settingsFor} onClose={() => setSettingsFor(null)} onSaved={() => reload().catch(reportError)} />}
       {linking && (
         <Modal title={`Assign a Teams chat to ${group.name}`} onClose={() => setLinking(false)} footer={<><button className="btn" onClick={() => setLinking(false)}>Cancel</button><button className="btn primary" disabled={!form.code.trim()} onClick={link}>Assign</button></>}>
-          <p className="muted" style={{ marginTop: 0 }}>In Teams, add Sidekick to the chat or channel and mention it with “link”. It replies with an 8-character code.</p>
+          <p className="muted" style={{ marginTop: 0 }}>In Teams, add {BRAND.name} to the chat or channel and mention it with “link”. It replies with an 8-character code.</p>
           <div className="field">
             <label htmlFor="lcode">Code from Teams</label>
             <input id="lcode" className="input mono" placeholder="ABCD-2345" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} autoFocus />
@@ -341,11 +351,11 @@ function Docs({ docs, openDocs }: { docs: Doc[]; openDocs: () => void }) {
   return (
     <div className="panel">
       <div className="panel-h">
-        <div><h2>Documents</h2><span className="muted" style={{ fontSize: 12.5 }}>What Sidekick answers from in this group. Shareable documents may be used in chats with the client.</span></div>
+        <div><h2>Documents</h2><span className="muted" style={{ fontSize: 12.5 }}>What {BRAND.name} answers from in this group. Shareable documents may be used in chats with the client.</span></div>
         <button className="btn primary" onClick={openDocs}><Icon n="upload" />Upload or manage</button>
       </div>
       {!docs.length ? (
-        <div className="empty"><span>No documents yet. Upload specs, plans and runbooks so Sidekick can answer questions about this client.</span></div>
+        <div className="empty"><span>No documents yet. Upload specs, plans and runbooks so {BRAND.name} can answer questions about this client.</span></div>
       ) : (
         <div className="table-wrap">
           <table>
@@ -367,8 +377,78 @@ function Docs({ docs, openDocs }: { docs: Doc[]; openDocs: () => void }) {
   );
 }
 
-/** Name, client and engagement code, and deleting the group (Org Owners and Admins). */
-function Settings({ group, onSaved, onDeleted }: { group: Group; onSaved: () => Promise<void>; onDeleted: () => Promise<void> }) {
+/**
+ * Export, end (roll-off) or cancel ending a group (Org Owners and Admins). Ending: read-only now, its Teams
+ * chats are told and unlinked, it stops counting toward the plan's groups, and it's deleted on the date
+ * (POST/DELETE /api/workspaces/:id/rolloff). Export: GET /api/workspaces/:id/export (a zip download).
+ */
+function RollOff({ group, onChanged }: { group: Group; onChanged: () => Promise<void> }) {
+  const toast = useToast();
+  const [days, setDays] = useState(GROUP_DEFAULT_DAYS);
+  const [today] = useState(() => Date.now());
+  const [asking, setAsking] = useState(false);
+  const [error, setError] = useState("");
+  const path = `/api/workspaces/${encodeURIComponent(group.id)}/rolloff`;
+  const end = async () => {
+    setError("");
+    try {
+      await api(path, { method: "POST", json: { days } });
+      toast(`“${group.name}” is ending.`);
+      setAsking(false);
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't end the group.");
+      setAsking(false);
+    }
+  };
+  const keep = async () => {
+    setError("");
+    try {
+      const r = await api<{ relinked: number }>(path, { method: "DELETE" });
+      toast(`“${group.name}” is a normal group again${r.relinked ? `; ${r.relinked} Teams chat${r.relinked === 1 ? "" : "s"} relinked` : ""}.`);
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't cancel the ending.");
+    }
+  };
+  const when = new Date(today + days * 86400_000);
+  return (
+    <div className="panel">
+      <div className="panel-h"><h2>When the engagement ends</h2>{group.ending && <Pill kind="bad">Ending</Pill>}</div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 640 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <a className="btn" href={`/api/workspaces/${encodeURIComponent(group.id)}/export`}><Icon n="upload" /> Export everything (zip)</a>
+          <span className="muted" style={{ fontSize: 13 }}>Documents&apos; text, meeting notes, decisions and action items, questions and gaps, a Teams chat summary and the people, with an index page.</span>
+        </div>
+        {group.ending ? (
+          <>
+            <p style={{ margin: 0 }}>Ending: read-only, and everything is deleted on <b>{fmtDate(group.ending.deleteOn)}</b> (set by {group.ending.requestedBy}). A deletion certificate goes into the audit log (Settings → Roll-offs and certificates).</p>
+            <div className="row"><button className="btn" onClick={keep}>Cancel the ending</button></div>
+          </>
+        ) : (
+          <>
+            <p className="muted" style={{ margin: 0 }}>Ending a group makes it read-only straight away, tells and unlinks its Teams chats, and stops it counting toward your plan&apos;s groups. You can export and cancel until the date; then everything in it is deleted and you get a deletion certificate.</p>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <label htmlFor="end-days">Delete in</label>
+              <input id="end-days" className="input num" type="number" min={MIN_GROUP_DAYS} max={MAX_ROLLOFF_DAYS} style={{ width: 80 }} value={days} onChange={(e) => setDays(Math.max(MIN_GROUP_DAYS, Math.min(MAX_ROLLOFF_DAYS, Math.floor(Number(e.target.value) || MIN_GROUP_DAYS))))} />
+              <span>days ({fmtDate(when.toISOString())})</span>
+              <button className="btn danger" onClick={() => setAsking(true)}>End this group…</button>
+            </div>
+          </>
+        )}
+        {error && <p className="err" role="alert" style={{ margin: 0 }}>{error}</p>}
+      </div>
+      {asking && (
+        <Modal title={`End “${group.name}”?`} onClose={() => setAsking(false)} footer={<><button className="btn" onClick={() => setAsking(false)}>Back</button><button className="btn danger solid" onClick={end}>End group</button></>}>
+          <p style={{ margin: 0 }}>The group turns read-only now and its Teams chats are told and unlinked. Everything in it (documents, meetings, notes, questions, saved chat messages) is deleted on <b>{fmtDate(when.toISOString())}</b>. Export it first if you need a copy. You can cancel until then.</p>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/** Name, client and engagement code, and deleting the group now (Org Owners and Admins). */
+function Settings({ group, onSaved, onChanged, onDeleted }: { group: Group; onSaved: () => Promise<void>; onChanged: () => Promise<void>; onDeleted: () => Promise<void> }) {
   const toast = useToast();
   const [form, setForm] = useState({ name: group.name, client: group.client ?? "", code: group.code ?? "" });
   const [error, setError] = useState("");
@@ -389,7 +469,7 @@ function Settings({ group, onSaved, onDeleted }: { group: Group; onSaved: () => 
       const n = (k: number, one: string) => `${k} ${one}${k === 1 ? "" : "s"}`;
       const what = [n(c.documents, "document"), n(c.meetings, "meeting"), n(c.actionItems, "action item"), n(c.questions, "asked question")].join(", ");
       const chats = c.chats ? ` ${n(c.chats, "Teams chat")} will be unassigned.` : "";
-      if (!confirm(`Delete the group “${group.name}”? This permanently deletes ${what}, its knowledge map, guardrail rules, saved Teams messages and reminders.${chats} The audit log and usage records are kept. This can't be undone.`)) return;
+      if (!confirm(`Delete the group “${group.name}” now? This permanently deletes ${what}, its knowledge map, guardrail rules, saved Teams messages and reminders.${chats} The audit log, usage records and a deletion certificate are kept. This can't be undone. (To give people time to export, use “End this group” instead.)`)) return;
       await api(path, { method: "DELETE" });
       toast(`Group “${group.name}” deleted.`);
       await onDeleted();
@@ -400,14 +480,17 @@ function Settings({ group, onSaved, onDeleted }: { group: Group; onSaved: () => 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
 
   return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <RollOff group={group} onChanged={onChanged} />
     <div className="panel">
       <form className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 560 }} onSubmit={(e) => { e.preventDefault(); if (form.name.trim()) save(); }}>
         <div className="field"><label htmlFor="s-name">Group name</label><input id="s-name" className="input" value={form.name} onChange={set("name")} /></div>
         <div className="field"><label htmlFor="s-client">Client</label><input id="s-client" className="input" value={form.client} onChange={set("client")} placeholder="e.g. Northwind Bank" /></div>
         <div className="field"><label htmlFor="s-code">Engagement code (optional)</label><input id="s-code" className="input mono" value={form.code} onChange={set("code")} placeholder="NWB-2026-014" /></div>
         {error && <p className="err" style={{ margin: 0 }}>{error}</p>}
-        <div className="row"><button type="submit" className="btn primary" disabled={!form.name.trim()}>Save</button><span style={{ flex: 1 }} /><button type="button" className="btn danger" onClick={remove}>Delete group…</button></div>
+        <div className="row"><button type="submit" className="btn primary" disabled={!form.name.trim() || !!group.ending}>Save</button><span style={{ flex: 1 }} /><button type="button" className="btn danger" onClick={remove}>Delete group now…</button></div>
       </form>
+    </div>
     </div>
   );
 }

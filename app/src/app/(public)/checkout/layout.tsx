@@ -4,8 +4,9 @@
  */
 import type { Metadata } from "next";
 import { NOINDEX } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 
-export const metadata: Metadata = { ...NOINDEX, title: "Checkout · Sidekick" };
+export const metadata: Metadata = { ...NOINDEX, title: `Checkout · ${BRAND.name}` };
 
 export default function CheckoutLayout({ children }: { children: React.ReactNode }) {
   return children;

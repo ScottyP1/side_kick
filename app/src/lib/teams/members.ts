@@ -20,6 +20,7 @@ import { audit, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, type Role, ty
 import { get, run } from "../db";
 import { findOrCreateMicrosoftUser } from "../directory";
 import { span } from "../trace";
+import { BRAND } from "../brand";
 
 /** A person mentioned in the command, as the Teams chat roster describes them. */
 export type ChatPerson = { name: string; objectId?: string; email?: string; tenantId?: string; guest: boolean };
@@ -50,12 +51,12 @@ export async function workspaceMemberCommand(
 ): Promise<CommandReply> {
   const verb = action === "add" ? "add people to" : "take people off";
   if (actor.id.startsWith("teams:")) {
-    return { title: "I don't know you in Sidekick yet", lines: [`Only this workspace's Team Lead or an Org Admin can ${verb} ${workspaceName}. If that's you, sign in to the Sidekick portal with Microsoft once so I recognise you here.`] };
+    return { title: `I don't know you in ${BRAND.name} yet`, lines: [`Only this workspace's Team Lead or an Org Admin can ${verb} ${workspaceName}. If that's you, sign in to the ${BRAND.name} portal with Microsoft once so I recognise you here.`] };
   }
   if (!(await mayManage(actor, conv.workspace_id))) {
-    return { title: "Sorry, I can't do that for you", lines: [`Only this workspace's Team Lead or an Org Admin can ${verb} ${workspaceName}. Your Sidekick role is ${actor.role}.`] };
+    return { title: "Sorry, I can't do that for you", lines: [`Only this workspace's Team Lead or an Org Admin can ${verb} ${workspaceName}. Your ${BRAND.name} role is ${actor.role}.`] };
   }
-  if (!people.length) return { title: "Who should I " + action + "?", lines: [`Mention them, for example “@Sidekick ${action} @Maria”.`] };
+  if (!people.length) return { title: "Who should I " + action + "?", lines: [`Mention them, for example “@${BRAND.name} ${action} @Maria”.`] };
 
   return span("teams", action === "add" ? "Add people to the workspace from Teams" : "Take people off the workspace from Teams", async () => {
     const lines: string[] = [];
@@ -86,19 +87,19 @@ async function addOne(actor: User, conv: { org_id: string; workspace_id: string;
   await run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING", conv.workspace_id, user.id);
   if (created) await audit(actor, `Added ${user.name} (${user.email}) as Member (Microsoft sign-in) from Teams`, "Access");
   await audit(actor, `Added ${user.name} (${user.email}) to workspace “${ws}” from Teams`, "Access", conv.workspace_id);
-  return created ? `Added ${user.name} to ${ws}. They're new to Sidekick: they sign in with their Microsoft work account.` : `Added ${user.name} to ${ws}.`;
+  return created ? `Added ${user.name} to ${ws}. They're new to ${BRAND.name}: they sign in with their Microsoft work account.` : `Added ${user.name} to ${ws}.`;
 }
 
 async function removeOne(actor: User, conv: { org_id: string; workspace_id: string }, ws: string, p: ChatPerson): Promise<string> {
   const user = p.objectId
     ? await get<{ id: string; name: string; email: string; role: Role }>("SELECT id, name, email, role FROM users WHERE org_id = ? AND entra_oid = ?", actor.org_id, p.objectId)
     : undefined;
-  if (!user) return `${p.name} isn't in Sidekick, so there's nothing to take away.`;
+  if (!user) return `${p.name} isn't in ${BRAND.name}, so there's nothing to take away.`;
   if (user.id === actor.id) return "You can't take yourself off here. Ask another Team Lead or an Org Admin.";
   if (user.role === "Org Owner" || user.role === "Org Admin") return `${user.name} is an ${user.role} and sees every workspace; their role is changed on Users & access.`;
   if (!leadMayTouch(actor, user.role)) return `${user.name} is a ${user.role}; ask an Org Admin.`;
   const n = await run("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?", conv.workspace_id, user.id);
   if (!n.changes) return `${user.name} wasn't in ${ws}.`;
   await audit(actor, `Took ${user.name} (${user.email}) off workspace “${ws}” from Teams`, "Access", conv.workspace_id);
-  return `Took ${user.name} off ${ws}. Their Sidekick account stays; an Org Admin can remove it on Users & access.`;
+  return `Took ${user.name} off ${ws}. Their ${BRAND.name} account stays; an Org Admin can remove it on Users & access.`;
 }

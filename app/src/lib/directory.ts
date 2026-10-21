@@ -33,6 +33,7 @@ import { get, newId, now, run } from "./db";
 import { entraConfig, entraConfigured, LOGIN_BASE, OIDC_COOKIE, redirectUri } from "./entra";
 import { tenantOfOrg } from "./tenants";
 import { span } from "./trace";
+import { BRAND } from "./brand";
 
 /** Microsoft Graph. Overridable only outside production (for the fake Graph in tests). */
 const GRAPH_BASE = process.env.NODE_ENV !== "production" && process.env.GRAPH_BASE ? process.env.GRAPH_BASE.replace(/\/$/, "") : "https://graph.microsoft.com";
@@ -42,15 +43,15 @@ export const MICROSOFT_ONLY = "microsoft-only";
 
 /** What each permission Sidekick asks for lets it do, in plain words (shown next to the approve button). */
 export const PERMISSIONS_EXPLAINED = [
-  { name: "Sign in and read user profile (User.Read, delegated)", what: "Lets people sign in to Sidekick with their work account. Sidekick sees their name, email and account id." },
-  { name: "Read all users' full profiles (User.Read.All, application)", what: "Lets Sidekick search your directory when an admin imports people or someone types @Sidekick add in Teams. Sidekick reads names, work emails, job titles and account ids only, and never changes anything in Microsoft 365." },
-  { name: "Manage its own installation in chats and teams (TeamsAppInstallation.ReadWriteSelfForChat.All and ReadWriteSelfForTeam.All, application)", what: "Lets Sidekick remove itself from a chat or team: when someone other than a Team Lead or admin adds it, when nobody assigns a chat to a group within 7 days, or when you press Remove Sidekick from this chat. It can only add or remove Sidekick, never other apps." },
-  { name: "Teams chat and channel messages (resource-specific, per chat)", what: "Not part of this approval: granted per chat or team when Sidekick is added there. Sidekick reads a chat's messages only once it's assigned to a group." },
+  { name: "Sign in and read user profile (User.Read, delegated)", what: `Lets people sign in to ${BRAND.name} with their work account. ${BRAND.name} sees their name, email and account id.` },
+  { name: "Read all users' full profiles (User.Read.All, application)", what: `Lets ${BRAND.name} search your directory when an admin imports people or someone types @${BRAND.name} add in Teams. ${BRAND.name} reads names, work emails, job titles and account ids only, and never changes anything in Microsoft 365.` },
+  { name: "Manage its own installation in chats and teams (TeamsAppInstallation.ReadWriteSelfForChat.All and ReadWriteSelfForTeam.All, application)", what: `Lets ${BRAND.name} remove itself from a chat or team: when someone other than a Team Lead or admin adds it, when nobody assigns a chat to a group within 7 days, or when you press Remove ${BRAND.name} from this chat. It can only add or remove ${BRAND.name}, never other apps.` },
+  { name: "Teams chat and channel messages (resource-specific, per chat)", what: `Not part of this approval: granted per chat or team when ${BRAND.name} is added there. ${BRAND.name} reads a chat's messages only once it's assigned to a group.` },
 ] as const;
 
 /** Thrown when the organization's Microsoft admin hasn't approved Sidekick (yet). The JSON says `consent: "needed"`. */
 export class ConsentNeededError extends HttpError {
-  constructor(message = "Sidekick isn't approved for your Microsoft 365 organization yet. A Microsoft admin of your organization needs to approve it once (Users & access → Approve Sidekick for your organization).") {
+  constructor(message = `${BRAND.name} isn't approved for your Microsoft 365 organization yet. A Microsoft admin of your organization needs to approve it once (Users & access → Approve ${BRAND.name} for your organization).`) {
     super(409, message);
     withErrorDetails(this, { consent: "needed" });
   }
@@ -79,7 +80,7 @@ async function graphToken(tenantId: string): Promise<string> {
   if (!res) throw new HttpError(502, "Couldn't reach Microsoft. Try again in a minute.");
   if (!res.ok || !body?.access_token) {
     // invalid_client = the app's secret is wrong or expired: that's ours to fix, not the customer's.
-    if (body?.error === "invalid_client") throw new HttpError(502, "Microsoft refused Sidekick's app credentials (the secret may have expired). The Sidekick team needs to renew it.");
+    if (body?.error === "invalid_client") throw new HttpError(502, `Microsoft refused ${BRAND.name}'s app credentials (the secret may have expired). The ${BRAND.name} team needs to renew it.`);
     // Anything else (unauthorized_client, invalid_grant, AADSTS7000229/65001/700016) means the app isn't set up
     // or approved in that tenant.
     throw new ConsentNeededError();
@@ -110,7 +111,7 @@ export async function graphCall<T>(tenantId: string, method: "GET" | "DELETE", p
 const graphGet = <T>(tenantId: string, path: string, headers: Record<string, string> = {}) =>
   graphCall<T>(tenantId, "GET", path, {
     headers,
-    deniedMessage: "Sidekick is connected to your Microsoft 365 organization but can't read its directory yet. A Microsoft admin needs to approve the “Read all users' full profiles” permission (Users & access → Approve Sidekick for your organization).",
+    deniedMessage: `${BRAND.name} is connected to your Microsoft 365 organization but can't read its directory yet. A Microsoft admin needs to approve the “Read all users' full profiles” permission (Users & access → Approve ${BRAND.name} for your organization).`,
   });
 
 /* ------------------------------------------------------------------ */
@@ -172,13 +173,13 @@ export async function findOrCreateMicrosoftUser(orgId: string, p: { objectId: st
   if (byOid) return { user: byOid, created: false };
   const email = p.email.toLowerCase();
   const byEmail = email ? await get<Found>("SELECT id, org_id, name, email, role, entra_oid FROM users WHERE lower(email) = ?", email) : undefined;
-  if (byEmail && byEmail.org_id !== orgId) throw new HttpError(409, `${email} already has a Sidekick account in another organization.`);
+  if (byEmail && byEmail.org_id !== orgId) throw new HttpError(409, `${email} already has a ${BRAND.name} account in another organization.`);
   if (byEmail) {
     if (byEmail.entra_oid && byEmail.entra_oid !== p.objectId) throw new HttpError(409, `${email} is already linked to a different Microsoft account.`);
     await run("UPDATE users SET entra_oid = ? WHERE id = ?", p.objectId, byEmail.id);
     return { user: { ...byEmail, entra_oid: p.objectId }, created: false };
   }
-  if (!email) throw new HttpError(400, `${p.name} has no email address in Microsoft 365, so Sidekick can't add them.`);
+  if (!email) throw new HttpError(400, `${p.name} has no email address in Microsoft 365, so ${BRAND.name} can't add them.`);
   const id = newId();
   await run(
     "INSERT INTO users (id, org_id, name, email, role, password_hash, must_change_password, created_at, entra_oid) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
@@ -224,7 +225,7 @@ export async function importPeople(actor: User, objectIds: string[], role: Role,
       try {
         const { user, created } = await findOrCreateMicrosoftUser(actor.org_id, { objectId: p.id, name: p.name, email: p.email }, role);
         if (!created && isLead(actor) && !LEAD_ASSIGNABLE_ROLES.includes(user.role)) {
-          out.skipped.push({ name: p.name, reason: `Already in Sidekick as ${user.role}; ask an Org Admin.` });
+          out.skipped.push({ name: p.name, reason: `Already in ${BRAND.name} as ${user.role}; ask an Org Admin.` });
           continue;
         }
         for (const ws of workspaces) await run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING", ws, user.id);
@@ -245,7 +246,7 @@ export async function importPeople(actor: User, objectIds: string[], role: Role,
  */
 export async function requireDirectoryTenant(user: User): Promise<string> {
   if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and Team Leads can import people.");
-  if (!entraConfigured()) throw new HttpError(503, "Microsoft isn't set up on this Sidekick yet.");
+  if (!entraConfigured()) throw new HttpError(503, `Microsoft isn't set up on this ${BRAND.name} yet.`);
   const tenant = await tenantOfOrg(user.org_id);
   if (!tenant) throw new HttpError(400, "Connect your organization to Microsoft first: the Org Owner does it on Settings → Microsoft sign-in.");
   return tenant;
@@ -299,18 +300,18 @@ export async function finishAdminConsent(req: Request, cookieState: string | und
   if (saved.expires_at < now()) throw new HttpError(400, "That approval took too long. Try again.");
   if (q.get("error")) {
     const desc = (q.get("error_description") ?? "").split("\n")[0].replace(/^AADSTS\d+:\s*/, "").slice(0, 300);
-    throw new HttpError(400, q.get("error") === "access_denied" ? "Approval was cancelled, or the account used isn't a Microsoft admin of your organization." : `Microsoft didn't approve Sidekick: ${desc || q.get("error")}`);
+    throw new HttpError(400, q.get("error") === "access_denied" ? "Approval was cancelled, or the account used isn't a Microsoft admin of your organization." : `Microsoft didn't approve ${BRAND.name}: ${desc || q.get("error")}`);
   }
   const user = saved.user_id ? await get<User>("SELECT id, org_id, name, email, role, must_change_password FROM users WHERE id = ?", saved.user_id) : undefined;
-  if (!user || !isAdmin(user)) throw new HttpError(403, "Only Org Owners and Org Admins can approve Sidekick for the organization.");
+  if (!user || !isAdmin(user)) throw new HttpError(403, `Only Org Owners and Org Admins can approve ${BRAND.name} for the organization.`);
   const tenant = await tenantOfOrg(user.org_id);
   if (!tenant || (q.get("tenant") ?? "").toLowerCase() !== tenant.toLowerCase()) {
-    throw new HttpError(403, "That approval was for a different Microsoft organization than the one connected to Sidekick.");
+    throw new HttpError(403, `That approval was for a different Microsoft organization than the one connected to ${BRAND.name}.`);
   }
   if (q.get("admin_consent")?.toLowerCase() !== "true") throw new HttpError(400, "Microsoft didn't confirm the approval. Try again.");
   tokens.delete(tenant);
   await run("UPDATE orgs SET graph_consent_at = ? WHERE id = ?", now(), user.org_id);
-  await audit(user, "Approved Sidekick for the organization's Microsoft 365 (directory read permission)", "Policy change");
+  await audit(user, `Approved ${BRAND.name} for the organization's Microsoft 365 (directory read permission)`, "Policy change");
 }
 
 export { OIDC_COOKIE };

@@ -28,6 +28,7 @@
 import "server-only";
 import { audit, HttpError, type User } from "./auth";
 import { get, run } from "./db";
+import { BRAND } from "./brand";
 
 /** Values of TENANT_ID that mean "any organization" rather than one tenant. */
 const ANY_TENANT = new Set(["", "common", "organizations", "botframework.com"]);
@@ -81,7 +82,7 @@ export async function tieOrgToTenant(orgId: string, tenantId: string, by: Pick<U
   if (!isTenantId(tenantId)) throw new HttpError(400, "That isn't a Microsoft organization id.");
   if (by.org_id !== orgId) throw new HttpError(403, "Only the organization's own Org Owner can connect it to Microsoft.");
   const taken = await get<{ id: string }>("SELECT id FROM orgs WHERE entra_tenant_id = ? AND id <> ?", tenantId, orgId);
-  if (taken) throw new HttpError(409, "That Microsoft organization is already connected to another Sidekick organization. Contact the Sidekick team.");
+  if (taken) throw new HttpError(409, `That Microsoft organization is already connected to another ${BRAND.name} organization. Contact the ${BRAND.name} team.`);
   const current = await tenantOfOrg(orgId);
   if (current && current !== tenantId) throw new HttpError(409, "This organization is already connected to a different Microsoft organization. Disconnect it first.");
   if (ownerOid) {

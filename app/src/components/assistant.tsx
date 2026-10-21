@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useApp } from "./shell";
 import { api, ApiError, Icon, Spinner } from "./ui";
+import { BRAND } from "@/lib/brand";
 
 /** A confirm card's action, as built by lib/assistant.ts `checkAction`. */
 type ReadyAction = {
@@ -35,14 +36,14 @@ function suggestionsFor(role: string, admin: boolean): string[] {
   if (admin) return ["Create a workspace", "Add a person to a workspace", "Link a Teams chat", "What did we spend on AI this month?"];
   if (role === "Billing Admin") return ["What did we spend on AI this month?", "What can my role do?", "How is cost tracked?"];
   if (role === "Viewer") return ["What can my role do?", "How do I find a decision from a meeting?", "What are knowledge gaps?"];
-  return ["How do I import a meeting?", "Refresh the knowledge map", "How do I use Sidekick in Teams?"];
+  return ["How do I import a meeting?", "Refresh the knowledge map", `How do I use ${BRAND.name} in Teams?`];
 }
 
 /** What the thinking bubble cycles through, in order (the last one repeats until the reply arrives). */
 const THINKING_LABELS = [
   "Reading your question",
   "Checking what your role allows",
-  "Looking through how Sidekick works",
+  `Looking through how ${BRAND.name} works`,
   "Weighing the options",
   "Drafting a reply",
   "Double-checking the details",
@@ -152,8 +153,8 @@ export function Assistant({ onThinking }: { onThinking?: (on: boolean) => void }
           value={text}
           onChange={(e) => setText(e.target.value)}
           maxLength={1000}
-          placeholder={me.user.admin ? "Ask about Sidekick, or say “create a workspace for Fabrikam”…" : "Ask how something works in Sidekick…"}
-          aria-label="Message the Sidekick assistant"
+          placeholder={me.user.admin ? `Ask about ${BRAND.name}, or say “create a workspace for Fabrikam”…` : `Ask how something works in ${BRAND.name}…`}
+          aria-label={`Message the ${BRAND.name} assistant`}
         />
         <button className="btn primary" type="submit" disabled={thinking || !text.trim()}>{thinking ? <Spinner /> : "Send"}</button>
       </form>
@@ -166,7 +167,7 @@ export function Assistant({ onThinking }: { onThinking?: (on: boolean) => void }
           ))}
         </div>
       )}
-      <p className="assist-note muted">Answers questions about Sidekick. Anything that changes data waits for you to press Confirm. For questions about a project, use Ask Sidekick on Knowledge &amp; docs.</p>
+      <p className="assist-note muted">Answers questions about {BRAND.name}. Anything that changes data waits for you to press Confirm. For questions about a project, use Ask {BRAND.name} on Knowledge &amp; docs.</p>
     </div>
   );
 }
@@ -184,7 +185,7 @@ function resultOf(a: ReadyAction, out: Record<string, unknown>): CardState {
         link: { href: "/users", label: "Open Users & access" },
       };
     case "link_teams":
-      return { state: "done", note: `Linked${out.name ? ` “${out.name}”` : ""}. Sidekick posted a confirmation in Teams.`, link: { href: "/workspaces", label: "Open Workspaces" } };
+      return { state: "done", note: `Linked${out.name ? ` “${out.name}”` : ""}. ${BRAND.name} posted a confirmation in Teams.`, link: { href: "/workspaces", label: "Open Workspaces" } };
     case "refresh_map":
       return { state: "done", note: "Knowledge map refreshed.", link: { href: "/memory", label: "Open Memory & gaps" } };
     default:

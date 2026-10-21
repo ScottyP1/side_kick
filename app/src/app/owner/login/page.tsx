@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { SecondStepForm } from "@/components/two-step";
 import { api } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 export default function OwnerLoginPage() {
   const [email, setEmail] = useState("");
@@ -106,11 +107,11 @@ export default function OwnerLoginPage() {
       <form className="auth-card" onSubmit={submit}>
         <div className="brand" style={{ padding: 0 }}>
           <span className="brand-mark owner-mark">S</span>
-          <div><b style={{ color: "var(--fg)" }}>Sidekick</b></div>
+          <div><b style={{ color: "var(--fg)" }}>{BRAND.name}</b></div>
         </div>
         <div>
           <h1>Owner Console</h1>
-          <p className="muted" style={{ margin: "4px 0 0" }}>For the Sidekick team only. Client users sign in at the main portal.</p>
+          <p className="muted" style={{ margin: "4px 0 0" }}>For the {BRAND.name} team only. Client users sign in at the main portal.</p>
         </div>
         <div className="field">
           <label htmlFor="email">Email</label>

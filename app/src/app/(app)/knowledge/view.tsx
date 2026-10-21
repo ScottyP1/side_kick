@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, CitedText, fmtBytes, fmtDate, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Doc = { id: string; name: string; size: number; audience: string; status: string; error: string | null; chunk_count: number; created_at: string; uploaded_by: string | null };
 type Answer = { found: boolean; answer: string; blocked?: string | null; sources: { id: string; title: string; loc: string; type: string; excerpt: string }[] };
@@ -90,7 +91,7 @@ export default function KnowledgePage() {
     }
   };
   const remove = async (d: Doc) => {
-    if (!window.confirm(`Delete “${d.name}”? It's removed from search, so Sidekick can no longer use it in answers. This can't be undone.`)) return;
+    if (!window.confirm(`Delete “${d.name}”? It's removed from search, so ${BRAND.name} can no longer use it in answers. This can't be undone.`)) return;
     try {
       await api(`/api/docs/${d.id}`, { method: "DELETE" });
       toast(`“${d.name}” deleted and removed from search`);
@@ -107,13 +108,13 @@ export default function KnowledgePage() {
         <div>
           <div className="eyebrow">Knowledge & documents</div>
           <h1>{wsName}</h1>
-          <p>Everything Sidekick can reference in this workspace. Tag documents “Internal” to keep them out of answers when client guests are present.</p>
+          <p>Everything {BRAND.name} can reference in this workspace. Tag documents “Internal” to keep them out of answers when client guests are present.</p>
         </div>
       </div>
 
       <div className="panel">
         <div className="panel-h">
-          <h2>Ask Sidekick</h2>
+          <h2>Ask {BRAND.name}</h2>
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
             <input type="checkbox" checked={guests} onChange={(e) => setGuests(e.target.checked)} />
             Client guests are present (use Shareable sources only)

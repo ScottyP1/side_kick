@@ -23,6 +23,7 @@ import { normalizeCode, postCard, type TeamsConversation } from "@/lib/teams/bot
 import { WAITING_DAYS } from "@/lib/teams/install";
 import { CHAT_RETENTION_DAYS, forgetChat, getChatSettings, lastRuns, saveChatSettings } from "@/lib/reminders";
 import { tenantMode, tenantOfOrg } from "@/lib/tenants";
+import { BRAND } from "@/lib/brand";
 
 // Teams channels and chats linked to the workspaces this user can see.
 export const GET = handle(async () => {
@@ -102,7 +103,7 @@ export const POST = handle(async (req: Request) => {
       : undefined;
     // Multi-tenant: a code from another company's Teams never links into this org.
     if (conv && tenantMode() === "multi" && (!tenant || conv.tenant_id !== tenant)) conv = undefined;
-    if (!conv) throw new HttpError(404, "That code doesn't match a Teams channel or chat. Codes expire after 24 hours: mention @Sidekick with “link” in Teams to get a new one.");
+    if (!conv) throw new HttpError(404, `That code doesn't match a Teams channel or chat. Codes expire after 24 hours: mention @${BRAND.name} with “link” in Teams to get a new one.`);
   }
   // "AND workspace_id IS NULL": if two people assign the same chat at once, only the first one wins.
   const linked = await run(

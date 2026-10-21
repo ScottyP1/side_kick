@@ -12,6 +12,7 @@ import { get, newId, now, run, tx } from "@/lib/db";
 import { entraConfigured } from "@/lib/entra";
 import { assertSetupAllowed, setupNeedsCode } from "@/lib/owner";
 import { assertGoodPassword } from "@/lib/passwords";
+import { BRAND } from "@/lib/brand";
 
 // First-run setup: creates the organization and its Org Owner. Only works while no users exist.
 // `microsoft` tells the sign-in page whether to show "Sign in with Microsoft"; `needsCode` whether the setup
@@ -20,7 +21,7 @@ export const GET = handle(async () => ({ needsSetup: !await get("SELECT id FROM 
 
 export const POST = handle(async (req: Request) => {
   const body = await readJson<{ org?: string; name?: string; email?: string; password?: string; setupCode?: string }>(req);
-  await assertSetupAllowed(body.setupCode, "First-run setup only works on the machine running Sidekick (localhost). New organizations are added by the Sidekick team in the Owner Console.");
+  await assertSetupAllowed(body.setupCode, `First-run setup only works on the machine running ${BRAND.name} (localhost). New organizations are added by the ${BRAND.name} team in the Owner Console.`);
   if (await get("SELECT id FROM users LIMIT 1")) throw new HttpError(409, "Setup is already done. Sign in instead.");
   const org = requireText(body.org, "Organization name", 120);
   const name = requireText(body.name, "Your name", 120);

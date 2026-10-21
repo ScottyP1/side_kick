@@ -8,6 +8,7 @@ import { FaqList } from "@/components/faq-list";
 import { PublicShell } from "@/components/public-shell";
 import { FAQ } from "@/lib/faq";
 import { pageMetadata } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 
 export const metadata: Metadata = pageMetadata("/faq");
 
@@ -17,7 +18,7 @@ export default function FaqPage() {
       <div className="site-wrap site-narrow site-page-head">
         <span className="site-eyebrow">FAQ</span>
         <h1>Questions people ask before they start</h1>
-        <p>What Sidekick sees, where your data lives, how setup works and what happens with billing. Click a question to open it.</p>
+        <p>What {BRAND.name} sees, where your data lives, how setup works and what happens with billing. Click a question to open it.</p>
       </div>
       <div className="site-wrap site-narrow site-stack">
         <FaqList items={[...FAQ]} />

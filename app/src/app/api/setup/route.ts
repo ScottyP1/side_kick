@@ -13,6 +13,7 @@ import { audit, HttpError, requireUser } from "@/lib/auth";
 import { all, get } from "@/lib/db";
 import { getGuardSettings, SWITCHES, type SwitchKey } from "@/lib/guardrails";
 import { finishSetup, getSetup, markStep, presetOf, PRESETS, SETUP_STEPS, startSetup, type SetupStep } from "@/lib/setup";
+import { BRAND } from "@/lib/brand";
 
 export const GET = handle(async () => {
   const user = await requireUser(["Org Owner", "Org Admin"]);
@@ -44,7 +45,7 @@ export const PUT = handle(async (req: Request) => {
   const body = await readJson<{ step?: string; state?: string; finished?: boolean }>(req);
   if (typeof body.finished === "boolean") {
     await finishSetup(user.org_id, body.finished);
-    await audit(user, body.finished ? "Finished setting up Sidekick" : "Reopened Sidekick setup", "Access");
+    await audit(user, body.finished ? `Finished setting up ${BRAND.name}` : `Reopened ${BRAND.name} setup`, "Access");
   } else {
     if (!SETUP_STEPS.includes(body.step as SetupStep)) throw new HttpError(400, `Unknown setup step. Use one of: ${SETUP_STEPS.join(", ")}.`);
     if (body.state !== "done" && body.state !== "skipped") throw new HttpError(400, "A step is either done or skipped.");

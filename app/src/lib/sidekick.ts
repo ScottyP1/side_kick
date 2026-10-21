@@ -26,6 +26,7 @@ import { creditStatus } from "./credit";
 import { excerptFor } from "./excerpt";
 import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, type GuardPlace, type RuleId } from "./guardrails";
 import { tagSafe } from "./security";
+import { BRAND } from "./brand";
 
 /* ------------------------------------------------------------------ */
 /* Ask Sidekick: answer from this workspace's documents and meetings   */
@@ -38,7 +39,7 @@ const AnswerSchema = z.object({
   source_ids: z.array(z.string()).describe("IDs of the sources actually used, e.g. S1"),
 });
 
-const ASK_SYSTEM = `You are Sidekick, an AI teammate for a consulting team. You answer questions using ONLY the numbered sources provided from the team's own documents and meeting transcripts.
+const ASK_SYSTEM = `You are ${BRAND.name}, an AI teammate for a consulting team. You answer questions using ONLY the numbered sources provided from the team's own documents and meeting transcripts.
 Rules:
 - Answer briefly, the way a well-informed colleague would in a meeting. Cite every claim with its source tag, like [S2].
 - If the sources do not contain the answer, set found to false and say "I don't know" plus what is missing. Never guess or use outside knowledge for project facts: names, numbers, dates and decisions must come from a cited source.
@@ -261,7 +262,7 @@ const InsightsSchema = z.object({
 const INSIGHTS_SYSTEM = `You maintain a knowledge map for a consulting engagement. From the inventory provided, group what the team knows into 5-10 topics and find knowledge gaps.
 Coverage guide: 70-100 = well documented and consistent; 40-69 = partially covered; under 40 = mostly discussed but not written down, or barely covered.
 Gap types:
-- "Couldn't find an answer": a question asked of Sidekick that it could not answer (listed under FAILED QUESTIONS).
+- "Couldn't find an answer": a question asked of ${BRAND.name} that it could not answer (listed under FAILED QUESTIONS).
 - "Unanswered in meeting": an open question nobody answered.
 - "Conflicting information": two sources state different facts (names, numbers, dates).
 - "Out of date": a document older than later decisions on its topic (in meetings or Teams chats), e.g. a runbook still saying Nov 5 after the cutover moved to Nov 12.
@@ -331,7 +332,7 @@ export async function refreshInsights(user: User, workspaceId: string) {
     `DOCUMENTS (${docs.length}):\n${docLines.join("\n") || "(none)"}`,
     `MEETINGS (${meetings.length}):\n${meetingLines.join("\n\n") || "(none)"}`,
     `TEAMS CHATS (recent messages from chats the team chose to track):\n${chats.join("\n\n") || "(none)"}`,
-    `FAILED QUESTIONS (asked of Sidekick, no answer found):\n${failed.map((f) => `- "${f.question}" (asked ${f.c}x, last ${f.last.slice(0, 10)})`).join("\n") || "(none)"}`,
+    `FAILED QUESTIONS (asked of ${BRAND.name}, no answer found):\n${failed.map((f) => `- "${f.question}" (asked ${f.c}x, last ${f.last.slice(0, 10)})`).join("\n") || "(none)"}`,
   ].join("\n\n");
   const out = await structured("insights", { orgId: user.org_id, workspaceId }, { system: INSIGHTS_SYSTEM, content, schema: InsightsSchema, effort: "medium" });
   const json = JSON.stringify({ ...out, topics: out.topics.map((t) => ({ ...t, coverage: Math.max(0, Math.min(100, Math.round(t.coverage))) })) });

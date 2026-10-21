@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, fmtTime, Pill, usd } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type O = {
   kpis: {
@@ -39,7 +40,7 @@ export default function OwnerOverview() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Owner Console</div>
-          <h1>Sidekick at a glance</h1>
+          <h1>{BRAND.name} at a glance</h1>
           <p>Spend, speed, errors and activity across every client organization.</p>
         </div>
         <div className="actions">

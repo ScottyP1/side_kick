@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "teams:package": "node scripts/teams-package.mjs",
+    "teams:package": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/teams-package.mjs",
     "help:sync": "node scripts/sync-help.mjs",
     "tunnel": "devtunnel host sidekick",
     "test": "node tests/run.mjs",

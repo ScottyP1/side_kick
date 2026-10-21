@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, ApiError, fmtDate, Icon, Modal, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { ActionItemsTable, useUpdateAction, type ActionItem } from "@/components/action-items";
+import { BRAND } from "@/lib/brand";
 
 /** Same limit as the server (lib/extract.ts MAX_TRANSCRIPT_CHARS), so the dialog can say so before sending. */
 const MAX_TRANSCRIPT_CHARS = 300_000;
@@ -94,7 +95,7 @@ export default function MeetingsPage() {
       const savedId = e instanceof ApiError && typeof e.data?.meeting_id === "string" ? e.data.meeting_id : null;
       if (savedId) {
         resetImport();
-        toast("The meeting is saved, but Sidekick couldn't write the notes. Use Try again.", "error");
+        toast(`The meeting is saved, but ${BRAND.name} couldn't write the notes. Use Try again.`, "error");
         openMeeting(savedId);
       } else {
         setErr(e instanceof Error ? e.message : "Import failed.");
@@ -158,7 +159,7 @@ export default function MeetingsPage() {
                 </div>
               )}
             </div>
-            {m!.status === "Failed" && <div className="callout bad"><Icon n="alert" /><div>Sidekick couldn&apos;t write notes: {m!.error}</div></div>}
+            {m!.status === "Failed" && <div className="callout bad"><Icon n="alert" /><div>{BRAND.name} couldn&apos;t write notes: {m!.error}</div></div>}
             <div className="grid g4">
               {[["Decisions", of("decision").length], ["Open action items", detail.actions.filter((a) => a.status !== "Done").length], ["Open questions", of("question").filter((q) => !q.answered).length], ["Facts learned", of("requirement").length + of("fact").length + of("risk").length + of("glossary").length]].map(([l, v]) => (
                 <div key={l as string} className="kpi" style={{ cursor: "default" }}>
@@ -226,7 +227,7 @@ export default function MeetingsPage() {
         <div>
           <div className="eyebrow">Meetings</div>
           <h1>{list ? `${list.length} meeting${list.length === 1 ? "" : "s"}` : "Meetings"}</h1>
-          <p>Import a Teams transcript and Sidekick writes the notes: summary, decisions, action items, open questions and facts to remember.</p>
+          <p>Import a Teams transcript and {BRAND.name} writes the notes: summary, decisions, action items, open questions and facts to remember.</p>
         </div>
         {canEdit && (
           <div className="actions">
@@ -284,7 +285,7 @@ export default function MeetingsPage() {
             <>
               <button className="btn" disabled={busy} onClick={() => setImporting(false)}>Cancel</button>
               <button className="btn primary" disabled={busy || (!file && !form.text.trim()) || (!file && !form.title.trim()) || (!file && form.text.length > MAX_TRANSCRIPT_CHARS)} onClick={submit}>
-                {busy ? <><Spinner /> Sidekick is writing notes…</> : "Import & write notes"}
+                {busy ? <><Spinner /> {BRAND.name} is writing notes…</> : "Import & write notes"}
               </button>
             </>
           }

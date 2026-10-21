@@ -51,6 +51,7 @@ import { leaveChat, mayAddSidekick, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
 import { getChatSettings, recordChatMessage, reminderAction } from "../reminders";
+import { BRAND } from "../brand";
 
 /* ------------------------------------------------------------------ */
 /* Security mode                                                       */
@@ -449,7 +450,7 @@ function registerHandlers(app: App) {
     if (conv.leaving) return;
     // A chat linked (by code, before multi-tenant) to another org than the one its tenant belongs to is left alone.
     if (tenantMode() === "multi" && conv.org_id && gate.org && conv.org_id !== gate.org.id) {
-      if (conv.kind === "personal" || mentionsSidekick(activity)) await send("This chat is linked to a different organization's Sidekick. An admin can unlink it on the group's page in the Sidekick portal.");
+      if (conv.kind === "personal" || mentionsSidekick(activity)) await send(`This chat is linked to a different organization's ${BRAND.name}. An admin can unlink it on the group's page in the ${BRAND.name} portal.`);
       return;
     }
     traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
@@ -466,9 +467,9 @@ function registerHandlers(app: App) {
     if (!question || command === "help") return void (await send(helpCard(await workspaceName(conv))));
     if (!conv.workspace_id) return void (await send(await unlinkedCard(conv, gate.org)));
     if (command === "link") {
-      return void (await send(`This ${conv.kind === "channel" ? "channel" : "chat"} is linked to **${await workspaceName(conv)}**. A Team Lead or admin can change that on the group's page in the Sidekick portal.`));
+      return void (await send(`This ${conv.kind === "channel" ? "channel" : "chat"} is linked to **${await workspaceName(conv)}**. A Team Lead or admin can change that on the group's page in the ${BRAND.name} portal.`));
     }
-    if (await orgPaused(conv.org_id!)) return void (await send("Sidekick is paused for this organization. Contact the Sidekick team."));
+    if (await orgPaused(conv.org_id!)) return void (await send(`${BRAND.name} is paused for this organization. Contact the ${BRAND.name} team.`));
     if (question.length > 1000) return void (await send("That question is too long for me (max 1,000 characters)."));
     const asker = await teamsActor(conv, activity);
     // "add"/"remove" followed by @mentions of people: a command. Without a mention it's an ordinary question
@@ -510,12 +511,12 @@ function registerHandlers(app: App) {
     // A message response shows the text to the person who clicked and leaves the card as it was.
     const fail = (message: string) => ({ statusCode: 200 as const, type: "application/vnd.microsoft.activity.message" as const, value: message });
     const gate = await tenantGate(activity);
-    if (!gate.ok) return fail("Sidekick isn't set up for your organization yet.");
+    if (!gate.ok) return fail(`${BRAND.name} isn't set up for your organization yet.`);
     const conv = await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", baseConversationId(activity.conversation.id));
-    if (!conv?.workspace_id || !conv.org_id) return fail("This chat isn't linked to a Sidekick workspace anymore.");
-    if (tenantMode() === "multi" && gate.org && conv.org_id !== gate.org.id) return fail("This chat is linked to a different organization's Sidekick.");
+    if (!conv?.workspace_id || !conv.org_id) return fail(`This chat isn't linked to a ${BRAND.name} workspace anymore.`);
+    if (tenantMode() === "multi" && gate.org && conv.org_id !== gate.org.id) return fail(`This chat is linked to a different organization's ${BRAND.name}.`);
     traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
-    if (await orgPaused(conv.org_id)) return fail("Sidekick is paused for this organization.");
+    if (await orgPaused(conv.org_id)) return fail(`${BRAND.name} is paused for this organization.`);
     if (typeof verb === "string" && verb.startsWith(REMIND_PREFIX)) {
       const out = await span("remind", "Reminder card button", async () => reminderAction(conv, await teamsActor(conv, activity), verb, { ...(data ?? {}) }));
       if ("error" in out) return fail(out.error);
@@ -532,7 +533,7 @@ function registerHandlers(app: App) {
     );
     if (!item || (conv.guests === 1 && item.external_guests !== 1)) return fail("I couldn't find that action item in this workspace.");
     const actor = await teamsActor(conv, activity);
-    if (!canEdit(actor)) return fail(`Your Sidekick role (${actor.role}) can't change action items. Ask a Member or an Org Admin.`);
+    if (!canEdit(actor)) return fail(`Your ${BRAND.name} role (${actor.role}) can't change action items. Ask a Member or an Org Admin.`);
     if (verb === VERBS.assign) {
       const owner = String(data?.owner ?? "").trim().slice(0, 120);
       if (!owner) return fail("Type a name to assign it to.");
@@ -637,6 +638,6 @@ async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<
       console.error(`Couldn't post meeting notes to Teams conversation ${conv.id}`, e);
     }
   }
-  if (posted) await audit({ org_id: orgId, name: "Sidekick" }, `Posted notes for “${m.title}” to ${posted} Teams ${posted === 1 ? "conversation" : "conversations"}`, "Agent action", m.workspace_id);
+  if (posted) await audit({ org_id: orgId, name: BRAND.name }, `Posted notes for “${m.title}” to ${posted} Teams ${posted === 1 ? "conversation" : "conversations"}`, "Agent action", m.workspace_id);
   return posted;
 }

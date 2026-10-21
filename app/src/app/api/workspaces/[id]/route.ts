@@ -1,21 +1,23 @@
 /**
  * GET/PATCH/DELETE /api/workspaces/:id: what a workspace holds (for the delete confirmation), rename it or
- * change its engagement code or client, or delete it with everything in it (see lib/workspaces.ts).
+ * change its engagement code or client, or delete it with everything in it (see lib/workspaces.ts) and a
+ * deletion certificate (lib/rolloff.ts). A group that is ending can't be renamed (it's read-only).
  * Who: Org Owners and Org Admins only (the role is checked before the workspace is looked up, so other
  * roles always get a plain 403). Workspaces of another organization are 404. Every change is audited.
  */
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, HttpError, isAdmin, requireUser, requireWorkspace, type User } from "@/lib/auth";
 import { get, run } from "@/lib/db";
-import { assertUniqueName, deleteWorkspace, MAX_CLIENT, MAX_CODE, MAX_NAME, workspaceContents } from "@/lib/workspaces";
+import { assertUniqueName, MAX_CLIENT, MAX_CODE, MAX_NAME, workspaceContents } from "@/lib/workspaces";
+import { deleteGroupWithCertificate, groupRolloff } from "@/lib/rolloff";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 /** The workspace, after the role check and the workspace wall. */
-async function load(id: string, action: string): Promise<{ user: User; ws: { id: string; name: string; code: string | null; client: string | null } }> {
+async function load(id: string, action: string, opts: { allowEnding?: boolean } = {}): Promise<{ user: User; ws: { id: string; name: string; code: string | null; client: string | null } }> {
   const user = await requireUser();
   if (!isAdmin(user)) throw new HttpError(403, `Only Org Owners and Org Admins can ${action} workspaces.`);
-  await requireWorkspace(user, id);
+  await requireWorkspace(user, id, opts);
   const ws = await get<{ id: string; name: string; code: string | null; client: string | null }>("SELECT id, name, code, client FROM workspaces WHERE id = ? AND org_id = ?", id, user.org_id);
   if (!ws) throw new HttpError(404, "Workspace not found, or you're not a member of it.");
   return { user, ws };
@@ -52,16 +54,20 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   return { id: ws.id, name, code, client };
 });
 
-/** Delete the workspace and everything in it. Can't be undone. */
+/**
+ * Delete the workspace and everything in it now. Can't be undone. Works for a group that is ending too
+ * (deleting it before its date). Writes a deletion certificate (lib/rolloff.ts) and answers its id.
+ */
 export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
-  const { user, ws } = await load((await params).id, "delete");
+  const { user, ws } = await load((await params).id, "delete", { allowEnding: true });
   const contents = await workspaceContents(user.org_id, ws.id);
-  const { unlinked } = await deleteWorkspace(user.org_id, ws.id);
+  const cert = await deleteGroupWithCertificate(user.org_id, ws.id, user, await groupRolloff(user.org_id, ws.id));
+  const unlinked = cert.counts["Teams chats unlinked"] ?? 0;
   await audit(
     user,
     `Deleted workspace “${ws.name}” with ${contents.documents} document(s), ${contents.meetings} meeting(s) and everything else in it${unlinked ? `; unlinked ${unlinked} Teams chat(s)` : ""}`,
     "Access",
     null,
   );
-  return { ok: true };
+  return { ok: true, certificate: cert.id };
 });

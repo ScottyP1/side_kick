@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { api, Icon, Pill, useReportError, useToast } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Method = "totp" | "passkey";
 type Factor = { id: string; kind: Method; label: string; added: string; lastUsed: string | null };
@@ -169,7 +170,7 @@ export function TwoStepPanel({ base, note }: { base: string; note?: string }) {
       </div>
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <span className="muted">
-          After your password, Sidekick also asks for a code from an authenticator app or a passkey (Face ID, Touch ID,
+          After your password, {BRAND.name} also asks for a code from an authenticator app or a passkey (Face ID, Touch ID,
           Windows Hello). Someone who learns your password still can&apos;t get in.{note ? ` ${note}` : ""}
         </span>
         {s.factors.map((f) => (

@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtTime, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type R = {
   build: { version: string; branch: string | null; commit: string | null; next: string; sdk: string; node: string; environment: string; startedAt: string };
@@ -66,7 +67,7 @@ export default function ReleasesPage() {
           <div className="panel-h"><h2>Running build</h2><Pill kind="good">Up since {fmtTime(b.startedAt)}</Pill></div>
           <div className="panel-b">
             <dl className="kv">
-              <dt>Sidekick version</dt><dd>{b.version}</dd>
+              <dt>{BRAND.name} version</dt><dd>{b.version}</dd>
               <dt>Branch</dt><dd className="mono">{b.branch ?? "—"}</dd>
               <dt>Commit</dt><dd className="mono">{b.commit ?? "not committed"}</dd>
               <dt>Environment</dt><dd>{b.environment}</dd>
@@ -105,7 +106,7 @@ export default function ReleasesPage() {
       </div>
       {pending && (
         <Modal title={`Pause ${pending.label}?`} onClose={() => setPending(null)} footer={<><button className="btn" onClick={() => setPending(null)}>Cancel</button><button className="btn danger solid" onClick={() => flip(pending.key, false, pending.label)}>Pause for everyone</button></>}>
-          <p style={{ margin: 0 }}>Every client will see “{pending.label} is paused by the Sidekick team” until you turn it back on. Nothing is deleted.</p>
+          <p style={{ margin: 0 }}>Every client will see “{pending.label} is paused by the {BRAND.name} team” until you turn it back on. Nothing is deleted.</p>
         </Modal>
       )}
     </>

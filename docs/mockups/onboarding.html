@@ -276,7 +276,7 @@ tr:last-child td{border-bottom:0}
 .chatc{display:grid;grid-template-columns:40px minmax(0,1fr);gap:4px 14px;padding:18px}
 .chatc + .chatc{border-top:1px solid var(--line)}
 .chat-ic{width:40px;height:40px;border-radius:9px;background:var(--sunken);display:grid;place-items:center;color:var(--muted)}
-.toggles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
+.toggles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}
 .tg{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px}
 .tg b{font-weight:500;font-size:13px;display:block}
 .tg span{font-size:12px;color:var(--muted)}
@@ -363,7 +363,7 @@ tr:last-child td{border-bottom:0}
   <nav id="mocknav" aria-label="Mockup screens"></nav>
   <div class="opts">
     <div class="seg" role="group" aria-label="Palette" id="palseg">
-      <button data-pal="navy">A · Navy</button><button data-pal="indigo">B · Indigo</button>
+      <button data-pal="navy">A · Navy</button><button data-pal="indigo">B · Indigo (chosen)</button>
     </div>
     <div class="seg" role="group" aria-label="Light or dark" id="themeseg">
       <button data-th="system">Auto</button><button data-th="light">Light</button><button data-th="dark">Dark</button>
@@ -466,8 +466,7 @@ const RULES = [
 const PERMS = [
   ["Team Leads can add people to their group from Teams", true, true],
   ["Team Leads can link chats to their group", true, true],
-  ["Team Leads can turn on “Keep track of every message” in a chat", true, false],
-  ["Chats with client guests only see documents marked Shareable", true, true, true],
+    ["Chats with client guests only see documents marked Shareable", true, true, true],
 ];
 
 function wizard() {
@@ -513,7 +512,7 @@ function wM365() {
     <div class="panel"><div class="panel-h"><h3>What Microsoft will ask you to approve, in plain words</h3></div><div class="panel-b" style="padding-block:4px">
       <div class="perm">${ic("check")}<b>Sign in with your work account</b><span></span><span class="muted">Your people use their Microsoft login. No new passwords.</span></div>
       <div class="perm">${ic("check")}<b>See your company directory (names, job titles, email)</b><span></span><span class="muted">So you can pick group leaders and members from a list instead of typing them.</span></div>
-      <div class="perm">${ic("check")}<b>Read chats that Sidekick has been added to</b><span></span><span class="muted">Only chats where someone adds Sidekick on purpose. It can't see any other chat.</span></div>
+      <div class="perm">${ic("check")}<b>Read chats that Sidekick has been added to</b><span></span><span class="muted">Everything in chats where someone adds Sidekick on purpose, once the chat is linked to a group. It can't see any other chat.</span></div>
       <div class="perm">${ic("check")}<b>Read meeting transcripts of those chats' meetings</b><span></span><span class="muted">To write meeting notes and action items.</span></div>
       <div class="perm no">${ic("x")}<b>Never: email, OneDrive, calendars or chats it isn't in</b><span></span><span class="muted">Sidekick doesn't ask for these, so it can't read them.</span></div>
     </div></div>
@@ -734,10 +733,10 @@ function leadMembers() {
 }
 function chatToggles(c, key) {
   const t = (f, label, desc, ic_) => `<div class="tg">${sw(key + "." + f, c[f], label)}<div><b>${label}</b><span>${desc}</span></div></div>`;
-  return `<div class="toggles">${t("notes", "Meeting notes", "Post notes and action items after meetings")}${t("remind", "Daily reminders", "Overdue items and open questions, once a day")}${t("track", "Keep track of every message", "Reads all messages, not only @mentions. Announced in the chat.")}</div>`;
+  return `<div class="toggles">${t("notes", "Meeting notes", "Post notes and action items after meetings")}${t("remind", "Daily reminders", "Overdue items and open questions, once a day")}</div><p class="small muted" style="margin-top:8px">${ic("eye")} Once linked, Sidekick reads every message in this chat (it says so in the chat). Unlinking deletes what it saved.</p>`;
 }
 function leadChats() {
-  return `${S.waiting.length ? `<div class="panel raised"><div class="panel-h" style="background:var(--hand-soft);border-radius:var(--r) var(--r) 0 0"><span style="color:var(--hand)">${ic("bell")}</span><div><h3>Chats waiting for a group</h3><p class="small muted">Sidekick was added to these chats in Teams. Pick the ones that belong to Payments Platform. Until then Sidekick doesn't read or save anything in them.</p></div></div>
+  return `${S.waiting.length ? `<div class="panel raised"><div class="panel-h" style="background:var(--hand-soft);border-radius:var(--r) var(--r) 0 0"><span style="color:var(--hand)">${ic("bell")}</span><div><h3>Chats waiting for a group</h3><p class="small muted">Someone on your team added Sidekick to these Teams chats, but nobody has said which group they're for yet. Pick the ones that belong to Payments Platform. Until you do, Sidekick doesn't read or save anything in them.</p></div></div>
     ${S.waiting.map((c, i) => `<div class="chatc"><span class="chat-ic">${ic("chat")}</span><div>
       <div class="row"><h3>${esc(c.name)}</h3>${c.guests ? `<span class="pill hand">${c.guests} client guests</span>` : ""}</div>
       <p class="small muted">${c.kind} · ${c.people} people · Sidekick added by ${esc(c.by)} ${c.when}</p>
@@ -790,10 +789,10 @@ function teams() {
   if (sc === "newchat") {
     thread = `<div class="sys">Priya Natarajan added Sidekick to the chat</div>`;
     thread += bot(st.linked ? `<div class="acard"><div class="stripe good"></div><div class="ah"><h3>This chat is now part of Payments Platform</h3><span class="small muted">Linked by Priya Natarajan</span></div>
-        <div class="ab"><div class="cmds"><span class="muted">Meeting notes</span><b>On</b><span class="muted">Daily reminders</span><b>On</b><span class="muted">Keep track of every message</span><b>Off</b></div></div>
+        <div class="ab"><div class="cmds"><span class="muted">Meeting notes</span><b>On</b><span class="muted">Daily reminders</span><b>On</b><span class="muted">Reads this chat</span><b>Every message, from now on</b></div></div>
         <div class="aa"><button class="btn sm" data-go="lead">Change in the portal</button></div></div>`
       : `<div class="acard"><div class="stripe"></div><div class="ah"><h3>Which group is this chat for?</h3></div>
-        <div class="ab"><p>Hi, I'm Sidekick. Pick a group so I know which documents and meetings to answer from. Until then I won't read or save anything here.</p>
+        <div class="ab"><p>Hi, I'm Sidekick. Pick a group so I know which documents and meetings to answer from. Once you do, I'll read everything in this chat to keep notes and answer questions. Until then I won't read or save anything here.</p>
         <p class="small muted">Only Team Leads and admins can pick. It also shows in the portal under Chats waiting.</p></div>
         <div class="aa"><button class="btn primary sm" data-act="sst" data-k="linked">Payments Platform · Northwind Bank</button><button class="btn sm">Another group…</button><button class="btn sm ghost">Not a work chat</button></div></div>`);
     if (st.linked) thread += person("maria", `${mention("@Sidekick")} when is the wave 2 cutover?`);
@@ -839,7 +838,7 @@ function palette() {
   const col = (pal, title, blurb) => {
     const L = readPalette(pal, "light"), D = readPalette(pal, "dark");
     const strip = v => `<div class="sw">${TOKENS.filter(t => !t.endsWith("soft")).slice(0, 12).map(t => `<div style="background:${v[t]};color:${ratio(v[t], "#ffffff") > ratio(v[t], "#000000") ? "#fff" : "#000"}">${t}</div>`).join("")}</div>`;
-    return `<div class="panel ${S.palette === pal ? "raised" : ""}" style="${S.palette === pal ? "border-color:var(--accent)" : ""}"><div class="panel-h"><h2>${title}</h2><span class="spacer"></span>${S.palette === pal ? `<span class="pill accent">Showing now</span>` : `<button class="btn sm" data-act="pal" data-v="${pal}">Try it</button>`}</div>
+    return `<div class="panel ${S.palette === pal ? "raised" : ""}" style="${S.palette === pal ? "border-color:var(--accent)" : ""}"><div class="panel-h"><h2>${title}</h2><span class="spacer"></span>${pal === "indigo" ? `<span class="pill good">Chosen</span>` : ""}${S.palette === pal ? `<span class="pill accent">Showing now</span>` : `<button class="btn sm" data-act="pal" data-v="${pal}">Try it</button>`}</div>
       <div class="panel-b stack"><p class="muted">${blurb}</p>
       <span class="eyebrow">Light</span>${strip(L)}<span class="eyebrow">Dark</span>${strip(D)}
       <div class="tw"><table><thead><tr><th>Text on background</th><th class="num">Light</th><th class="num">Dark</th></tr></thead><tbody>
@@ -868,7 +867,7 @@ let toastT;
 function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2600); }
 function setPalette(p) { S.palette = p; p === "navy" ? delete document.documentElement.dataset.palette : document.documentElement.dataset.palette = p; save(); render(); }
 function setTheme(t) { S.theme = t; t === "system" ? delete document.documentElement.dataset.theme : document.documentElement.dataset.theme = t; save(); render(); }
-function save() { try { localStorage.setItem("sk-mock", JSON.stringify({ p: S.palette, t: S.theme })); } catch {} }
+function save() { try { localStorage.setItem("sk-mock2", JSON.stringify({ p: S.palette, t: S.theme })); } catch {} }
 
 function setPath(path, v) { // "ng.strict" or "w0.notes" / "l1.track"
   const [a, b] = path.split(".");
@@ -938,8 +937,8 @@ document.addEventListener("change", e => {
 });
 
 (function init() {
-  try { const s = JSON.parse(localStorage.getItem("sk-mock") || "{}"); if (s.p) S.palette = s.p; if (s.t) S.theme = s.t; } catch {}
-  S.palette = S.palette || "navy"; S.theme = S.theme || "system";
+  try { const s = JSON.parse(localStorage.getItem("sk-mock2") || "{}"); if (s.p) S.palette = s.p; if (s.t) S.theme = s.t; } catch {}
+  S.palette = S.palette || "indigo"; S.theme = S.theme || "system";
   if (S.palette !== "navy") document.documentElement.dataset.palette = S.palette;
   if (S.theme !== "system") document.documentElement.dataset.theme = S.theme;
   const h = (location.hash || "").slice(1); if (SCREENS[h]) S.screen = h;

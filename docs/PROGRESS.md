@@ -2,6 +2,9 @@
 
 > Last updated: October 19, 2026 (real-world re-check after deploy). Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Regroup** just below.
 
+## End-to-end test results (Oct 20, 2026)
+- **Answers, documents, guardrails, workspaces** (branch `claude/e2e-answers-docs-7a3221`): chat timestamps no longer masked as phone numbers; rate/fee questions no longer refused as HR advice; too-broad custom rules ("Don't answer any questions") refused at save, clearer custom-rule refusal; workspaces can be renamed and deleted (with everything in them) by Org Owners/Admins, names unique per org; document delete asks first; unsupported/empty uploads refused before saving; Knowledge, Guardrails (phone width) and Workspaces polish.
+
 ## Regroup (Oct 17, 2026)
 Many side sessions had drifted apart, so Cody paused them, merged what was ready and cleaned up. State after the regroup:
 

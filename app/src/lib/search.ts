@@ -64,6 +64,18 @@ export async function removeIndexed(sourceId: string) {
   if (azureSearchConfigured()) await azureRemove(sourceId).catch((e) => console.error("Azure AI Search: delete failed", e));
 }
 
+/**
+ * Removes every passage of one workspace from the index (when the workspace is deleted): each source from
+ * Azure when configured, then all local passages of that org + workspace.
+ */
+export async function removeWorkspaceIndex(orgId: string, workspaceId: string) {
+  if (azureSearchConfigured()) {
+    const sources = await all<{ source_id: string }>("SELECT DISTINCT source_id FROM passages WHERE workspace_id = ? AND org_id = ?", workspaceId, orgId);
+    for (const s of sources) await azureRemove(s.source_id).catch((e) => console.error("Azure AI Search: delete failed", e));
+  }
+  await run("DELETE FROM passages WHERE workspace_id = ? AND org_id = ?", workspaceId, orgId);
+}
+
 /** Changes whether a source's passages are internal or shareable (when a document is re-tagged). */
 export async function setAudience(sourceId: string, audience: string) {
   await run("UPDATE passages SET audience = ? WHERE source_id = ?", audience, sourceId);

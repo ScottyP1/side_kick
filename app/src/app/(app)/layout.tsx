@@ -1,6 +1,10 @@
-/** Wraps every signed-in client portal page in the portal frame (components/shell.tsx). */
+/** Wraps every signed-in client portal page in the portal frame (components/shell.tsx). Search engines are told to skip these pages (`noindex`). */
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AppShell } from "@/components/shell";
+import { NOINDEX } from "@/lib/site";
+
+export const metadata: Metadata = NOINDEX;
 
 // The shell loads the signed-in user in the browser, so this segment opts out of instant-navigation validation.
 export const instant = false;

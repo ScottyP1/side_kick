@@ -67,7 +67,7 @@ export default function SetupWizard() {
   }, [me.user.admin, load, reportError, toast]);
 
   if (!me.user.admin) {
-    return <div className="panel"><div className="empty"><h2>Setup is for admins</h2><span>Your Org Owner or an Org Admin sets Sidekick up for your organization.</span><Link className="btn" href="/">Go home</Link></div></div>;
+    return <div className="panel"><div className="empty"><h2>Setup is for admins</h2><span>Your Org Owner or an Org Admin sets Sidekick up for your organization.</span><Link className="btn" href="/home">Go home</Link></div></div>;
   }
   if (!s) return <span className="muted">Loading setup…</span>;
 

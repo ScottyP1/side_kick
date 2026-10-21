@@ -1,38 +1,97 @@
 /**
- * The frame for Sidekick's public pages (no sign-in): pricing, sign-up, privacy, terms and support. A slim
- * top bar with the Sidekick mark and links, the page, and a footer with the legal links (the same links the
- * Teams Store listing points to). Uses the existing styles only (globals.css), no colours of its own.
+ * The frame for Sidekick's public website (no sign-in): home, features, how it works, security, pricing, the
+ * help center, support, changelog, sign-up, checkout, privacy and terms. One header (logo, Features, How it
+ * works, Security, Pricing, FAQ, Help, Sign in, Get started) with a menu button on phones, the page, and one footer
+ * (product, help and legal links; FAQ is under Help; the privacy/terms links are also what the Teams Store listing points to).
+ *
+ * Server component with no JavaScript of its own: the phone menu is a native <details> element, so it works
+ * under the enforced Content-Security-Policy and before any script loads. Styles: components/public-site.css
+ * on top of the Indigo tokens in globals.css. The links come from lib/site.ts. The empty <SiteChatSlot> at the
+ * end is where the public "Ask about Sidekick" chat will go.
  */
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { SITE_NAV } from "@/lib/site";
+import { SiteChatSlot } from "./site-chat-slot";
+import "./public-site.css";
 
-/** Shown on every public page: the brand, the main links and the legal footer around `children`. */
-export function PublicShell({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
+/**
+ * Shown on every public page around `children`.
+ * - `current`: the page's path, so its header link is marked as the current page.
+ * - `layout`: "page" (default, a centred column like the portal's pages), "narrow" (reading width, for
+ *   legal text and forms) or "full" (the page draws its own full-width sections, like the home page).
+ *   `narrow` is the older way to ask for "narrow".
+ */
+export function PublicShell({ children, narrow, current, layout }: { children: ReactNode; narrow?: boolean; current?: string; layout?: "page" | "narrow" | "full" }) {
+  const mode = layout ?? (narrow ? "narrow" : "page");
+  const here = (href: string) => (current && (current === href || current.startsWith(`${href}/`)) ? "page" : undefined);
   return (
-    <div style={{ minHeight: "100%", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
-      <header className="topbar" style={{ position: "static" }}>
-        <Link href="/pricing" className="brand" style={{ padding: 0, textDecoration: "none" }}>
-          <span className="brand-mark">S</span>
-          <b style={{ color: "var(--fg)" }}>Sidekick</b>
-        </Link>
-        <span className="spacer" />
-        <nav style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }} aria-label="Sidekick">
-          <Link className="btn small ghost" href="/pricing">Pricing</Link>
-          <Link className="btn small ghost" href="/support">Support</Link>
-          <Link className="btn small" href="/login">Sign in</Link>
-          <Link className="btn small primary" href="/signup">Sign up</Link>
-        </nav>
+    <div className="site">
+      <a className="site-skip" href="#main">Skip to content</a>
+      <header className="site-head">
+        <div className="site-head-in">
+          <Link href="/" className="site-brand" aria-label="Sidekick home">
+            <span className="brand-mark" aria-hidden="true">S</span>
+            Sidekick
+          </Link>
+          <nav className="site-nav" aria-label="Main">
+            {SITE_NAV.map((l) => <Link key={l.href} href={l.href} aria-current={here(l.href)}>{l.label}</Link>)}
+          </nav>
+          <div className="site-cta">
+            <Link className="btn ghost" href="/login">Sign in</Link>
+            <Link className="btn primary" href="/signup">Get started</Link>
+          </div>
+          <details className="site-menu">
+            <summary className="btn" aria-label="Menu">
+              <svg className="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+              Menu
+            </summary>
+            <nav className="site-menu-panel" aria-label="Main">
+              {SITE_NAV.map((l) => <Link key={l.href} href={l.href} aria-current={here(l.href)}>{l.label}</Link>)}
+              <div className="site-menu-cta">
+                <Link className="btn" href="/login">Sign in</Link>
+                <Link className="btn primary" href="/signup">Get started</Link>
+              </div>
+            </nav>
+          </details>
+        </div>
       </header>
-      <main style={{ flex: 1, width: `min(${narrow ? 760 : 1080}px, 100%)`, margin: "0 auto", padding: "32px 16px", display: "flex", flexDirection: "column", gap: 20 }}>
-        {children}
+      <main id="main" className="site-main">
+        {mode === "full" ? children : (
+          <div className={`site-wrap ${mode === "narrow" ? "site-narrow" : ""}`} style={{ display: "flex", flexDirection: "column", gap: 20, padding: "32px 16px 56px" }}>
+            {children}
+          </div>
+        )}
       </main>
-      <footer className="muted" style={{ borderTop: "1px solid var(--line)", padding: "16px", display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap", fontSize: 13 }}>
-        <span>Sidekick: a personal project, not a company</span>
-        <Link href="/privacy">Privacy</Link>
-        <Link href="/terms">Terms of use</Link>
-        <Link href="/support">Support</Link>
-      </footer>
+      <SiteFooter />
+      {/* Reserved for the public "Ask about Sidekick" chat (not built yet; see site-chat-slot.tsx). */}
+      <SiteChatSlot />
     </div>
+  );
+}
+
+/** The footer on every public page: product, help and legal links, and who runs Sidekick. */
+function SiteFooter() {
+  const cols: [string, [string, string][]][] = [
+    ["Product", [["/features", "Features"], ["/how-it-works", "How it works"], ["/security", "Security & trust"], ["/pricing", "Pricing"], ["/changelog", "Changelog"]]],
+    ["Help", [["/faq", "FAQ"], ["/docs", "Help center"], ["/support", "Support"], ["/login", "Sign in"], ["/signup", "Get started"]]],
+    ["Legal", [["/privacy", "Privacy policy"], ["/terms", "Terms of use"]]],
+  ];
+  return (
+    <footer className="site-foot">
+      <div className="site-foot-in">
+        <div>
+          <Link href="/" className="site-brand" aria-label="Sidekick home"><span className="brand-mark" aria-hidden="true">S</span>Sidekick</Link>
+          <p>The AI teammate for client teams in Microsoft Teams. A personal project, not a company. Powered by Claude.</p>
+        </div>
+        {cols.map(([title, links]) => (
+          <nav key={title} aria-label={title}>
+            <h2>{title}</h2>
+            <ul>{links.map(([href, label]) => <li key={href}><Link href={href}>{label}</Link></li>)}</ul>
+          </nav>
+        ))}
+      </div>
+    </footer>
   );
 }
 

@@ -251,3 +251,81 @@ test(`[${engine}] subscriptions: one per organization; the upsert works on this 
   const rows = await db.all("SELECT plan, status FROM subscriptions WHERE org_id = ?", id);
   assert.deepEqual(rows.map((r) => ({ ...r })), [{ plan: "business", status: "active" }]);
 });
+
+/* ---------- Public website and help center (pure: lib/markdown.ts, lib/help.ts, lib/site.ts) ---------- */
+
+test(`[${engine}] help center Markdown: lists, nested lists, tables, quotes and links are read as data`, async () => {
+  const md = await import("../src/lib/markdown.ts");
+  const keep = (href) => (href === "ok.md" ? "/docs/ok" : null);
+  const blocks = md.parseMarkdown(
+    "# Title\n\nSee [ok](ok.md) and [secret](../PROGRESS.md), **bold** and `code` <script>x</script>.\n\n1. One:\n   - sub a\n   - sub b\n\n   More about one.\n2. Two\n\n| A | B |\n|:-:|--:|\n| *x* | y |\n\n> quoted\n\n## Title",
+    keep,
+  );
+  assert.deepEqual(blocks.map((b) => b.t), ["h", "p", "list", "table", "quote", "h"]);
+  assert.equal(blocks[0].id, "title");
+  assert.equal(blocks[5].id, "title-1", "repeated headings get unique ids");
+  const p = blocks[1].c;
+  assert.deepEqual(p.find((n) => n.t === "a"), { t: "a", href: "/docs/ok", c: [{ t: "text", v: "ok" }] });
+  assert.ok(!p.some((n) => n.t === "a" && /PROGRESS/.test(n.href)), "a refused link keeps only its text");
+  assert.match(md.plainText(p), /secret.*<script>x<\/script>/, "markup stays plain text");
+  const list = blocks[2];
+  assert.equal(list.ordered, true);
+  assert.equal(list.items.length, 2);
+  assert.deepEqual(list.items[0].sub.items.map((i) => md.plainText(i.c)), ["sub a", "sub b"]);
+  assert.equal(md.plainText(list.items[0].more[0]), "More about one.");
+  assert.deepEqual(blocks[3].align, ["center", "right"]);
+  assert.equal(md.slugify("7. Link Teams chats & channels"), "7-link-teams-chats--channels");
+});
+
+test(`[${engine}] help center: only the four customer guides, links rewritten, search finds sections`, async () => {
+  const help = await import("../src/lib/help.ts");
+  assert.deepEqual(help.guides().map((g) => g.slug), ["concepts", "admin-guide", "teams-guide", "roles-and-permissions"]);
+  for (const bad of ["owner-guide", "README", "../PROGRESS", "PROGRESS", "constructor", "__proto__", "hasOwnProperty", ""]) assert.equal(help.guide(bad), null, bad);
+  assert.equal(help.helpLink("admin-guide.md#4-add-people"), "/docs/admin-guide#4-add-people");
+  assert.equal(help.helpLink("owner-guide.md"), null);
+  assert.equal(help.helpLink("../ARCHITECTURE.md"), null);
+  assert.equal(help.helpLink("javascript:alert(1)"), null);
+  assert.equal(help.helpLink("https://learn.microsoft.com/x"), "https://learn.microsoft.com/x");
+  const text = JSON.stringify(help.guides());
+  assert.doesNotMatch(text, /permissions-matrix|npm --prefix|SIDEKICK_|azurecontainerapps/, "nothing internal in the public guides");
+  const hits = help.searchHelp(help.helpSections(), "read-only");
+  assert.ok(hits.length > 0);
+  assert.ok(hits.every((h) => `${h.heading} ${h.text}`.toLowerCase().includes("read-only")));
+  assert.deepEqual(help.searchHelp(help.helpSections(), "   "), []);
+});
+
+test(`[${engine}] help center copy matches docs/guide, and the site map covers every portal page`, async () => {
+  const { spawnSync } = await import("node:child_process");
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const app = path.resolve(import.meta.dirname, "..");
+  const check = spawnSync(process.execPath, ["scripts/sync-help.mjs", "--check"], { cwd: app, encoding: "utf8" });
+  assert.equal(check.status, 0, `${check.stderr}Run: npm --prefix app run help:sync`);
+  const site = await import("../src/lib/site.ts");
+  const portal = fs.readdirSync(path.join(app, "src/app/(app)"), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => `/${d.name}`);
+  for (const p of portal) assert.ok(site.PRIVATE_PATHS.includes(p), `robots.txt keeps search engines out of ${p}`);
+  const paths = site.PUBLIC_PAGES.map((p) => p.path);
+  assert.equal(new Set(paths).size, paths.length);
+  for (const p of paths) assert.ok(!site.PRIVATE_PATHS.some((x) => p === x || p.startsWith(x)), `${p} isn't private`);
+  // The proxy's matcher must skip every public page (except "/", which it handles itself).
+  const proxy = fs.readFileSync(path.join(app, "src/proxy.ts"), "utf8");
+  for (const p of paths.filter((x) => x !== "/")) assert.ok(proxy.includes(`|${p.slice(1).split("/")[0]}|`), `proxy skips ${p}`);
+  assert.throws(() => site.publicPage("/nope"));
+});
+
+test(`[${engine}] FAQ: one list, unique ids, every help-center link lands on a real guide section`, async () => {
+  const { FAQ, faqFor } = await import("../src/lib/faq.ts");
+  const help = await import("../src/lib/help.ts");
+  const ids = FAQ.map((f) => f.id);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const t of ["pricing", "security", "how-it-works"]) assert.ok(faqFor(t).length >= 3, `${t} has questions`);
+  for (const f of FAQ) {
+    assert.ok(f.q.endsWith("?") && f.a.length > 0, f.id);
+    if (!f.guide || f.guide === "/docs") continue;
+    const [, slug, anchor] = /^\/docs\/([\w-]+)(?:#([\w-]+))?$/.exec(f.guide) ?? [];
+    const g = help.guide(slug);
+    assert.ok(g, `${f.id}: ${f.guide} is a public guide`);
+    if (anchor) assert.ok(g.blocks.some((b) => b.t === "h" && b.id === anchor), `${f.id}: #${anchor} exists in ${slug}`);
+  }
+  assert.equal(FAQ.find((f) => f.id === "training").legalReview, true, "the AI-training answer is marked for legal review");
+});

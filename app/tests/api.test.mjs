@@ -529,6 +529,88 @@ test(`[${ENGINE}] every response carries the browser security headers and doesn'
   }
 });
 
+/* ---------- public website and help center ---------- */
+
+/** The paths in sitemap.xml (its addresses use SIDEKICK_PUBLIC_URL, so only the path is compared). */
+async function sitemapPaths() {
+  const xml = (await client()("GET", "/sitemap.xml")).body;
+  return [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => new URL(m[1]).pathname);
+}
+
+test(`[${ENGINE}] website: / shows the website when signed out and sends signed-in people to their portal home`, async () => {
+  const visitor = await client()("GET", "/");
+  assert.equal(visitor.status, 200);
+  assert.match(visitor.body, /<title>Sidekick: the AI teammate/);
+  assert.match(visitor.body, /href="\/signup"[^>]*>Get started/);
+  assert.match(visitor.body, /href="\/login"[^>]*>Sign in/);
+  assert.match(visitor.body, /Placeholder/, "social proof is clearly marked as placeholders");
+  assert.match(visitor.headers.get("content-security-policy") ?? "", /default-src 'self'/, "the website runs under the same enforced policy");
+  const signedIn = await admin("GET", "/");
+  assert.equal(signedIn.status, 307);
+  assert.equal(new URL(signedIn.location, BASE).pathname, "/home");
+  assert.equal((await admin("GET", "/home")).status, 200, "the portal home moved to /home");
+  assert.equal((await client()("GET", "/home")).status, 307, "and still needs a session");
+});
+
+test(`[${ENGINE}] website: every public page answers without a session; the portal, Owner Console and checkout don't`, async () => {
+  const pages = await sitemapPaths();
+  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/roles-and-permissions"]) {
+    assert.ok(pages.includes(p), `${p} is in the sitemap`);
+  }
+  for (const p of pages) {
+    const r = await client()("GET", p);
+    assert.equal(r.status, 200, p);
+    assert.match(r.body, /<meta name="description"/, `${p} has a description`);
+    assert.match(r.body, /<meta property="og:title"/, `${p} has a link preview`);
+    assert.doesNotMatch(r.body, /<meta name="robots" content="noindex/, `${p} can be indexed`);
+  }
+  // The FAQ is on its own page and in short sections on Pricing, Security & trust and How it works.
+  assert.match((await client()("GET", "/faq")).body, /id="training"[\s\S]*pending legal review/);
+  for (const p of ["/pricing", "/security", "/how-it-works"]) assert.match((await client()("GET", p)).body, /class="site-faq"/, `${p} has FAQ answers`);
+  // Everything robots.txt keeps search engines out of needs a session (except the sign-in pages themselves).
+  const robots = (await client()("GET", "/robots.txt")).body;
+  const disallowed = [...robots.matchAll(/^Disallow: (\S+)$/gm)].map((m) => m[1]);
+  for (const p of ["/home", "/workspaces", "/usage", "/owner", "/checkout", "/api/"]) assert.ok(disallowed.includes(p), `robots.txt disallows ${p}`);
+  for (const p of disallowed.filter((x) => !["/login", "/setup", "/api/"].includes(x))) {
+    const r = await client()("GET", p);
+    assert.equal(r.status, 307, p);
+    assert.match(r.location, p === "/owner" ? /\/owner\/login$/ : /\/login$/, p);
+  }
+  // Portal, Owner Console and sign-in pages tell search engines to skip them.
+  for (const [who, p] of [[admin, "/home"], [admin, "/workspaces"], [client(), "/login"], [client(), "/owner/login"], [owner, "/owner"]]) {
+    assert.match((await who("GET", p)).body, /<meta name="robots" content="noindex, nofollow"/, p);
+  }
+});
+
+test(`[${ENGINE}] website: the sitemap lists only public pages, and robots.txt points to it`, async () => {
+  const pages = await sitemapPaths();
+  assert.ok(pages.length >= 15);
+  for (const p of pages) {
+    assert.doesNotMatch(p, /^\/(home|owner|api|checkout|login|setup|workspaces|usage|users|settings|activity|audit|get-started)(\/|$)/, p);
+  }
+  assert.ok(!pages.includes("/docs/owner-guide"), "the Owner Console guide isn't public");
+  assert.match((await client()("GET", "/robots.txt")).body, /^Sitemap: \S+\/sitemap\.xml$/m);
+});
+
+test(`[${ENGINE}] help center: serves only the public guides, never internal docs or file paths`, async () => {
+  const guide = await client()("GET", "/docs/admin-guide");
+  assert.equal(guide.status, 200);
+  assert.match(guide.body, /<h1[^>]*>Admin guide<\/h1>/);
+  assert.match(guide.body, /href="\/docs\/concepts"/, "links between guides point into the help center");
+  assert.doesNotMatch(guide.body, /PROGRESS|ARCHITECTURE|\.md"/, "no links to developer docs or raw files");
+  const roles = (await client()("GET", "/docs/roles-and-permissions")).body;
+  assert.match(roles, /Who can do what/);
+  assert.doesNotMatch(roles, /permissions-matrix|npm --prefix/, "developer-only parts are left out");
+  for (const p of ["/docs/owner-guide", "/docs/README", "/docs/PROGRESS", "/docs/HOSTING", "/docs/RUNBOOKS", "/docs/..%2FPROGRESS", "/docs/..%2F..%2FCLAUDE", "/docs/%2E%2E%2Fdocs%2FPROGRESS.md", "/docs/admin-guide.md", "/docs/constructor", "/docs/__proto__"]) {
+    const r = await client()("GET", p);
+    assert.equal(r.status, 404, p);
+    assert.doesNotMatch(r.body, /Owner Console guide|Roadmap &amp; queue|SIDEKICK_SETUP_CODE/, p);
+  }
+  // A raw "../" never reaches a file either: the address is normalized before routing, and that page needs a session.
+  const raw = await fetch(`${BASE}/docs/../PROGRESS`, { redirect: "manual" });
+  assert.notEqual(raw.status, 200);
+});
+
 test(`[${ENGINE}] Activity: admins see traces with their steps; members can't`, async () => {
   assert.equal((await member("GET", "/api/activity?view=overview")).status, 403);
   await member("POST", "/api/ask", { ws: s.wsA, question: "When is the wave 2 cutover?" });

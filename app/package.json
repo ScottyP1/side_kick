@@ -11,6 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "teams:package": "node scripts/teams-package.mjs",
+    "help:sync": "node scripts/sync-help.mjs",
     "tunnel": "devtunnel host sidekick",
     "test": "node tests/run.mjs",
     "db:copy-to-postgres": "node scripts/copy-to-postgres.mjs"

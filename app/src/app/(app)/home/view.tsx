@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Home (/): what Sidekick knows and what needs attention across your workspaces: counts, recent meetings, open gaps and action items.
+ * Portal home (/home; signed-in visitors to / are sent here by src/proxy.ts): what Sidekick knows and what needs attention across your workspaces: counts, recent meetings, open gaps and action items.
  */
 
 import Link from "next/link";

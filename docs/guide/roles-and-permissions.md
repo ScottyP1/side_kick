@@ -1,9 +1,12 @@
 # Roles and permissions
 
 Every person in a Sidekick organization has exactly one of six roles. The role decides **what they can do**;
-the workspaces they're added to decide **which client work they can see**. This page is the rulebook,
-and an automated test (`app/tests/permissions-matrix.mjs`, run by `npm --prefix app test`) checks every
-row below against the real app for every role, so the page and the code can't drift apart.
+the workspaces they're added to decide **which client work they can see**. This page is the rulebook.
+
+<!-- help-center:skip -->
+For developers: an automated test (`app/tests/permissions-matrix.mjs`, run by `npm --prefix app test`) checks
+every row below against the real app for every role, so the page and the code can't drift apart.
+<!-- /help-center:skip -->
 
 ## The roles
 
@@ -103,7 +106,9 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 - **Guardrails can only get stricter** below the company level: a workspace or a custom rule can add
   limits, never remove the locked floor.
 
+<!-- help-center:skip -->
 ## Changing a rule
 
 Change the code, the matching row in `app/tests/permissions-matrix.mjs`, and this page together; the test
 fails if any of the three disagree.
+<!-- /help-center:skip -->

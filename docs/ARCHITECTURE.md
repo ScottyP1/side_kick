@@ -59,8 +59,32 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/reminders.ts` | Per-chat settings (notes, tracking, reminders), saving tracked chat messages, building reminder digests (items picked in code, worded by Claude feature `remind`, every point with a source) and their card buttons |
 | `lib/reminder-rules.ts` | Plain rules for chat settings and reminder timing (defaults, validation, time zones, quiet days); no I/O, unit-tested |
 | `instrumentation.ts` | Starts the in-app timer that calls `POST /api/reminders/tick` every 5 minutes (off with `SIDEKICK_SCHEDULER=off`) |
-| `components/` | Portal and Owner Console frames, shared UI |
-| `app/(app)/*/view.tsx` | Client portal pages; `app/owner/(console)/*/view.tsx` Owner Console pages |
+| `lib/site.ts` | The public website's map: `PUBLIC_PAGES` (titles, descriptions, sitemap order), header links, `PRIVATE_PATHS` (robots.txt), page metadata helpers (`pageMetadata`, `NOINDEX`), `siteUrl` from `SIDEKICK_PUBLIC_URL`. Pure |
+| `lib/help.ts`, `lib/help-search.ts` | The help center: the public guides by name (fixed list, never file paths), link rewriting, the search index and matching. Pure |
+| `lib/help-content.ts` | **Generated** copy of the public guides in `docs/guide/` (`npm --prefix app run help:sync`, `scripts/sync-help.mjs`; a test fails while it's stale). Needed because the Docker build only sees `app/` |
+| `lib/markdown.ts` | Small Markdown reader for the guides: blocks and inline nodes as data (no HTML strings), rendered by `components/markdown.tsx` |
+| `lib/changelog.ts` | The public changelog entries, newest first |
+| `lib/faq.ts` | The FAQ: every question and answer in one data file (`/faq` shows all; Pricing, Security & trust and How it works show theirs via `faqFor`). Answers stay consistent with `docs/guide/`; `legalReview` marks draft wording. The future public chat should answer from this file and the guides |
+| `components/` | Portal, Owner Console and public-website frames (`public-shell.tsx` + `public-site.css`), shared UI |
+| `app/(app)/*/view.tsx` | Client portal pages (home is `app/(app)/home`); `app/owner/(console)/*/view.tsx` Owner Console pages; `app/(public)/*` the public website |
+
+## Routes
+
+| Address | What | Sign-in |
+|---|---|---|
+| `/` | Website home for visitors. **Anyone with a portal session cookie is redirected to `/home`** by `src/proxy.ts`; sign-in and Microsoft sign-in still land on `/`, so they arrive at `/home` too | None |
+| `/features`, `/how-it-works`, `/security`, `/pricing`, `/faq`, `/support`, `/changelog`, `/privacy`, `/terms`, `/signup` | Public website pages (`app/(public)/*`), one header and footer (`components/public-shell.tsx`) | None |
+| `/docs`, `/docs/<guide>` | Help center: the public guides from `docs/guide/` (concepts, admin, Teams, roles) with search; any other name is a 404 | None |
+| `/robots.txt`, `/sitemap.xml` | Generated per request (`app/robots.ts`, `app/sitemap.ts`) from `lib/site.ts`; addresses from `SIDEKICK_PUBLIC_URL` | None |
+| `/login`, `/setup` | Portal sign-in and first-run setup (`noindex`) | None |
+| `/checkout` | Pay for the plan (test mode) | Portal |
+| `/home` and every other portal page (`app/(app)/*`) | The client portal (`noindex`); home moved here from `/` so the website can own `/` | Portal |
+| `/owner/*` | Owner Console (`noindex`), own sign-in at `/owner/login` | Owner |
+| `/api/*` | API routes; each checks the session itself (the proxy skips them) | Per route |
+
+**Public chat slot**: `components/site-chat-slot.tsx` (rendered at the end of every public page by `public-shell.tsx`) is where the public "Ask about Sidekick" chat goes. It renders nothing today. Whoever builds it: hidden unless switched on, public content only (`lib/faq.ts`, `lib/help.ts`, the public pages), every question and answer through `lib/guardrails.ts`.
+
+Adding a public page: add it to `PUBLIC_PAGES` in `lib/site.ts` (sitemap, metadata) **and** to the proxy's `matcher` (a unit test checks both); adding a portal page: add its path to `PRIVATE_PATHS` (a unit test checks every `app/(app)` folder is listed). Later the website and portal can split into `sidekick.ai` and `app.sidekick.ai`; keeping the website under `(public)` and the portal under `(app)` keeps that a hosting change.
 
 ## Three flows worth knowing
 

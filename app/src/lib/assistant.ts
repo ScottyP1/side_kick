@@ -41,7 +41,7 @@ import { cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, t
 
 /** Pages the assistant can send someone to, with who may see each (mirrors the sidebar in shell.tsx). */
 export const PAGES: Record<string, { label: string; href: string; who?: (u: User) => boolean }> = {
-  overview: { label: "Overview", href: "/" },
+  overview: { label: "Overview", href: "/home" },
   usage: { label: "Usage & billing", href: "/usage", who: (u) => isAdmin(u) || u.role === "Billing Admin" },
   agent: { label: "AI models & agent", href: "/agent" },
   workspaces: { label: "Workspaces", href: "/workspaces" },

@@ -6,6 +6,7 @@
 import { handle, readJson, requireText } from "@/lib/api";
 import { HttpError } from "@/lib/auth";
 import { assertSetupAllowed, createOwner, ownerExists, platformLog, setupNeedsCode, startOwnerSession } from "@/lib/owner";
+import { assertGoodPassword } from "@/lib/passwords";
 
 export const GET = handle(async () => ({ needsSetup: !await ownerExists(), needsCode: setupNeedsCode() }));
 
@@ -17,7 +18,7 @@ export const POST = handle(async (req: Request) => {
   const name = requireText(body.name, "Your name", 120);
   const email = requireText(body.email, "Email", 200);
   const password = requireText(body.password, "Password", 200);
-  if (password.length < 12) throw new HttpError(400, "Use a password with at least 12 characters for the owner account.");
+  await assertGoodPassword(password, { email });
   const id = await createOwner(name, email, password);
   await startOwnerSession(id);
   await platformLog(name, "Created the owner account");

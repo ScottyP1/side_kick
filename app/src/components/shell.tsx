@@ -15,7 +15,12 @@ export type Me = {
   user: { id: string; name: string; email: string; role: string; mustChangePassword: boolean; admin: boolean; lead?: boolean };
   org: { name: string };
   workspaces: Workspace[];
-  claude: { configured: boolean; models: Record<string, string> };
+  /** Plain status of AI answers (no model or provider names in the portal). */
+  ai: { working: boolean };
+  /** This month's AI credit (Org Owners, Org Admins, Billing Admins only; null for others). */
+  credit?: { level: "unlimited" | "ok" | "warn" | "essentials"; pct: number } | null;
+  /** The plan's name (null = managed by the Sidekick team) and connectors included (0, 1, null = all). */
+  plan?: { name: string | null; connectors: number | null };
   branding: { logo?: string | null; accent?: string | null };
   /** What the organization's plan allows now (lib/plans.ts accessFor) and the notice to show, if any. */
   billing?: { mode: "full" | "read_only"; notice: string | null };
@@ -168,11 +173,22 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </aside>
           <div className="main">
-            {!me.claude.configured && (
+            {!me.ai.working && (
               <div className="banner">
                 <Icon n="alert" />
                 <span>
-                  <b>Claude isn&apos;t connected yet.</b> Add your key as <code>ANTHROPIC_API_KEY</code> in <code>app/.env.local</code>, then restart the app. Uploads and search work without it; answers and meeting notes need it.
+                  <b>AI answers aren&apos;t set up yet.</b> The Sidekick team needs to finish setting up this server. Uploads and search work already; answers and meeting notes need it.
+                </span>
+              </div>
+            )}
+            {me.credit && (me.credit.level === "warn" || me.credit.level === "essentials") && (
+              <div className="banner" role="status">
+                <Icon n="alert" />
+                <span>
+                  {me.credit.level === "warn"
+                    ? <>Your organization has used {me.credit.pct}% of this month&apos;s AI credit. At 100%, Sidekick keeps answering questions but pauses extras like reminders and the knowledge map.</>
+                    : <><b>This month&apos;s AI credit is used up.</b> Sidekick still answers questions; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st.</>}{" "}
+                  <Link href="/usage">Open Usage &amp; billing</Link>
                 </span>
               </div>
             )}
@@ -207,7 +223,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
               {WS_PAGES.some((p) => path.startsWith(p)) && <WorkspacePick workspaces={me.workspaces} ws={ws} setWs={setWs} />}
               <span className="spacer" />
-              <Pill kind={me.claude.configured ? "good" : "warn"}>{me.claude.configured ? "Claude connected" : "Claude not connected"}</Pill>
+              <Pill kind={!me.ai.working ? "warn" : me.credit?.level === "essentials" ? "warn" : "good"}>{!me.ai.working ? "AI answers: not set up" : me.credit?.level === "essentials" ? "AI answers: essentials only" : "AI answers: working"}</Pill>
               <UserMenu name={me.user.name} detail={me.user.role} onSignOut={logout} />
             </header>
             {/* Workspace pages restart when the workspace changes; org-wide pages (incl. the home assistant) keep their state. */}
@@ -309,10 +325,10 @@ function ChangeTemporaryPassword({ name, onDone }: { name: string; onDone: () =>
         <h2>Pick your own password</h2>
         <p className="muted">Welcome, {name}. You signed in with a temporary password; choose a new one to start using Sidekick.</p>
         <div className="field"><label htmlFor="tmp-cur">Temporary password</label><input id="tmp-cur" className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></div>
-        <div className="field"><label htmlFor="tmp-new">New password</label><input id="tmp-new" className="input" type="password" autoComplete="new-password" minLength={10} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 10 characters.</span></div>
+        <div className="field"><label htmlFor="tmp-new">New password</label><input id="tmp-new" className="input" type="password" autoComplete="new-password" minLength={12} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 12 characters, and not one from a known data breach. A password manager can make one.</span></div>
         {err && <p className="err">{err}</p>}
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn primary" type="submit" disabled={busy || !pw.current || pw.next.length < 10}>Save password</button>
+          <button className="btn primary" type="submit" disabled={busy || !pw.current || pw.next.length < 12}>Save password</button>
           <button className="btn ghost" type="button" onClick={signOut}>Sign out</button>
         </div>
       </form>

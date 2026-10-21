@@ -3,7 +3,7 @@
 /**
  * Security & audit (/audit): the organization's audit log: sign-ins, access changes, uploads, deletions,
  * Teams links and every action Sidekick takes on its own. Admins only. "Where your data goes" is built from
- * /api/health, so it shows the setup actually running (database engine, search, Claude, Teams).
+ * /api/health, so it shows the setup actually running (database engine, search, AI answers, Teams).
  */
 
 import { useEffect, useState } from "react";
@@ -20,7 +20,7 @@ function flowFor(h: Health | null): [string, string][] {
   return [
     ["Your browser", "Signed-in session, HTTPS in production"],
     ["Sidekick server", "Checks role and workspace on every request"],
-    ["Claude", !h ? "…" : h.claude ? "Anthropic's Claude API: sees only the passages needed for one answer" : "Not connected yet"],
+    ["AI answers", !h ? "…" : h.claude ? "Working: the AI sees only the passages needed for one answer, and never trains on your data" : "Not set up yet"],
     ["Database", !h ? "…" : h.database.engine === "postgres" ? "PostgreSQL" : "SQLite on the machine running Sidekick"],
     ["Search", search],
     ...(h?.teams ? [["Microsoft Teams", "Only chats and channels an admin linked to a workspace"] as [string, string]] : []),

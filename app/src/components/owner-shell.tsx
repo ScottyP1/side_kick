@@ -2,6 +2,8 @@
 
 /**
  * The Owner Console frame: sidebar and header around every Owner Console page, and the owner sign-in check.
+ * Its own dark graphite look with the Indigo accent (`.owner-app` in globals.css), whatever the device's
+ * light/dark setting, so it's never mistaken for a client portal.
  * Signing out: the sidebar footer, or the avatar menu in the header (the only way at phone width).
  */
 
@@ -13,9 +15,11 @@ import { api, Icon, Pill, ToastProvider } from "./ui";
 
 const NAV: [string, string, string][] = [
   ["/owner", "Overview", "home"],
+  ["/owner/business", "Business", "activity"],
   ["/owner/clients", "Clients", "users"],
   ["/owner/performance", "Performance & errors", "chart"],
   ["/owner/releases", "Releases & switches", "gear"],
+  ["/owner/security", "Security", "lock"],
 ];
 
 // The Owner Console: Sidekick's operator view across every client organization.

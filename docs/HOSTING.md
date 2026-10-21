@@ -31,6 +31,25 @@ Container App **secrets** (encrypted, referenced with `secretref:`); the rest ar
 plus `SIDEKICK_PUBLIC_URL` (the live address) and `AZURE_SEARCH_INDEX=sidekick-cloud`.
 The database admin password was generated at random and only exists inside `DATABASE_URL`.
 
+**`SIDEKICK_ENCRYPTION_KEY`** (needed before anyone can add an authenticator app on the live site; passkeys
+work without it): the master key that encrypts authenticator-app secrets in the database (`app/src/lib/secret-box.ts`,
+envelope encryption with AES-256-GCM: each secret has its own data key, wrapped by this key). Production refuses
+authenticator setup until it's set, and says so on Settings. Create it once, straight into the Container App
+(the value never appears on screen):
+
+```bash
+az containerapp secret set -g sidekick-rg -n sidekick-app --secrets encryption-key="$(openssl rand -base64 32)"
+```
+
+```bash
+az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars SIDEKICK_ENCRYPTION_KEY=secretref:encryption-key
+```
+
+Don't change or delete it afterwards: secrets encrypted with it can't be read with another key (people would
+have to remove and re-add their authenticator app; passkeys and backup codes are unaffected). Later, move it to
+Azure Key Vault (a Key Vault reference on the Container App secret, read with the app's managed identity), or let
+Key Vault do the wrapping; the stored format already has a key id for that.
+
 The image is pulled with the app's managed identity (AcrPull role); the registry's admin user is off.
 
 ## Deploy, freeze, unfreeze
@@ -65,6 +84,19 @@ Actions tab has **Run workflow** for a manual deploy, and `./infra/azure/deploy.
   repos, so merging *is* releasing. Keep the rule: merge only reviewed PRs with a green `test` check.
 - **Stop automatic deploys** (e.g. during an incident): Actions → Deploy → ⋯ → Disable workflow.
 - Rollback by hand: `docs/RUNBOOKS.md` → Roll back.
+
+**Release facts for the Owner Console.** The console's **Business** page shows which commit is running and
+when it was released, read from two settings on the container: `SIDEKICK_COMMIT` (short git commit) and
+`SIDEKICK_RELEASED_AT` (ISO time). The automatic deploy (`.github/workflows/deploy.yml`) sets them when it switches the app to the new image
+(and again on a rollback, to the previous image's tag).
+Without them the page falls back to the git checkout (laptop) or says "Not set by the deploy". Each app
+copy records the release it runs (`app_releases`) the first time `/api/health` answers, so the page lists
+the recent deploys without needing Azure.
+
+**AI settings worth knowing** (all optional): `SIDEKICK_CLAUDE_RETRIES` (extra attempts when Claude is busy,
+default 3), `SIDEKICK_BATCH=off` (send daily reminder wording live instead of through the half-price Batch
+API), `SIDEKICK_MODEL_ESSENTIAL_ASK/_GUARD/_EXTRACT` (models used once a client's AI credit is used up),
+`SIDEKICK_ASK_PER_HOUR` (questions per person per hour, default 60).
 
 ## Teams app package
 
@@ -101,6 +133,10 @@ otherwise the app's own address, which serves those pages.
   points at the tunnel. Upload the live package again afterwards.
 
 ## Monitoring and alerts (October 20, 2026)
+
+Day to day, watch the business and the app's health in the **Owner Console → Business** page (MRR,
+margin, limits, trials, payments, health checks, running release, app errors). The Azure pieces below are
+the safety net that alerts when the app itself is down.
 
 - **Health probes** on `sidekick-app`: *startup* and *readiness* call `/api/health` (200 only when the
   database answers); *liveness* is a plain port check, so a database blip takes the app out of traffic
@@ -145,6 +181,12 @@ first if it would trip again). Not test-fired yet, because firing it takes the l
   (at least 16 characters; without it production refuses setup). To create the owner account: add the
   secret to the Container App, open `/owner/setup`, enter it, then remove the secret. (Oct 2026: the
   live owner account didn't exist yet; see `docs/security/`.)
+- Sign-in (Oct 20, 2026, PR #30): two-step sign-in (passkeys, authenticator apps, backup codes) for portal and
+  Owner Console accounts; authenticator secrets encrypted at rest with `SIDEKICK_ENCRYPTION_KEY` (above). New
+  passwords are checked against Have I Been Pwned with its k-anonymity range API: only the first 5 characters
+  of the password's SHA-1 hash leave the server (with padding), never the password. If HIBP can't be reached in
+  3 seconds the password is accepted on length alone and the log gets a `[passwords] Breached-password check
+  unavailable` warning. Locked-out accounts: `docs/RUNBOOKS.md` → Locked out.
 - Registry: admin user and anonymous pull off.
 - Database: TLS required, random 32-character password; firewall allows Azure services only (the app's
   outgoing addresses are a long shared list that can change, so they aren't pinned). Private networking

@@ -7,9 +7,14 @@ For **Org Owners** and **Org Admins**: everything needed to set Sidekick up for 
 
 **Signing up yourself.** When the Sidekick team has opened sign-up, a company can create its own organization at **/signup** (or **Start free trial** on the **/pricing** page): see [Sign-up, plan and billing](#15-sign-up-plan-and-billing) below.
 
-The first person to open a new Sidekick install sets up the organization and becomes its **Org Owner**. If the Sidekick team onboarded you, sign in with the temporary password they gave you. Sidekick then shows only a **Pick your own password** screen until you choose a new one (at least 10 characters); nothing else works with a temporary password. Signing in with Microsoft instead also counts.
+The first person to open a new Sidekick install sets up the organization and becomes its **Org Owner**. If the Sidekick team onboarded you, sign in with the temporary password they gave you. Sidekick then shows only a **Pick your own password** screen until you choose a new one (at least 12 characters, and not one that has appeared in a known data breach); nothing else works with a temporary password. Signing in with Microsoft instead also counts.
 
-**Signing in safely.** After 5 wrong passwords for one email (or 20 from one network address) within 15 minutes, password sign-in is paused for that email or address for 15 minutes, even with the right password. Wrong passwords on real accounts, the pause, sign-ins and sign-outs all appear on **Security & audit**. Org Owners and Org Admins see **Sign-in locked** next to a paused person on **Users & access** and can press **Unlock** to let them in straight away. Changing your password signs you out on every other browser and device. To sign out, use **Sign out** at the bottom of the sidebar, or tap your initials at the top right (the only way on a phone).
+**Signing in safely.** After 5 wrong passwords for one email (or 20 from one network address) within 15 minutes, password sign-in is paused for that email or address for 15 minutes, even with the right password. Wrong passwords on real accounts, the pause, sign-ins and sign-outs all appear on **Security & audit**. Org Owners and Org Admins see **Sign-in locked** next to a paused person on **Users & access** and can press **Unlock** to let them in straight away. Changing your password signs you out on every other browser and device. Forgot your password as the Org Owner? Ask the Sidekick team: they can issue a one-time password (it appears on Security & audit as "Reset … password", by "Sidekick operator"), and you pick a new one at sign-in. To sign out, use **Sign out** at the bottom of the sidebar, or tap your initials at the top right (the only way on a phone).
+
+**Protect your own account (Settings).** Everyone can do these for their own account; nobody can do them for someone else.
+- **Two-step sign-in**: **Add a passkey** (Face ID, Touch ID, Windows Hello or a security key) or **Add an authenticator app** (scan the QR code with Microsoft Authenticator, Google Authenticator, 1Password… and type the code it shows). From then on, sign-in asks for the passkey or a code after your password. The first time, Sidekick shows **10 backup codes once**: save them in your password manager; each works once if you lose your phone. Removing a method or making new backup codes asks for your password again. Signing in with Microsoft skips this step, because Microsoft runs its own checks.
+- **Where you're signed in**: every browser signed in to your account, with its network address and when it was last used. **Sign out** one, or **Sign out everywhere else**. Changing your password also signs out everywhere else.
+- Lost both your phone and your backup codes? The Sidekick team can remove two-step sign-in from your account (it shows on Security & audit).
 
 ## 2. Create groups
 A **group** (called a workspace in older screens) is one client team: its people, Teams chats and documents. **Groups → New group** sets one up on a single page:
@@ -27,7 +32,7 @@ You're added to the group automatically. **Create group** opens the group's page
 **Rename or delete.** On the group's **Settings** tab, change its name, client or engagement code. **Delete group…** first shows what will go (documents, meetings, action items, asked questions, linked Teams chats) and asks you to confirm. Deleting removes everything in that workspace for good: documents and their search entries, meetings and their notes, questions and gaps, the knowledge map, its guardrail switches and custom rules, saved Teams messages and reminders. Linked Teams chats are unlinked. The audit log and usage records are kept. Renames, client and code changes and deletions are recorded on **Security & audit**.
 
 ## 3. Turn on Microsoft sign-in (Org Owner)
-**Settings → Microsoft sign-in → Connect with Microsoft**, then sign in with your work account. This connects your organization to your company's Microsoft directory (tenant). From then on, people you've added can use **Sign in with Microsoft**. When everyone is set, switch on **Require Microsoft sign-in**: passwords stop working and anyone signed in with a password is signed out. You must have signed in with Microsoft yourself first, so you can't lock yourself out. **Disconnect** turns it off again (passwords work again).
+**Settings → Microsoft sign-in → Connect with Microsoft**, then sign in with your work account. This connects your organization to your company's Microsoft directory (tenant). From then on, people you've added can use **Sign in with Microsoft**. When everyone is set, switch on **Require Microsoft sign-in**: passwords stop working and anyone signed in with a password is signed out. You must have signed in with Microsoft yourself first, so you can't lock yourself out. **This is the most secure setup** and Settings recommends it: Microsoft checks every sign-in with your company's own rules (multi-factor sign-in, Conditional Access, risky sign-in alerts), and there are no Sidekick passwords left to guess. For your Microsoft accounts, make sure multi-factor sign-in is on in Microsoft Entra (Security defaults or Conditional Access). If Microsoft sign-in ever breaks, the Sidekick team can turn passwords back on for you. **Disconnect** turns it off again (passwords work again).
 
 ## 4. Add people
 **Users & access → Add person.** Pick their role and the workspaces they can see. Sidekick shows a **temporary password once**: share it with them privately; they must change it at first sign-in. Change roles or workspaces at any time from the same page. **Remove** asks you to confirm first. Nobody can change their own role or remove themselves (so you can't lock yourself out by accident): ask the Org Owner or another Org Admin. If your organization uses Microsoft sign-in, people can ignore the temporary password and use **Sign in with Microsoft** with that same email; the list shows a **Microsoft** badge once they have.
@@ -52,8 +57,8 @@ You can change the tag later; it takes effect immediately. **Delete** asks you t
 
 ## 6. Import meetings
 **Meetings → Import transcript.** Upload the Teams transcript (`.vtt`), a Word file or paste the text, give it a title and date, and tick **Client guests attended** if the client was there. Notes are usually ready in 20–60 seconds.
-- **Limits:** files up to 25 MB, and the transcript text (pasted or from the file) up to 300,000 characters, about five hours of talk. The whole transcript goes to Claude in one request, so this keeps each import within what Claude can read at once and its cost predictable. Split a longer meeting into parts.
-- **If writing the notes fails** (for example, Claude was busy), the meeting is still saved: the dialog closes and the meeting opens with a **Failed** label and the reason. Choose **Try again** there; don't import it again.
+- **Limits:** files up to 25 MB, and the transcript text (pasted or from the file) up to 300,000 characters, about five hours of talk. The whole transcript goes to the AI in one request, so this keeps each import within what it can read at once and its cost predictable. Split a longer meeting into parts. Each meeting's length (from its timestamps, or its length without them) counts toward your plan's **meeting hours** this month (see section 16).
+- **If writing the notes fails** (for example, the AI was busy), the meeting is still saved: the dialog closes and the meeting opens with a **Failed** label and the reason. Choose **Try again** there; don't import it again.
 - **On the meeting's page:** the summary, decisions, open questions and facts, plus the **action items**, which you can edit right there like on Memory & gaps: tick them done, set the owner, pick a due date and change the status. The **Transcript** tab shows a long transcript in pieces (**Show more**).
 - **Delete** asks first: it removes the meeting together with its notes, action items and transcript.
 
@@ -82,12 +87,12 @@ Reminders only cover the chat's own workspace, and a chat with client guests onl
 **Memory & gaps → Refresh knowledge map** after adding material (Members and Admins can; Viewers and Billing Admins can't, since each refresh is a paid AI request). Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place: tick them done, set the owner, the due date (pick a date; a due date said in the meeting, like "next Friday", shows underneath until you do) and the status. Every change is in the audit log with what changed. The same edits work on the meeting's own page.
 
 ## 9. Watch usage and activity
-- **Usage & billing**: your **plan** at the top (see section 15), then AI cost by feature, workspace and day for the whole month (also open to Billing Admins). Work that isn't tied to a workspace, such as the home assistant, shows as **Organization-wide**.
+- **Usage & billing**: your **plan** and its limits at the top (see sections 15 and 16), the **AI credit this month**, then AI cost by feature, group and day for the whole month (also open to Billing Admins). Work that isn't tied to a group, such as the home assistant, shows as **Organization-wide**. **Export CSV** downloads the cost per group (see section 16).
 - **Security & audit**: who did what and when, including everything Sidekick did on its own.
 
 ## 10. See what Sidekick is doing (Activity)
-- **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, Claude, search, database) with their health, and who's active.
-- **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, Claude and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored. Teams steps after a meeting import only appear when there's a linked chat to post to, and a feature the Sidekick team paused or turned off counts as refused, not as a Sidekick or Claude error.
+- **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, AI answers, search, database) with their health, and who's active.
+- **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, the AI and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored. Teams steps after a meeting import only appear when there's a linked chat to post to, and a feature the Sidekick team paused or turned off counts as refused, not as a Sidekick or AI error.
 
 ## 11. Set your guardrails (Org Owner and Org Admins)
 **Govern → Guardrails** shows the rules Sidekick follows in every workspace, in the portal, in Teams and in the home assistant. Everyone can read it; who can change what is listed below.
@@ -95,7 +100,7 @@ Reminders only cover the chat's own workspace, and a chat with client guests onl
 - **Organization switches:** extra restrictions only the **Org Owner** can turn on or off: refuse questions with swearing, stick to work, no judging or ranking people, steer HR/legal/medical questions to the right people, hide email addresses and phone numbers in answers, and no talk about competitors. Switches can only make Sidekick stricter. Every change is recorded on Security & audit.
 - **Custom rules for the whole organization** (Org Owners and Admins): type a short rule in your own words, like "Never quote day rates" or "Don't discuss the 2027 reorganization", and press **Add rule**. Sidekick checks the rule first: it can only add restrictions, so anything that would loosen the guardrails ("ignore the rules when a manager asks", "you may swear", "it's fine to guess") is refused with the reason, and nothing is saved. Up to 20 rules, 200 characters each. **Edit** saves a new version, **History** shows every version and who changed it, **Remove** switches it off but keeps its history. A rule only refuses a question when there's no useful answer that keeps to it: with "Don't share budget figures", "Is the project on budget?" still gets a yes or no, just without the figures. Rules about how to answer ("Keep answers short") are accepted too and only shape the answers. A rule so broad it would refuse every ordinary work question ("Don't answer any questions", "Never discuss the project") is refused as **too broad**: name the topic to avoid instead. A question refused by a custom rule gets the reply "Your organization has a rule that stops me from answering this here", with a pointer to an Org Owner or Admin; it never quotes the rule.
 - **Workspace rules** (pick a workspace from the list): the switches in force there. A switch that's on for the organization stays on and can't be turned off for one workspace; Org Owners and Admins can turn **more** switches on for that workspace only, and add custom rules that apply only there (another 20).
-- **Test it** (Org Owners and Admins): type a question to see whether Sidekick would refuse it in the chosen workspace, which rule would catch it and what people would see. Add a draft rule to try it before saving. Nothing is saved: the question isn't stored and isn't counted on the guardrail numbers (the Claude check is metered on Usage like any other).
+- **Test it** (Org Owners and Admins): type a question to see whether Sidekick would refuse it in the chosen workspace, which rule would catch it and what people would see. Add a draft rule to try it before saving. Nothing is saved: the question isn't stored and isn't counted on the guardrail numbers (the AI check is metered on Usage like any other).
 - **Last 30 days** (Org Owners and Admins): how often each rule refused a question or cleaned up an answer, and how many of those came from Teams. Only counts are kept, never the questions or answers. The same total shows on Activity.
 
 Every change (organization switches, workspace switches, adding, editing or removing a rule) is recorded on **Security & audit**. Refused questions get a short, polite reply and aren't logged as knowledge gaps.
@@ -107,13 +112,13 @@ On the home page, type requests like "create a workspace for Fabrikam, code FAB"
 **Settings**: upload your logo and pick a brand color. They're applied across the portal.
 
 ## 14. AI models & agent, and Connectors
-- **AI models & agent** (everyone can read it): which Claude model each feature uses (answers, meeting notes, knowledge map, assistant, guardrail check, reminders), how Sidekick is told to behave, and what's ready versus planned. Models are set by the Sidekick team; your documents and meetings are never used to train a model.
-- **Connectors**: the sources Sidekick can use. Available now: document upload, Teams transcripts and Teams chats and channels (assigned on each group's page). Outlook, SharePoint, Jira and the others are planned; each will connect with its own sign-in, without storing passwords.
+- **AI models & agent** (everyone can read it): what each AI feature does (answers, meeting notes, knowledge map, assistant, guardrail check, reminders) and whether it's **Working**, on **Essentials only** or **Paused (AI credit)**, plus what's ready versus planned. The Sidekick team picks and runs the AI behind them (Sidekick is powered by Claude); your documents and meetings are never used to train a model.
+- **Connectors**: the sources Sidekick can use. The page says how many connectors to other tools your plan includes (Starter none, Team one, Business all). Available now: document upload, Teams transcripts and Teams chats and channels (assigned on each group's page). Outlook, SharePoint, Jira and the others are planned; each will connect with its own sign-in, without storing passwords.
 
 ## 15. Sign-up, plan and billing
 Payments are in **test mode** for now: no money moves, prices are made up, and Sidekick **never asks for card or bank details** (a blue "Test mode" note shows wherever billing appears).
 
-**Signing up.** On **/signup** enter your organization's name, your name, work email, a password (at least 10 characters) and a plan (Starter, Team or Business; compare them on **/pricing**). You become the **Org Owner**, are signed in straight away and land on **checkout**. Each email can only have one Sidekick account, in any organization. Sign-up is **off until the Sidekick team opens it**: until then **/signup** says "Sign-up isn't open yet" and **/pricing** shows **Contact us** instead of **Start free trial**; contact them to get an organization set up. Too many sign-up attempts from one network (5 an hour) are paused for an hour.
+**Signing up.** On **/signup** enter your organization's name, your name, work email, a password (at least 12 characters, and not one from a known data breach) and a plan (Starter, Team or Business; compare them on **/pricing**). You become the **Org Owner**, are signed in straight away and land on **checkout**. Each email can only have one Sidekick account, in any organization. Sign-up is **off until the Sidekick team opens it**: until then **/signup** says "Sign-up isn't open yet" and **/pricing** shows **Contact us** instead of **Start free trial**; contact them to get an organization set up. Too many sign-up attempts from one network (5 an hour) are paused for an hour.
 
 **Free trial and paying.** Every new organization gets a **14-day free trial**. On checkout you see the plan, the price per person, how many people you have and the total every 30 days, and one **Pay (test mode)** button. **Not now** keeps the trial; everyone sees a "Free trial: N days left" note at the top until you pay.
 
@@ -127,7 +132,7 @@ Payments are in **test mode** for now: no money moves, prices are made up, and S
 Then **Done** shows what's set and what's left, and **Finish setup** ends it. Any step can be skipped (**Do this later**) and you can come back: until setup is finished, Org Owners and Org Admins see a **Finish setting up Sidekick** banner with a **Continue setup** link. Finishing is in the audit log. Organizations set up by the Sidekick team don't get the banner.
 
 **Plan on Usage & billing** (Org Owners, Org Admins and Billing Admins see it; **only the Org Owner and Billing Admins** can change it):
-- **Current plan**, its status (Free trial, Active, Payment failed, Canceled) and dates; **people** used against the plan's limit and **workspaces** against its limit. A person is anyone with an account, any role.
+- **Current plan**, its status (Free trial, Active, Payment failed, Canceled) and dates, and a table of **every limit** with how much you use (see section 16). A person is anyone with an account, any role.
 - **Pay now** (when not active) opens checkout. **Change plan…** switches straight away (the paid-until date stays); a plan you've outgrown (more people or workspaces than it allows) is refused with the numbers.
 - **Cancel plan** asks first. Sidekick stays fully usable until the end of what you paid for (or the trial), then turns read-only.
 - **Simulate a failed payment** (test mode only) shows what your team would see when a payment fails.
@@ -141,7 +146,32 @@ Then **Done** shows what's set and what's left, and **Finish setup** ends it. An
 | Canceled | Full use until the end of what was paid for, with a note. |
 | Any of these after its date | **Read-only**: everyone can still sign in and see everything; nothing can be added or changed (refused with "Sidekick is read-only for your organization because…"), and Sidekick doesn't answer in the portal, Teams or the assistant, write meeting notes or send reminders. Nothing is deleted. Paying on Usage & billing turns everything back on at once. |
 
-Organizations set up by the Sidekick team (or the very first one on an install) have no self-service plan: Usage & billing says the plan is managed by the Sidekick team.
+Organizations set up by the Sidekick team (or the very first one on an install) have no self-service plan: Usage & billing says the plan is managed by the Sidekick team, and still shows any limits the team set. **Enterprise** is the same: set up with the Sidekick team, with limits and a price agreed for your organization.
+
+## 16. Plan limits, AI credit and the usage export
+**Limits.** Each plan includes a number of each of these (placeholders while pricing is decided):
+
+| | Starter | Team | Business | Enterprise |
+|---|---|---|---|---|
+| People | 10 | 50 | 500 | Agreed with you |
+| Groups | 2 | 10 | Unlimited | Agreed with you |
+| Tracked Teams chats (chats assigned to a group) | 5 | 30 | 200 | Agreed with you |
+| Meeting hours per month (imported transcripts) | 20 | 100 | 500 | Agreed with you |
+| Live meeting hours per month (Sidekick joining calls; coming later) | Not included | Not included | Not included | Included (100 by default) |
+| Documents | 200 | 2,000 | 20,000 | Agreed with you |
+| Connectors to other tools | None | 1 | All | Agreed with you |
+| **AI credit per month** | $20 | $150 | $1,000 | Agreed with you |
+
+When a limit is reached, adding another one is refused with a message saying which limit, the numbers, and how to get more ("Your Starter plan allows 2 groups and you have 2. An Org Owner or Billing Admin can move to a bigger plan on Usage & billing."). Meeting hours start again on the 1st of each month (UTC). **Nothing is ever deleted** because of a limit: if you move to a smaller plan (or the Sidekick team lowers a limit) while using more, everything stays, the limit shows **Over limit** on Usage & billing, and you just can't add more until you're under it. **Near limit** shows from 80%.
+
+**AI credit.** Your plan includes a monthly amount of AI use, measured in dollars of AI cost (shown on Usage & billing → **AI credit this month**):
+- **At 80%** the Org Owner, Org Admins and Billing Admins see a notice at the top of every page, and it's recorded once on **Security & audit**.
+- **At 100% ("essentials only")** Sidekick **keeps answering questions** (portal and Teams) and checking them against your guardrails, on a lighter AI model, and shorter meetings still get notes. These pause until the 1st, each with a plain message: automatic reminders in Teams, knowledge map updates, the home assistant, and notes for long meetings (over about an hour; such an import is refused before it's saved, so there's nothing to clean up). The header says **AI answers: essentials only**, and it's recorded on Security & audit.
+- **More credit:** move to a bigger plan, or ask the Sidekick team: they can raise your credit or add a one-off top-up for the month (it shows as "includes a top-up"). Both are recorded on Security & audit as "Sidekick team".
+
+**Questions per person.** Each person can ask up to 60 questions an hour (portal and Teams together). Past that, Sidekick says "You've asked 60 questions in the last hour… ask again in a few minutes". The Sidekick team can change the number for your organization.
+
+**Usage export (CSV, for chargeback).** On Usage & billing, pick **This month**, **Last 3 months** or **Last 12 months** and press **Export CSV** (Org Owners, Org Admins and Billing Admins). One row per group per month with: month, group, **engagement code**, **client**, AI requests, **AI cost (USD)**, questions asked, meetings imported, meeting hours and documents added. AI work not tied to a group is one "Organization-wide" row. Set each group's engagement code and client on its **Settings** tab so the file lines up with your WBS codes. Only your own organization's groups are ever in the file.
 
 ## Troubleshooting
 | You see | What to do |
@@ -153,10 +183,17 @@ Organizations set up by the Sidekick team (or the very first one on an install) 
 | Questions fail with "Guardrail check is paused" | The Sidekick team paused the check; Sidekick never answers without it. Try again later. |
 | A dialog "Can't reach Sidekick" | Your connection or Sidekick is down. Anything you saved is safe; try again in a minute. |
 | "This page hit a problem" | Click **Try again**, or use the menu. If it repeats, send the reference code to the Sidekick team. |
-| "Claude isn't connected yet" | The Sidekick team needs to configure the AI key. Contact them. |
+| "AI answers aren't set up yet" | The Sidekick team needs to finish setting up the AI. Contact them. |
+| "Your … plan allows … and you have …" | You've reached a plan limit (section 16). Move to a bigger plan on Usage & billing, remove something you no longer need, or ask the Sidekick team. |
+| "… is paused because your organization has used this month's AI credit" | Answers still work; the extras come back on the 1st, with a bigger plan, or with a top-up from the Sidekick team (section 16). |
+| "You've asked … questions in the last hour" | The per-person limit. Wait a few minutes. |
+| "Sidekick's AI is very busy right now. Try again in a minute." | The AI service was overloaded even after Sidekick retried a few times. Try again shortly; nothing is lost (a meeting import is kept with **Try again**). |
 | "… is paused by the Sidekick team" | A feature was paused for maintenance. Try again later. |
 | "… is turned off for your organization by the Sidekick team" | Not an error: the Sidekick team switched that feature off for your organization. Org Owners: contact the Sidekick team to have it turned back on. Everyone else: ask your Org Owner. |
 | "This organization's Sidekick access is paused" | Contact the Sidekick team. |
+| "That password has appeared in a known data breach" | Attackers try those first. Pick another (a password manager can make one). Sidekick checks this against Have I Been Pwned without sending your password anywhere: only the first 5 characters of a scrambled version (its hash) leave Sidekick, and the match is made on Sidekick's side. If that service is down, the password is accepted on length alone. |
+| "Authenticator apps aren't available on this server yet" | The Sidekick team still needs to set the server's encryption key. Add a passkey instead, or ask them. |
+| "That code doesn't match" at sign-in | Type the newest code from your authenticator app (check your phone's clock is set automatically), or a backup code. After 5 wrong codes, sign in again with your password. |
 | "Sidekick is read-only for your organization because…" | The free trial ended, a failed payment wasn't fixed, or the plan was canceled. The Org Owner or a Billing Admin pays on **Usage & billing** to turn everything back on. |
 | "Self-service sign-up isn't open yet" | Sign-up is off until the Sidekick team opens it. Contact them (see Support) to get an organization set up. |
 | A Teams link code doesn't work | Codes expire after 24 hours. Mention `@Sidekick link` in Teams for a new one. A code from another company's Teams never works in your organization. |

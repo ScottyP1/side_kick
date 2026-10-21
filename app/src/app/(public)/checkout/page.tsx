@@ -28,7 +28,7 @@ export default function CheckoutPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const asked = planById(new URLSearchParams(location.search).get("plan"));
+    const asked = PLANS.find((p) => p.id === new URLSearchParams(location.search).get("plan"));
     api<Billing>("/api/billing")
       .then((r) => {
         setB(r);

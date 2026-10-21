@@ -28,6 +28,7 @@ import { audit, createOrgWithOwner, HttpError } from "./auth";
 import { requirePlan, startTrial } from "./billing";
 import { get, newId, now, run, tx } from "./db";
 import { flagEnabled, platformLog } from "./owner";
+import { assertGoodPassword } from "./passwords";
 import { planById } from "./plans";
 import { startSetup } from "./setup";
 import { span, traceScope } from "./trace";
@@ -80,7 +81,7 @@ export async function signUp(input: SignUpInput, ip: string): Promise<{ orgId: s
   if (ms) password = crypto.randomBytes(24).toString("base64url");
   else {
     password = requireText(input.password, "Password", 200);
-    if (password.length < 10) throw new HttpError(400, "Use a password with at least 10 characters.");
+    await assertGoodPassword(password, { email });
   }
   if (await get("SELECT id FROM users WHERE email = ?", email)) throw new HttpError(409, "An account with that email already exists. Sign in instead, or use another email.");
   if (ms && (await get("SELECT id FROM orgs WHERE entra_tenant_id = ?", ms.tenantId))) throw new HttpError(409, "Your Microsoft organization already uses Sidekick. Ask its Org Owner to add you.");

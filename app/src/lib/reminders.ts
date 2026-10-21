@@ -29,13 +29,16 @@
  * Scheduling: `runDueReminders` is called every few minutes by the in-app timer (instrumentation.ts →
  * POST /api/reminders/tick). Each chat/slot is claimed with a unique row first, so a reminder is never
  * posted twice, even with two servers. See docs/HOSTING.md for why this is an in-app timer for now.
+ * Daily reminders are worded through Claude's Batch API (half price, nobody waits for them): a tick queues
+ * them and sends one batch, and a later tick posts the cards once the batch has ended (usually minutes).
+ * Reminders after a meeting, "Send now" and previews stay live calls.
  */
 import "server-only";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { all, get, newId, now, run } from "./db";
 import { audit, auditAsSidekick, canEdit, HttpError, isAdmin, isLead, requireManage, type User } from "./auth";
-import { structured } from "./claude";
+import { batchEnabled, queueStructured, registerBatchHandler, runBatches, structured } from "./claude";
 import { answerRules, cleanOutput, getGuardPolicy, recordGuard, type RuleId } from "./guardrails";
 import { assertEnabled, flagEnabled, orgFlagEnabled } from "./owner";
 import { indexText, removeIndexed } from "./search";
@@ -379,15 +382,32 @@ export type Digest = { intro: string; points: (ReminderPointInput & { shareable:
  */
 export async function buildDigest(orgId: string, workspaceId: string, candidates: Candidate[]): Promise<Digest | null> {
   if (!candidates.length) return null;
-  // Platform-wide pause and this organization's own restriction (Owner Console) both stop it.
+  const req = await digestRequest(orgId, workspaceId, candidates);
+  const raw = await structured("remind", { orgId, workspaceId }, { ...req, schema: DigestSchema, effort: "low", maxTokens: 2000 });
+  return digestFrom(orgId, workspaceId, candidates, raw);
+}
+
+/**
+ * What Claude is asked for a digest: the instructions (with the organization's answer rules) and the
+ * numbered items. Checks the switches first: a platform-wide pause and this organization's own restriction
+ * (Owner Console) both stop it.
+ */
+async function digestRequest(orgId: string, workspaceId: string, candidates: Candidate[]) {
   await assertEnabled("remind", orgId);
   const policy = await getGuardPolicy(orgId, workspaceId);
-  const ids = new Map(candidates.map((c, i) => [`R${i + 1}`, c]));
-  const content = [...ids]
-    .map(([id, c]) => `<item id="${id}" kind="${c.label}">${c.text}\n${c.detail}\nFrom: ${c.sources.map((s) => `${s.type} "${s.title}"${s.when ? ` (${s.when})` : ""}`).join("; ")}</item>`)
+  const content = candidates
+    .map((c, i) => `<item id="R${i + 1}" kind="${c.label}">${c.text}\n${c.detail}\nFrom: ${c.sources.map((s) => `${s.type} "${s.title}"${s.when ? ` (${s.when})` : ""}`).join("; ")}</item>`)
     .join("\n\n");
-  const raw = await structured("remind", { orgId, workspaceId }, { system: `${REMIND_SYSTEM}\n\n${answerRules(policy)}`, content, schema: DigestSchema, effort: "low", maxTokens: 2000 });
+  return { system: `${REMIND_SYSTEM}\n\n${answerRules(policy)}`, content };
+}
 
+/**
+ * Turns Claude's wording (`raw`, live or from a batch) into the digest: points naming an unknown item are
+ * dropped, the text is cleaned by the guardrails, and if nothing usable is left the items' own text is used.
+ */
+async function digestFrom(orgId: string, workspaceId: string, candidates: Candidate[], raw: z.infer<typeof DigestSchema>): Promise<Digest> {
+  const policy = await getGuardPolicy(orgId, workspaceId);
+  const ids = new Map(candidates.map((c, i) => [`R${i + 1}`, c]));
   const fired = new Map<string, { rule: RuleId; action: "replaced" | "masked" }>();
   const clean = (t: string) => {
     const r = cleanOutput(t, policy.switches);
@@ -432,10 +452,11 @@ const todayFor = (s: ChatSettings) => localTime(new Date(), s.timeZone).day;
  * Builds and posts one reminder card to one linked chat, unless that chat already had this `slot`
  * (claimed with a unique row first, so it never posts twice). Nothing is posted when there is nothing
  * to remind about (the run is kept as "empty"). A failure is saved on the run (shown on the Workspaces
- * page) and thrown, so it is traced and logged.
- * @returns the run's status: "posted", "empty" or "skipped" (slot already done)
+ * page) and thrown, so it is traced and logged. With `opts.batch` (daily reminders), the wording is queued
+ * for the Batch API instead and the card is posted when the result comes back.
+ * @returns the run's status: "posted", "empty", "queued" (batched) or "skipped" (slot already done)
  */
-export async function sendReminder(conv: TeamsConversation, reason: "daily" | "meeting" | "manual", slot: string, opts: { excludeMeetingId?: string | null } = {}): Promise<{ status: string; points: number; runId?: string }> {
+export async function sendReminder(conv: TeamsConversation, reason: "daily" | "meeting" | "manual", slot: string, opts: { excludeMeetingId?: string | null; batch?: boolean } = {}): Promise<{ status: string; points: number; runId?: string }> {
   if (!conv.org_id || !conv.workspace_id) return { status: "skipped", points: 0 };
   const settings = await getChatSettings(conv);
   const runId = newId();
@@ -446,28 +467,68 @@ export async function sendReminder(conv: TeamsConversation, reason: "daily" | "m
   if (!claimed.changes) return { status: "skipped", points: 0 };
   try {
     const candidates = await gatherReminders(conv.org_id, conv.workspace_id, { guests: conv.guests === 1, kinds: settings.kinds, today: todayFor(settings), excludeMeetingId: opts.excludeMeetingId });
+    if (opts.batch && candidates.length) {
+      // Nobody is waiting for a daily reminder: word it in the next Message Batch (half price) and post it
+      // when the result comes back (`finishBatchedReminder`). The items wait on the run meanwhile.
+      const req = await digestRequest(conv.org_id, conv.workspace_id, candidates);
+      await queueStructured("remind", { orgId: conv.org_id, workspaceId: conv.workspace_id }, { ...req, effort: "low", maxTokens: 2000 }, { handler: "reminder", ref: runId });
+      await run("UPDATE reminder_runs SET status = 'waiting', json = ? WHERE id = ?", JSON.stringify({ candidates }), runId);
+      return { status: "queued", points: 0, runId };
+    }
     const digest = await buildDigest(conv.org_id, conv.workspace_id, candidates);
     if (!digest) {
       await run("UPDATE reminder_runs SET status = 'empty' WHERE id = ?", runId);
       return { status: "empty", points: 0, runId };
     }
-    const ws = (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", conv.workspace_id, conv.org_id))?.name ?? "Workspace";
-    const json = JSON.stringify({ workspace: ws, ...digest });
-    await run("UPDATE reminder_runs SET json = ?, points = ? WHERE id = ?", json, digest.points.length, runId);
-    try {
-      await postCard(conv, reminderCard({ runId, workspace: ws, intro: digest.intro, points: digest.points, portalUrl: `${PORTAL()}/memory` }));
-    } catch (e) {
-      console.error(`Couldn't post a reminder to Teams conversation ${conv.id}`, e);
-      throw new HttpError(502, "Couldn't post the reminder in Teams. Check that Sidekick is still in that chat and that the Teams bot is set up.");
-    }
-    await run("UPDATE reminder_runs SET status = 'posted' WHERE id = ?", runId);
-    await auditAsSidekick(conv.org_id, `Posted ${digest.points.length} reminder${digest.points.length === 1 ? "" : "s"} to Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}”`, "Agent action", conv.workspace_id);
+    await postDigest(conv, runId, digest);
     return { status: "posted", points: digest.points.length, runId };
   } catch (e) {
     await run("UPDATE reminder_runs SET status = 'failed', error = ? WHERE id = ?", (e instanceof Error ? e.message : String(e)).slice(0, 300), runId);
     throw e;
   }
 }
+
+/** Posts a finished digest to the chat, marks the run posted and audits it. Throws 502 if Teams refuses. */
+async function postDigest(conv: TeamsConversation, runId: string, digest: Digest) {
+  const ws = (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", conv.workspace_id, conv.org_id))?.name ?? "Workspace";
+  await run("UPDATE reminder_runs SET json = ?, points = ? WHERE id = ?", JSON.stringify({ workspace: ws, ...digest }), digest.points.length, runId);
+  try {
+    await postCard(conv, reminderCard({ runId, workspace: ws, intro: digest.intro, points: digest.points, portalUrl: `${PORTAL()}/memory` }));
+  } catch (e) {
+    console.error(`Couldn't post a reminder to Teams conversation ${conv.id}`, e);
+    throw new HttpError(502, "Couldn't post the reminder in Teams. Check that Sidekick is still in that chat and that the Teams bot is set up.");
+  }
+  await run("UPDATE reminder_runs SET status = 'posted' WHERE id = ?", runId);
+  await auditAsSidekick(conv.org_id!, `Posted ${digest.points.length} reminder${digest.points.length === 1 ? "" : "s"} to Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}”`, "Agent action", conv.workspace_id);
+}
+
+// Daily reminders posted from batch results during this tick (runDueReminders reports them).
+let batchPosted = 0;
+
+/**
+ * A batched digest came back (lib/claude.ts `runBatches`): word the waiting run's items with it and post the
+ * card. When the batch request failed or its answer didn't fit, the items' own text is posted instead, so a
+ * due reminder is never lost. A chat that was unlinked meanwhile gets nothing; a Teams failure marks the run failed.
+ */
+async function finishBatchedReminder(runId: string, output: unknown | null, error: string | null) {
+  const r = await get<{ conversation_id: string; org_id: string; workspace_id: string; json: string | null }>("SELECT conversation_id, org_id, workspace_id, json FROM reminder_runs WHERE id = ? AND status = 'waiting'", runId);
+  if (!r) return;
+  const conv = await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ? AND org_id = ? AND workspace_id = ?", r.conversation_id, r.org_id, r.workspace_id);
+  if (!conv) {
+    await run("UPDATE reminder_runs SET status = 'failed', error = ? WHERE id = ?", "The chat was unlinked before the reminder was ready.", runId);
+    return;
+  }
+  try {
+    const { candidates } = JSON.parse(r.json ?? "{}") as { candidates: Candidate[] };
+    if (error) console.error(`Batched reminder ${runId}: ${error}; posting the items' own text`);
+    const digest = await digestFrom(r.org_id, r.workspace_id, candidates, (output as z.infer<typeof DigestSchema> | null) ?? { intro: "A few things are still open.", points: [] });
+    await postDigest(conv, runId, digest);
+    batchPosted++;
+  } catch (e) {
+    await run("UPDATE reminder_runs SET status = 'failed', error = ? WHERE id = ?", (e instanceof Error ? e.message : String(e)).slice(0, 300), runId);
+  }
+}
+registerBatchHandler("reminder", { schema: DigestSchema, finish: finishBatchedReminder });
 
 /**
  * What the next reminder in this chat would say, without posting or saving anything (Preview on the
@@ -520,9 +581,10 @@ export async function remindAfterMeeting(orgId: string, meetingId: string): Prom
 }
 
 /**
- * The scheduler's tick: posts every daily reminder that is due now (see `dailySlotDue`), each in its own
- * trace, and clears out expired chat messages. Skips everything while the owner has paused reminders.
- * Returns how many cards were posted.
+ * The scheduler's tick: starts every daily reminder that is due now (see `dailySlotDue`), each in its own
+ * trace, then sends the queued Batch API requests and posts the reminders whose results are back; also
+ * clears out expired chat messages. Skips everything while the owner has paused reminders.
+ * Returns how many cards were posted this tick.
  */
 export async function runDueReminders(at = new Date()): Promise<number> {
   await purgeOldChatMessages().catch((e) => console.error("Couldn't clear old chat messages", e));
@@ -536,13 +598,20 @@ export async function runDueReminders(at = new Date()): Promise<number> {
     if (!slot) continue;
     if (await get("SELECT id FROM reminder_runs WHERE conversation_id = ? AND slot = ?", conv.id, slot)) continue;
     try {
-      const r = await withTrace({ name: "Daily reminder", channel: "teams", kind: "remind", orgId: conv.org_id, workspaceId: conv.workspace_id, detached: true }, () => sendReminder(conv, "daily", slot));
+      const r = await withTrace({ name: "Daily reminder", channel: "teams", kind: "remind", orgId: conv.org_id, workspaceId: conv.workspace_id, detached: true }, () => sendReminder(conv, "daily", slot, { batch: batchEnabled() }));
       if (r.status === "posted") posted++;
     } catch (e) {
       console.error(`Daily reminder failed for Teams conversation ${conv.id}`, e);
     }
   }
-  return posted;
+  // Send this tick's batched digests and post the ones whose results are back (often from an earlier tick).
+  batchPosted = 0;
+  try {
+    await runBatches();
+  } catch (e) {
+    console.error("Couldn't send or collect the AI batch", e);
+  }
+  return posted + batchPosted;
 }
 
 /** The latest reminder run of each of these chats (for the Workspaces page). */

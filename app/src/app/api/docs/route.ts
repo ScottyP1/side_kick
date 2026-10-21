@@ -6,6 +6,7 @@
  * to far more than it should (a "zip bomb"), is saved as Failed with the reason (see lib/extract.ts).
  * Who: workspace members (upload needs edit rights).
  */
+import { assertCanAdd } from "@/lib/limits";
 import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { all, newId, now, run } from "@/lib/db";
@@ -45,6 +46,7 @@ export const POST = handle(async (req: Request) => {
     else readable.push(file);
   }
   if (!readable.length) throw new HttpError(415, results.length === 1 ? results[0].error! : `None of these files can be uploaded: ${results[0].error}`);
+  await assertCanAdd(user.org_id, "documents", readable.length);
   for (const file of readable) {
     const id = newId();
     await run(

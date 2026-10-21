@@ -3,9 +3,11 @@
 /**
  * Connectors (/connectors): the tools Sidekick will read from (Outlook, SharePoint, Jira, ...).
  * Uploads, transcript import and Teams (chats and channels assigned on each group's page) work today; the
- * other tools are planned and will each connect with their own sign-in.
+ * other tools are planned and will each connect with their own sign-in. Says how many connectors the
+ * organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me.
  */
 
+import { useApp } from "@/components/shell";
 import { Pill } from "@/components/ui";
 
 const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; desc: string; live?: boolean }[] = [
@@ -26,6 +28,13 @@ const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; de
 const GROUPS = ["Available now", "Microsoft 365", "Engineering", "Work & docs", "Business apps"];
 
 export default function ConnectorsPage() {
+  const { me } = useApp();
+  const included = me.plan?.connectors;
+  const yours = me.plan?.name ? `Your ${me.plan.name} plan` : "Your plan";
+  const planText = included === undefined ? null
+    : included === null ? `${yours} includes every connector.`
+    : included === 0 ? `${yours} doesn't include connectors to other tools; Team includes one and Business all of them.`
+    : `${yours} includes ${included} connector${included === 1 ? "" : "s"} to another tool; Business includes all of them.`;
   return (
     <>
       <div className="page-head">
@@ -33,6 +42,7 @@ export default function ConnectorsPage() {
           <div className="eyebrow">Connectors</div>
           <h1>Give Sidekick access to your tools</h1>
           <p>Uploads, transcript import and Teams chats and channels work today. The other tools are planned; each will connect with its own sign-in (no passwords stored).</p>
+          {planText && <p className="muted">{planText}</p>}
         </div>
       </div>
       {GROUPS.map((g) => (

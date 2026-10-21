@@ -72,7 +72,8 @@ jobs:
           az acr build -r $ACR -t sidekick:$TAG -t sidekick:latest app -o none
 
       - name: Switch the app to the new image
-        run: az containerapp update -g $RG -n $APP --image $ACR.azurecr.io/sidekick:$TAG -o none
+        # SIDEKICK_COMMIT / SIDEKICK_RELEASED_AT: shown on the Owner Console's Business page (lib/ops.ts).
+        run: az containerapp update -g $RG -n $APP --image $ACR.azurecr.io/sidekick:$TAG --set-env-vars SIDEKICK_COMMIT=$TAG SIDEKICK_RELEASED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) -o none
 
       - name: Wait for the health check (roll back if it fails)
         run: |
@@ -88,5 +89,5 @@ jobs:
             sleep 10
           done
           echo "::error::$TAG didn't report healthy within 5 minutes. Rolling back to $PREV."
-          az containerapp update -g $RG -n $APP --image "$PREV" -o none
+          az containerapp update -g $RG -n $APP --image "$PREV" --set-env-vars SIDEKICK_COMMIT="${PREV##*:}" SIDEKICK_RELEASED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) -o none
           exit 1

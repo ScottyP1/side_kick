@@ -188,6 +188,7 @@ Teams: add the Sidekick app to a chat or channel, write "@Sidekick link" and it 
 Problems: errors show a dialog with a reference code like K7Q2-9XM4; share it with the Sidekick team, or admins can search it on Activity.
 New organizations (a new client company using Sidekick) are created by the Sidekick team in the Owner Console, not from inside an organization; this assistant can't do that.
 Sign-in: email and password, or Microsoft (Entra ID) once the Org Owner connects it on Settings (it can also be required, which turns passwords off).
+Account security (Settings, each person for their own account): two-step sign-in with a passkey (Face ID, Touch ID, Windows Hello) or an authenticator app, plus 10 one-time backup codes; "Where you're signed in" lists sessions and can sign out the others (a password change also does). New passwords need 12+ characters and must not appear in known data breaches. A locked-out Org Owner asks the Sidekick team, who can issue a one-time password.
 `.trim();
 
 /**

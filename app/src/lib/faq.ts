@@ -88,8 +88,8 @@ export const FAQ: readonly FaqItem[] = [
     id: "ai-limit",
     q: "What happens when we reach our plan's AI allowance?",
     a: [
-      "Plans include a monthly amount of AI use. Admins get a warning well before you reach it. At the limit Sidekick keeps the essentials running and pauses the rest until the next month or until you change plan, so nothing is lost and nothing is billed by surprise.",
-      "The exact allowances per plan are being finalized and will be shown on this page.",
+      "Each plan includes a monthly AI credit. Admins see a warning when you've used 80% of it. At the limit Sidekick keeps the essentials running and pauses the rest until the next month or until you change plan, so nothing is lost and nothing is billed by surprise.",
+      "The amounts may still change while pricing is being decided.",
     ],
     topics: ["pricing"],
   },

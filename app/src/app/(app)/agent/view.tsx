@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * AI models & agent (/agent): which Claude model each feature uses, how Sidekick is instructed to behave, and what's ready vs coming next.
- * Models are changed by the Sidekick team with SIDEKICK_MODEL_* settings (app/.env.local on the server, see lib/claude.ts);
- * the page itself tells clients to ask the Sidekick team, since they can't reach the server's settings.
+ * AI models & agent (/agent): what each AI feature does and whether it's working, and what's ready vs coming next.
+ * Plain wording only: model and provider names are for the Sidekick team (Owner Console), so customers see
+ * "Working" / "Essentials only" rather than the plumbing. Models are set by the Sidekick team (lib/claude.ts).
  */
 
 import { useApp } from "@/components/shell";
@@ -29,32 +29,40 @@ const ROADMAP: [string, string][] = [
   ["Ready", "Proactive reminders in Teams: overdue and unowned action items, open decisions, out-of-date documents, with sources and Assign / Done / Snooze buttons"],
   ["Ready", "Per-chat settings: dedicated meeting-notes chat, and chats Sidekick keeps track of (every message, 90 days)"],
   ["Next", "Draft Jira / Azure DevOps stories from action items"],
-  ["Next", "Claude hosted in Azure (Microsoft Foundry), and Sidekick itself hosted in Azure"],
+  ["Ready", "Plan limits and a monthly AI credit: answers keep working when it runs out, extras pause until the 1st"],
   ["Later", "Live meetings: joins calls, listens, raises a virtual hand, answers out loud (Azure AI Speech)"],
   ["Later", "Persona settings: voice, speaking style, participation mode, hand-raise triggers"],
 ];
 
+/** Features that keep working ("essentials only") once the month's AI credit is used up. */
+const ESSENTIAL = new Set(["ask", "guard", "extract"]);
+
 export default function AgentPage() {
   const { me } = useApp();
+  const essentials = me.credit?.level === "essentials";
+  const state = (k: string) => (!me.ai.working ? ["warn", "Not set up"] : essentials && !ESSENTIAL.has(k) ? ["warn", "Paused (AI credit)"] : essentials ? ["info", "Essentials only"] : ["good", "Working"]);
   return (
     <>
       <div className="page-head">
         <div>
           <div className="eyebrow">AI models & agent</div>
           <h1>How Sidekick thinks</h1>
-          <p>Each feature uses the Claude model below. To use a different model for a feature, ask the Sidekick team. Your documents and meetings are never used to train any model.</p>
+          <p>What each AI feature does for your team. The Sidekick team picks and runs the AI behind them. Your documents and meetings are never used to train any model.</p>
         </div>
-        <div className="actions"><Pill kind={me.claude.configured ? "good" : "warn"}>{me.claude.configured ? "Claude connected" : "Claude not connected"}</Pill></div>
+        <div className="actions"><Pill kind={me.ai.working && !essentials ? "good" : "warn"}>{!me.ai.working ? "AI answers: not set up" : essentials ? "AI answers: essentials only" : "AI answers: working"}</Pill></div>
       </div>
+      {essentials && <div className="callout warn"><span>This month&apos;s AI credit is used up, so Sidekick runs on essentials until the 1st: answers, guardrail checks and notes for shorter meetings keep working; the rest is paused.</span></div>}
       <div className="grid g3">
-        {Object.entries(me.claude.models).map(([k, model]) => (
-          <div key={k} className="model">
-            <span className="eyebrow">{ROLES[k]?.[0] ?? k}</span>
-            <span className="name">{model}</span>
-            <span className="muted">{ROLES[k]?.[1]}</span>
-            <div className="stat-line"><span className="muted">Setting</span><span className="mono">SIDEKICK_MODEL_{k.toUpperCase()}</span></div>
-          </div>
-        ))}
+        {Object.entries(ROLES).map(([k, [label, text]]) => {
+          const [kind, word] = state(k);
+          return (
+            <div key={k} className="model">
+              <span className="eyebrow">{label}</span>
+              <span className="muted">{text}</span>
+              <div className="stat-line"><span className="muted">Status</span><Pill kind={kind}>{word}</Pill></div>
+            </div>
+          );
+        })}
       </div>
       <div className="panel">
         <div className="panel-h"><h2>What’s ready and what’s next</h2></div>

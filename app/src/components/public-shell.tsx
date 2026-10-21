@@ -82,7 +82,7 @@ function SiteFooter() {
       <div className="site-foot-in">
         <div>
           <Link href="/" className="site-brand" aria-label="Sidekick home"><span className="brand-mark" aria-hidden="true">S</span>Sidekick</Link>
-          <p>The AI teammate for client teams in Microsoft Teams. A personal project, not a company. Powered by Claude.</p>
+          <p>The AI teammate for client teams in Microsoft Teams. A personal project, not a company. <Link href="/security">Powered by Claude</Link>.</p>
         </div>
         {cols.map(([title, links]) => (
           <nav key={title} aria-label={title}>

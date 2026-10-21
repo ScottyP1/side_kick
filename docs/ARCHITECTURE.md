@@ -36,7 +36,11 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification (issuer checked per tenant; single-tenant mode also checks the tenant) |
 | `lib/tenants.ts` | Single- vs multi-tenant mode (`TENANT_ID`), which Sidekick org a Microsoft tenant belongs to, `tieOrgToTenant` (also for the sign-up flow) |
 | `lib/directory.ts` | The customer's Microsoft 365 directory via Microsoft Graph (app permission `User.Read.All`): admin-consent round trip, search, import as Microsoft-sign-in people |
-| `lib/plans.ts` | The plans (Starter/Team/Business: made-up per-person prices, seat and workspace limits), trial/grace lengths and `accessFor` (what a trialing/past_due/canceled subscription allows: full or read-only). Pure, shared by pages and server, unit-tested |
+| `lib/plans.ts` | The plans (Starter/Team/Business for sale, Enterprise set up by the team: made-up per-person prices and every limit: people, groups, tracked chats, meeting hours, documents, connectors, monthly AI credit), trial/grace lengths, `accessFor` (full or read-only), `limitState`, `parseCustomLimits`, `transcriptMinutes`. Pure, shared by pages and server, unit-tested |
+| `lib/limits.ts` | Plan limits: effective limits (plan + the Sidekick team's custom terms in `org_terms`), what's used, `assertCanAdd` (402 `kind: "limit"`) called where each thing is created, `limitReport` (near / over), `saveTerms` |
+| `lib/credit.ts` | The monthly AI credit: this month's cost vs the plan's credit (+ top-ups), 30-second cache updated by every call, 80% notice, 100% "essentials only" (`creditGate`: cheaper models for answers/checks/short notes, `FeatureOffError("credit")` for the extras), `skipCredit` opt-out, `grantTopUp` |
+| `lib/rate-limit.ts` | Per-person rate limits stored in `rate_events` (works across app copies): questions per hour in `ask()` |
+| `lib/ops.ts` | What the app knows about itself for the Owner Console: health facts (as `/api/health`), build and release (`SIDEKICK_COMMIT`, `SIDEKICK_RELEASED_AT`), releases seen (`app_releases`) |
 | `lib/billing.ts` | Subscriptions (`subscriptions` table) behind a billing provider: `mock` (test mode, no payment details ever) now, Stripe later (documented in the file). Pay, change plan, cancel, simulate a failed payment, operator changes; `readOnlyRefusal` (used by `handle()`) |
 | `lib/signup.ts` | Self-service sign-up: org + Org Owner + trial in one transaction, the `signup` switch (**off by default**; opened in the Owner Console or with `SIDEKICK_SIGNUP_OPEN=true`, see `flagDefault` in lib/owner.ts), per-IP limit (`signup_attempts`), the hook for "Sign up with Microsoft" |
 | `lib/entra.ts` | Microsoft (Entra ID) sign-in: the round trip to Microsoft (PKCE, state, nonce) and ID-token verification |
@@ -46,7 +50,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/extract.ts` | Files → text (PDF, Word, Teams .vtt) and text → passages |
 | `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured |
 | `lib/azure-search.ts` | Azure AI Search index, embeddings and hybrid (keyword + vector) queries |
-| `lib/claude.ts` | **All Claude calls go through here**: model per feature, structured output, metering |
+| `lib/claude.ts` | **All Claude calls go through here**: model per feature, the AI credit check (`creditGate`), retries with backoff (`withRetry`, `AiBusyError`), the cached system prompt, structured output, metering, and the Batch API for non-urgent work (`queueStructured`, `runBatches`, handlers such as the daily reminder digest). The hook for a second route (Claude in Azure AI Foundry) is `aiClient()` |
 | `lib/assistant.ts` | The in-app assistant on the home page: answers questions about Sidekick and proposes role-limited actions that only run when the person presses Confirm |
 | `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
 | `lib/guardrails.ts` | The firm's guardrails: locked floor + org-wide switches, per-workspace extra switches (stricter only) and custom rules (save-time loosening check, versioned) merged by `getGuardPolicy`, the question check (quick local check, then Claude feature `guard`), the answer check (grounding, masking), and `guard_events` counts |
@@ -111,6 +115,13 @@ Adding a public page: add it to `PUBLIC_PAGES` in `lib/site.ts` (sitemap, metada
 2. `/checkout` → **Pay (test mode)** → `POST /api/billing {action:"pay"}` → `pay()` → `provider().completeCheckout()` → `recordPayment()` (status active). A Stripe provider would instead return its own checkout URL and call `recordPayment` from a signed webhook.
 3. Access: `accessFor()` (lib/plans.ts) turns the subscription into full or read-only. Read-only is enforced in `handle()` (changes → 402 via `readOnlyRefusal`, except auth, billing, owner, sign-up, Teams endpoints) and in `assertEnabled()` (lib/owner.ts: new AI work, so Teams and reminders stop too). `/api/me` returns it so the portal shows the notice banner.
 
+**Plan limits and the AI credit**
+1. Creating something counted by the plan (person, group, tracked chat, meeting, document) first calls `assertCanAdd(orgId, key, amount)` (lib/limits.ts): effective limit (plan, overlaid with `org_terms`) vs current use; past it → `LimitError` (402, `kind: "limit"`, `limit`). Nothing is deleted when a limit shrinks; `limitReport` shows "over".
+2. Every `structured()` call runs `creditGate(feature, orgId)` (lib/credit.ts) after `assertEnabled`: the month's cost (cached 30 s, bumped by every recorded call) vs the credit. Below 100% nothing changes (80% writes a one-time audit notice and the portal banner reads `/api/me` `credit`). At 100%: `ask`/`guard` and short `extract` get a cheaper model; `remind`, `insights`, `assist` and long `extract` throw `FeatureOffError("credit")` (503, a notice, not an app error). `ctx.skipCredit` skips the check (for work Sidekick pays for itself, such as the coming support assistant).
+3. Every live call is retried on 429/529/5xx with exponential backoff and jitter (Retry-After honoured); a call that stays busy throws `AiBusyError` (503, "very busy, try again in a minute"). Daily reminder digests are queued with `queueStructured` and sent as one Message Batch per timer tick; `runBatches` collects ended batches on later ticks and hands results to the registered handler (half price). Things people wait for stay live.
+4. `ask()` also takes one hit from the per-person rate limit (lib/rate-limit.ts, 429 past it), for the portal and Teams alike.
+5. Model and provider names stay out of the portal (`/api/me` says `ai.working`, Usage has no models, Activity drops `model` from step details); the Owner Console client page shows AI use by model.
+
 **A Teams message**
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.
 2. The Teams SDK verifies the token and routes the activity to a handler in `bot.ts`.
@@ -124,6 +135,8 @@ Adding a public page: add it to `PUBLIC_PAGES` in `lib/site.ts` (sitemap, metada
 - **Guardrails**: anything that answers people (portal, Teams, assistant) goes through `lib/guardrails.ts`: `screenQuestion` before, `cleanOutput` (and `checkGrounding` for sourced answers) after. Refusals use the fixed `MESSAGES`, never Claude-written text. `guard_events` stores rule/where/when only, never text.
 - **Isolation test**: `tests/api.test.mjs` plants a secret in workspace B and checks it can't be reached from workspace A, another org, Teams or the assistant. New routes or surfaces that read workspace data belong in that test.
 - **One path each**: Claude only via `lib/claude.ts`, search only via `lib/search.ts`, so Azure (Foundry, AI Search) can be swapped in later without touching callers.
+- **Limits**: plan limits only in `lib/plans.ts`; enforce a new countable thing with `assertCanAdd` where it's created, and never delete data because of a limit. AI work goes through `structured()` so the AI credit applies; pass `skipCredit` only for work Sidekick pays for itself.
+- **Plain wording**: customers see "AI answers", never model names, providers or keys; those belong in the Owner Console ("Powered by Claude" is said on the public privacy page).
 - **Billing**: plans and prices only in `lib/plans.ts`; subscription changes only through `lib/billing.ts` (provider first, then the row and the audit log). Never add card, CVC or bank fields: a real provider collects them on its own page.
 - **Audit**: access changes, deletions and anything Sidekick does on its own call `audit()` / `auditAsSidekick()`.
 - **Parameters**: SQL values always go in `?` parameters, never into the SQL string.

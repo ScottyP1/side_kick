@@ -49,6 +49,8 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See their own AI use this month on the home page | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See Usage & billing and the whole company's AI spend | ✓ | ✓ | | ✓ | | |
 | See the plan and subscription (on Usage & billing) | ✓ | ✓ | | ✓ | | |
+| Export usage per group as CSV (AI cost by engagement code, for chargeback) | ✓ | ✓ | | ✓ | | |
+| See the AI credit notice (80% used, used up) | ✓ | ✓ | | ✓ | | |
 | Pay for the plan, change it or cancel it | ✓ | | | ✓ | | |
 | **Running the organization** | | | | | | |
 | Create groups (workspaces), picking their client, Team Lead and first members | ✓ | ✓ | | | | |

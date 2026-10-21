@@ -16,12 +16,33 @@ import { unstable_rethrow } from "next/navigation";
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "node:crypto";
 import { HttpError } from "./auth";
+import { FeatureOffError } from "./owner";
 import { now, run } from "./db";
-import { traceFailed, withTrace } from "./trace";
+import { failureReason, traceFailed, withTrace } from "./trace";
 
-/** "/api/meetings/3f2a…" → "/api/meetings/:id", so the Activity page groups requests by operation. */
-const routeName = (req: unknown) =>
-  req instanceof Request ? `${req.method} ${new URL(req.url).pathname.replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,}|\/[0-9a-f]{16,}/gi, "/:id")}` : "request";
+/**
+ * "/api/meetings/3f2a…" → "/api/meetings/:id", so the Activity page groups requests by operation. Every
+ * segment after a collection name that is a value rather than a fixed route word becomes ":id": ids of any
+ * shape (UUIDs, hex, made-up ones like "nope"), so a mistyped id doesn't become an operation of its own.
+ */
+export function routeName(req: unknown) {
+  if (!(req instanceof Request)) return "request";
+  return `${req.method} ${normalisePath(new URL(req.url).pathname)}`;
+}
+
+/**
+ * The collections with a dynamic `[id]` segment (app/api/<collection>/[id]); the segment right after one of
+ * them is always an id. Add a collection here when adding such a route.
+ */
+const ID_COLLECTIONS = new Set(["meetings", "action-items", "docs", "users", "tenants"]);
+
+/** The path with dynamic segments replaced by ":id" (see `routeName`). */
+export function normalisePath(pathname: string) {
+  const parts = pathname.split("/");
+  return parts
+    .map((seg, i) => (seg && (ID_COLLECTIONS.has(parts[i - 1]) || /^[0-9a-f]{8}-[0-9a-f-]{27,}$|^[0-9a-f]{16,}$/i.test(seg)) ? ":id" : seg))
+    .join("/");
+}
 
 /** A short code (like "K7Q2-9XM4") that links what the person saw to the full error in the error log. */
 const newRef = () => {
@@ -71,6 +92,20 @@ export async function errorMessageFor(req: Request, e: unknown): Promise<string>
   return `Something went wrong on our side. Try again; if it keeps happening, contact the Sidekick team. (Reference ${ref})`;
 }
 
+const DETAILS = Symbol("sidekick.errorDetails");
+
+/**
+ * Attaches extra, safe-to-show fields to an error before re-throwing it, and `handle()` adds them to the
+ * JSON error body. Used where the page needs to know something about a failure, e.g. the id of a meeting
+ * that was saved even though writing its notes failed (so the page can open it with **Try again**).
+ * Only ids and other non-sensitive values: they go to the browser.
+ */
+export function withErrorDetails<E>(e: E, details: Record<string, string | number>): E {
+  if (e && typeof e === "object") (e as Record<symbol, unknown>)[DETAILS] = details;
+  return e;
+}
+const detailsOf = (e: unknown) => ((e && typeof e === "object" && (e as Record<symbol, unknown>)[DETAILS]) || {}) as Record<string, string | number>;
+
 /**
  * Wraps a route handler so its return value becomes JSON and thrown errors become clean JSON errors the
  * UI can show. Nothing fails silently:
@@ -91,14 +126,20 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
       const fail = async (status: number, error: string) => {
         const ref = newRef();
         await logAppError(ref, status, args[0], e);
-        traceFailed(status, error, ref);
-        return NextResponse.json({ error: `${error} (Reference ${ref})`, ref }, { status });
+        // An HttpError's message is already the reason; anything else gets its type and message on the step.
+        traceFailed(status, error, ref, e instanceof HttpError ? {} : { reason: failureReason(e) });
+        return NextResponse.json({ ...detailsOf(e), error: `${error} (Reference ${ref})`, ref }, { status });
       };
+      if (e instanceof FeatureOffError) {
+        // Paused or turned off on purpose: a refusal, not an app error (no reference code, no App errors row).
+        traceFailed(e.status, e.message, undefined, { refusal: true });
+        return NextResponse.json({ ...detailsOf(e), error: e.message, kind: e.reason }, { status: e.status });
+      }
       if (e instanceof HttpError) {
         // 5xx HttpErrors (e.g. Claude declined, Azure down) are still problems worth a reference code.
-        if (e.status >= 500 && !/paused/i.test(e.message)) return fail(e.status, e.message);
+        if (e.status >= 500) return fail(e.status, e.message);
         traceFailed(e.status, e.message);
-        return NextResponse.json({ error: e.message }, { status: e.status });
+        return NextResponse.json({ ...detailsOf(e), error: e.message }, { status: e.status });
       }
       if (e instanceof Anthropic.AuthenticationError) return fail(502, "Claude rejected the API key. The Sidekick team needs to update it.");
       if (e instanceof Anthropic.RateLimitError) return fail(429, "Claude is busy right now (rate limit). Wait a minute and try again.");

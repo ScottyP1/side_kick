@@ -197,7 +197,8 @@ function costOf(model: string, u: { input_tokens: number; output_tokens: number;
 }
 
 /** Who the call is for, so its cost lands on the right org and workspace in usage reports. */
-type Ctx = { orgId: string; workspaceId: string | null };
+/** Whose work a call is: org and workspace (for metering), and the reader's role (for restriction wording). */
+type Ctx = { orgId: string; workspaceId: string | null; role?: string | null };
 
 /**
  * Calls Claude and returns its answer, validated against a Zod schema.
@@ -220,6 +221,9 @@ export async function structured<S extends z.ZodType>(
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
 ): Promise<z.infer<S>> {
+  // Checked before the step starts: a paused or restricted feature is a deliberate refusal, so it must not
+  // show up as a failed Claude step (which would turn the home orb's Claude light to "had errors").
+  await assertEnabled(feature, ctx.orgId, ctx.role);
   return span("ai", SPAN_NAMES[feature], () => structuredCall(feature, ctx, opts), { model: FAKE_CLAUDE ? "fake-claude" : MODELS[feature], effort: opts.effort ?? "medium" });
 }
 
@@ -229,7 +233,6 @@ async function structuredCall<S extends z.ZodType>(
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
 ): Promise<z.infer<S>> {
-  await assertEnabled(feature, ctx.orgId);
   if (FAKE_CLAUDE) return fakeClaude(feature, ctx, opts.content) as z.infer<S>;
   const model = MODELS[feature];
   const started = Date.now();

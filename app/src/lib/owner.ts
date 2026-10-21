@@ -127,12 +127,37 @@ export async function orgFlags(orgId: string) {
 }
 
 /**
- * Throws a friendly 503 if the owner has paused this feature, for everyone or (with `orgId`) for that
- * organization. Call it before starting that work; pass the org whenever the work belongs to one.
+ * A feature someone deliberately turned off: `paused` (a kill switch, for every client, temporary) or
+ * `restricted` (turned off for one organization on its Owner Console page). It's a refusal, not a fault:
+ * `handle()` answers with status 503 and `{ error, kind }`, doesn't log it under App errors and doesn't count
+ * it as a failed request or a Claude error; the portal shows it as a notice (components/ui.tsx).
  */
-export async function assertEnabled(key: FlagKey, orgId?: string | null) {
-  if (!(await flagEnabled(key))) throw new HttpError(503, `${FLAGS[key].label} is paused by the Sidekick team. Try again later.`);
-  if (orgId && !(await orgFlagEnabled(orgId, key))) {
-    throw new HttpError(503, `${FLAGS[key].label} is turned off for your organization by the Sidekick team. Ask your Org Owner.`);
+export class FeatureOffError extends HttpError {
+  constructor(public reason: "paused" | "restricted", message: string) {
+    super(503, message);
   }
+}
+
+/**
+ * Throws `FeatureOffError` if the owner has paused this feature for everyone or (with `orgId`) turned it off
+ * for that organization. Call it before starting that work; pass the org whenever the work belongs to one.
+ *
+ * @param role the reader's role, when known, so the restriction says what *they* can do: an Org Owner is told
+ *   to contact the Sidekick team, everyone else to ask their Org Owner. Without it (Teams, background work)
+ *   the message just says what happened.
+ */
+export async function assertEnabled(key: FlagKey, orgId?: string | null, role?: string | null) {
+  if (!(await flagEnabled(key))) throw new FeatureOffError("paused", `${FLAGS[key].label} is paused by the Sidekick team. Try again later.`);
+  if (orgId && !(await orgFlagEnabled(orgId, key))) {
+    throw new FeatureOffError("restricted", restrictedMessage(FLAGS[key].label, role));
+  }
+}
+
+/** The wording for a feature turned off for one organization, fitted to who reads it. */
+export function restrictedMessage(label: string, role?: string | null) {
+  const base = `${label} is turned off for your organization by the Sidekick team.`;
+  if (!role) return base;
+  return role === "Org Owner"
+    ? `${base} To have it turned back on, contact the Sidekick team.`
+    : `${base} Your Org Owner can ask the Sidekick team to turn it back on.`;
 }

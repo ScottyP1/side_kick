@@ -33,6 +33,7 @@ import { stripMentionsText, type IMessageActivityInput } from "@microsoft/teams.
 import type { IAdaptiveCard } from "@microsoft/teams.cards";
 import { all, get, now, run } from "../db";
 import { audit, canEdit, HttpError, type User } from "../auth";
+import { FeatureOffError } from "../owner";
 import { ask } from "../sidekick";
 import { span, traceFailed, traceScope, withTrace } from "../trace";
 import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, REMIND_PREFIX, VERBS, type ActionItemInput } from "./cards";
@@ -360,7 +361,8 @@ function registerHandlers(app: App) {
           await span("teams", "Send the answer card to Teams", () => reply(card));
         } catch (e) {
           console.error("Teams ask failed", e);
-          traceFailed(e instanceof HttpError ? e.status : 500, e instanceof Error ? e.message : String(e));
+          // A feature paused or turned off by the Sidekick team is a refusal, not a failure of Sidekick.
+          traceFailed(e instanceof HttpError ? e.status : 500, e instanceof Error ? e.message : String(e), undefined, { refusal: e instanceof FeatureOffError });
           await send(e instanceof HttpError ? e.message : "Sorry, I couldn't answer that just now. Please try again in a minute.").catch(() => {});
         }
       }),
@@ -435,7 +437,21 @@ const MAX_ACTION_CARDS = 15;
  * Called from the meeting import/reprocess routes after the response is sent, so imports never wait on Teams.
  */
 export async function postMeetingNotes(orgId: string, meetingId: string): Promise<number> {
+  // Nothing to post to (Teams not set up, or no chat linked to this workspace): no trace at all, so
+  // Activity and the home orb don't count Teams work that never happened.
+  if (!(await meetingHasLinkedChat(orgId, meetingId))) return 0;
   return withTrace({ name: "Post meeting notes to Teams", channel: "teams", orgId, detached: true }, () => postMeetingNotesInner(orgId, meetingId));
+}
+
+/**
+ * Whether any Teams chat or channel is linked to the workspace of this meeting (in this org). Checked before
+ * starting Teams work after an import, so nothing is recorded when there's nowhere to post.
+ */
+export async function meetingHasLinkedChat(orgId: string, meetingId: string): Promise<boolean> {
+  return Boolean(await get(
+    "SELECT c.id FROM teams_conversations c JOIN meetings m ON m.workspace_id = c.workspace_id WHERE m.id = ? AND m.org_id = ? AND c.org_id = ? LIMIT 1",
+    meetingId, orgId, orgId,
+  ));
 }
 
 async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<number> {

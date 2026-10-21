@@ -8,11 +8,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, fmtDate, fmtTime, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
+import { ActionItemsTable, useUpdateAction, type ActionItem } from "@/components/action-items";
 
 type Topic = { name: string; summary: string; coverage: number; key_facts: string[]; document_titles: string[]; meeting_titles: string[] };
 type Gap = { kind: string; text: string; suggestion: string; topic: string; assignee: string | null };
 type Item = { id: string; kind: string; text: string; who: string | null; answered: number | null; meeting: string | null; held_at: string | null };
-type Action = { id: string; text: string; owner: string | null; due: string | null; status: string; meeting: string | null; held_at: string | null };
+type Action = ActionItem;
 type Data = { topics: Topic[]; gaps: Gap[]; refreshedAt: string | null; items: Item[]; actions: Action[] };
 
 const covKind = (c: number) => (c >= 70 ? "good" : c >= 40 ? "warn" : "bad");
@@ -40,6 +41,11 @@ export default function MemoryPage() {
     load().catch(reportError);
   }, [load, reportError]);
 
+  const updateAction = useUpdateAction(
+    (id, patch) => setData((d) => (d ? { ...d, actions: d.actions.map((x) => (x.id === id ? { ...x, ...patch } : x)) } : d)),
+    () => load().catch(reportError),
+  );
+
   if (!ws) return <NeedsWorkspace />;
 
   const refresh = async () => {
@@ -52,15 +58,6 @@ export default function MemoryPage() {
       toast(e instanceof Error ? e.message : "Couldn't refresh.");
     } finally {
       setRefreshing(false);
-    }
-  };
-  const updateAction = async (a: Action, patch: Partial<Action>) => {
-    setData((d) => (d ? { ...d, actions: d.actions.map((x) => (x.id === a.id ? { ...x, ...patch } : x)) } : d));
-    try {
-      await api(`/api/action-items/${a.id}`, { method: "PATCH", json: patch });
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Couldn't update.");
-      load();
     }
   };
   const gapAction = async (g: Gap, status: "Open" | "Resolved", assignee?: string) => {
@@ -114,7 +111,7 @@ export default function MemoryPage() {
 
       <div className="panel">
         <div className="tabs" role="tablist">
-          {[["Topics", topics.length], ["Gaps", data?.gaps.length ?? 0], ["Action items", open.length], ["Decisions & facts", data?.items.length ?? 0]].map(([k, c]) => (
+          {[["Topics", topics.length], ["Gaps", data?.gaps.length ?? 0], ["Action items", open.length], ["Decisions & facts", (data?.items ?? []).filter((i) => i.kind !== "question").length]].map(([k, c]) => (
             <button key={k as string} role="tab" aria-selected={tab === k} onClick={() => setTab(k as string)}>
               {k} <span className="faint num">{c}</span>
             </button>
@@ -205,38 +202,7 @@ export default function MemoryPage() {
             {!shown.length ? (
               <div className="empty">No action items here.</div>
             ) : (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ width: 36 }} />
-                      <th>Action item</th>
-                      <th>Owner</th>
-                      <th>Due</th>
-                      <th>Status</th>
-                      <th>From meeting</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shown.map((a) => (
-                      <tr key={a.id}>
-                        <td><input type="checkbox" aria-label={`Done: ${a.text}`} disabled={!canEdit} checked={a.status === "Done"} onChange={(e) => updateAction(a, { status: e.target.checked ? "Done" : "Open" })} /></td>
-                        <td style={a.status === "Done" ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}><b>{a.text}</b></td>
-                        <td>
-                          <input className="input" style={{ padding: "3px 8px", width: 150, borderColor: a.owner ? undefined : "var(--hand)" }} placeholder="Assign owner" defaultValue={a.owner ?? ""} disabled={!canEdit} aria-label="Owner" onBlur={(e) => e.target.value !== (a.owner ?? "") && updateAction(a, { owner: e.target.value })} />
-                        </td>
-                        <td className="num">{a.due ?? "—"}</td>
-                        <td>
-                          <select className="input" style={{ width: "auto", padding: "3px 6px" }} value={a.status} disabled={!canEdit} aria-label="Status" onChange={(e) => updateAction(a, { status: e.target.value })}>
-                            {["Open", "In progress", "Done"].map((s) => <option key={s}>{s}</option>)}
-                          </select>
-                        </td>
-                        <td className="muted">{a.meeting ?? "—"}{a.held_at ? ` · ${fmtDate(a.held_at)}` : ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ActionItemsTable items={shown} canEdit={canEdit} onChange={updateAction} showMeeting />
             )}
           </>
         )}

@@ -16,15 +16,15 @@ The portal's own first-run setup (the very first organization on an empty instal
 | **Releases & switches** | Running version and commit, models in use, **kill switches**, operator log |
 
 ## Kill switches
-Each switch pauses one AI feature **for every client at once**: answering questions, meeting notes, knowledge map, the in-app assistant, the **guardrail check**, or document uploads. Pausing the guardrail check also stops answers (Sidekick never answers a question it hasn't checked). Use it during an incident or a cost spike. Clients see a friendly "paused by the Sidekick team" message, and Sidekick stops answering in Teams for that feature. Every flip is recorded in the operator log.
+Each switch pauses one AI feature **for every client at once**: answering questions, meeting notes, knowledge map, the in-app assistant, the **guardrail check**, document uploads, or **reminders in Teams** (daily and after-meeting reminder cards). Pausing the guardrail check also stops answers (Sidekick never answers a question it hasn't checked). Use it during an incident or a cost spike. Clients see a friendly "paused by the Sidekick team" message, and Sidekick stops answering in Teams for that feature. A pause is a deliberate refusal: it isn't listed under App errors and doesn't count as a Claude error. Every flip is recorded in the operator log.
 
 ## One client's page
 Click a client on **Clients** to see:
 - **People**: everyone in that organization with their role, the workspaces they can use ("All workspaces" for Org Owners and Org Admins), whether they sign in with Microsoft or a password, and when they were last active.
 - **Workspaces**: each one with its number of members, documents and meetings.
-- **Restrictions for this client**: the same switches as the kill switches, but for **this client only**, for example turning off the in-app assistant or document uploads for one organization. Their people see "turned off for your organization by the Sidekick team". A feature paused for everyone stays off whatever this switch says.
+- **Restrictions for this client**: the same switches as the kill switches, but for **this client only**, for example turning off the in-app assistant or document uploads for one organization. Their people see a calm notice (not an error dialog): "… is turned off for your organization by the Sidekick team", with "contact the Sidekick team" for their Org Owner and "ask your Org Owner" for everyone else. It isn't listed under App errors and doesn't count as a Claude error. A feature paused for everyone stays off whatever this switch says.
 
-Opening the page is recorded in the operator log ("Viewed the people and workspaces of …"), and each restriction is recorded in both the operator log and the client's own audit log. The page shows names and counts only, never document or meeting content.
+Opening the page is recorded in the operator log once per visit ("Viewed the people and workspaces of …"; flipping switches on the page doesn't add more), and each restriction is recorded in both the operator log and the client's own audit log. The page shows names and counts only, never document or meeting content.
 
 People, roles and workspace access are still managed by the client's own Org Owner or Org Admin on **Users & access**.
 

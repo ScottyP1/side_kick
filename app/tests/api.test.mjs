@@ -374,6 +374,7 @@ test(`[${ENGINE}] when AI processing fails, the meeting is marked Failed with th
   const broken = list.find((x) => x.title === "Broken meeting");
   assert.equal(broken.status, "Failed");
   assert.ok(broken.error);
+  assert.equal(r.body.meeting_id, broken.id, "the error names the saved meeting, so the page opens it with Try again");
 });
 
 test(`[${ENGINE}] action items: members can update, viewers can't`, async () => {
@@ -651,6 +652,10 @@ test(`[${ENGINE}] Owner Console: a restriction turns a feature off for one clien
   const off = await nw.call("POST", "/api/assistant", { message: "hi" });
   assert.equal(off.status, 503);
   assert.match(off.body.error, /turned off for your organization/);
+  assert.equal(off.body.kind, "restricted", "a restriction, not a server problem");
+  assert.equal(off.body.ref, undefined, "no reference code: nothing went wrong");
+  assert.match(off.body.error, /contact the Sidekick team/, "Nora is the Org Owner: she's told to contact the Sidekick team");
+  assert.doesNotMatch(off.body.error, /Ask your Org Owner/);
   assert.equal((await member("POST", "/api/assistant", { message: "hi" })).status, 200, "other clients are unaffected");
   assert.equal((await owner("GET", `/api/owner/tenants/${nw.id}`)).body.flags.find((f) => f.key === "assist").enabled, false);
   const audit = (await nw.call("GET", "/api/audit")).body;
@@ -664,6 +669,134 @@ test(`[${ENGINE}] Owner Console: a restriction turns a feature off for one clien
   fd.append("files", new Blob(["hello"], { type: "text/plain" }), "a.txt");
   assert.equal((await nw.call("POST", "/api/docs", undefined, { form: fd })).status, 503);
   assert.equal((await owner("POST", `/api/owner/tenants/${nw.id}/flags`, { key: "uploads", enabled: true })).status, 200);
+});
+
+test(`[${ENGINE}] restrictions and pauses are refusals: a notice for the reader, not an app error or a Claude error`, async () => {
+  const orgId = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Test Org").id;
+  const since = new Date().toISOString();
+  assert.equal((await owner("POST", `/api/owner/tenants/${orgId}/flags`, { key: "assist", enabled: false })).status, 200);
+  const forMember = await member("POST", "/api/assistant", { message: "hi" });
+  assert.equal(forMember.status, 503);
+  assert.equal(forMember.body.kind, "restricted");
+  assert.match(forMember.body.error, /Your Org Owner can ask the Sidekick team/, "a Member is pointed to their Org Owner");
+  const forOwner = await admin("POST", "/api/assistant", { message: "hi" });
+  assert.match(forOwner.body.error, /contact the Sidekick team/, "the Org Owner is pointed to the Sidekick team");
+  assert.equal((await owner("POST", `/api/owner/tenants/${orgId}/flags`, { key: "assist", enabled: true })).status, 200);
+  // A platform-wide pause is the same kind of refusal.
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "assist", enabled: false })).status, 200);
+  const paused = await member("POST", "/api/assistant", { message: "hi" });
+  assert.equal(paused.status, 503);
+  assert.equal(paused.body.kind, "paused");
+  assert.equal((await owner("POST", "/api/owner/releases", { key: "assist", enabled: true })).status, 200);
+  await new Promise((r) => setTimeout(r, 500));
+
+  const newErrors = (await owner("GET", "/api/owner/performance")).body.appErrors.filter((e) => e.created_at >= since && e.route === "/api/assistant");
+  assert.deepEqual(newErrors, [], "not logged under App errors");
+  const refused = (await admin("GET", "/api/activity?view=traces&q=assistant&status=refused")).body.traces.filter((t) => t.http_status === 503);
+  assert.ok(refused.length >= 3, "traced as refused, not failed");
+  for (const t of refused) {
+    const d = (await admin("GET", `/api/activity?view=trace&id=${t.id}`)).body;
+    assert.ok(!d.spans.some((x) => x.kind === "ai" || x.kind === "guard"), "no Claude step (and no paid guardrail check) for a refused request");
+  }
+  assert.equal((await admin("GET", "/api/activity?view=traces&q=assistant&status=error")).body.traces.filter((t) => t.http_status === 503).length, 0);
+});
+
+test(`[${ENGINE}] meetings: pasted transcripts have a size limit and the date must be a real date`, async () => {
+  const count = async () => (await member("GET", `/api/meetings?ws=${s.wsA}`)).body.meetings.length;
+  const before = await count();
+  const big = new FormData();
+  big.append("ws", s.wsA);
+  big.append("title", "Far too long");
+  big.append("text", "Priya: words. ".repeat(25000)); // 350,000 characters
+  const r = await member("POST", "/api/meetings", undefined, { form: big });
+  assert.equal(r.status, 413);
+  assert.match(r.body.error, /too long.*300,000/);
+  for (const held_at of ["notadate", "2026-02-30", "20261020"]) {
+    const f = new FormData();
+    f.append("ws", s.wsA);
+    f.append("title", "Bad date");
+    f.append("held_at", held_at);
+    f.append("text", "Priya: hello.");
+    const bad = await member("POST", "/api/meetings", undefined, { form: f });
+    assert.equal(bad.status, 400, held_at);
+    assert.match(bad.body.error, /Meeting date/);
+  }
+  assert.equal(await count(), before, "nothing was saved");
+});
+
+test(`[${ENGINE}] action items: owner and due date are checked, and the audit says what changed`, async () => {
+  const id = s.actionA;
+  const patch = (body) => member("PATCH", `/api/action-items/${id}`, body);
+  // Later tests (reminders) rely on this item as it is now, so it's put back at the end.
+  const was = (await member("GET", `/api/meetings/${s.meeting}`)).body.actions.find((x) => x.id === id);
+  assert.equal((await patch({ owner: 123 })).status, 400, "a number isn't a name (was a 500)");
+  assert.equal((await patch({ owner: "x".repeat(121) })).status, 400);
+  assert.equal((await patch({ due: "not a date at all" })).status, 400);
+  assert.equal((await patch({ due: "2026-02-30" })).status, 400);
+  assert.equal((await patch({})).status, 400, "nothing to change");
+  const ok = await patch({ owner: "Priya Patel", due: "2026-10-24", status: "In progress" });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  const a = (await member("GET", `/api/meetings/${s.meeting}`)).body.actions.find((x) => x.id === id);
+  assert.equal(a.owner, "Priya Patel");
+  assert.equal(a.due_on, "2026-10-24");
+  assert.equal(a.status, "In progress");
+  const same = await patch({ status: "In progress" });
+  assert.equal(same.body.changed, false);
+  assert.equal((await patch({ due: "" })).status, 200);
+  const log = JSON.stringify((await admin("GET", "/api/audit")).body);
+  assert.match(log, new RegExp(`Updated action item “[^”]*”: status ${was.status} → In progress, owner → Priya Patel, due → 2026-10-24`));
+  assert.match(log, /due date cleared/);
+  assert.doesNotMatch(log, /Updated action item “[^”]*”"/, "every update says what changed");
+  assert.equal((await patch({ status: was.status, owner: was.owner ?? "", due: was.due_on ?? "" })).status, 200);
+});
+
+test(`[${ENGINE}] gaps: assigning, reopening and resolving are audited without "undefined"`, async () => {
+  assert.equal((await member("POST", "/api/gaps", { ws: s.wsA, gap: "Who owns the cutover runbook?", assignee: "Sam" })).status, 200);
+  assert.equal((await member("POST", "/api/gaps", { ws: s.wsA, gap: "Who owns the cutover runbook?" })).status, 200);
+  assert.equal((await member("POST", "/api/gaps", { ws: s.wsA, gap: "Who owns the cutover runbook?", assignee: 5 })).status, 400);
+  const log = JSON.stringify((await admin("GET", "/api/audit")).body);
+  assert.match(log, /Assigned gap “Who owns the cutover runbook\?” to Sam/);
+  assert.match(log, /Reopened gap “Who owns the cutover runbook\?”/);
+  assert.doesNotMatch(log, /undefined/);
+});
+
+test(`[${ENGINE}] Activity: no Teams traces after an import when nothing is linked; ids and failures are recorded cleanly`, async () => {
+  const nw = s.northwind;
+  const f = new FormData();
+  f.append("ws", nw.ws);
+  f.append("title", "Northwind kickoff");
+  f.append("text", "Nora: we decided to start. Omar will send the plan.");
+  assert.equal((await nw.call("POST", "/api/meetings", undefined, { form: f })).status, 200);
+  await new Promise((r) => setTimeout(r, 1500)); // the Teams steps would run just after the response
+  const teams = (await nw.call("GET", "/api/activity?view=traces&channel=teams")).body.traces;
+  assert.deepEqual(teams.map((t) => t.name), [], "no Teams chat is linked to this workspace, so no Teams work is recorded");
+  // A made-up id is grouped with the real ones, not an operation of its own.
+  assert.equal((await member("PATCH", "/api/action-items/nope", { status: "Done" })).status, 404);
+  await new Promise((r) => setTimeout(r, 500));
+  const names = (await admin("GET", "/api/activity?view=traces&q=action-items")).body.traces.map((t) => t.name);
+  assert.ok(names.includes("PATCH /api/action-items/:id"));
+  assert.ok(!names.some((n) => n.includes("nope")));
+  // A failed trace's first step says why.
+  const failed = (await admin("GET", `/api/activity?view=traces&q=${s.failRef}`)).body.traces[0];
+  const d = (await admin("GET", `/api/activity?view=trace&id=${failed.id}`)).body;
+  assert.match(d.spans[0].error ?? "", /fake failure/i);
+});
+
+test(`[${ENGINE}] assistant: the reply never promises an action it won't offer; Owner Console logs one view per visit`, async () => {
+  const r = (await member("POST", "/api/assistant", { message: `refresh map ${s.wsB}` })).body;
+  assert.equal(r.action, null);
+  assert.doesNotMatch(r.reply, /Here's what I'll do/);
+  assert.match(r.reply, /nothing has been done/);
+  const org = (await admin("POST", "/api/assistant", { message: "Create a new organization called Rogue Org" })).body;
+  assert.doesNotMatch(org.reply, /Creating organization/);
+  assert.match(org.reply, /Sidekick team/);
+
+  const orgId = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Test Org").id;
+  const lastId = (await owner("GET", "/api/owner/releases")).body.log[0]?.id ?? 0;
+  assert.equal((await owner("GET", `/api/owner/tenants/${orgId}`)).status, 200);
+  assert.equal((await owner("GET", `/api/owner/tenants/${orgId}?reload=1`)).status, 200);
+  const views = (await owner("GET", "/api/owner/releases")).body.log.filter((l) => l.id > lastId && l.action === "Viewed the people and workspaces of Test Org");
+  assert.equal(views.length, 1, "a reload after a switch flip isn't another view");
 });
 
 test(`[${ENGINE}] first-run setup can't be used from outside the machine running Sidekick`, async () => {

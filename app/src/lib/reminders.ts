@@ -493,15 +493,21 @@ const linkedChats = (workspaceId?: string) =>
  * chat doesn't stop the others. Called from the meeting routes after the response is sent.
  */
 export async function remindAfterMeeting(orgId: string, meetingId: string): Promise<number> {
+  // Worked out before any trace starts: with reminders paused, no chat linked (Teams not set up) or no chat
+  // wanting a reminder after meetings, nothing is recorded, so Activity doesn't count Teams work that never ran.
+  if (!(await flagEnabled("remind"))) return 0;
+  const m = await get<{ workspace_id: string; status: string }>("SELECT workspace_id, status FROM meetings WHERE id = ? AND org_id = ?", meetingId, orgId);
+  if (!m || m.status !== "Ready") return 0;
+  const chats: TeamsConversation[] = [];
+  for (const conv of (await linkedChats(m.workspace_id)).filter((c) => c.org_id === orgId)) {
+    const s = await getChatSettings(conv);
+    if (s.reminders && s.afterMeeting) chats.push(conv);
+  }
+  if (!chats.length) return 0;
   return withTrace({ name: "Reminders after a meeting", channel: "teams", kind: "remind", orgId, detached: true }, async () => {
-    if (!(await flagEnabled("remind"))) return 0;
-    const m = await get<{ workspace_id: string; status: string }>("SELECT workspace_id, status FROM meetings WHERE id = ? AND org_id = ?", meetingId, orgId);
-    if (!m || m.status !== "Ready") return 0;
     traceScope({ workspaceId: m.workspace_id });
     let posted = 0;
-    for (const conv of (await linkedChats(m.workspace_id)).filter((c) => c.org_id === orgId)) {
-      const s = await getChatSettings(conv);
-      if (!s.reminders || !s.afterMeeting) continue;
+    for (const conv of chats) {
       try {
         if ((await sendReminder(conv, "meeting", `meeting:${meetingId}`, { excludeMeetingId: meetingId })).status === "posted") posted++;
       } catch (e) {

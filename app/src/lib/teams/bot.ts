@@ -11,11 +11,13 @@
  * - **Conversation**: a Teams channel, group chat or 1:1 chat that Sidekick has been added to. Each one
  *   is a row in `teams_conversations`.
  * - **Linking**: a conversation must be linked to exactly one workspace before Sidekick answers there.
- *   If the chat's Microsoft tenant is tied to a Sidekick org (lib/tenants.ts), the chat shows on that org's
- *   Workspaces page as **Waiting to be assigned** and an Org Admin or Team Lead picks the workspace there.
- *   Otherwise (or as a fallback) Sidekick shows an 8-character code in Teams that an admin enters on the
- *   Workspaces page: the code proves the admin can see that chat. Either way the link puts the chat inside
- *   one org's walls.
+ *   If the chat's Microsoft tenant is tied to a Sidekick org (lib/tenants.ts), only a Team Lead or admin may
+ *   add Sidekick (install.ts checks the installer and Sidekick leaves otherwise); the chat then waits ("Waiting
+ *   to be assigned") until a Team Lead or admin assigns it to a group **in the portal only**. Until then
+ *   Sidekick reads, saves and answers nothing there, and it leaves after 7 days. Once assigned it reads every
+ *   message. In a tenant that isn't tied to an org (single-tenant mode, the live site today) Sidekick shows an
+ *   8-character link code instead, entered on the group's page. Either way the link puts the chat inside one
+ *   org's walls.
  * - **Tenants** (lib/tenants.ts): in multi-tenant mode Teams activities may come from any company. Sidekick
  *   only acts for tenants tied to a Sidekick org; anything else gets a "sign up first" card, and nothing about
  *   that chat is stored. In single-tenant mode (TENANT_ID set) every chat works as before.
@@ -24,7 +26,8 @@
  *   Shareable sources, and notes from internal-only meetings are never posted there.
  * - **Chat settings** (see reminders.ts): per linked chat, an Org Admin chooses whether Sidekick tracks
  *   every message there (needs the app's resource-specific consent permissions, see teams/manifest),
- *   whether meeting notes go there, and whether reminders are posted there.
+ *   whether meeting notes go there, and whether reminders are posted there. (Chats assigned through the
+ *   picker always track: assigned means full access.)
  * - **Adaptive Cards**: the formatted messages with buttons (see cards.ts). Button clicks come back as
  *   `card.action` activities and update the card in place.
  * - **Authentication**: in production every request carries a token signed by Microsoft for Sidekick's
@@ -43,7 +46,8 @@ import { audit, canEdit, HttpError, type User } from "../auth";
 import { FeatureOffError } from "../owner";
 import { ask } from "../sidekick";
 import { span, traceFailed, traceScope, withTrace } from "../trace";
-import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, noticeCard, REMIND_PREFIX, unknownTenantCard, VERBS, waitingCard, type ActionItemInput } from "./cards";
+import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, noticeCard, notSetUpCard, REMIND_PREFIX, unknownTenantCard, VERBS, type ActionItemInput } from "./cards";
+import { leaveChat, mayAddSidekick, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
 import { getChatSettings, recordChatMessage, reminderAction } from "../reminders";
@@ -156,13 +160,20 @@ export type TeamsConversation = {
   /** Who added Sidekick here (Teams display name and Microsoft id), from the install activity. */
   added_by?: string | null;
   added_by_oid?: string | null;
+  /** Since when the chat waits to be assigned (set when Sidekick is added or the chat is unlinked). */
+  waiting_since?: string | null;
+  /** The channel's team as a Microsoft 365 group id (Graph needs it to remove Sidekick from a team). */
+  team_aad_id?: string | null;
+  /** Set while Sidekick is leaving this chat ("installer", "stale", "removed"); it's ignored meanwhile. */
+  leaving?: string | null;
+  leave_tried_at?: string | null;
 };
 
 /** The parts of an incoming Teams activity Sidekick uses. */
 type InboundActivity = {
   conversation: { id: string; conversationType?: string; tenantId?: string; name?: string };
   serviceUrl?: string;
-  channelData?: { tenant?: { id?: string }; channel?: { id?: string; name?: string }; team?: { id?: string; name?: string } };
+  channelData?: { tenant?: { id?: string }; channel?: { id?: string; name?: string }; team?: { id?: string; name?: string; aadGroupId?: string } };
   recipient?: { id?: string };
   entities?: unknown[];
   from: { id: string; name?: string; aadObjectId?: string };
@@ -217,7 +228,8 @@ async function lookupChannelName(a: InboundActivity, conversationId: string): Pr
 
 /**
  * Saves (or refreshes) the conversation an activity came from and returns its row. Keeps the latest
- * service URL, which proactive messages need, and the display name the Workspaces page shows.
+ * service URL, which proactive messages need, and the display name the portal shows. `addedBy` (from the
+ * install activity) records who added Sidekick and restarts the 7-day wait.
  * Names: a real name from the activity always wins; a channel without one is looked up in Teams once
  * (while the saved name is still a placeholder); placeholders never overwrite a real name.
  */
@@ -230,11 +242,14 @@ async function touchConversation(a: InboundActivity, addedBy?: { name: string; o
     if (isPlaceholder(saved?.name) || isOldGeneralGuess(saved?.name, id, a.channelData?.team?.id)) name = await lookupChannelName(a, id);
   }
   await run(
-    `INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at, added_by, added_by_oid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at, added_by, added_by_oid, waiting_since, team_aad_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET service_url = excluded.service_url, name = COALESCE(?, teams_conversations.name), last_seen_at = excluded.last_seen_at,
-       added_by = COALESCE(excluded.added_by, teams_conversations.added_by), added_by_oid = COALESCE(excluded.added_by_oid, teams_conversations.added_by_oid)`,
-    id, a.serviceUrl ?? "", tenantOf(a), kind, name ?? PLACEHOLDER_NAMES[kind] ?? "Teams chat", now(), now(), addedBy?.name ?? null, addedBy?.oid ?? null, name,
+       added_by = COALESCE(excluded.added_by, teams_conversations.added_by), added_by_oid = COALESCE(excluded.added_by_oid, teams_conversations.added_by_oid),
+       team_aad_id = COALESCE(excluded.team_aad_id, teams_conversations.team_aad_id)`,
+    id, a.serviceUrl ?? "", tenantOf(a), kind, name ?? PLACEHOLDER_NAMES[kind] ?? "Teams chat", now(), now(), addedBy?.name ?? null, addedBy?.oid ?? null, now(), a.channelData?.team?.aadGroupId ?? null, name,
   );
+  // Added again to a chat that still waits: the 7 days start over.
+  if (addedBy) await run("UPDATE teams_conversations SET waiting_since = ? WHERE id = ? AND workspace_id IS NULL", now(), id);
   return (await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", id))!;
 }
 
@@ -253,13 +268,17 @@ async function tenantGate(a: InboundActivity): Promise<{ ok: true; org: TenantOr
 }
 
 /**
- * The card for a chat that isn't linked yet: in a tenant tied to an org, "waiting to be assigned" with a link to
- * the portal (and the code as a fallback); otherwise the classic link-code card. 1:1 chats never wait in the
- * picker (they're one person's), so they always get the code.
+ * True if this unlinked chat follows the "assigned only in the portal" rules (install.ts): a channel or group
+ * chat in a tenant tied to an org. Everything else (1:1 chats, tenants not tied to an org) keeps the link code.
+ */
+const usesPicker = (conv: TeamsConversation, org: TenantOrg | undefined) => !!org && conv.kind !== "personal";
+
+/**
+ * The card for a chat that isn't linked yet: "I'm not set up for this chat yet" (no buttons, no code) where the
+ * picker rules apply; otherwise the classic link-code card.
  */
 async function unlinkedCard(conv: TeamsConversation, org: TenantOrg | undefined) {
-  const code = await freshLinkCode(conv);
-  return org && conv.kind !== "personal" ? waitingCard(conv.kind, code, portalUrl("/workspaces")) : linkCard(code, conv.kind);
+  return usesPicker(conv, org) ? notSetUpCard(conv.kind, WAITING_DAYS) : linkCard(await freshLinkCode(conv), conv.kind);
 }
 
 /** The "sign up first" card for a tenant no Sidekick org is tied to (multi-tenant mode). */
@@ -377,8 +396,10 @@ async function mentionedPeople(a: InboundActivity, conv: TeamsConversation): Pro
 
 /**
  * Wires up what Sidekick does for each kind of Teams activity:
- * - `install.add`: Sidekick was added to a channel/chat → greet with the help card, or the link code.
- * - `channelRenamed`: a channel's new name, so the Workspaces page shows it.
+ * - `install.add`: Sidekick was added to a channel/chat → the help card if it's already linked; otherwise, where
+ *   the picker rules apply, the "not set up yet" notice if a Team Lead or admin added it (or Sidekick leaves),
+ *   else the link code.
+ * - `channelRenamed`: a channel's new name, so the portal shows it.
  * - `message`: someone mentioned Sidekick (or started with "@Sidekick" typed as plain text) → commands
  *   (`help`, `link`, `add @name`, `remove @name`) or a question to answer; other messages in tracked chats are only saved.
  * Every handler first checks the tenant (`tenantGate`): in multi-tenant mode an unknown company only gets
@@ -390,7 +411,14 @@ function registerHandlers(app: App) {
     const gate = await tenantGate(activity);
     if (!gate.ok) return void (await send(signupCard()));
     const conv = await touchConversation(activity, { name: activity.from.name ?? "Someone in Teams", oid: activity.from.aadObjectId ?? null });
-    await send(conv.workspace_id ? helpCard(await workspaceName(conv)) : await unlinkedCard(conv, gate.org));
+    if (conv.workspace_id) return void (await send(helpCard(await workspaceName(conv))));
+    // Only a Team Lead or admin of the tenant's org may add Sidekick to a chat; anyone else, Sidekick leaves.
+    if (usesPicker(conv, gate.org) && !(await mayAddSidekick(gate.org!.id, activity.from.aadObjectId))) {
+      traceScope({ orgId: gate.org!.id });
+      after(() => leaveChat(conv, "installer").then(() => undefined, (e) => console.error("Couldn't leave the Teams chat", e)));
+      return;
+    }
+    await send(await unlinkedCard(conv, gate.org));
   });
 
   // A channel was renamed: Teams says so to the team's bot, with the channel's id and new name.
@@ -417,9 +445,11 @@ function registerHandlers(app: App) {
       return;
     }
     const conv = await touchConversation(activity);
+    // Sidekick is on its way out of this chat (refused installer, never assigned, removed): ignore everything.
+    if (conv.leaving) return;
     // A chat linked (by code, before multi-tenant) to another org than the one its tenant belongs to is left alone.
     if (tenantMode() === "multi" && conv.org_id && gate.org && conv.org_id !== gate.org.id) {
-      if (conv.kind === "personal" || mentionsSidekick(activity)) await send("This chat is linked to a different organization's Sidekick. An admin can unlink it on the Workspaces page.");
+      if (conv.kind === "personal" || mentionsSidekick(activity)) await send("This chat is linked to a different organization's Sidekick. An admin can unlink it on the group's page in the Sidekick portal.");
       return;
     }
     traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
@@ -428,13 +458,15 @@ function registerHandlers(app: App) {
       if (conv.workspace_id && !(await orgPaused(conv.org_id!))) await recordChatMessage(conv, activity);
       return;
     }
+    // Not assigned yet where the picker rules apply: read, save and answer nothing; just say how to set it up.
+    if (!conv.workspace_id && usesPicker(conv, gate.org)) return void (await send(notSetUpCard(conv.kind, WAITING_DAYS)));
     const question = (plainMention ? plainText(activity.text ?? "").replace(PLAIN_MENTION, "") : (stripMentionsText(activity) ?? "")).replace(/\s+/g, " ").trim();
     const command = question.toLowerCase().replace(/[^a-z]/g, "");
 
     if (!question || command === "help") return void (await send(helpCard(await workspaceName(conv))));
     if (!conv.workspace_id) return void (await send(await unlinkedCard(conv, gate.org)));
     if (command === "link") {
-      return void (await send(`This ${conv.kind === "channel" ? "channel" : "chat"} is linked to **${await workspaceName(conv)}**. An Org Admin can change that on the Workspaces page in the Sidekick portal.`));
+      return void (await send(`This ${conv.kind === "channel" ? "channel" : "chat"} is linked to **${await workspaceName(conv)}**. A Team Lead or admin can change that on the group's page in the Sidekick portal.`));
     }
     if (await orgPaused(conv.org_id!)) return void (await send("Sidekick is paused for this organization. Contact the Sidekick team."));
     if (question.length > 1000) return void (await send("That question is too long for me (max 1,000 characters)."));

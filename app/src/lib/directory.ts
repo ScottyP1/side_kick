@@ -44,7 +44,8 @@ export const MICROSOFT_ONLY = "microsoft-only";
 export const PERMISSIONS_EXPLAINED = [
   { name: "Sign in and read user profile (User.Read, delegated)", what: "Lets people sign in to Sidekick with their work account. Sidekick sees their name, email and account id." },
   { name: "Read all users' full profiles (User.Read.All, application)", what: "Lets Sidekick search your directory when an admin imports people or someone types @Sidekick add in Teams. Sidekick reads names, work emails, job titles and account ids only, and never changes anything in Microsoft 365." },
-  { name: "Teams chat and channel messages (resource-specific, per chat)", what: "Not part of this approval: granted per chat or team when Sidekick is added there, and only used in chats an admin chooses to track." },
+  { name: "Manage its own installation in chats and teams (TeamsAppInstallation.ReadWriteSelfForChat.All and ReadWriteSelfForTeam.All, application)", what: "Lets Sidekick remove itself from a chat or team: when someone other than a Team Lead or admin adds it, when nobody assigns a chat to a group within 7 days, or when you press Remove Sidekick from this chat. It can only add or remove Sidekick, never other apps." },
+  { name: "Teams chat and channel messages (resource-specific, per chat)", what: "Not part of this approval: granted per chat or team when Sidekick is added there. Sidekick reads a chat's messages only once it's assigned to a group." },
 ] as const;
 
 /** Thrown when the organization's Microsoft admin hasn't approved Sidekick (yet). The JSON says `consent: "needed"`. */
@@ -87,19 +88,30 @@ async function graphToken(tenantId: string): Promise<string> {
   return body.access_token;
 }
 
-/** One GET to Microsoft Graph for this tenant; 401/403 become `ConsentNeededError`, 404 returns null. */
-async function graphGet<T>(tenantId: string, path: string, headers: Record<string, string> = {}): Promise<T | null> {
+/**
+ * One call to Microsoft Graph for this tenant with Sidekick's app token. 401/403 become `ConsentNeededError`
+ * (with `deniedMessage` when given), 404 returns null, other failures 502. Returns the JSON body (null when empty).
+ * Used here for the directory and by lib/teams/install.ts to remove Sidekick from a chat or team.
+ */
+export async function graphCall<T>(tenantId: string, method: "GET" | "DELETE", path: string, opts: { headers?: Record<string, string>; deniedMessage?: string } = {}): Promise<T | null> {
   const token = await graphToken(tenantId);
-  const res = await fetch(`${GRAPH_BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, ...headers } }).catch(() => null);
+  const res = await fetch(`${GRAPH_BASE}${path}`, { method, headers: { Authorization: `Bearer ${token}`, ...(opts.headers ?? {}) } }).catch(() => null);
   if (!res) throw new HttpError(502, "Couldn't reach Microsoft Graph. Try again in a minute.");
   if (res.status === 401 || res.status === 403) {
     tokens.delete(tenantId);
-    throw new ConsentNeededError("Sidekick is connected to your Microsoft 365 organization but can't read its directory yet. A Microsoft admin needs to approve the “Read all users' full profiles” permission (Users & access → Approve Sidekick for your organization).");
+    throw new ConsentNeededError(opts.deniedMessage);
   }
   if (res.status === 404) return null;
   if (!res.ok) throw new HttpError(502, `Microsoft Graph answered ${res.status}. Try again in a minute.`);
-  return (await res.json()) as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T | null;
 }
+
+const graphGet = <T>(tenantId: string, path: string, headers: Record<string, string> = {}) =>
+  graphCall<T>(tenantId, "GET", path, {
+    headers,
+    deniedMessage: "Sidekick is connected to your Microsoft 365 organization but can't read its directory yet. A Microsoft admin needs to approve the “Read all users' full profiles” permission (Users & access → Approve Sidekick for your organization).",
+  });
 
 /* ------------------------------------------------------------------ */
 /* Directory people                                                    */

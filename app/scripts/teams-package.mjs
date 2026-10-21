@@ -9,6 +9,9 @@
 // Live address: SIDEKICK_LIVE_URL if set, otherwise asked from Azure (`az login` needed), like deploy.sh.
 // Local address: SIDEKICK_PUBLIC_URL (the dev tunnel). CLIENT_ID and SIDEKICK_PUBLIC_URL are read from the
 // environment or app/.env.local; nothing secret is read or written.
+// Entra app in webApplicationInfo: ENTRA_CLIENT_ID (the multi-tenant sign-in/directory app) when set, else the
+// bot's app. Microsoft ties the Teams app's resource-specific and "self" installation permissions to that app,
+// which is how Sidekick may remove itself from a chat (lib/teams/install.ts, docs/TEAMS-MULTITENANT.md).
 // Public website (store listing: website, privacy /privacy and terms /terms pages): SIDEKICK_WEBSITE_URL if
 // set (e.g. a custom domain), otherwise the app's own address, which serves those pages.
 import fs from "node:fs";
@@ -25,7 +28,7 @@ const env = { ...process.env };
 const envFile = path.join(root, "app/.env.local");
 if (fs.existsSync(envFile)) {
   for (const line of fs.readFileSync(envFile, "utf8").split("\n")) {
-    const m = line.match(/^\s*(CLIENT_ID|SIDEKICK_PUBLIC_URL|SIDEKICK_LIVE_URL|SIDEKICK_WEBSITE_URL)\s*=\s*"?([^"\s#]*)"?/);
+    const m = line.match(/^\s*(CLIENT_ID|ENTRA_CLIENT_ID|SIDEKICK_PUBLIC_URL|SIDEKICK_LIVE_URL|SIDEKICK_WEBSITE_URL)\s*=\s*"?([^"\s#]*)"?/);
     if (m && !env[m[1]]) env[m[1]] = m[2];
   }
 }
@@ -69,6 +72,7 @@ if (env.SIDEKICK_WEBSITE_URL) {
 
 const template = fs.readFileSync(path.join(src, "manifest.template.json"), "utf8");
 const manifest = template
+  .replaceAll("{{AAD_APP_ID}}", (env.ENTRA_CLIENT_ID || botId).toLowerCase())
   .replaceAll("{{BOT_ID}}", botId.toLowerCase())
   .replaceAll("{{PUBLIC_URL}}", publicUrl.origin)
   .replaceAll("{{PUBLIC_HOST}}", publicUrl.host)

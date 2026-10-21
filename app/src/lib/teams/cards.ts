@@ -79,30 +79,46 @@ export function answerCard(question: string, answer: { found: boolean; answer: s
 export function linkCard(code: string, kind: string): IAdaptiveCard {
   const where = kind === "channel" ? "channel" : "chat";
   return card([
-    ...header("Sidekick", `Link this ${where} to a workspace`),
-    text(`I don't know which client workspace this ${where} belongs to yet, so I can't answer from its documents and meetings.`),
-    text("An Org Admin can link it in the Sidekick portal: **Workspaces → Link a Teams chat or channel**, then enter this code:"),
+    ...header("Sidekick", `Link this ${where} to a group`),
+    text(`I don't know which group this ${where} belongs to yet, so I can't answer from its documents and meetings.`),
+    text("A Team Lead or admin can link it on the group's page in the Sidekick portal (**Teams chats**), with this code:"),
     text(code, { size: "ExtraLarge", weight: "Bolder", fontType: "Monospace", horizontalAlignment: "Center", spacing: "Medium" }),
     text("The code works for 24 hours. Mention me with **link** to get a new one.", { size: "Small", isSubtle: true }),
   ]);
 }
 
 /**
- * Shown in an unassigned chat or channel when its Microsoft organization uses Sidekick: an Org Admin or the
- * group's Team Lead assigns it on the portal's Workspaces page ("Waiting to be assigned"), no code needed.
- * The link code stays as a fallback for anyone who prefers it.
+ * Shown once when Sidekick is added to a chat or channel whose Microsoft organization uses Sidekick, by a Team
+ * Lead or admin (and again if someone mentions Sidekick there before it's assigned). No buttons: assigning
+ * happens only in the portal, on the group's page.
  */
-export function waitingCard(kind: string, code: string, portalUrl: string): IAdaptiveCard {
+export function notSetUpCard(kind: string, days: number): IAdaptiveCard {
   const where = kind === "channel" ? "channel" : "chat";
-  return card(
-    [
-      ...header("Sidekick", `This ${where} is waiting to be assigned`),
-      text(`I don't know which workspace this ${where} belongs to yet, so I can't answer from its documents and meetings.`),
-      text(`An admin or the group's leader can assign this ${where} in the Sidekick portal: **Workspaces → Waiting to be assigned**.`),
-      text(`Or link it with this code on the Workspaces page: **${code}** (works for 24 hours).`, { size: "Small", isSubtle: true, spacing: "Medium" }),
-    ],
-    [{ type: "Action.OpenUrl", title: "Open Sidekick", url: portalUrl }],
-  );
+  return card([
+    ...header("Sidekick", `I'm not set up for this ${where} yet`),
+    text(`A Team Lead needs to assign this ${where} to a group in the Sidekick portal. Until then I won't read, save or answer anything here.`),
+    text(`If nobody assigns it within ${days} days, I'll leave the ${where}.`, { size: "Small", isSubtle: true }),
+  ]);
+}
+
+/**
+ * Posted when a Team Lead or admin assigns the chat to a group in the portal: from now on Sidekick reads every
+ * message here (assigned means full access), and what it can do.
+ */
+export function assignedCard(workspace: string, by: string, retentionDays: number): IAdaptiveCard {
+  return card([
+    ...header("Sidekick", `Assigned to ${workspace}`),
+    text(`${by} assigned this chat to **${workspace}** in the Sidekick portal. From now on I read every message here to keep track of decisions, dates and to-dos, and only ${workspace}'s team can search what I learn. Messages are kept ${retentionDays} days.`),
+    {
+      type: "FactSet",
+      facts: [
+        { title: "@Sidekick <question>", value: "Answer with sources" },
+        { title: "@Sidekick add @name", value: "Add someone to the group (Team Lead or admin)" },
+        { title: "@Sidekick help", value: "What I can do here" },
+      ],
+    },
+    text("To stop, a Team Lead or admin removes me from this chat on the group's page in Sidekick.", { size: "Small", isSubtle: true }),
+  ]);
 }
 
 /**
@@ -113,7 +129,7 @@ export function unknownTenantCard(signupUrl: string): IAdaptiveCard {
   return card(
     [
       ...header("Sidekick", "Sidekick isn't set up for your organization yet"),
-      text(`Sign up at ${signupUrl} and connect your Microsoft 365 organization. Then mention me here again and an admin can assign this chat to a workspace.`),
+      text(`Sign up at ${signupUrl} and connect your Microsoft 365 organization. Then a Team Lead or admin adds me to this chat again and assigns it to a group.`),
       text("Until then I don't read or keep anything from this chat.", { size: "Small", isSubtle: true }),
     ],
     [{ type: "Action.OpenUrl", title: "Sign up", url: signupUrl }],
@@ -123,15 +139,15 @@ export function unknownTenantCard(signupUrl: string): IAdaptiveCard {
 /** What Sidekick can do here, and which workspace this conversation is linked to (if any). */
 export function helpCard(workspace: string | null): IAdaptiveCard {
   return card([
-    ...header("Sidekick", workspace ? `Linked to ${workspace}` : "Not linked to a workspace yet"),
+    ...header("Sidekick", workspace ? `Linked to ${workspace}` : "Not linked to a group yet"),
     text("Mention me with a question and I'll answer from this workspace's documents and meetings, with sources."),
     {
       type: "FactSet",
       facts: [
         { title: "@Sidekick <question>", value: "Answer with sources" },
-        { title: "@Sidekick link", value: "Show the code to link this chat to a workspace" },
-        { title: "@Sidekick add @name", value: "Add someone to this workspace (Team Lead or Org Admin)" },
-        { title: "@Sidekick remove @name", value: "Take someone off this workspace (Team Lead or Org Admin)" },
+        { title: "@Sidekick link", value: "Show which group this chat belongs to" },
+        { title: "@Sidekick add @name", value: "Add someone to this group (Team Lead or admin)" },
+        { title: "@Sidekick remove @name", value: "Take someone off this group (Team Lead or admin)" },
         { title: "@Sidekick help", value: "Show this card" },
       ],
     },

@@ -87,6 +87,10 @@ const { publicKey: msPublic, privateKey: msPrivate } = crypto.generateKeyPairSyn
 const msJwk = { ...msPublic.export({ format: "jwk" }), kid: "test-key", alg: "RS256", use: "sig" };
 const msCodes = new Map();
 const consented = new Set(); // tenants whose Microsoft admin approved Sidekick
+const TEAMS_APP_ID = "sidekick-test-app";
+// Where Sidekick is installed (chat or team id → Graph installations), and where it removed itself from.
+const INSTALLED = new Map();
+const removedFrom = [];
 // Each tenant's directory.
 const DIRECTORY = {
   [TA]: [
@@ -132,6 +136,23 @@ const microsoft = http.createServer((req, res) => {
       const pkceOk = c && crypto.createHash("sha256").update(f.get("code_verifier") ?? "").digest("base64url") === c.challenge;
       if (!c || !pkceOk) return send(400, { error: "invalid_grant" });
       return send(200, { id_token: msIdToken(c.claims.tid, c.nonce, c.claims) });
+    }
+    // Teams app installations in chats and teams (Sidekick removing itself).
+    const apps = url.pathname.match(/^\/v1\.0\/(chats|teams)\/([^/]+)\/installedApps(?:\/(.+))?$/);
+    if (apps) {
+      const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "");
+      if (!consented.has(tid)) return send(403, { error: { code: "Forbidden" } });
+      const where = decodeURIComponent(apps[2]);
+      const list = INSTALLED.get(where) ?? [];
+      if (req.method === "GET") return send(200, { value: list });
+      if (req.method === "DELETE") {
+        const id = decodeURIComponent(apps[3] ?? "");
+        if (!list.some((i) => i.id === id)) return send(404, { error: { code: "NotFound" } });
+        INSTALLED.set(where, list.filter((i) => i.id !== id));
+        removedFrom.push(where);
+        res.writeHead(204);
+        return void res.end();
+      }
     }
     if (url.pathname.startsWith("/v1.0/users")) {
       const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "");
@@ -205,6 +226,16 @@ const at = (teamsId) => ({ type: "mention", mentioned: { id: teamsId, name: ROST
 /** "@Sidekick <verb> @person…" from `from` in `conv` (tenant A). */
 const command = (conv, from, verb, ...people) =>
   activity(TA, conv, { type: "message", from, text: `<at>Sidekick</at> ${verb} ${people.map((p) => `<at>${ROSTER[p]?.name}</at>`).join(" ")}`, entities: [atSidekick, ...people.map(at)] });
+const TICK_SECRET = crypto.randomBytes(24).toString("hex");
+/** Runs the reminder timer's heartbeat once (it also makes Sidekick leave stale chats). */
+const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET } }).then((r) => r.json());
+/** Sidekick is added to a group chat in tenant A by `from` (Teams also records the installation for Graph). */
+const install = (conv, from) => {
+  INSTALLED.set(conv, [{ id: `inst-${conv}`, teamsApp: { id: "catalog-id", externalId: TEAMS_APP_ID } }]);
+  return toBot(activity(TA, conv, { type: "installationUpdate", action: "add", from }));
+};
+const LOU = { id: "29:lou", name: "Lou Lead", aadObjectId: "oid-lou" };
+const ANN = { id: "29:ann", name: "Ann Owner", aadObjectId: "oid-ann" };
 const toBot = (a) => fetch(`${BASE}/api/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(a) });
 
 /** Counts rows straight in the test database (to check nothing was stored). */
@@ -250,6 +281,11 @@ before(async () => {
     ENTRA_TENANT: "",
     ENTRA_LOGIN_BASE: MS_BASE,
     GRAPH_BASE: MS_BASE,
+    TEAMS_APP_ID,
+    // The 7-day wait and the hourly retry, shortened; only the tick call below triggers leaving.
+    SIDEKICK_LEAVE_AFTER_MS: "1000",
+    SIDEKICK_LEAVE_RETRY_MS: "0",
+    SIDEKICK_TICK_SECRET: TICK_SECRET,
   };
   if (ENGINE === "postgres") {
     const dbName = new URL(PG_URL.replace("postgres:///", "postgres://localhost/")).pathname.slice(1);
@@ -344,46 +380,82 @@ test(`[${ENGINE}] multi-tenant: a company that hasn't signed up gets the sign-up
   assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:unknown@thread.v2'"), 0);
 });
 
-test(`[${ENGINE}] chat picker: a chat Sidekick joins waits for its own org, and only admins and the lead can assign it`, async () => {
+test(`[${ENGINE}] chat picker: only leads and admins add Sidekick; it waits silently for its own org and is assigned only in the portal`, async () => {
+  // Someone who isn't a Team Lead or admin adds Sidekick: a short card, and Sidekick marks the chat to leave.
+  const REFUSED = "19:refused@thread.v2";
+  const f0 = sent.length;
+  await install(REFUSED, { id: "29:gina", name: "Gina Adder", aadObjectId: "oid-gina" });
+  await waitFor(REFUSED, /Only a Team Lead or admin can add me to a chat, so I'm leaving/, f0);
+  s.refused = REFUSED;
+
+  // The Team Lead adds Sidekick: one notice, no buttons, no code.
   const CHAT = "19:wave2@thread.v2";
   const from = sent.length;
-  await toBot(activity(TA, CHAT, { type: "installationUpdate", action: "add", from: { id: "29:gina", name: "Gina Adder", aadObjectId: "oid-gina" } }));
-  const card = await waitFor(CHAT, /waiting to be assigned/, from);
-  assert.match(card, /An admin or the group's leader can assign this chat/);
-  assert.match(card, /https:\/\/sidekick\.example\.test\/workspaces/);
-  const code = card.match(/\*\*([A-Z0-9]{4}-[A-Z0-9]{4})\*\*/)?.[1];
-  assert.ok(code, "the link code is still there as a fallback");
+  await install(CHAT, LOU);
+  const card = await waitFor(CHAT, /not set up for this chat yet/, from);
+  assert.match(card, /A Team Lead needs to assign this chat to a group in the Sidekick portal\. Until then I won't read, save or answer anything here/);
+  assert.match(card, /within 7 days, I'll leave the chat/);
+  assert.doesNotMatch(card, /Action\.|[A-Z0-9]{4}-[A-Z0-9]{4}/, "no buttons and no link code");
 
+  // Until it's assigned, Sidekick doesn't answer (only repeats the notice) and saves nothing.
+  const m0 = sent.length;
+  await toBot(activity(TA, CHAT, { type: "message", from: LOU, text: "<at>Sidekick</at> when is the cutover?", entities: [atSidekick] }));
+  await waitFor(CHAT, /not set up for this chat yet/, m0);
+  await toBot(activity(TA, CHAT, { type: "message", from: LOU, text: "plain chatter before assignment" }));
+  await toBot(activity(TA, REFUSED, { type: "message", from: LOU, text: "<at>Sidekick</at> hello?", entities: [atSidekick] }));
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(sentTo(REFUSED, m0), "", "a chat Sidekick is leaving gets no replies");
+  assert.equal(await count("SELECT COUNT(*) FROM chat_messages"), 0);
+
+  // Who sees it waiting: the admin (all) and the lead who added it; not Members, not another org; never the refused chat.
   const waitingFor = async (who) => (await who("GET", "/api/teams-links")).body.waiting ?? [];
   const mine = (await waitingFor(ann)).find((w) => w.id === CHAT);
   assert.ok(mine, "Org A's admin sees it");
-  assert.equal(mine.added_by, "Gina Adder");
+  assert.equal(mine.added_by, "Lou Lead");
   assert.equal(mine.kind, "groupChat");
-  assert.ok((await waitingFor(lou)).some((w) => w.id === CHAT), "the Team Lead sees it");
+  assert.ok(mine.leaves_at > mine.created_at);
+  assert.ok((await waitingFor(lou)).some((w) => w.id === CHAT), "the Team Lead who added it sees it");
+  assert.ok(!(await waitingFor(ann)).some((w) => w.id === REFUSED));
   assert.deepEqual(await waitingFor(mo), [], "a Member doesn't");
   assert.deepEqual(await waitingFor(bob), [], "another org never does");
+  // An admin adds Sidekick to another chat: the lead doesn't see that one.
+  const OTHER = "19:admins-chat@thread.v2";
+  await install(OTHER, ANN);
+  await waitFor(OTHER, /not set up/);
+  assert.ok((await waitingFor(ann)).some((w) => w.id === OTHER));
+  assert.ok(!(await waitingFor(lou)).some((w) => w.id === OTHER), "a lead only sees the chats they added");
+  assert.equal((await lou("POST", "/api/teams-links", { id: OTHER, ws: s.w1 })).status, 404, "nor assigns them");
+  s.other = OTHER;
 
   // Who may assign it, and where.
   assert.equal((await mo("POST", "/api/teams-links", { id: CHAT, ws: s.w1 })).status, 403);
   assert.equal((await bob("POST", "/api/teams-links", { id: CHAT, ws: s.bw })).status, 404, "another org can't take it");
-  assert.equal((await bob("POST", "/api/teams-links", { code, ws: s.bw })).status, 404, "not even with the code");
-  assert.equal((await lou("POST", "/api/teams-links", { id: CHAT, ws: s.w2 })).status, 404, "a lead only assigns to workspaces they lead");
+  assert.equal((await lou("POST", "/api/teams-links", { id: CHAT, ws: s.w2 })).status, 404, "a lead only assigns to groups they lead");
   const ok = await lou("POST", "/api/teams-links", { id: CHAT, ws: s.w1 });
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(ok.body.tracking, true, "assigned means Sidekick reads every message");
   assert.equal((await ann("POST", "/api/teams-links", { id: CHAT, ws: s.w2 })).status, 404, "once assigned it's not waiting any more");
   assert.ok(!(await waitingFor(ann)).some((w) => w.id === CHAT));
-  assert.ok((await ann("GET", "/api/teams-links")).body.links.some((l) => l.id === CHAT && l.workspace_id === s.w1));
-  await waitFor(CHAT, /Linked to W1/, from);
+  const link = (await ann("GET", "/api/teams-links")).body.links.find((l) => l.id === CHAT);
+  assert.equal(link.workspace_id, s.w1);
+  assert.equal(link.settings.track, true);
+  const assigned = await waitFor(CHAT, /Assigned to W1/, from);
+  assert.match(assigned, /Lou Lead assigned this chat to \*\*W1\*\*.*I read every message here/);
+  assert.equal((await ann("PATCH", "/api/teams-links/settings", { id: CHAT, changes: { track: false } })).status, 400, "no switching tracking off in an assigned chat");
+  // Now plain messages are kept.
+  await toBot(activity(TA, CHAT, { type: "message", from: LOU, text: "The cutover moved to November 19." }));
+  for (let i = 0; i < 20 && !(await count("SELECT COUNT(*) FROM chat_messages")); i++) await new Promise((r) => setTimeout(r, 250));
+  assert.equal(await count("SELECT COUNT(*) FROM chat_messages"), 1, "only the message after assignment");
   const audit = JSON.stringify((await ann("GET", "/api/audit")).body);
   assert.match(audit, /Linked Teams chat “Chat 19:wave2@thread.v2” to workspace “W1”/);
+  assert.match(audit, /settings: message tracking on/);
   s.chat = CHAT;
 
-  // The code fallback works within the org's own tenant.
-  const CHAT2 = "19:fallback@thread.v2";
-  const f2 = sent.length;
-  await toBot(activity(TA, CHAT2, { type: "installationUpdate", action: "add" }));
-  const code2 = (await waitFor(CHAT2, /waiting to be assigned/, f2)).match(/\*\*([A-Z0-9]{4}-[A-Z0-9]{4})\*\*/)[1];
-  assert.equal((await ann("POST", "/api/teams-links", { code: code2, ws: s.w2 })).status, 200);
+  // Removing Sidekick needs the Microsoft admin's approval first: a clear answer, and nothing changes.
+  const before = await ann("POST", "/api/teams-links/remove", { id: OTHER });
+  assert.equal(before.status, 409);
+  assert.equal(before.body.consent, "needed");
+  assert.ok((await waitingFor(ann)).some((w) => w.id === OTHER), "still waiting");
 });
 
 test(`[${ENGINE}] Teams: @Sidekick add/remove @name works only for the workspace's lead or an admin, and is audited`, async () => {
@@ -510,4 +582,32 @@ test(`[${ENGINE}] isolation: another org never sees or imports this org's direct
   // Org B's admin approval can't be recorded for Org A, and A's chats never wait in B.
   assert.deepEqual((await bob("GET", "/api/teams-links")).body.waiting, []);
   assert.ok(!(await bob("GET", "/api/teams-links")).body.links.some((l) => l.id === s.chat));
+});
+
+test(`[${ENGINE}] leaving chats: removed from the portal, refused installs and chats nobody assigned within 7 days`, async () => {
+  // The Microsoft admin approved Sidekick in the directory test above, so it may remove itself now.
+  assert.ok(consented.has(TA));
+  // Who may remove: not a Member, not a lead for a chat in a group they don't lead or one they didn't add.
+  assert.equal((await mo("POST", "/api/teams-links/remove", { id: s.chat })).status, 403);
+  assert.equal((await lou("POST", "/api/teams-links/remove", { id: s.other })).status, 404);
+  assert.equal((await bob("POST", "/api/teams-links/remove", { id: s.chat })).status, 404, "another org can't");
+  // The lead removes Sidekick from the assigned chat: gone from Teams, its saved messages forgotten.
+  const r = await lou("POST", "/api/teams-links/remove", { id: s.chat });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.ok(removedFrom.includes(s.chat));
+  assert.equal(await count("SELECT COUNT(*) FROM chat_messages"), 0);
+  assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:wave2@thread.v2'"), 0);
+  assert.ok(!(await ann("GET", "/api/teams-links")).body.links.some((l) => l.id === s.chat));
+  assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Lou Lead.*Removed Sidekick from Teams chat “Chat 19:wave2@thread.v2” \(forgot 1 saved message\)/);
+
+  // The timer: the refused install is removed now that it's allowed, and the admin's chat that nobody
+  // assigned (the wait is shortened to a second here) gets a goodbye and is left.
+  await new Promise((res) => setTimeout(res, 1100));
+  const f = sent.length;
+  const out = await tick();
+  assert.ok(out.leftChats >= 2, JSON.stringify(out));
+  assert.ok(removedFrom.includes(s.refused), "the refused install is gone");
+  assert.ok(removedFrom.includes(s.other), "the unassigned chat is left");
+  assert.match(sentTo(s.other, f), /Nobody assigned this chat to a group in the Sidekick portal within 7 days, so I'm leaving/);
+  assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE id IN ('19:refused@thread.v2', '19:admins-chat@thread.v2')"), 0);
 });

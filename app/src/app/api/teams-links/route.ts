@@ -1,12 +1,15 @@
 /**
  * GET/POST/PATCH/DELETE /api/teams-links: which Teams channels and chats are linked to which workspace.
  * Listing: workspace members; changes: Org Owners and Org Admins, or a Team Lead for the workspaces they lead.
- * Two ways to link (see lib/teams/bot.ts and lib/tenants.ts):
- * - **Assign a waiting chat** (`{ id, ws }`): chats and channels Sidekick was added to in the org's own
- *   Microsoft tenant, not linked yet. GET returns them as `waiting` (name, kind, who added Sidekick, when) to
- *   Org Owners/Admins and Team Leads only; a Team Lead assigns them to the workspaces they lead.
- * - **Link code** (`{ code, ws }`): the fallback, the code Sidekick shows in Teams. In multi-tenant mode the
- *   chat must belong to the org's own Microsoft tenant.
+ * Two ways to link (see lib/teams/bot.ts, lib/teams/install.ts and lib/tenants.ts):
+ * - **Assign a waiting chat** (`{ id, ws, guests? }`): chats and channels a Team Lead or admin added Sidekick
+ *   to in the org's own Microsoft tenant, not assigned yet. GET returns them as `waiting` (id, name, kind, who
+ *   added Sidekick and when, `leaves_at` = when Sidekick leaves if nobody assigns it): Org Owners/Admins see
+ *   all of them, a Team Lead only the ones they added, and assigns those to the groups they lead. Assigning
+ *   turns on reading every message (assigned means full access) and Sidekick says so in the chat.
+ * - **Link code** (`{ code, ws }`): for chats where the picker doesn't apply (a tenant not tied to the org,
+ *   1:1 chats). In multi-tenant mode the chat must belong to the org's own Microsoft tenant.
+ * Removing Sidekick from a chat altogether: POST /api/teams-links/remove.
  * The list includes each chat's settings (tracking, notes, reminders; see lib/reminders.ts) and its last
  * reminder. Unlinking also forgets the messages Sidekick saved from that chat and its settings.
  */
@@ -14,9 +17,10 @@ import { after } from "next/server";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, HttpError, isAdmin, isLead, requireManage, requireUser, workspaceIdsFor, type User } from "@/lib/auth";
 import { all, get, now, run } from "@/lib/db";
-import { helpCard } from "@/lib/teams/cards";
+import { assignedCard, helpCard } from "@/lib/teams/cards";
 import { normalizeCode, postCard, type TeamsConversation } from "@/lib/teams/bot";
-import { forgetChat, getChatSettings, lastRuns } from "@/lib/reminders";
+import { WAITING_DAYS } from "@/lib/teams/install";
+import { CHAT_RETENTION_DAYS, forgetChat, getChatSettings, lastRuns, saveChatSettings } from "@/lib/reminders";
 import { tenantMode, tenantOfOrg } from "@/lib/tenants";
 
 // Teams channels and chats linked to the workspaces this user can see.
@@ -44,19 +48,35 @@ export const GET = handle(async () => {
   };
 });
 
+/** One chat waiting to be assigned, as GET returns it. */
+type Waiting = { id: string; kind: string; name: string | null; added_by: string | null; created_at: string; waiting_since: string | null; last_seen_at: string };
+
 /**
- * The org's chats and channels waiting to be assigned: unlinked, in the org's own Microsoft tenant, not 1:1.
- * Only for people who can assign them (Org Owners/Admins, Team Leads); an empty list for everyone else.
+ * The SQL condition for "waits to be assigned in this tenant": unlinked, not 1:1, Sidekick not leaving. A Team
+ * Lead additionally only gets the chats they added themselves (`added_by_oid` = their Microsoft account).
+ */
+async function waitingScope(user: User): Promise<{ sql: string; params: string[] } | null> {
+  if (!isAdmin(user) && !isLead(user)) return null;
+  const tenant = await tenantOfOrg(user.org_id);
+  if (!tenant) return null;
+  const base = "tenant_id = ? AND workspace_id IS NULL AND kind <> 'personal' AND leaving IS NULL";
+  if (isAdmin(user)) return { sql: base, params: [tenant] };
+  const oid = (await get<{ entra_oid: string | null }>("SELECT entra_oid FROM users WHERE id = ?", user.id))?.entra_oid;
+  return oid ? { sql: `${base} AND added_by_oid = ?`, params: [tenant, oid] } : null;
+}
+
+/**
+ * The chats and channels this person may assign: all waiting ones for Org Owners/Admins, the ones they added
+ * for a Team Lead, none for anyone else. `leaves_at` is when Sidekick leaves if nobody assigns the chat.
  */
 async function waitingChats(user: User) {
-  if (!isAdmin(user) && !isLead(user)) return [];
-  const tenant = await tenantOfOrg(user.org_id);
-  if (!tenant) return [];
-  return all<{ id: string; kind: string; name: string | null; added_by: string | null; created_at: string; last_seen_at: string }>(
-    `SELECT id, kind, name, added_by, created_at, last_seen_at FROM teams_conversations
-      WHERE tenant_id = ? AND workspace_id IS NULL AND kind <> 'personal' ORDER BY created_at DESC LIMIT 100`,
-    tenant,
+  const scope = await waitingScope(user);
+  if (!scope) return [];
+  const rows = await all<Waiting>(
+    `SELECT id, kind, name, added_by, created_at, waiting_since, last_seen_at FROM teams_conversations WHERE ${scope.sql} ORDER BY created_at DESC LIMIT 100`,
+    ...scope.params,
   );
+  return rows.map((r) => ({ ...r, leaves_at: new Date(new Date(r.waiting_since ?? r.created_at).getTime() + WAITING_DAYS * 86400_000).toISOString() }));
 }
 
 // Link a Teams channel/chat to a workspace: assign a waiting chat by id, or use the code Sidekick showed in Teams.
@@ -67,9 +87,10 @@ export const POST = handle(async (req: Request) => {
   const tenant = await tenantOfOrg(user.org_id);
   let conv: TeamsConversation | undefined;
   if (body.id !== undefined) {
-    // Assigning from "Waiting to be assigned": only chats from this org's own Microsoft tenant.
-    conv = typeof body.id === "string" && tenant
-      ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ? AND tenant_id = ? AND workspace_id IS NULL AND kind <> 'personal'", body.id, tenant)
+    // Assigning from "Waiting to be assigned": only chats this person may see there (own tenant; a lead's own).
+    const scope = await waitingScope(user);
+    conv = typeof body.id === "string" && scope
+      ? await get<TeamsConversation>(`SELECT * FROM teams_conversations WHERE id = ? AND ${scope.sql}`, body.id, ...scope.params)
       : undefined;
     if (!conv) throw new HttpError(404, "That chat isn't waiting to be assigned any more (someone may have just assigned it). Reload the page.");
   } else {
@@ -83,21 +104,27 @@ export const POST = handle(async (req: Request) => {
   }
   // "AND workspace_id IS NULL": if two people assign the same chat at once, only the first one wins.
   const linked = await run(
-    "UPDATE teams_conversations SET org_id = ?, workspace_id = ?, guests = ?, linked_by = ?, linked_at = ?, link_code = NULL, code_expires_at = NULL WHERE id = ? AND workspace_id IS NULL",
+    "UPDATE teams_conversations SET org_id = ?, workspace_id = ?, guests = ?, linked_by = ?, linked_at = ?, link_code = NULL, code_expires_at = NULL, waiting_since = NULL WHERE id = ? AND workspace_id IS NULL",
     user.org_id, ws, body.guests ? 1 : 0, user.id, now(), conv.id,
   );
   if (!linked.changes) throw new HttpError(409, "Someone just linked that chat. Reload the page.");
   const wsName = (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ?", ws))!.name;
   await audit(user, `Linked Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}” to workspace “${wsName}”`, "Access", ws);
+  // A chat in the org's own tenant (the picker rules): assigned means Sidekick reads every message there.
+  const fullAccess = conv.kind !== "personal" && !!tenant && conv.tenant_id === tenant;
+  if (fullAccess) {
+    const linkedConv = (await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", conv.id))!;
+    await saveChatSettings(user, linkedConv, { track: true });
+  }
   // Let the people in Teams know it worked.
   after(async () => {
     try {
-      await postCard(conv, helpCard(wsName));
+      await postCard(conv, fullAccess ? assignedCard(wsName, user.name, CHAT_RETENTION_DAYS) : helpCard(wsName));
     } catch (e) {
       console.error("Couldn't confirm the link in Teams", e);
     }
   });
-  return { ok: true, id: conv.id, name: conv.name };
+  return { ok: true, id: conv.id, name: conv.name, tracking: fullAccess };
 });
 
 // Change whether client guests are in the conversation (guests only get Shareable sources).
@@ -113,7 +140,8 @@ export const PATCH = handle(async (req: Request) => {
 export const DELETE = handle(async (req: Request) => {
   const user = await requireUser();
   const conv = await ownLink(user, new URL(req.url).searchParams.get("id"));
-  await run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL WHERE id = ?", conv.id);
+  // Back to waiting (in the org's own tenant): the 7 days before Sidekick leaves start now.
+  await run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL, waiting_since = ? WHERE id = ?", now(), conv.id);
   const forgotten = await forgetChat(conv.id);
   if (forgotten) await audit(user, `Deleted ${forgotten} saved message${forgotten === 1 ? "" : "s"} from Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}”`, "Data", conv.workspace_id);
   await audit(user, `Unlinked Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}”`, "Access", conv.workspace_id);

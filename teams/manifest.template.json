@@ -37,7 +37,7 @@
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],
-  "webApplicationInfo": { "id": "{{BOT_ID}}", "resource": "api://{{PUBLIC_HOST}}/{{BOT_ID}}" },
+  "webApplicationInfo": { "id": "{{AAD_APP_ID}}", "resource": "api://{{PUBLIC_HOST}}/{{AAD_APP_ID}}" },
   "authorization": {
     "permissions": {
       "resourceSpecific": [

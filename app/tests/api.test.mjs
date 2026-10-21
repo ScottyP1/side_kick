@@ -1483,7 +1483,7 @@ test(`[${ENGINE}] Microsoft: requiring it turns passwords off and signs password
 
 /* ---------- proactive reminders and per-chat settings (lib/reminders.ts) ---------- */
 const GROUP = "conv-group-reminders";
-test(`[${ENGINE}] single-tenant mode: other tenants still get a link code; chats in the connected tenant wait for this org only`, async () => {
+test(`[${ENGINE}] single-tenant mode: other tenants still get a link code; chats in the connected tenant wait quietly for this org only`, async () => {
   const OLD = "conv-single-tenant-old";
   const NEW = "19:connected-tenant@thread.v2";
   // The test above disconnected Microsoft; connect it again for this one (and disconnect at the end).
@@ -1491,11 +1491,12 @@ test(`[${ENGINE}] single-tenant mode: other tenants still get a link code; chats
   await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: OLD, conversationType: "groupChat", tenantId: "tenant-1" } }));
   const old = await waitForSent((m) => decodeURIComponent(m.url).includes(OLD));
   assert.match(JSON.stringify(old.body), /Link this chat to a workspace/, "unchanged: the classic link-code card");
-  await toBot(activity({ type: "installationUpdate", action: "add", from: { id: "29:w", name: "Wendy Adder", aadObjectId: "aad-w" }, conversation: { id: NEW, conversationType: "groupChat", tenantId: TENANT, name: "Cutover crew" } }));
+  // The Org Owner (recognised by their Microsoft account) adds Sidekick in the connected tenant: it waits quietly.
+  await toBot(activity({ type: "installationUpdate", action: "add", from: { id: "29:w", name: "Test Admin in Teams", aadObjectId: "oid-admin" }, conversation: { id: NEW, conversationType: "groupChat", tenantId: TENANT, name: "Cutover crew" } }));
   const card = await waitForSent((m) => decodeURIComponent(m.url).includes(NEW));
-  assert.match(JSON.stringify(card.body), /waiting to be assigned/);
+  assert.match(JSON.stringify(card.body), /not set up for this chat yet/);
   const waiting = (await admin("GET", "/api/teams-links")).body.waiting;
-  assert.deepEqual(waiting.map((w) => [w.id, w.name, w.added_by]), [[NEW, "Cutover crew", "Wendy Adder"]], "only the connected tenant's chat waits");
+  assert.deepEqual(waiting.map((w) => [w.id, w.name, w.added_by]), [[NEW, "Cutover crew", "Test Admin in Teams"]], "only the connected tenant's chat waits");
   // Requiring Microsoft sign-in (above) ended the member's password session: Mia signs in with Microsoft.
   const mia = client();
   assert.equal((await microsoftSignIn(mia, { tid: TENANT, oid: "oid-member", email: "member@test.local" })).to.pathname, "/");
@@ -1506,8 +1507,10 @@ test(`[${ENGINE}] single-tenant mode: other tenants still get a link code; chats
   const theirWs = (await other("POST", "/api/workspaces", { name: "Theirs" })).body.id;
   assert.deepEqual((await other("GET", "/api/teams-links")).body.waiting, [], "another org never sees it");
   assert.equal((await other("POST", "/api/teams-links", { id: NEW, ws: theirWs })).status, 404, "or assigns it");
-  assert.equal((await admin("POST", "/api/teams-links", { id: NEW, ws: s.wsA })).status, 200);
-  assert.ok((await admin("GET", "/api/teams-links")).body.links.some((l) => l.id === NEW && l.workspace_id === s.wsA));
+  const assigned = await admin("POST", "/api/teams-links", { id: NEW, ws: s.wsA });
+  assert.equal(assigned.status, 200);
+  assert.equal(assigned.body.tracking, true, "assigned in the portal means Sidekick reads every message");
+  assert.ok((await admin("GET", "/api/teams-links")).body.links.some((l) => l.id === NEW && l.workspace_id === s.wsA && l.settings.track));
   assert.equal((await admin("DELETE", `/api/teams-links?id=${encodeURIComponent(NEW)}`)).status, 200);
   assert.equal((await admin("DELETE", "/api/auth/microsoft")).status, 200);
 });

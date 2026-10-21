@@ -7,9 +7,15 @@ Sidekick works inside Microsoft Teams group chats, channels and 1:1 chats. It an
    - **Group chat** (including a meeting's chat): open the chat, click **+** or **⋯ → Manage apps** at the top, add **Sidekick**.
    - **Channel**: on the team, **⋯ → Manage team → Apps**, add **Sidekick**.
 
-   Teams asks the chat or team owner to let Sidekick **read messages** there. Accept it: that's what lets an admin later turn on *Keep track of every message* (Sidekick still only does that once an admin switches it on, and announces it).
-2. Sidekick posts an 8-character link code (or mention it: `@Sidekick link`).
-3. Ask an Org Admin (or the workspace's Team Lead) to enter that code in the Sidekick portal (open the group under **Groups**, then **Teams chats → Assign a chat**). Sidekick confirms in the chat when it's done.
+   Teams asks the chat or team owner to let Sidekick **read messages** there. Accept it: that's what lets Sidekick follow the chat once it's assigned to a group (it reads nothing before that, and announces it when it starts).
+2. Sidekick posts one notice: **"I'm not set up for this chat yet. A Team Lead needs to assign this chat to a group in the Sidekick portal."** Until then it doesn't read, save or answer anything there (mentioning it just repeats the notice).
+3. The Team Lead (or an admin) assigns the chat to a group in the portal. Sidekick then says it's assigned and from then on reads every message in the chat. Assigning happens only in the portal; `@Sidekick link` just shows which group a chat belongs to.
+
+**Who can add Sidekick:** only Team Leads and admins. If anyone else adds it, Sidekick posts "Only a Team Lead or admin can add me to a chat, so I'm leaving" and removes itself. A chat nobody assigns within 7 days is left too, with a short goodbye.
+
+If your organization hasn't connected Microsoft sign-in to Sidekick yet (and in 1:1 chats), Sidekick shows an 8-character **link code** instead, which a Team Lead or admin enters on the group's page (**Teams chats → Assign a chat**).
+
+**Your organization isn't on Sidekick yet?** Sidekick replies "Sidekick isn't set up for your organization yet" with a link to sign up, and reads or keeps nothing from that chat.
 
 ### Group chat or channel?
 Both work the same for Sidekick; use whatever your team already uses.
@@ -60,16 +66,33 @@ Buttons on each point:
 Changes show on the card for everyone and go in the audit log under your name. A Viewer can't change items.
 
 ## Chats Sidekick keeps track of
+Chats assigned to a group in the portal (in an organization with Microsoft sign-in connected) are always tracked: assigned means full access, and Sidekick announces it when the chat is assigned. To stop it, a Team Lead or admin removes Sidekick from the chat. In chats linked with a code, an admin chooses:
+
 An Org Admin can switch **Keep track of every message** on for a channel or group chat. Sidekick then posts a notice in that chat, reads every message there (not only @mentions) and remembers them for 90 days, so it can answer from them and notice when plans change. It doesn't reply to messages that don't mention it. Only the linked workspace's team can search what it learned; in a chat with client guests, what's said there counts as Shareable. When the switch is turned off, Sidekick says so in the chat; when the chat is unlinked, the saved messages are deleted.
 
 ## Who you are in Teams
 Once you've signed in to the Sidekick portal with Microsoft, Sidekick recognises you in Teams too: your questions and card clicks count under your Sidekick name and role. A **Viewer** can ask questions but can't assign or close action items. People in a linked chat who don't have a Sidekick account can still ask and use the cards, for that chat's workspace only.
+
+## Adding people from the chat
+In a chat linked to a workspace, the workspace's **Team Lead** or an **Org Admin** can manage who's in it without leaving Teams:
+
+> @Sidekick add @Maria Lopez
+>
+> @Sidekick remove @Maria Lopez
+
+Pick each person from Teams' mention list (so they become real mentions). Sidekick replies with a card saying what it did for each person:
+- **add**: puts them in this chat's workspace. Someone who isn't in Sidekick yet gets an account as a **Member** who signs in with their Microsoft work account (no password to hand out). Guests from other companies can't be added (they can still ask questions in the chat), and Org Owners and Org Admins already see every workspace.
+- **remove**: takes them off this workspace only; their Sidekick account stays (an Org Admin removes accounts on Users & access). Nobody can take themselves off, and a Team Lead only adds or removes Members and Viewers.
+
+Sidekick needs to know who's asking: sign in to the Sidekick portal with Microsoft once. Anyone else gets a polite "only this workspace's Team Lead or an Org Admin can…". Every change is in the audit log ("… from Teams").
 
 ## Commands
 | Type | Does |
 |---|---|
 | `@Sidekick <question>` | Answer with sources |
 | `@Sidekick link` | Show the link code, or which workspace this chat is linked to |
+| `@Sidekick add @name` | Add someone to this chat's workspace (Team Lead or Org Admin) |
+| `@Sidekick remove @name` | Take someone off this chat's workspace (Team Lead or Org Admin) |
 | `@Sidekick help` | Show what Sidekick can do here |
 
 ## What Sidekick can and can't see

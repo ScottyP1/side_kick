@@ -8,6 +8,7 @@
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError } from "@/lib/auth";
 import { all, get, run } from "@/lib/db";
+import { billingSummary } from "@/lib/billing";
 import { orgFlags, platformLog, requireOwner } from "@/lib/owner";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -15,7 +16,8 @@ type Ctx = { params: Promise<{ id: string }> };
 /**
  * The client's details for its Owner Console page: the organization (status, Microsoft sign-in), every
  * person (role, workspaces, Microsoft-linked, last active), every workspace (members, documents, meetings)
- * and its feature switches. Never any document or meeting content.
+ * its feature switches and its subscription (plan, status, what it allows now; null = managed by the
+ * Sidekick team). Never any document or meeting content.
  */
 export const GET = handle(async (req: Request, { params }: Ctx) => {
   const owner = await requireOwner();
@@ -49,6 +51,7 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
     })),
     workspaces: workspaces.map((w) => ({ ...w, members: members.filter((m) => m.workspace_id === w.id).length })),
     flags: await orgFlags(org.id),
+    billing: await billingSummary(org.id),
   };
 });
 

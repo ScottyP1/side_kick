@@ -225,6 +225,29 @@ CREATE TABLE IF NOT EXISTS reminder_state (
 -- Reminders: due dates as real dates (YYYY-MM-DD).
 ALTER TABLE action_items ADD COLUMN IF NOT EXISTS due_on TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS due_on TEXT;
+-- Multi-tenant Teams (lib/tenants.ts, lib/directory.ts): who added Sidekick to a chat, and when the org's
+-- Microsoft admin approved the directory permission.
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS added_by TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS added_by_oid TEXT;
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS graph_consent_at TEXT;
+CREATE INDEX IF NOT EXISTS teams_conversations_tenant ON teams_conversations(tenant_id);
+-- Unassigned chats (lib/teams/install.ts): waiting since, the team's Microsoft 365 group id, pending departure.
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS waiting_since TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS team_aad_id TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leaving TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leave_tried_at TEXT;
+-- Self-service sign-up attempts (lib/signup.ts), for the per-IP sign-up limit. Kept one day.
+CREATE TABLE IF NOT EXISTS signup_attempts (
+  id TEXT PRIMARY KEY, ip TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS signup_attempts_ip ON signup_attempts(ip, created_at);
+-- One subscription per organization (lib/billing.ts); no row = managed by the Sidekick team.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), plan TEXT NOT NULL, status TEXT NOT NULL,
+  provider TEXT NOT NULL, provider_ref TEXT, trial_ends_at TEXT, current_period_end TEXT,
+  past_due_since TEXT, canceled_at TEXT, access_until TEXT,
+  updated_by TEXT, updated_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
 -- Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS client TEXT;
 -- Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.

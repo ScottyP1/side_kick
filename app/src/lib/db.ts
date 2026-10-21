@@ -61,6 +61,20 @@ CREATE TABLE IF NOT EXISTS login_failures (
 );
 CREATE INDEX IF NOT EXISTS login_failures_email ON login_failures(email, created_at);
 CREATE INDEX IF NOT EXISTS login_failures_ip ON login_failures(ip, created_at);
+-- Self-service sign-up attempts (lib/signup.ts), for the per-IP sign-up limit. Kept one day.
+CREATE TABLE IF NOT EXISTS signup_attempts (
+  id TEXT PRIMARY KEY, ip TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS signup_attempts_ip ON signup_attempts(ip, created_at);
+-- One subscription per organization (lib/billing.ts): plan (lib/plans.ts), status = trialing | active |
+-- past_due | canceled, and which billing provider holds it (mock today; stripe later, provider_ref = its id).
+-- Organizations without a row are managed by the Sidekick team (no self-service plan) and keep full use.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), plan TEXT NOT NULL, status TEXT NOT NULL,
+  provider TEXT NOT NULL, provider_ref TEXT, trial_ends_at TEXT, current_period_end TEXT,
+  past_due_since TEXT, canceled_at TEXT, access_until TEXT,
+  updated_by TEXT, updated_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
 -- Microsoft sign-in in progress: one row per "Sign in with Microsoft" click, kept 10 minutes. state is
 -- the random value sent to Microsoft and back; verifier (PKCE) and nonce prove the reply belongs to it.
 -- mode = signin | link (an Org Owner connecting their organization's Microsoft tenant).
@@ -347,6 +361,18 @@ function migrate(conn: DatabaseSync) {
   // Reminders: due dates as real dates (YYYY-MM-DD), worked out from what was said and the meeting date.
   if (!has("action_items", "due_on")) conn.exec("ALTER TABLE action_items ADD COLUMN due_on TEXT");
   if (!has("items", "due_on")) conn.exec("ALTER TABLE items ADD COLUMN due_on TEXT");
+  // Multi-tenant Teams (lib/tenants.ts): who added Sidekick to a chat (shown on "Waiting to be assigned"),
+  // and when the org's Microsoft admin approved Sidekick's directory permission (lib/directory.ts).
+  if (!has("teams_conversations", "added_by")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN added_by TEXT");
+  if (!has("teams_conversations", "added_by_oid")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN added_by_oid TEXT");
+  if (!has("orgs", "graph_consent_at")) conn.exec("ALTER TABLE orgs ADD COLUMN graph_consent_at TEXT");
+  conn.exec("CREATE INDEX IF NOT EXISTS teams_conversations_tenant ON teams_conversations(tenant_id)");
+  // Unassigned chats (lib/teams/install.ts): since when a chat waits (Sidekick leaves after 7 days), the team's
+  // Microsoft 365 group id (to remove Sidekick from a channel's team), and a pending departure.
+  if (!has("teams_conversations", "waiting_since")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN waiting_since TEXT");
+  if (!has("teams_conversations", "team_aad_id")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN team_aad_id TEXT");
+  if (!has("teams_conversations", "leaving")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN leaving TEXT");
+  if (!has("teams_conversations", "leave_tried_at")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN leave_tried_at TEXT");
   // Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
   if (!has("workspaces", "client")) conn.exec("ALTER TABLE workspaces ADD COLUMN client TEXT");
   // Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.

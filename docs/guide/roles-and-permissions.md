@@ -12,7 +12,7 @@ row below against the real app for every role, so the page and the code can't dr
 | **Org Owner** | Runs the whole organization, including sign-in and the company-wide guardrails. One per organization. | All |
 | **Org Admin** | Runs people, workspaces and Teams links day to day. | All |
 | **Team Lead** | A Member who also runs the people side of the workspaces they lead: adds Members and Viewers, takes them off, links Teams chats. Made by Org Owners/Admins. | Only ones they're added to (the ones they lead) |
-| **Billing Admin** | Watches usage and AI spend. Changes nothing. | Only ones they're added to (usually none) |
+| **Billing Admin** | Watches usage and AI spend, and pays for, changes or cancels the plan. Changes no content. | Only ones they're added to (usually none) |
 | **Member** | Does the client work: uploads, imports meetings, asks, updates action items. | Only ones they're added to |
 | **Viewer** | Reads and asks, never changes anything. | Only ones they're added to |
 
@@ -45,12 +45,20 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | **Money** | | | | | | |
 | See their own AI use this month on the home page | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See Usage & billing and the whole company's AI spend | ✓ | ✓ | | ✓ | | |
+| See the plan and subscription (on Usage & billing) | ✓ | ✓ | | ✓ | | |
+| Pay for the plan, change it or cancel it | ✓ | | | ✓ | | |
 | **Running the organization** | | | | | | |
 | Create groups (workspaces), picking their client, Team Lead and first members | ✓ | ✓ | | | | |
 | Rename a group, change its client or engagement code, delete it (and everything in it) | ✓ | ✓ | | | | |
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
 | Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |
+| Add Sidekick to a Teams chat (anyone else: Sidekick leaves) | ✓ | ✓ | ✓ | | | |
+| See and assign Teams chats waiting to be assigned (portal only) | ✓ | ✓ | ✓ (chats they added, to own groups) | | | |
+| Remove Sidekick from a Teams chat | ✓ | ✓ | ✓ (own groups' chats, or waiting chats they added) | | | |
+| Import people from Microsoft 365 | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | | |
+| `@Sidekick add` / `remove @name` in a linked Teams chat | ✓ | ✓ | ✓ (Members and Viewers, that chat's workspace if they lead it) | | | |
+| Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval) | ✓ | ✓ | | | | |
 | See the audit log and Activity (traces, performance) | ✓ | ✓ | | | | |
 | Change branding (logo, brand color) | ✓ | ✓ | | | | |
 | Make a workspace's guardrails stricter, write custom rules, use "Test it" | ✓ | ✓ | | | | |
@@ -79,6 +87,10 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
   (in the portal, or from a linked Microsoft account in Teams). Members and Viewers see only their own;
   Org Owners, Org Admins and Billing Admins see the company total. Work Sidekick does on its own, and
   questions from Teams guests, count only toward the company total.
+- **A lapsed plan makes everything read-only, for every role.** When a free trial ends unpaid, a failed
+  payment isn't fixed within 7 days, or a canceled plan runs out, everyone can still sign in and see
+  everything, but nothing can be added or changed and Sidekick doesn't answer (portal, Teams, assistant).
+  Org Owners and Billing Admins can still pay, which turns everything back on.
 - **Client guests** in a Teams chat only ever get answers from Shareable documents, whatever the asker's role.
 - **Same rules everywhere.** The portal, Teams and the home assistant use the same checks; the assistant
   never offers an action the role can't do, and the server refuses it again if it tried.

@@ -19,8 +19,9 @@ operations review is in `docs/security/`.
 
 ## Roll back a bad deploy
 
-`./infra/azure/deploy.sh` prints the version that was live before and, if the new one isn't healthy within
-five minutes, the exact rollback command. Every image tag is kept in the registry, so any earlier version
+Automatic deploys (GitHub Actions → Deploy) roll back by themselves when the new version isn't healthy within
+five minutes. `./infra/azure/deploy.sh` prints the version that was live before and, if the new one isn't
+healthy, the exact rollback command. To pause automatic deploys: Actions → Deploy → ⋯ → Disable workflow. Every image tag is kept in the registry, so any earlier version
 can come back:
 
 ```bash

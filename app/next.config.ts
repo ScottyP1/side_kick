@@ -23,18 +23,25 @@ const csp = [
   `connect-src 'self'${production ? "" : " ws: wss:"}`,
   "object-src 'none'",
   "base-uri 'self'",
-  "form-action 'self'",
+  // The sign-in form's Microsoft round trip goes to Microsoft's sign-in page.
+  "form-action 'self' https://login.microsoftonline.com",
   "frame-ancestors 'none'",
 ].join("; ");
 
-/** Security headers on every response (pages and API). HSTS only in production, where the site is HTTPS. */
+/**
+ * Security headers on every response (pages and API; security review Oct 2026, docs/HOSTING.md → Security):
+ * HSTS (always HTTPS; browsers ignore it on plain-http localhost), no framing by other sites (clickjacking), no
+ * MIME sniffing, a short referrer. The content policy is enforced (the ops review started it as report-only;
+ * the app review checked the portal under it with no violations). If Sidekick ever gets a Teams tab,
+ * `frame-ancestors` and X-Frame-Options must allow Teams.
+ */
 const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
-  ...(production ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }] : []),
+  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
 ];
 
 const nextConfig: NextConfig = {

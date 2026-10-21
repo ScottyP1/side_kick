@@ -507,6 +507,19 @@ test(`[${ENGINE}] health check reports the database engine and reveals no data`,
   assert.deepEqual(Object.keys(r.body).sort(), ["claude", "database", "ok", "search", "teams"]);
 });
 
+test(`[${ENGINE}] every response carries the browser security headers and doesn't name the framework`, async () => {
+  for (const url of ["/login", "/api/health", "/api/me"]) {
+    const res = await fetch(`${BASE}${url}`, { redirect: "manual" });
+    const h = res.headers;
+    assert.match(h.get("strict-transport-security") ?? "", /max-age=31536000/, url);
+    assert.equal(h.get("x-frame-options"), "DENY", url);
+    assert.equal(h.get("x-content-type-options"), "nosniff", url);
+    assert.equal(h.get("referrer-policy"), "strict-origin-when-cross-origin", url);
+    assert.match(h.get("content-security-policy") ?? "", /frame-ancestors 'none'/, url);
+    assert.equal(h.get("x-powered-by"), null, url);
+  }
+});
+
 test(`[${ENGINE}] Activity: admins see traces with their steps; members can't`, async () => {
   assert.equal((await member("GET", "/api/activity?view=overview")).status, 403);
   await member("POST", "/api/ask", { ws: s.wsA, question: "When is the wave 2 cutover?" });
@@ -1829,17 +1842,6 @@ test(`[${ENGINE}] changes sent from another website are refused (CSRF), same-sit
   assert.ok(!(await admin("GET", "/api/workspaces")).body.workspaces.some((w) => w.name === "CSRF made"));
   // Reading is never blocked.
   assert.equal((await fetch(`${BASE}/api/me`, { headers: { origin: "https://evil.example", cookie: adminCookie() } })).status, 200);
-});
-
-test(`[${ENGINE}] security headers are on pages and API answers`, async () => {
-  for (const url of ["/login", "/api/health"]) {
-    const r = await fetch(BASE + url, { redirect: "manual" });
-    assert.equal(r.headers.get("x-frame-options"), "DENY", url);
-    assert.match(r.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/, url);
-    assert.equal(r.headers.get("x-content-type-options"), "nosniff", url);
-    assert.equal(r.headers.get("referrer-policy"), "strict-origin-when-cross-origin", url);
-    assert.equal(r.headers.get("x-powered-by"), null, url);
-  }
 });
 
 test(`[${ENGINE}] uploads: Word "zip bombs", huge text and too many files are refused`, async () => {

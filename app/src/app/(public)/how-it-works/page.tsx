@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { FaqList } from "@/components/faq-list";
 import { AnswerMock, ApproveMock, GroupMock, InstallMock, SignupMock, WaitingChatMock } from "@/components/how-mocks";
 import { PublicShell } from "@/components/public-shell";
+import { JourneyArt } from "@/components/site-art";
 import { SiteIcon } from "@/components/site-icons";
 import { faqFor } from "@/lib/faq";
 import { TRIAL_DAYS } from "@/lib/plans";
@@ -33,10 +34,15 @@ const WIZARD = ["Welcome", "Microsoft 365", "Add to Teams", "Rules", "First grou
 export default function HowItWorksPage() {
   return (
     <PublicShell layout="full" current="/how-it-works">
-      <div className="site-wrap site-page-head site-center">
-        <span className="site-eyebrow">How it works</span>
-        <h1>From sign-up to the first answer in Teams</h1>
-        <p>Five setup steps, most of them one click, and then your team just asks. After you pay, a setup wizard walks you through them and remembers where you stopped.</p>
+      <div className="site-wrap site-glow">
+        <div className="site-page-art">
+          <div className="site-page-head">
+            <span className="site-eyebrow">How it works</span>
+            <h1>From sign-up to the first answer in Teams</h1>
+            <p>Five setup steps, most of them one click, and then your team just asks. After you pay, a setup wizard walks you through them and remembers where you stopped.</p>
+          </div>
+          <JourneyArt />
+        </div>
       </div>
 
       <div className="site-wrap">

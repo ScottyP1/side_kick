@@ -20,6 +20,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       `A setup wizard after sign-up: connect Microsoft 365, add ${BRAND.name} to Teams, pick your rules and create your first groups. A "Finish setting up" note takes you back if you leave halfway.`,
       "Signed-in people who open the website go straight to their portal.",
       "Redesigned How it works (a step-by-step journey with screen previews) and Security & trust (trust pillars, a diagram of the walls, where your data lives), and tidier pricing cards.",
+      "Illustrations and real product pictures across the website: the chat, a phone and the portal, in light and dark.",
     ],
   },
   {

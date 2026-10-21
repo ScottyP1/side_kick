@@ -585,6 +585,25 @@ test(`[${ENGINE}] website: every public page answers without a session; the port
   // The FAQ is on its own page and in short sections on Pricing, Security & trust and How it works.
   assert.match((await client()("GET", "/faq")).body, /id="training"[\s\S]*pending legal review/);
   for (const p of ["/pricing", "/security", "/how-it-works"]) assert.match((await client()("GET", p)).body, /class="site-faq"/, `${p} has FAQ answers`);
+  // Pictures: served by the app itself without a session, sized (no layout shift), lazy below the fold, with alt text.
+  const home = (await client()("GET", "/")).body;
+  const imgs = [...home.matchAll(/<img [^>]*>/g)].map((m) => m[0]);
+  assert.ok(imgs.length >= 3, "home shows product shots");
+  for (const img of imgs) {
+    assert.match(img, /src="\/site\/[\w-]+\.webp"/, img);
+    assert.match(img, / width="\d+"/, img);
+    assert.match(img, / height="\d+"/, img);
+    assert.match(img, / alt="[^"]{20,}"/, img);
+    assert.match(img, /loading="lazy"/, img);
+  }
+  assert.doesNotMatch(home, /<(img|script|link)[^>]+(src|href)="https?:\/\//, "nothing loads from other sites");
+  assert.match(home, /class="site-art"/, "the hero illustration is inline SVG");
+  for (const f of ["chat-answer", "chat-answer-dark", "chat-notes", "phone-reminder", "portal-groups", "portal-groups-dark", "portal-ask"]) {
+    const r = await fetch(`${BASE}/site/${f}.webp`, { redirect: "manual" });
+    assert.equal(r.status, 200, f);
+    assert.equal(r.headers.get("content-type"), "image/webp", f);
+    assert.ok(Number(r.headers.get("content-length") ?? (await r.arrayBuffer()).byteLength) < 200_000, `${f} stays small`);
+  }
   const how = (await client()("GET", "/how-it-works")).body;
   assert.equal((how.match(/class="site-journey-step"/g) ?? []).length, 6, "How it works shows the six-step journey");
   assert.match(how, /class="site-stepper"/, "and the setup wizard stepper");

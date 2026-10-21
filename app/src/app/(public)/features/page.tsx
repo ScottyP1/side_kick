@@ -1,13 +1,14 @@
 /**
  * Features (/features): everything Sidekick does, grouped by where people meet it (in Teams, in the portal,
- * for admins), in plain language. Public and static. Each claim matches a shipped feature described in the
+ * for admins), in plain language, with a real chat shot and the portal's Ask page on a laptop
+ * (components/product-shot.tsx). Public and static. Each claim matches a shipped feature described in the
  * guides (docs/guide/), which the cards link to.
  */
 import Link from "next/link";
 import type { Metadata } from "next";
 import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
-import { TeamsDemo } from "@/components/teams-demo";
+import { ProductShot } from "@/components/product-shot";
 import { pageMetadata } from "@/lib/site";
 import { BRAND } from "@/lib/brand";
 
@@ -66,10 +67,17 @@ export default function FeaturesPage() {
             {g.id === "teams" ? (
               <div className="site-grid two" style={{ alignItems: "start" }}>
                 <div className="site-grid two">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>
-                <TeamsDemo />
+                <ProductShot name="chat-answer" frame="window" alt={`A team chat where someone asks ${BRAND.name} when the wave 2 cutover is; ${BRAND.name} answers with the date, store count and rollback owner, and lists five sources from meetings and documents.`} caption="Made-up example data." />
               </div>
             ) : (
-              <div className="site-grid">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>
+              <>
+                {g.id === "portal" && (
+                  <div style={{ marginBottom: 28 }}>
+                    <ProductShot name="portal-ask" frame="laptop" alt={`The ${BRAND.name} portal's Ask page: a question about the wave 2 cutover, an answer with numbered source markers, and the matching passages from documents and meetings below it.`} caption="Ask with sources in the portal. Made-up example data." />
+                  </div>
+                )}
+                <div className="site-grid">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>
+              </>
             )}
           </div>
         </section>

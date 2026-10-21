@@ -10,6 +10,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { FaqList } from "@/components/faq-list";
 import { PublicShell } from "@/components/public-shell";
+import { WallsArt } from "@/components/site-art";
 import { SiteIcon } from "@/components/site-icons";
 import { faqFor } from "@/lib/faq";
 import { pageMetadata } from "@/lib/site";
@@ -30,10 +31,15 @@ const PILLARS: { icon: string; title: string; text: string; draft?: boolean }[] 
 export default function SecurityPage() {
   return (
     <PublicShell layout="full" current="/security">
-      <div className="site-wrap site-page-head site-center">
-        <span className="site-eyebrow">Security &amp; trust</span>
-        <h1>Client work stays with the client it belongs to</h1>
-        <p>Firms trust {BRAND.name} with many clients at once, so separation is built into everything it does.</p>
+      <div className="site-wrap site-glow">
+        <div className="site-page-art">
+          <div className="site-page-head">
+            <span className="site-eyebrow">Security &amp; trust</span>
+            <h1>Client work stays with the client it belongs to</h1>
+            <p>Firms trust {BRAND.name} with many clients at once, so separation is built into everything it does.</p>
+          </div>
+          <WallsArt />
+        </div>
       </div>
 
       <div className="site-wrap site-stack">

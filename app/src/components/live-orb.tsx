@@ -83,7 +83,7 @@ function Core({ busy, reduced }: { busy: boolean; reduced: boolean }) {
   return (
     <CrystalizedBall
       preset="aurora"
-      color={theme === "dark" ? "#46D9BD" : "#0F8F78"}
+      color={theme === "dark" ? "#8B85FF" : "#4F46E5"}
       theme={theme}
       size={0.8}
       speed={busy ? 1.9 : 0.75}

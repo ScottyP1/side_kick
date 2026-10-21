@@ -161,10 +161,10 @@ npm --prefix app run tunnel
 ```
 
 ```bash
-npm --prefix app run teams:package
+npm --prefix app run teams:package -- --local
 ```
 
-That writes `teams/build/sidekick-teams.zip` (it passes Microsoft's 62 app-package validation checks).
+That writes `teams/build/sidekick-teams-local.zip` (it passes Microsoft's 62 app-package validation checks). This is for local testing over the tunnel; the live site has its own package (`npm --prefix app run teams:package`, see `docs/HOSTING.md` → Teams app package). Both are the same app to Teams, so uploading one replaces the other.
 
 **5. Upload to Teams**
 - Teams admin center → Teams apps → Setup policies → Global → turn on **Upload custom apps** (it can take a few hours to apply).

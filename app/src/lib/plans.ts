@@ -27,19 +27,22 @@ export type PlanId = (typeof PLAN_IDS)[number];
 
 /**
  * What a plan allows. `null` means no limit. `connectors`: 0 = none, 1 = one tool, null = all of them.
- * `meetingHours` and `aiCreditUsd` are per calendar month (UTC); the others are totals at any moment.
+ * `meetingHours`, `liveMeetingHours` and `aiCreditUsd` are per calendar month (UTC); the others are totals
+ * at any moment. `liveMeetingHours` is Sidekick joining calls live (product step 3, not built yet): only
+ * Enterprise includes it.
  */
 export type PlanLimits = {
   seats: number | null;
   workspaces: number | null;
   chats: number | null;
   meetingHours: number | null;
+  liveMeetingHours: number | null;
   documents: number | null;
   connectors: number | null;
   aiCreditUsd: number | null;
 };
 export type LimitKey = keyof PlanLimits;
-export const LIMIT_KEYS: readonly LimitKey[] = ["seats", "workspaces", "chats", "meetingHours", "documents", "connectors", "aiCreditUsd"];
+export const LIMIT_KEYS: readonly LimitKey[] = ["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors", "aiCreditUsd"];
 
 /** Plain names for the limits, as shown to people ("2 of 2 groups"). */
 export const LIMIT_LABEL: Record<LimitKey, { one: string; many: string }> = {
@@ -47,6 +50,7 @@ export const LIMIT_LABEL: Record<LimitKey, { one: string; many: string }> = {
   workspaces: { one: "group", many: "groups" },
   chats: { one: "tracked Teams chat", many: "tracked Teams chats" },
   meetingHours: { one: "meeting hour this month", many: "meeting hours this month" },
+  liveMeetingHours: { one: "live meeting hour this month", many: "live meeting hours this month" },
   documents: { one: "document", many: "documents" },
   connectors: { one: "connector", many: "connectors" },
   aiCreditUsd: { one: "AI credit this month", many: "AI credit this month" },
@@ -77,6 +81,7 @@ export const PLANS: readonly Plan[] = [
     workspaces: 2,
     chats: 5,
     meetingHours: 20,
+    liveMeetingHours: 0,
     documents: 200,
     connectors: 0,
     aiCreditUsd: 20,
@@ -92,6 +97,7 @@ export const PLANS: readonly Plan[] = [
     workspaces: 10,
     chats: 30,
     meetingHours: 100,
+    liveMeetingHours: 0,
     documents: 2000,
     connectors: 1,
     aiCreditUsd: 150,
@@ -107,6 +113,7 @@ export const PLANS: readonly Plan[] = [
     workspaces: null,
     chats: 200,
     meetingHours: 500,
+    liveMeetingHours: 0,
     documents: 20000,
     connectors: null,
     aiCreditUsd: 1000,
@@ -128,18 +135,19 @@ export const ENTERPRISE: Plan = {
   workspaces: null,
   chats: 200,
   meetingHours: 500,
+  liveMeetingHours: 100,
   documents: 20000,
   connectors: null,
   aiCreditUsd: 1000,
   blurb: "Custom limits and price, set up with the Sidekick team.",
-  features: ["Custom limits and price", "Everything in Business"],
+  features: ["Custom limits and price", "Live meetings (when available)", "Everything in Business"],
 };
 
 /** Every plan including Enterprise (for the server and the Owner Console). Buyers only see `PLANS`. */
 export const ALL_PLANS: readonly Plan[] = [...PLANS, ENTERPRISE];
 
 /** No limits at all: organizations managed by the Sidekick team with no plan and no custom terms. */
-export const UNLIMITED: PlanLimits = { seats: null, workspaces: null, chats: null, meetingHours: null, documents: null, connectors: null, aiCreditUsd: null };
+export const UNLIMITED: PlanLimits = { seats: null, workspaces: null, chats: null, meetingHours: null, liveMeetingHours: null, documents: null, connectors: null, aiCreditUsd: null };
 
 /** Just the limits of a plan (drops price and wording). */
 export const limitsOf = (p: Plan): PlanLimits => Object.fromEntries(LIMIT_KEYS.map((k) => [k, p[k]])) as PlanLimits;

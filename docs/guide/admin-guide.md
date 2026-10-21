@@ -149,7 +149,8 @@ Organizations set up by the Sidekick team (or the very first one on an install) 
 | People | 10 | 50 | 500 | Agreed with you |
 | Groups | 2 | 10 | Unlimited | Agreed with you |
 | Tracked Teams chats (chats assigned to a group) | 5 | 30 | 200 | Agreed with you |
-| Meeting hours per month | 20 | 100 | 500 | Agreed with you |
+| Meeting hours per month (imported transcripts) | 20 | 100 | 500 | Agreed with you |
+| Live meeting hours per month (Sidekick joining calls; coming later) | Not included | Not included | Not included | Included (100 by default) |
 | Documents | 200 | 2,000 | 20,000 | Agreed with you |
 | Connectors to other tools | None | 1 | All | Agreed with you |
 | **AI credit per month** | $20 | $150 | $1,000 | Agreed with you |
@@ -179,6 +180,7 @@ When a limit is reached, adding another one is refused with a message saying whi
 | "Your … plan allows … and you have …" | You've reached a plan limit (section 16). Move to a bigger plan on Usage & billing, remove something you no longer need, or ask the Sidekick team. |
 | "… is paused because your organization has used this month's AI credit" | Answers still work; the extras come back on the 1st, with a bigger plan, or with a top-up from the Sidekick team (section 16). |
 | "You've asked … questions in the last hour" | The per-person limit. Wait a few minutes. |
+| "Sidekick's AI is very busy right now. Try again in a minute." | The AI service was overloaded even after Sidekick retried a few times. Try again shortly; nothing is lost (a meeting import is kept with **Try again**). |
 | "… is paused by the Sidekick team" | A feature was paused for maintenance. Try again later. |
 | "… is turned off for your organization by the Sidekick team" | Not an error: the Sidekick team switched that feature off for your organization. Org Owners: contact the Sidekick team to have it turned back on. Everyone else: ask your Org Owner. |
 | "This organization's Sidekick access is paused" | Contact the Sidekick team. |

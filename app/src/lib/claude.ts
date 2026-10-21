@@ -14,18 +14,34 @@
  * - **AI credit** (lib/credit.ts): before each call, the organization's monthly AI credit is checked. From
  *   100% ("essentials only") answers and guardrail checks run on cheaper models and the extras pause. A
  *   call can opt out with `skipCredit` (work Sidekick pays for itself, like the coming support assistant).
+ * - **Busy API**: rate limits (429), "overloaded" (529) and server hiccups are retried with exponential
+ *   backoff and jitter (`withRetry`, honouring Retry-After); if Claude stays busy the person gets a plain
+ *   "very busy, try again in a minute" (`AiBusyError`), never a raw API error.
+ * - **Prompt caching**: the system prompt (instructions + the organization's guardrail rules, stable between
+ *   calls) carries a cache breakpoint, so repeats read it from Anthropic's cache at a tenth of the price.
+ *   The per-call content (sources, the question, a transcript) is never marked: it doesn't repeat, and a
+ *   cache write costs 1.25x. Prompts shorter than the model's minimum cacheable length (about 1-4k tokens)
+ *   simply aren't cached. Cache reads are recorded per call (`usage_events.cache_read_tokens`) and shown
+ *   per client and model in the Owner Console.
+ * - **Batch API** for work nobody waits for (`queueStructured` + `runBatches`): daily reminder digests are
+ *   sent as one Message Batch per timer tick and collected on a later tick, at half the price. Anything a
+ *   person is waiting for (answers, notes, the knowledge map button, the assistant) stays a live call.
+ *   `SIDEKICK_BATCH=off` turns batching off (everything live).
+ * - **Models**: one per feature in `MODELS`, each overridable by env. Don't switch a feature's model
+ *   without measuring answer quality first; Claude Haiku 5.5 is the candidate for cheap, simple jobs
+ *   (guardrail check, reminder wording).
  * - **Plumbing stays here**: customers see plain wording ("AI answers"); model names and providers are
  *   shown only in the Owner Console.
  *
- * The key comes from `ANTHROPIC_API_KEY` in app/.env.local. Production swaps this client for Claude hosted
- * on Azure (AnthropicFoundry) without changing callers.
+ * The key comes from `ANTHROPIC_API_KEY` in app/.env.local. A second route (Claude in Sidekick's own Azure
+ * AI Foundry) would go in `aiClient()` only, without changing callers.
  */
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { z } from "zod";
 import { HttpError } from "./auth";
-import { now, run } from "./db";
+import { all, newId, now, run } from "./db";
 import { assertEnabled } from "./owner";
 import { span, spanAttrs, traceUserId } from "./trace";
 import { addSpend, creditGate } from "./credit";
@@ -64,10 +80,13 @@ export const FAKE_CLAUDE = process.env.SIDEKICK_FAKE_CLAUDE === "1" && process.e
  * Canned, schema-shaped outputs for test mode. A content containing "__FAIL__" makes the call fail, so
  * tests can check that failures are reported (e.g. a meeting marked Failed with a reason).
  * "__SPEND_<dollars>__" in the content records that cost for the call, so tests can drive the AI credit.
+ * "__BUSY_<n>__" makes the first n attempts fail as "overloaded", to test retries and the busy message.
  * The recorded model is "fake-claude", or "fake-claude:<model>" when the call didn't use the feature's
  * normal model (essentials mode).
  */
-async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: string): Promise<unknown> {
+async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: string, attempt = 0): Promise<unknown> {
+  // "__BUSY_<n>__": the first n attempts fail like an overloaded API (529), so tests can check the retries.
+  if (attempt < Number(content.match(/__BUSY_(\d+)__/)?.[1] ?? 0)) throw new FakeBusyError();
   const cost = Number(content.match(/__SPEND_(\d+(?:\.\d+)?)__/)?.[1] ?? 0);
   await run(
     `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, created_at)
@@ -185,13 +204,66 @@ function fakeGuard(content: string) {
   return { allowed: true, rule: "none", custom_rule: null };
 }
 
+/** A fake "overloaded" failure (test mode only), retried like the real one. */
+class FakeBusyError extends Error {
+  constructor() {
+    super("Fake overloaded (test)");
+  }
+}
+
+/**
+ * Claude stayed busy (rate limit or overloaded) after every retry: a plain message for the person, 503.
+ * Still logged with a reference code, since it means answers were slow or missing.
+ */
+export class AiBusyError extends HttpError {
+  constructor() {
+    super(503, "Sidekick's AI is very busy right now. Try again in a minute.");
+  }
+}
+
+/** Extra attempts after the first for a busy or failing API (SIDEKICK_CLAUDE_RETRIES, default 3). */
+const RETRIES = Math.max(0, Number(process.env.SIDEKICK_CLAUDE_RETRIES ?? 3));
+// Backoff: 1 s, 2 s, 4 s … (capped at 20 s) with jitter; test mode waits milliseconds.
+const BACKOFF_MS = FAKE_CLAUDE ? 5 : 1000;
+
+/** True for failures worth retrying: rate limit, overloaded, server errors, timeouts and dropped connections. */
+export function isRetryable(e: unknown) {
+  if (e instanceof FakeBusyError) return true;
+  if (e instanceof Anthropic.APIConnectionError) return true;
+  return e instanceof Anthropic.APIError && [408, 429, 500, 502, 503, 504, 529].includes(e.status ?? 0);
+}
+
+/**
+ * Runs `fn` (one attempt per call, `attempt` = 0, 1, …) and retries retryable failures with exponential
+ * backoff and jitter, honouring the API's Retry-After header (up to 30 s). Gives up with `AiBusyError`;
+ * other failures are thrown straight away.
+ */
+export async function withRetry<T>(fn: (attempt: number) => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (e) {
+      if (!isRetryable(e)) throw e;
+      if (attempt >= RETRIES) throw Object.assign(new AiBusyError(), { cause: e });
+      const after = e instanceof Anthropic.APIError ? Number(e.headers?.get?.("retry-after")) : NaN;
+      const wait = Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 30_000) : Math.min(BACKOFF_MS * 2 ** attempt, 20_000) * (0.5 + Math.random());
+      spanAttrs({ retries: attempt + 1 });
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
 let client: Anthropic | null = null;
-/** The shared Anthropic client. Throws a friendly 503 if no API key is configured yet. */
-function anthropic(): Anthropic {
+/**
+ * The client for Sidekick's own Claude. Throws a friendly 503 if no key is configured yet. Retries are done
+ * by `withRetry` (so the SDK's own are off). The hook for a second route: Claude in Sidekick's Azure AI
+ * Foundry (e.g. `new AnthropicFoundry(...)` chosen by a setting) belongs here and only here.
+ */
+function aiClient(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new HttpError(503, "AI answers aren't set up on this server yet. The Sidekick team needs to add the AI key (ANTHROPIC_API_KEY), then restart the app.");
   }
-  client ??= new Anthropic();
+  client ??= new Anthropic({ maxRetries: 0, timeout: 120_000 });
   return client;
 }
 
@@ -200,12 +272,29 @@ export function claudeConfigured() {
   return Boolean(process.env.ANTHROPIC_API_KEY) || FAKE_CLAUDE;
 }
 
-/** Dollar cost of one call, from its token usage and the model's prices (unknown models priced as Opus). */
-function costOf(model: string, u: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }) {
+/** Dollar cost of one call, from its token usage and the model's prices (unknown models priced as Opus). Batch calls cost half. */
+function costOf(model: string, u: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }, batch = false) {
   const p = PRICES[model] ?? PRICES["claude-opus-5-5"];
   const cacheRead = u.cache_read_input_tokens ?? 0;
   const cacheWrite = u.cache_creation_input_tokens ?? 0;
-  return (u.input_tokens * p.in + cacheWrite * p.in * 1.25 + cacheRead * p.cacheRead + u.output_tokens * p.out) / 1_000_000;
+  return ((u.input_tokens * p.in + cacheWrite * p.in * 1.25 + cacheRead * p.cacheRead + u.output_tokens * p.out) / 1_000_000) * (batch ? 0.5 : 1);
+}
+
+/** The system prompt as one cached block (see "Prompt caching" above). */
+const cachedSystem = (system: string) => [{ type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } }];
+
+type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
+const NO_USAGE: Usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+
+/** Writes one call's usage row (and adds its cost to the AI credit's cached figure). */
+async function recordUsage(ctx: { orgId: string | null; workspaceId: string | null; userId?: string | null }, feature: string, model: string, usage: Usage, cost: number, latency: number, ok: number, error: string | null) {
+  addSpend(ctx.orgId, cost);
+  await run(
+    `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ctx.orgId, ctx.workspaceId, ctx.userId === undefined ? traceUserId() : ctx.userId, feature, model,
+    usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens, cost, latency, ok, error, now(),
+  );
 }
 
 /**
@@ -225,10 +314,11 @@ type Ctx = { orgId: string; workspaceId: string | null; role?: string | null; sk
  * @param opts.effort    how hard Claude thinks: "low" is fast and cheap, "high" is most thorough
  * @param opts.maxTokens upper limit on the reply length
  * @throws HttpError 503 if the feature is paused or no key is set; 422 if Claude declined or ran out of room;
- *   FeatureOffError("credit") if the feature pauses because the AI credit is used up
+ *   FeatureOffError("credit") if the feature pauses because the AI credit is used up; AiBusyError (503) if
+ *   Claude stayed busy through every retry
  *
  * Server-side fallback ("default") re-runs a policy-declined request on Anthropic's recommended model.
- * Usage is recorded in `finally`, so failed calls are metered too.
+ * Usage is recorded in `finally`, so failed calls are metered too (one row per call, whatever the retries).
  */
 const SPAN_NAMES: Record<Feature, string> = { ask: "AI: write the answer", extract: "AI: write meeting notes", insights: "AI: build the knowledge map", assist: "AI: in-app assistant", guard: "AI: guardrail check", remind: "AI: word the reminders" };
 export async function structured<S extends z.ZodType>(
@@ -236,40 +326,47 @@ export async function structured<S extends z.ZodType>(
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
 ): Promise<z.infer<S>> {
-  // Checked before the step starts: a paused or restricted feature is a deliberate refusal, so it must not
-  // show up as a failed Claude step (which would turn the home orb's Claude light to "had errors").
-  await assertEnabled(feature, ctx.orgId, ctx.role);
-  // The AI credit: may switch to a cheaper model ("essentials only"), or refuse an extra.
-  const gate = await creditGate(feature, ctx.orgId, { size: opts.content.length, skipCredit: ctx.skipCredit });
-  const model = gate.model ?? MODELS[feature];
+  const model = await gateFor(feature, ctx, opts.content);
   return span("ai", SPAN_NAMES[feature], () => structuredCall(feature, ctx, opts, model), {
-    model: FAKE_CLAUDE ? "fake-claude" : model, effort: opts.effort ?? "medium", ...(gate.model ? { essentials: true } : {}),
+    model: FAKE_CLAUDE ? "fake-claude" : model, effort: opts.effort ?? "medium", ...(model !== MODELS[feature] ? { essentials: true } : {}),
   });
 }
 
-/** The Claude call itself (wrapped in a trace span by `structured`). */
+/**
+ * The checks before any Claude work, live or batched: the kill switches and per-client restrictions
+ * (`assertEnabled`), then the AI credit (may pick a cheaper model or refuse an extra). Returns the model.
+ * Checked before the step starts: a refusal is deliberate and must not show up as a failed Claude step.
+ */
+async function gateFor(feature: Feature, ctx: Ctx, content: string): Promise<string> {
+  await assertEnabled(feature, ctx.orgId, ctx.role);
+  const gate = await creditGate(feature, ctx.orgId, { size: content.length, skipCredit: ctx.skipCredit });
+  return gate.model ?? MODELS[feature];
+}
+
+/** The Claude call itself (wrapped in a trace span by `structured`), with retries. */
 async function structuredCall<S extends z.ZodType>(
   feature: Feature,
   ctx: Ctx,
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
   model: string,
 ): Promise<z.infer<S>> {
-  if (FAKE_CLAUDE) return fakeClaude(feature, ctx, opts.content, model) as z.infer<S>;
+  if (FAKE_CLAUDE) return withRetry((attempt) => fakeClaude(feature, ctx, opts.content, model, attempt)) as Promise<z.infer<S>>;
   const started = Date.now();
   let ok = 0;
   let error: string | null = null;
-  let usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+  let usage = NO_USAGE;
   try {
-    const response = await anthropic().beta.messages.parse({
-      model,
-      max_tokens: opts.maxTokens ?? 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      cache_control: { type: "ephemeral" },
-      system: opts.system,
-      output_config: { effort: opts.effort ?? "medium", format: betaZodOutputFormat(opts.schema) },
-      messages: [{ role: "user", content: opts.content }],
-    });
+    const response = await withRetry(() =>
+      aiClient().beta.messages.parse({
+        model,
+        max_tokens: opts.maxTokens ?? 16000,
+        betas: ["server-side-fallback-2026-07-01"],
+        fallbacks: "default",
+        system: cachedSystem(opts.system),
+        output_config: { effort: opts.effort ?? "medium", format: betaZodOutputFormat(opts.schema) },
+        messages: [{ role: "user", content: opts.content }],
+      }),
+    );
     usage = {
       input_tokens: response.usage.input_tokens,
       output_tokens: response.usage.output_tokens,
@@ -289,26 +386,142 @@ async function structuredCall<S extends z.ZodType>(
     error = e instanceof Error ? e.message.slice(0, 500) : "Unknown error";
     throw e;
   } finally {
-    spanAttrs({ input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cached_tokens: usage.cache_read_input_tokens, cost_usd: Number(costOf(model, usage).toFixed(6)) });
     const cost = costOf(model, usage);
-    addSpend(ctx.orgId, cost);
-    await run(
-      `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms, ok, error, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ctx.orgId,
-      ctx.workspaceId,
-      traceUserId(),
-      feature,
-      model,
-      usage.input_tokens,
-      usage.output_tokens,
-      usage.cache_read_input_tokens,
-      usage.cache_creation_input_tokens,
-      cost,
-      Date.now() - started,
-      ok,
-      error,
-      now(),
-    );
+    spanAttrs({ input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cached_tokens: usage.cache_read_input_tokens, cost_usd: Number(cost.toFixed(6)) });
+    await recordUsage(ctx, feature, model, usage, cost, Date.now() - started, ok, error);
   }
+}
+
+/* ---------- Batch API: work nobody waits for, at half the price ---------- */
+
+/**
+ * What to do with a batched result. `schema` checks Claude's JSON; `finish` gets the parsed output (or null
+ * plus the error when the request failed, expired or didn't match) and the `ref` given when queueing.
+ * Handlers register by name at module load (e.g. "reminder" in lib/reminders.ts), so queued items only
+ * store the name, never code.
+ */
+export type BatchHandler = { schema: z.ZodType; finish: (ref: string, output: unknown | null, error: string | null) => Promise<void> };
+const handlers = new Map<string, BatchHandler>();
+/** Registers a batch handler (see `BatchHandler`). */
+export function registerBatchHandler(name: string, h: BatchHandler) {
+  handlers.set(name, h);
+}
+
+/** Whether non-urgent work goes through the Batch API (`SIDEKICK_BATCH=off` makes everything live). */
+export const batchEnabled = () => process.env.SIDEKICK_BATCH !== "off";
+
+type BatchItem = { id: string; batch_id: string | null; org_id: string; workspace_id: string | null; feature: Feature; model: string; handler: string; ref: string; request_json: string | null; status: string; created_at: string };
+
+/**
+ * Queues one structured call for the next Message Batch instead of calling Claude now. The same checks
+ * as a live call run first (kill switches, client restrictions, the AI credit), so a refusal is thrown
+ * here. `runBatches` sends it and later hands the result to the named handler with `ref`.
+ * The request (instructions and content) waits in `ai_batch_items` and is deleted once handled.
+ */
+export async function queueStructured(feature: Feature, ctx: Ctx, opts: { system: string; content: string; effort?: "low" | "medium" | "high"; maxTokens?: number }, job: { handler: string; ref: string }) {
+  if (!handlers.has(job.handler)) throw new Error(`Unknown batch handler ${job.handler}`);
+  const model = await gateFor(feature, ctx, opts.content);
+  await run(
+    "INSERT INTO ai_batch_items (id, batch_id, org_id, workspace_id, feature, model, handler, ref, request_json, status, created_at) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)",
+    newId(), ctx.orgId, ctx.workspaceId, feature, model, job.handler, job.ref,
+    JSON.stringify({ system: opts.system, content: opts.content, effort: opts.effort ?? "medium", maxTokens: opts.maxTokens ?? 4000 }), now(),
+  );
+}
+
+/**
+ * Sends every queued item as one Message Batch, then collects the batches that have ended and hands each
+ * result to its handler. Called by the reminder timer every tick (a real batch usually ends within minutes;
+ * results are picked up on a later tick). Test mode answers a batch at once with the fake outputs.
+ * Batched calls are metered at half price. Returns how many results were handled.
+ */
+export async function runBatches(): Promise<number> {
+  return span("ai", "AI: batch requests", async () => {
+    const queued = await all<BatchItem>("SELECT * FROM ai_batch_items WHERE status = 'queued' ORDER BY created_at LIMIT 1000");
+    if (queued.length) {
+      const batchId = FAKE_CLAUDE ? `fake_${newId()}` : await submitBatch(queued);
+      for (const q of queued) await run("UPDATE ai_batch_items SET batch_id = ?, status = 'sent' WHERE id = ?", batchId, q.id);
+    }
+    const sent = await all<{ batch_id: string }>("SELECT DISTINCT batch_id FROM ai_batch_items WHERE status = 'sent'");
+    let handled = 0;
+    for (const { batch_id } of sent) handled += await collectBatch(batch_id);
+    spanAttrs({ queued: queued.length, handled });
+    return handled;
+  });
+}
+
+/** Sends queued items to the Batch API; returns Anthropic's batch id. */
+async function submitBatch(items: BatchItem[]): Promise<string> {
+  const batch = await withRetry(() =>
+    aiClient().beta.messages.batches.create({
+      requests: items.map((it) => {
+        const req = JSON.parse(it.request_json!) as { system: string; content: string; effort: "low" | "medium" | "high"; maxTokens: number };
+        return {
+          custom_id: it.id,
+          params: {
+            model: it.model,
+            max_tokens: req.maxTokens,
+            system: cachedSystem(req.system),
+            output_config: { effort: req.effort, format: betaZodOutputFormat(handlers.get(it.handler)!.schema) },
+            messages: [{ role: "user" as const, content: req.content }],
+          },
+        };
+      }),
+    }),
+  );
+  return batch.id;
+}
+
+/** Collects one batch if it has ended: parses each result, meters it at half price and calls its handler. */
+async function collectBatch(batchId: string): Promise<number> {
+  const items = await all<BatchItem>("SELECT * FROM ai_batch_items WHERE batch_id = ? AND status = 'sent'", batchId);
+  const results = new Map<string, { output: unknown | null; error: string | null; usage: Usage }>();
+  if (batchId.startsWith("fake_")) {
+    for (const it of items) {
+      const req = JSON.parse(it.request_json ?? "{}") as { content: string };
+      try {
+        results.set(it.id, { output: await fakeClaude(it.feature, { orgId: it.org_id, workspaceId: it.workspace_id }, req.content, it.model), error: null, usage: NO_USAGE });
+      } catch (e) {
+        results.set(it.id, { output: null, error: e instanceof Error ? e.message : "Failed", usage: NO_USAGE });
+      }
+    }
+  } else {
+    const batch = await withRetry(() => aiClient().beta.messages.batches.retrieve(batchId));
+    if (batch.processing_status !== "ended") return 0;
+    for await (const r of await aiClient().beta.messages.batches.results(batchId)) {
+      if (r.result.type !== "succeeded") {
+        results.set(r.custom_id, { output: null, error: `Batch request ${r.result.type}`, usage: NO_USAGE });
+        continue;
+      }
+      const m = r.result.message;
+      const usage: Usage = { input_tokens: m.usage.input_tokens, output_tokens: m.usage.output_tokens, cache_read_input_tokens: m.usage.cache_read_input_tokens ?? 0, cache_creation_input_tokens: m.usage.cache_creation_input_tokens ?? 0 };
+      const text = m.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+      let output: unknown = null;
+      try {
+        output = JSON.parse(text);
+      } catch {}
+      results.set(r.custom_id, { output, error: output === null ? (m.stop_reason === "refusal" ? "Claude declined to process this content." : "The response wasn't valid JSON.") : null, usage });
+    }
+  }
+  let handled = 0;
+  for (const it of items) {
+    const res = results.get(it.id) ?? { output: null, error: "No result in the batch", usage: NO_USAGE };
+    const h = handlers.get(it.handler);
+    const parsed = res.output !== null && h ? h.schema.safeParse(res.output) : null;
+    const output = parsed?.success ? parsed.data : null;
+    const error = res.error ?? (parsed && !parsed.success ? "Claude's response didn't match the expected format." : null);
+    // Fake batches were already metered by fakeClaude; real ones are metered here, at the batch price.
+    if (!batchId.startsWith("fake_")) {
+      await recordUsage({ orgId: it.org_id, workspaceId: it.workspace_id, userId: null }, it.feature, it.model, res.usage, costOf(it.model, res.usage, true), 0, output ? 1 : 0, error);
+    }
+    try {
+      await h?.finish(it.ref, output, error);
+    } catch (e) {
+      console.error(`Batch handler ${it.handler} failed for ${it.ref}`, e);
+    }
+    await run("UPDATE ai_batch_items SET status = 'done', request_json = NULL WHERE id = ?", it.id);
+    handled++;
+  }
+  // Old finished rows are kept a day for troubleshooting, then dropped.
+  await run("DELETE FROM ai_batch_items WHERE status = 'done' AND created_at < ?", new Date(Date.now() - 86400_000).toISOString());
+  return handled;
 }

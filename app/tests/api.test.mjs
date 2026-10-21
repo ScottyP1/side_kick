@@ -2195,7 +2195,7 @@ test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meet
   s.lee = c;
   const lines = (await c("GET", "/api/billing")).body.limits;
   const line = (k) => lines.find((l) => l.key === k);
-  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "documents", "connectors", "aiCreditUsd"].map((k) => line(k).limit), [10, 2, 5, 20, 200, 0, 20], "Starter's numbers");
+  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors", "aiCreditUsd"].map((k) => line(k).limit), [10, 2, 5, 20, 0, 200, 0, 20], "Starter's numbers");
   // The operator tightens the limits for this client (custom terms), so each can be hit quickly.
   await terms({ limits: { seats: 2, workspaces: 1, chats: 0, meetingHours: 1, documents: 1 } });
 
@@ -2529,3 +2529,13 @@ function zipClaiming(name, size) {
   end.writeUInt32LE(0, 16);
   return Buffer.concat([cd, end]);
 }
+
+test(`[${ENGINE}] busy AI: overloaded calls are retried with backoff; if it stays busy people get a plain "try again"`, async () => {
+  const ok = await importMeeting(s.lee, s.limitWs, "Retry check", "[00:00:00] Ana: __BUSY_2__ quick sync.\n[00:05:00] Ben: Done.");
+  assert.equal(ok.status, 200, "two overloaded answers, then it works");
+  const busy = await importMeeting(s.lee, s.limitWs, "Busy check", "[00:00:00] Ana: __BUSY_9__ quick sync.\n[00:05:00] Ben: Done.");
+  assert.equal(busy.status, 503);
+  assert.match(busy.body.error, /Sidekick's AI is very busy right now\. Try again in a minute/);
+  assert.ok(busy.body.meeting_id, "the meeting is kept with Try again, as for any failure");
+  assert.doesNotMatch(busy.body.error, /529|overloaded|anthropic/i, "no raw API error");
+});

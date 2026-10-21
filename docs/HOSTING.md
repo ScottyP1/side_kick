@@ -74,6 +74,11 @@ Without them the page falls back to the git checkout (laptop) or says "Not set b
 copy records the release it runs (`app_releases`) the first time `/api/health` answers, so the page lists
 the recent deploys without needing Azure.
 
+**AI settings worth knowing** (all optional): `SIDEKICK_CLAUDE_RETRIES` (extra attempts when Claude is busy,
+default 3), `SIDEKICK_BATCH=off` (send daily reminder wording live instead of through the half-price Batch
+API), `SIDEKICK_MODEL_ESSENTIAL_ASK/_GUARD/_EXTRACT` (models used once a client's AI credit is used up),
+`SIDEKICK_ASK_PER_HOUR` (questions per person per hour, default 60).
+
 ## Teams app package
 
 There is **one** Sidekick app in Teams: its app ID is the Azure Bot's ID, and Teams sends its messages to

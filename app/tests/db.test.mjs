@@ -258,6 +258,7 @@ test(`[${engine}] plan limits: every plan has every limit; Enterprise isn't for 
   assert.equal(plans.planById("enterprise").selfService, false);
   assert.ok(!plans.PLANS.some((p) => p.id === "enterprise"), "buyers never see Enterprise");
   assert.deepEqual(plans.PLANS.map((p) => p.aiCreditUsd), [20, 150, 1000]);
+  assert.deepEqual(plans.ALL_PLANS.map((p) => p.liveMeetingHours), [0, 0, 0, 100], "live meetings are Enterprise only");
   assert.deepEqual(plans.limitState(4, 5), { used: 4, limit: 5, pct: 80, over: false, full: false, near: true });
   assert.equal(plans.limitState(6, 5).over, true, "a plan that shrank shows over limit");
   assert.equal(plans.limitState(0, 0).full, true, "a limit of 0 means none fit");

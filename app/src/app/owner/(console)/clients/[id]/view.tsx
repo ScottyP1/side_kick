@@ -38,7 +38,7 @@ type Detail = {
   terms: Terms;
   credit: Credit;
   limits: LimitLine[];
-  ai: { byModel: { feature: string; model: string; calls: number; cost: number }[] };
+  ai: { byModel: { feature: string; model: string; calls: number; cost: number; input: number; cached: number }[] };
 };
 
 export default function ClientPage() {
@@ -249,10 +249,10 @@ function CreditPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
         {err && <p className="err" style={{ margin: 0 }}>{err}</p>}
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Feature</th><th>Model</th><th className="r">Requests</th><th className="r">Cost</th></tr></thead>
+            <thead><tr><th>Feature</th><th>Model</th><th className="r">Requests</th><th className="r" title="Share of input read from the prompt cache">Cached</th><th className="r">Cost</th></tr></thead>
             <tbody>
-              {d.ai.byModel.map((m) => <tr key={`${m.feature}-${m.model}`}><td>{m.feature}</td><td className="mono">{m.model}</td><td className="r num">{m.calls}</td><td className="r num">{money(Number(m.cost))}</td></tr>)}
-              {!d.ai.byModel.length && <tr><td colSpan={4} className="muted">No AI use this month.</td></tr>}
+              {d.ai.byModel.map((m) => <tr key={`${m.feature}-${m.model}`}><td>{m.feature}</td><td className="mono">{m.model}</td><td className="r num">{m.calls}</td><td className="r num">{m.input ? `${Math.round((m.cached / m.input) * 100)}%` : "—"}</td><td className="r num">{money(Number(m.cost))}</td></tr>)}
+              {!d.ai.byModel.length && <tr><td colSpan={5} className="muted">No AI use this month.</td></tr>}
             </tbody>
           </table>
         </div>

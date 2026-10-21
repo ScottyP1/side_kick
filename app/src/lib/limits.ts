@@ -9,7 +9,8 @@
  *   team sets some. Enterprise starts from the Business numbers.
  * - **Enforced where created**: each route that creates something counted here calls `assertCanAdd` first
  *   (people: POST /api/users; groups: POST /api/workspaces; tracked chats: POST /api/teams-links; meeting
- *   hours: POST /api/meetings; documents: POST /api/docs; connectors: when connectors exist). The refusal is
+ *   hours: POST /api/meetings; documents: POST /api/docs; connectors and live meeting hours: when those
+ *   exist, e.g. `assertCanAdd(orgId, "liveMeetingHours", hours)` before Sidekick joins a call). The refusal is
  *   a 402 whose message names the limit and how to get more, with `kind: "limit"` and `limit` in the body.
  * - **Never deletes**: when a plan shrinks (or the team lowers a limit) nothing is removed; new things are
  *   refused and Usage & billing and the Owner Console show "over limit".
@@ -87,7 +88,8 @@ export async function usageCounts(orgId: string): Promise<Record<LimitKey, numbe
     count("SELECT COALESCE(SUM(duration_min), 0) AS n FROM meetings WHERE org_id = ? AND created_at >= ?", orgId, monthStart()),
     count("SELECT COUNT(*) AS n FROM documents WHERE org_id = ?", orgId),
   ]);
-  return { seats, workspaces, chats, meetingHours: minutes / 60, documents, connectors: 0, aiCreditUsd: 0 };
+  // Live meetings (Sidekick joining calls, product step 3) and connectors aren't built yet: nothing used so far.
+  return { seats, workspaces, chats, meetingHours: minutes / 60, liveMeetingHours: 0, documents, connectors: 0, aiCreditUsd: 0 };
 }
 
 /** One line of the limits report: label, used, limit and how full it is. */
@@ -111,7 +113,7 @@ export class LimitError extends HttpError {
   }
 }
 
-const fmt = (key: LimitKey, n: number) => (key === "meetingHours" ? `${Math.round(n * 10) / 10}` : String(n));
+const fmt = (key: LimitKey, n: number) => (key === "meetingHours" || key === "liveMeetingHours" ? `${Math.round(n * 10) / 10}` : String(n));
 
 /**
  * Refuses (LimitError, 402) adding `amount` more of `key` when that would go past the organization's
@@ -128,13 +130,13 @@ export async function assertCanAdd(orgId: string, key: Exclude<LimitKey, "aiCred
   const label = LIMIT_LABEL[key];
   const planName = plan ? `Your ${plan.name} plan` : "Your organization's plan";
   const allows = limit === 0 ? `doesn't include ${label.many}` : `allows ${fmt(key, limit)} ${limit === 1 ? label.one : label.many}`;
-  const now = key === "meetingHours"
+  const now = key === "meetingHours" || key === "liveMeetingHours"
     ? ` and ${fmt(key, used)} ${used === 1 ? "hour is" : "hours are"} used; this one is about ${fmt(key, amount)} ${amount === 1 ? "hour" : "hours"}`
     : used ? ` and you have ${used}` : "";
   const how = plan?.selfService
     ? "An Org Owner or Billing Admin can move to a bigger plan on Usage & billing."
     : "Contact the Sidekick team to raise it.";
-  const keep = key === "meetingHours" ? " Meeting hours start again on the 1st of next month." : "";
+  const keep = key === "meetingHours" || key === "liveMeetingHours" ? " Meeting hours start again on the 1st of next month." : "";
   throw new LimitError(key, `${planName} ${allows}${now}. ${how}${keep}`);
 }
 

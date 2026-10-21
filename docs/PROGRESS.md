@@ -53,6 +53,7 @@ Support scope (item 5): portal Help → Contact support (auto contact details, c
 - **Plain wording**: no model names in the portal ("AI answers: working"); models only in the Owner Console; "Powered by Claude" on /privacy and the public footer.
 - **Usage export** CSV per group/month with engagement code and client (billing roles).
 - **Owner Console → Business**: MRR, margin, plan mix, trials ending, failed payments, sign-ups per week, per-client usage vs limits with flags and partner, infrastructure health (health facts, release from `SIDEKICK_COMMIT`/`SIDEKICK_RELEASED_AT`, deploys seen, app errors). Console now always dark graphite + Indigo.
+- **Added after the checkpoint**: live meeting hours limit (Enterprise only, for product step 3); Claude retries with backoff on 429/overloaded and a plain "very busy" message; the system prompt is the cached block (no more cache writes for one-off content), cache share per model in the Owner Console; daily reminder digests through the Batch API (half price, posted on a later tick); hook for a second AI route in `aiClient()`.
 - **Dropped: bring your own AI** (customer Anthropic/Azure keys). It was in the brief, but Cody decided against it: it would expose the brain (provider, models, cost). Every client uses Sidekick's AI and credit.
 - **Next**: the deploy workflow (PR #28) should set `SIDEKICK_COMMIT` and `SIDEKICK_RELEASED_AT` (see HOSTING); email the 80%/100% notices; enforce connectors once connectors exist (`assertCanAdd(org, "connectors")`).
 

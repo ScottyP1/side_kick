@@ -278,6 +278,13 @@ CREATE TABLE IF NOT EXISTS rate_events (
   id TEXT PRIMARY KEY, bucket TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS rate_events_bucket ON rate_events(bucket, created_at);
+-- Claude work queued for the Batch API (lib/claude.ts queueStructured / runBatches), e.g. daily reminder
+-- digests. request_json (instructions + content) is cleared once the result is handled; rows go after a day.
+CREATE TABLE IF NOT EXISTS ai_batch_items (
+  id TEXT PRIMARY KEY, batch_id TEXT, org_id TEXT NOT NULL, workspace_id TEXT, feature TEXT NOT NULL, model TEXT NOT NULL,
+  handler TEXT NOT NULL, ref TEXT NOT NULL, request_json TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_batch_items_status ON ai_batch_items(status, batch_id);
 -- Versions of the app seen running (lib/ops.ts): commit and release time set by the deploy, first seen.
 CREATE TABLE IF NOT EXISTS app_releases (
   release_key TEXT PRIMARY KEY, commit_sha TEXT, released_at TEXT, first_seen_at TEXT NOT NULL

@@ -143,7 +143,7 @@ export function PlanSection() {
 }
 
 /** Shows one limit's number: money for the AI credit, one decimal for meeting hours. */
-const shown = (key: LimitKey, n: number) => (key === "aiCreditUsd" ? `$${n.toFixed(2)}` : key === "meetingHours" ? String(Math.round(n * 10) / 10) : n.toLocaleString());
+const shown = (key: LimitKey, n: number) => (key === "aiCreditUsd" ? `$${n.toFixed(2)}` : key === "meetingHours" || key === "liveMeetingHours" ? String(Math.round(n * 10) / 10) : n.toLocaleString());
 
 /**
  * Every plan limit with its use: "3 of 5", a meter, and "Over limit" (more than the plan allows, e.g. after
@@ -159,8 +159,8 @@ export function Limits({ lines }: { lines: LimitLine[] }) {
           {lines.map((l) => (
             <tr key={l.key}>
               <td>{l.label[0].toUpperCase() + l.label.slice(1)}</td>
-              <td className="r num">{l.key === "connectors" && l.used === 0 ? "—" : shown(l.key, l.used)}</td>
-              <td className="r num">{l.limit === null ? (l.key === "connectors" ? "All" : "Unlimited") : l.limit === 0 && l.key === "connectors" ? "None" : shown(l.key, l.limit)}</td>
+              <td className="r num">{(l.key === "connectors" || l.key === "liveMeetingHours") && l.used === 0 ? "—" : shown(l.key, l.used)}</td>
+              <td className="r num">{l.limit === null ? (l.key === "connectors" ? "All" : "Unlimited") : l.limit === 0 ? "Not included" : shown(l.key, l.limit)}</td>
               <td>
                 {l.over ? <Pill kind="bad">Over limit</Pill> : l.full && l.limit !== 0 ? <Pill kind="warn">At limit</Pill> : l.near ? <Pill kind="warn">Near limit</Pill> : l.limit !== null && l.limit > 0 ? <div className="meter"><span style={{ width: `${Math.min(100, l.pct)}%` }} /></div> : null}
               </td>

@@ -61,7 +61,7 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
     credit,
     limits: (await limitReport(org.id, credit.usedUsd)).lines,
     ai: {
-      byModel: await all("SELECT feature, model, COUNT(*) calls, COALESCE(SUM(cost_usd),0) cost FROM usage_events WHERE org_id = ? AND created_at >= ? GROUP BY feature, model ORDER BY cost DESC", org.id, monthStart()),
+      byModel: await all("SELECT feature, model, COUNT(*) calls, COALESCE(SUM(cost_usd),0) cost, COALESCE(SUM(input_tokens + cache_read_tokens + cache_write_tokens),0) input, COALESCE(SUM(cache_read_tokens),0) cached FROM usage_events WHERE org_id = ? AND created_at >= ? GROUP BY feature, model ORDER BY cost DESC", org.id, monthStart()),
     },
   };
 });

@@ -50,7 +50,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/extract.ts` | Files → text (PDF, Word, Teams .vtt) and text → passages |
 | `lib/search.ts` | Indexing and search. **All search goes through here**: local keyword index (source of truth, fallback) plus Azure AI Search when configured |
 | `lib/azure-search.ts` | Azure AI Search index, embeddings and hybrid (keyword + vector) queries |
-| `lib/claude.ts` | **All Claude calls go through here**: model per feature, the AI credit check (`creditGate`), structured output, metering |
+| `lib/claude.ts` | **All Claude calls go through here**: model per feature, the AI credit check (`creditGate`), retries with backoff (`withRetry`, `AiBusyError`), the cached system prompt, structured output, metering, and the Batch API for non-urgent work (`queueStructured`, `runBatches`, handlers such as the daily reminder digest). The hook for a second route (Claude in Azure AI Foundry) is `aiClient()` |
 | `lib/assistant.ts` | The in-app assistant on the home page: answers questions about Sidekick and proposes role-limited actions that only run when the person presses Confirm |
 | `lib/sidekick.ts` | The AI features: answers with sources, meeting notes, knowledge map |
 | `lib/guardrails.ts` | The firm's guardrails: locked floor + org-wide switches, per-workspace extra switches (stricter only) and custom rules (save-time loosening check, versioned) merged by `getGuardPolicy`, the question check (quick local check, then Claude feature `guard`), the answer check (grounding, masking), and `guard_events` counts |
@@ -94,8 +94,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 **Plan limits and the AI credit**
 1. Creating something counted by the plan (person, group, tracked chat, meeting, document) first calls `assertCanAdd(orgId, key, amount)` (lib/limits.ts): effective limit (plan, overlaid with `org_terms`) vs current use; past it → `LimitError` (402, `kind: "limit"`, `limit`). Nothing is deleted when a limit shrinks; `limitReport` shows "over".
 2. Every `structured()` call runs `creditGate(feature, orgId)` (lib/credit.ts) after `assertEnabled`: the month's cost (cached 30 s, bumped by every recorded call) vs the credit. Below 100% nothing changes (80% writes a one-time audit notice and the portal banner reads `/api/me` `credit`). At 100%: `ask`/`guard` and short `extract` get a cheaper model; `remind`, `insights`, `assist` and long `extract` throw `FeatureOffError("credit")` (503, a notice, not an app error). `ctx.skipCredit` skips the check (for work Sidekick pays for itself, such as the coming support assistant).
-3. `ask()` also takes one hit from the per-person rate limit (lib/rate-limit.ts, 429 past it), for the portal and Teams alike.
-4. Model and provider names stay out of the portal (`/api/me` says `ai.working`, Usage has no models, Activity drops `model` from step details); the Owner Console client page shows AI use by model.
+3. Every live call is retried on 429/529/5xx with exponential backoff and jitter (Retry-After honoured); a call that stays busy throws `AiBusyError` (503, "very busy, try again in a minute"). Daily reminder digests are queued with `queueStructured` and sent as one Message Batch per timer tick; `runBatches` collects ended batches on later ticks and hands results to the registered handler (half price). Things people wait for stay live.
+4. `ask()` also takes one hit from the per-person rate limit (lib/rate-limit.ts, 429 past it), for the portal and Teams alike.
+5. Model and provider names stay out of the portal (`/api/me` says `ai.working`, Usage has no models, Activity drops `model` from step details); the Owner Console client page shows AI use by model.
 
 **A Teams message**
 1. Teams → Azure Bot Service → `POST /api/messages` with a Microsoft-signed token.

@@ -69,7 +69,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/markdown.ts` | Small Markdown reader for the guides: blocks and inline nodes as data (no HTML strings), rendered by `components/markdown.tsx` |
 | `lib/changelog.ts` | The public changelog entries, newest first |
 | `lib/faq.ts` | The FAQ: every question and answer in one data file (`/faq` shows all; Pricing, Security & trust and How it works show theirs via `faqFor`). Answers stay consistent with `docs/guide/`; `legalReview` marks draft wording. The future public chat should answer from this file and the guides |
-| `components/` | Portal, Owner Console and public-website frames (`public-shell.tsx` + `public-site.css`), shared UI |
+| `components/` | Portal, Owner Console and public-website frames (`public-shell.tsx` + `public-site.css`), the website's pictures (`teams-demo.tsx`, `how-mocks.tsx`: plain HTML/CSS mockups, no images), shared UI |
 | `app/(app)/*/view.tsx` | Client portal pages (home is `app/(app)/home`); `app/owner/(console)/*/view.tsx` Owner Console pages; `app/(public)/*` the public website |
 
 ## Routes

@@ -585,6 +585,13 @@ test(`[${ENGINE}] website: every public page answers without a session; the port
   // The FAQ is on its own page and in short sections on Pricing, Security & trust and How it works.
   assert.match((await client()("GET", "/faq")).body, /id="training"[\s\S]*pending legal review/);
   for (const p of ["/pricing", "/security", "/how-it-works"]) assert.match((await client()("GET", p)).body, /class="site-faq"/, `${p} has FAQ answers`);
+  const how = (await client()("GET", "/how-it-works")).body;
+  assert.equal((how.match(/class="site-journey-step"/g) ?? []).length, 6, "How it works shows the six-step journey");
+  assert.match(how, /class="site-stepper"/, "and the setup wizard stepper");
+  const sec = (await client()("GET", "/security")).body;
+  assert.match(sec, /class="site-walls"/, "Security shows the walls diagram");
+  assert.match(sec, /pending legal review/, "the AI-training pillar is marked for legal review");
+  assert.doesNotMatch(sec, /azurecontainerapps|\.postgres\.database\.azure\.com/, "no live addresses");
   // Everything robots.txt keeps search engines out of needs a session (except the sign-in pages themselves).
   const robots = (await client()("GET", "/robots.txt")).body;
   const disallowed = [...robots.matchAll(/^Disallow: (\S+)$/gm)].map((m) => m[1]);

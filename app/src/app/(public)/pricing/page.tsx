@@ -1,65 +1,72 @@
 /**
- * Pricing (/pricing): part of the public website (the home page is /). What Sidekick does, the plans from lib/plans.ts with
- * their (made-up, test-mode) prices, and a "Start free trial" button per plan that opens /signup with that
- * plan picked; while sign-up isn't open (the default) a note says so and the buttons say "Contact us"
- * (components/signup-status.tsx). Ends with the pricing questions from lib/faq.ts. No sign-in needed.
+ * Pricing (/pricing): the plans from lib/plans.ts (the single source; made-up, test-mode prices) as cards
+ * with their main limits, a "Start free trial" button per plan that opens /signup with that plan picked, and
+ * Enterprise as "talk to us" (set up by the Sidekick team, never self-service). While sign-up isn't open (the
+ * default) a note says so and the buttons say "Contact us" (components/signup-status.tsx). Then good-to-know
+ * notes and the pricing questions from lib/faq.ts. No sign-in needed.
  */
 import Link from "next/link";
 import type { Metadata } from "next";
 import { FaqList } from "@/components/faq-list";
 import { PublicShell, TestModeBanner } from "@/components/public-shell";
-import { pageMetadata } from "@/lib/site";
 import { SignupClosedNotice, TrialButton } from "@/components/signup-status";
 import { faqFor } from "@/lib/faq";
-import { limitText, PLANS, priceText, TRIAL_DAYS } from "@/lib/plans";
+import { ENTERPRISE, limitText, PLANS, TRIAL_DAYS, type Plan } from "@/lib/plans";
+import { pageMetadata } from "@/lib/site";
 
 export const metadata: Metadata = pageMetadata("/pricing");
 
+/** The limits a buyer compares, from the plan itself. */
+const limits = (p: Plan) => [
+  `${limitText(p.seats)} people`,
+  `${limitText(p.workspaces)} groups`,
+  `${limitText(p.chats)} Teams chats`,
+  `${limitText(p.meetingHours)} meeting hours / month`,
+];
+
 export default function PricingPage() {
   return (
-    <PublicShell current="/pricing">
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Sidekick for Microsoft Teams</div>
-          <h1>An AI teammate that remembers every meeting and document</h1>
-          <p>
-            Sidekick answers your team&apos;s questions in Teams with sources, writes meeting notes and action items,
-            and reminds the chat about what&apos;s overdue. Each client engagement gets its own walled-off workspace.
-            Every plan starts with a {TRIAL_DAYS}-day free trial.
-          </p>
-        </div>
+    <PublicShell layout="full" current="/pricing">
+      <div className="site-wrap site-page-head site-center">
+        <span className="site-eyebrow">Pricing</span>
+        <h1>Simple per-person pricing</h1>
+        <p>Every plan starts with a {TRIAL_DAYS}-day free trial. Client guests in your Teams chats are always free.</p>
       </div>
-      <SignupClosedNotice />
-      <TestModeBanner />
-      <div className="grid g3">
-        {PLANS.map((p) => (
-          <div key={p.id} className="panel" style={{ display: "flex", flexDirection: "column" }}>
-            <div className="panel-h"><h2>{p.name}</h2>{p.id === "team" && <span className="pill accent nodot">Most popular</span>}</div>
-            <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-              <div><span className="v" style={{ fontSize: 28, fontWeight: 600 }}>${p.pricePerSeat}</span> <span className="muted">per person / month</span></div>
-              <p className="muted" style={{ margin: 0 }}>{p.blurb}</p>
-              <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
-                {p.features.map((f) => <li key={f}>{f}</li>)}
-              </ul>
-              <span className="faint" style={{ fontSize: 12.5 }}>{limitText(p.seats)} people · {limitText(p.workspaces)} workspaces · {priceText(p)}</span>
-              <span style={{ flex: 1 }} />
+      <div className="site-wrap site-stack">
+        <SignupClosedNotice />
+        <TestModeBanner />
+        <div className="site-plans">
+          {PLANS.map((p) => (
+            <div key={p.id} className={`site-card site-plan ${p.id === "team" ? "featured" : ""}`}>
+              <div className="site-plan-head"><h2>{p.name}</h2>{p.id === "team" && <span className="pill accent nodot">Most popular</span>}</div>
+              <div className="site-plan-price"><b>${p.pricePerSeat}</b><span>per person / month</span></div>
+              <p>{p.blurb}</p>
               <TrialButton plan={p.id} primary={p.id === "team"} />
+              <ul className="site-checks">{[...limits(p), ...p.features.filter((f) => !/^Up to|workspaces$/.test(f))].map((f) => <li key={f}><span>{f}</span></li>)}</ul>
             </div>
+          ))}
+          <div className="site-card site-plan">
+            <div className="site-plan-head"><h2>{ENTERPRISE.name}</h2></div>
+            <div className="site-plan-price"><b>Custom</b><span>per contract</span></div>
+            <p>{ENTERPRISE.blurb}</p>
+            <Link className="btn" href="/support">Contact us</Link>
+            <ul className="site-checks">
+              <li><span>Limits agreed with you</span></li>
+              <li><span>Everything in Business</span></li>
+              <li><span>Sidekick live in your meetings <span className="site-badge-soon">Coming soon</span></span></li>
+            </ul>
           </div>
-        ))}
-      </div>
-      <div className="panel">
-        <div className="panel-h"><h2>Good to know</h2></div>
-        <div className="panel-b">
-          <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
-            <li>A <b>person</b> is anyone with a Sidekick account in your organization, whatever their role. Client guests in Teams chats are free.</li>
-            <li>Change plans or cancel any time from <b>Usage &amp; billing</b>. After canceling, Sidekick stays usable until the end of what you paid for, then turns read-only; nothing is deleted.</li>
-            <li>Already have an account? <Link href="/login">Sign in</Link>. Questions? See <Link href="/support">Support</Link>.</li>
-          </ul>
+        </div>
+        <div className="site-grid">
+          <div className="site-card"><h3 style={{ marginTop: 0 }}>Who counts as a person</h3><p>Anyone with a Sidekick account in your organization, whatever their role. Client guests in Teams chats are free.</p></div>
+          <div className="site-card"><h3 style={{ marginTop: 0 }}>Change or cancel any time</h3><p>From Usage &amp; billing. After canceling, Sidekick stays usable until the end of what you paid for, then turns read-only; nothing is deleted.</p></div>
+          <div className="site-card"><h3 style={{ marginTop: 0 }}>Meeting notes</h3><p>Notes from imported transcripts on every plan today. Automatic notes after every meeting are coming soon.</p></div>
         </div>
       </div>
-      <FaqList title="Pricing questions" items={faqFor("pricing")} />
-      <p className="muted" style={{ margin: 0 }}>More answers on the <Link href="/faq">FAQ</Link>.</p>
+      <div className="site-wrap site-narrow site-stack" style={{ paddingTop: 0 }}>
+        <FaqList title="Pricing questions" items={faqFor("pricing")} />
+        <p className="muted" style={{ margin: 0 }}>More answers on the <Link href="/faq">FAQ</Link>. Already have an account? <Link href="/login">Sign in</Link>.</p>
+      </div>
     </PublicShell>
   );
 }

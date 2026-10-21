@@ -16,6 +16,10 @@ const PATHS: Record<string, string> = {
   spark: "M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6",
   people: "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 6",
   map: "M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14",
+  key: "M14 10a4 4 0 1 0-3.5 3.97L10 14v3h3v3h4l1-1v-3l-3.5-3.5A4 4 0 0 0 14 10zM15.5 8.5h.01",
+  pulse: "M3 12h4l2-6 4 12 2-6h6",
+  db: "M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3zM5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3",
+  building: "M4 21V5l8-3v19M12 8h8v13M7 8h2M7 12h2M7 16h2M15 12h2M15 16h2M2 21h20",
 };
 
 /** One icon by name (see PATHS), in the accent-tinted square used on the feature cards. */

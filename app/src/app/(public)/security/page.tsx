@@ -1,9 +1,10 @@
 /**
- * Security & trust (/security): how Sidekick keeps each company's and each client group's data apart, the
- * guardrails on every answer, the audit log, where data lives (Microsoft Azure), encryption in transit, and
- * the AI model ("Powered by Claude"). Public and static. Statements about the AI provider's data use are
- * marked as a draft for legal review, like the privacy and terms pages. Ends with the security questions
- * from lib/faq.ts.
+ * Security & trust (/security): a hero line, a row of trust pillars with icons (walls, guardrails, sign-in,
+ * encryption, audit log, backups and monitoring, AI training), a diagram of the walls (company → groups →
+ * chats and documents, client guests seeing only Shareable material, another company fully separate), where
+ * the data lives (Azure: app, Postgres database, search; no addresses), and the security questions from
+ * lib/faq.ts. Public and static. The AI-training statement is marked as a draft for legal review, like the
+ * privacy and terms pages.
  */
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -15,92 +16,103 @@ import { pageMetadata } from "@/lib/site";
 
 export const metadata: Metadata = pageMetadata("/security");
 
-const PILLARS: { icon: string; title: string; points: string[] }[] = [
-  {
-    icon: "groups",
-    title: "Walls between companies and groups",
-    points: [
-      "Every company's Sidekick is completely separate: people, groups, documents and meetings are never shared between organizations.",
-      "Inside a company, each client group is walled off too. Search is limited to the group before anything is ranked, so an answer for one client can't use another client's material.",
-      "Each Teams chat belongs to exactly one group, and only Team Leads and admins can connect one.",
-      "Owners and Admins see every group; everyone else, Team Leads included, sees only the groups they've been added to.",
-    ],
-  },
-  {
-    icon: "shield",
-    title: "Guardrails on every answer",
-    points: [
-      "A locked safety floor that nobody can turn off, plus company-wide switches and custom rules. A group can be made stricter, never looser.",
-      "Questions are checked before Sidekick answers, and answers are checked against their sources afterwards.",
-      "In chats with client guests, Sidekick only uses material marked shareable.",
-      "When it doesn't know, Sidekick says so instead of guessing.",
-    ],
-  },
-  {
-    icon: "audit",
-    title: "An audit log you can read",
-    points: [
-      "Sign-ins, role changes, chat links, rule changes and other important actions are recorded with who did them and when.",
-      "Activity traces record timings and counts, never document text.",
-      "Every error shows a reference code, so support can find exactly what happened without seeing your content.",
-    ],
-  },
-  {
-    icon: "lock",
-    title: "Sign-in and access",
-    points: [
-      "Sign in with Microsoft, which your Org Owner can make required for everyone.",
-      "Six roles, from Org Owner to Viewer. Billing Admins see costs, not content.",
-      "Passwords are stored only as one-way hashes, and repeated wrong passwords pause sign-in.",
-    ],
-  },
-  {
-    icon: "cloud",
-    title: "Where your data lives",
-    points: [
-      "Sidekick runs in Microsoft Azure: the app, its database and its search index.",
-      "Everything travels encrypted (HTTPS only), including the connection to the database.",
-      "The pages load nothing from other websites: no trackers, no ads, no third-party scripts.",
-      "Org Owners and Org Admins can delete documents, meetings and whole groups at any time.",
-    ],
-  },
+const PILLARS: { icon: string; title: string; text: string; draft?: boolean }[] = [
+  { icon: "groups", title: "Walls between companies and groups", text: "Nothing is shared between organizations, and each client group is walled off inside yours. Searches stay inside one group." },
+  { icon: "shield", title: "Guardrails on every answer", text: "A locked safety floor plus your own rules, checked before Sidekick answers and again after. If it doesn't know, it says so." },
+  { icon: "lock", title: "Microsoft and two-step sign-in", text: "Sign in with Microsoft (which you can require), or a password plus a passkey or authenticator app." },
+  { icon: "key", title: "Encrypted", text: "HTTPS only, including to the database. Data is encrypted at rest by Azure, and sign-in secrets are encrypted again by Sidekick." },
+  { icon: "audit", title: "An audit log you can read", text: "Sign-ins, role changes, chat links and rule changes are recorded with who and when. Traces hold timings, never document text." },
+  { icon: "pulse", title: "Backups and monitoring", text: "Automatic database backups kept for 35 days, health checks, uptime alerts and a reference code on every error." },
+  { icon: "spark", title: "Not used to train AI", text: "Sidekick's AI is Claude, through Anthropic's API, whose commercial terms say API data isn't used for training by default.", draft: true },
 ];
 
 export default function SecurityPage() {
   return (
     <PublicShell layout="full" current="/security">
-      <div className="site-wrap site-page-head">
+      <div className="site-wrap site-page-head site-center">
         <span className="site-eyebrow">Security &amp; trust</span>
         <h1>Client work stays with the client it belongs to</h1>
-        <p>Firms trust Sidekick with many clients at once, so separation is built into everything it does. Here&apos;s how, in plain language.</p>
+        <p>Firms trust Sidekick with many clients at once, so separation is built into everything it does.</p>
       </div>
+
       <div className="site-wrap site-stack">
-        <div className="site-grid two">
+        <div className="site-pillars">
           {PILLARS.map((p) => (
-            <div key={p.title} className="site-card">
+            <div key={p.title} className="site-card site-pillar">
               <SiteIcon name={p.icon} />
-              <h3>{p.title}</h3>
-              <ul className="site-checks" style={{ marginTop: 10, paddingLeft: 0 }}>
-                {p.points.map((t) => <li key={t}><span>{t}</span></li>)}
-              </ul>
+              <h2>{p.title}</h2>
+              <p>{p.text}</p>
+              {p.draft && <span className="site-faq-note">Draft wording, pending legal review. Anthropic&apos;s own terms are what count.</span>}
             </div>
           ))}
-          <div className="site-card">
-            <SiteIcon name="spark" />
-            <h3>Powered by Claude</h3>
-            <p>Sidekick&apos;s answers, notes and checks are written by Claude, an AI model made by Anthropic. Sidekick sends Claude only what one request needs (the question and the passages from that group) and keeps the walls between clients itself.</p>
-            <div className="callout warn" role="note" style={{ marginTop: 12 }}>
-              <span>
-                <b>Draft for legal review.</b> Anthropic&apos;s commercial terms say data sent through its API isn&apos;t used to train its models by default. This summary is a placeholder until a lawyer has checked it; Anthropic&apos;s own terms are what count.
-              </span>
-            </div>
-          </div>
         </div>
+      </div>
+
+      <section className="site-section alt" aria-labelledby="walls-title">
+        <div className="site-wrap">
+          <span className="site-eyebrow">How the walls work</span>
+          <h2 id="walls-title">Every answer comes from one group</h2>
+          <p className="site-lead">Each Teams chat belongs to exactly one group, and Sidekick searches only that group before it ranks anything. Client guests only get material marked Shareable.</p>
+          <Walls />
+        </div>
+      </section>
+
+      <section className="site-section" aria-labelledby="where-title">
+        <div className="site-wrap site-grid two" style={{ alignItems: "start" }}>
+          <div>
+            <span className="site-eyebrow">Where your data lives</span>
+            <h2 id="where-title">In Microsoft Azure</h2>
+            <p className="site-lead" style={{ marginBottom: 12 }}>Sidekick runs entirely in Microsoft Azure. The pages load nothing from other websites: no trackers, ads or third-party scripts.</p>
+            <p className="muted" style={{ margin: 0 }}>Org Owners and Org Admins can delete documents, meetings and whole groups at any time. To remove your whole organization, <Link href="/support">contact support</Link>.</p>
+          </div>
+          <ul className="site-where">
+            <li><SiteIcon name="cloud" /><span><b>The Sidekick app</b><small>Runs in Azure, HTTPS only</small></span></li>
+            <li><SiteIcon name="db" /><span><b>Database</b><small>Azure Database for PostgreSQL, encrypted, backed up automatically</small></span></li>
+            <li><SiteIcon name="map" /><span><b>Search index</b><small>Azure AI Search, filtered by company and group</small></span></li>
+            <li><SiteIcon name="spark" /><span><b>AI answers</b><small>Claude by Anthropic; only the passages one answer needs</small></span></li>
+          </ul>
+        </div>
+      </section>
+
+      <div className="site-wrap site-narrow site-stack">
         <FaqList title="Security questions" items={faqFor("security")} />
         <div className="callout info" role="note">
           <span>More detail: <Link href="/docs/concepts#how-your-data-is-protected">how your data is protected</Link>, <Link href="/docs/roles-and-permissions">roles and permissions</Link> and the <Link href="/privacy">privacy policy</Link>. Found a security problem? Tell us on <Link href="/support">Support</Link>.</span>
         </div>
       </div>
     </PublicShell>
+  );
+}
+
+/** The walls diagram: your company with two client groups, a guest who sees only Shareable, another company apart. */
+function Walls() {
+  return (
+    <figure className="site-walls" aria-label="Diagram: your company holds separate groups, each with its own chats and documents; a client guest sees only Shareable documents; another company is completely separate.">
+      <div className="site-walls-org">
+        <div className="site-walls-label"><SiteIcon name="building" /><b>Your company</b></div>
+        <div className="site-walls-groups">
+          <div className="site-walls-group">
+            <b>Payments Platform</b><small>Client: Northwind Bank</small>
+            <div className="site-walls-items">
+              <span>Team chat</span><span>Cutover plan</span><span className="share">Status deck · Shareable</span>
+            </div>
+            <div className="site-walls-guest"><span className="site-avatar">G</span><span>Client guest sees <b>Shareable</b> only</span></div>
+          </div>
+          <div className="site-walls-wall" aria-hidden="true"><span>wall</span></div>
+          <div className="site-walls-group">
+            <b>Store Rollout</b><small>Client: Fabrikam Retail</small>
+            <div className="site-walls-items">
+              <span>Team chat</span><span>Rates · Internal</span><span>Weekly sync notes</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="site-walls-wall big" aria-hidden="true"><span>wall</span></div>
+      <div className="site-walls-org other">
+        <div className="site-walls-label"><SiteIcon name="building" /><b>Another company</b></div>
+        <small>Its own people, groups and data. Nothing is shared, ever.</small>
+      </div>
+      <figcaption className="site-demo-caption">Made-up example.</figcaption>
+    </figure>
   );
 }

@@ -17,6 +17,20 @@ import { span } from "./trace";
 export const ACCEPTED = [".pdf", ".docx", ".txt", ".md", ".vtt", ".csv", ".json"];
 /** Largest file accepted, per file (25 MB). */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/** The accepted types in words, for error messages and the upload box. */
+export const ACCEPTED_TEXT = "PDF, Word (.docx), text, Markdown, CSV, JSON or a Teams transcript (.vtt)";
+
+/**
+ * Why an upload can't be accepted at all (wrong type, empty, too large), or null if it may be read.
+ * Checked before a document row is saved, so refused files never show up as "Failed" documents.
+ */
+export function uploadProblem(name: string, size: number): string | null {
+  const ext = path.extname(name).toLowerCase();
+  if (!ACCEPTED.includes(ext)) return `${ext || "This file type"} isn't supported. Upload ${ACCEPTED_TEXT}.`;
+  if (size === 0) return "This file is empty.";
+  if (size > MAX_UPLOAD_BYTES) return "File is larger than 25 MB.";
+  return null;
+}
 
 /**
  * Longest meeting transcript accepted, pasted or from a file (300,000 characters: roughly five hours of
@@ -38,7 +52,7 @@ export async function fileToText(name: string, buf: Buffer): Promise<string> {
 async function readFileText(name: string, buf: Buffer): Promise<string> {
   const ext = path.extname(name).toLowerCase();
   if (!ACCEPTED.includes(ext)) {
-    throw new HttpError(415, `${ext || "This file type"} isn't supported yet. Upload PDF, Word (.docx), text, Markdown or a Teams transcript (.vtt).`);
+    throw new HttpError(415, `${ext || "This file type"} isn't supported. Upload ${ACCEPTED_TEXT}.`);
   }
   if (ext === ".pdf") {
     const { extractText, getDocumentProxy } = await import("unpdf");

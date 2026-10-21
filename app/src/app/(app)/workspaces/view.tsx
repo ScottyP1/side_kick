@@ -2,7 +2,8 @@
 
 /**
  * Workspaces (/workspaces): one workspace per client engagement, plus the Teams channels and chats linked to them.
- * Admins create workspaces. Admins, and Team Leads for the workspaces they lead, link Teams channels with the
+ * Org Owners/Admins create, rename (name and engagement code) and delete workspaces; deleting asks for a
+ * confirmation that says what will be removed. Admins, and Team Leads for the workspaces they lead, link Teams channels with the
  * code Sidekick shows in Teams, and choose per chat what Sidekick does there (meeting notes, tracking every
  * message, reminders; components/chat-settings.tsx).
  */
@@ -33,6 +34,7 @@ export default function WorkspacesPage() {
   const [linkForm, setLinkForm] = useState({ code: "", ws: "", guests: false });
   const [linkError, setLinkError] = useState("");
   const [settingsFor, setSettingsFor] = useState<TeamsLink | null>(null);
+  const [editing, setEditing] = useState<{ w: W; name: string; code: string; error: string } | null>(null);
   const reportError = useReportError();
 
   const load = useCallback(
@@ -60,6 +62,36 @@ export default function WorkspacesPage() {
       toast(`Workspace “${name}” created. Add documents next.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't create the workspace.");
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    try {
+      await api(`/api/workspaces/${encodeURIComponent(editing.w.id)}`, { method: "PATCH", json: { name: editing.name, code: editing.code } });
+      setEditing(null);
+      await reload();
+      await load();
+      toast("Workspace updated.");
+    } catch (e) {
+      setEditing({ ...editing, error: e instanceof Error ? e.message : "Couldn't save the workspace." });
+    }
+  };
+
+  const remove = async (w: W) => {
+    try {
+      const { contents: c } = await api<{ contents: { documents: number; meetings: number; actionItems: number; questions: number; chats: number } }>(`/api/workspaces/${encodeURIComponent(w.id)}`);
+      const n = (k: number, one: string) => `${k} ${one}${k === 1 ? "" : "s"}`;
+      const what = [n(c.documents, "document"), n(c.meetings, "meeting"), n(c.actionItems, "action item"), n(c.questions, "asked question")].join(", ");
+      const chats = c.chats ? ` ${n(c.chats, "linked Teams chat")} will be unlinked.` : "";
+      if (!confirm(`Delete the workspace “${w.name}”? This permanently deletes ${what}, its knowledge map, guardrail rules, saved Teams messages and reminders.${chats} The audit log and usage records are kept. This can't be undone.`)) return;
+      await api(`/api/workspaces/${encodeURIComponent(w.id)}`, { method: "DELETE" });
+      setEditing(null);
+      await reload();
+      await load();
+      toast(`Workspace “${w.name}” deleted.`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't delete the workspace.");
     }
   };
 
@@ -124,14 +156,19 @@ export default function WorkspacesPage() {
         <div className="panel">
           <div className="empty">
             <h2>No workspaces yet</h2>
-            <span>Create one for each client engagement, like “Contoso – Cloud Migration”.</span>
+            <span>
+              {me.user.admin
+                ? "Create one for each client engagement, like “Contoso – Cloud Migration”."
+                : "You haven't been added to a workspace yet. Your Org Owner or Admin creates them and adds people."}
+            </span>
             {me.user.admin && <button className="btn primary" onClick={() => setOpen(true)}>Create your first workspace</button>}
           </div>
         </div>
       )}
       <div className="grid g3">
         {list?.map((w) => (
-          <Link key={w.id} className="ws-card" href="/knowledge" onClick={() => setWs(w.id)} style={{ textDecoration: "none" }}>
+          <div key={w.id} style={{ position: "relative" }}>
+          <Link className="ws-card" href="/knowledge" onClick={() => setWs(w.id)} style={{ textDecoration: "none", height: "100%" }}>
             <span className="mono faint">{w.code || "No code"}</span>
             <h3 style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span className="swatch" style={{ background: w.color }} />
@@ -147,6 +184,17 @@ export default function WorkspacesPage() {
             </div>
             <span className="muted" style={{ fontSize: 12.5 }}>Last meeting: {fmtDate(w.last_meeting)}</span>
           </Link>
+          {me.user.admin && (
+            <button
+              className="btn ghost small"
+              style={{ position: "absolute", top: 10, right: 10 }}
+              aria-label={`Edit or delete ${w.name}`}
+              onClick={() => setEditing({ w, name: w.name, code: w.code ?? "", error: "" })}
+            >
+              Edit
+            </button>
+          )}
+          </div>
         ))}
       </div>
       <div className="panel" style={{ marginTop: 16 }}>
@@ -164,7 +212,11 @@ export default function WorkspacesPage() {
         </div>
         {!links?.length ? (
           <div className="empty">
-            <span>Nothing linked yet. Add Sidekick to a Teams group chat or channel and mention it: it replies with a link code to enter here.</span>
+            <span>
+              {manage
+                ? "Nothing linked yet. Add Sidekick to a Teams group chat or channel and mention it: it replies with a link code to enter here."
+                : "Nothing linked yet. Your Org Owner, Org Admin or Team Lead links Teams chats and channels here."}
+            </span>
           </div>
         ) : (
           <div className="table-wrap">
@@ -260,6 +312,15 @@ export default function WorkspacesPage() {
             </>
           }
         >
+          {/* A form so Enter in either field creates the workspace. */}
+          <form
+            style={{ display: "contents" }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (name.trim()) create();
+            }}
+          >
+          <button type="submit" hidden aria-hidden tabIndex={-1} />
           <div className="field">
             <label htmlFor="wname">Workspace name</label>
             <input id="wname" className="input" placeholder="e.g. Contoso – Cloud Migration" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
@@ -268,7 +329,40 @@ export default function WorkspacesPage() {
             <label htmlFor="wcode">Engagement code (optional)</label>
             <input id="wcode" className="input mono" placeholder="ENG-2041" value={code} onChange={(e) => setCode(e.target.value)} />
           </div>
+          </form>
           {error && <p className="err">{error}</p>}
+        </Modal>
+      )}
+      {editing && (
+        <Modal
+          title="Edit workspace"
+          onClose={() => setEditing(null)}
+          footer={
+            <>
+              <button className="btn danger" style={{ marginRight: "auto" }} onClick={() => remove(editing.w)}>Delete workspace…</button>
+              <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
+              <button className="btn primary" disabled={!editing.name.trim()} onClick={saveEdit}>Save</button>
+            </>
+          }
+        >
+          <form
+            style={{ display: "contents" }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (editing.name.trim()) saveEdit();
+            }}
+          >
+          <button type="submit" hidden aria-hidden tabIndex={-1} />
+          <div className="field">
+            <label htmlFor="ename">Workspace name</label>
+            <input id="ename" className="input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} autoFocus />
+          </div>
+          <div className="field">
+            <label htmlFor="ecode">Engagement code (optional)</label>
+            <input id="ecode" className="input mono" placeholder="ENG-2041" value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value })} />
+          </div>
+          </form>
+          {editing.error && <p className="err">{editing.error}</p>}
         </Modal>
       )}
     </>

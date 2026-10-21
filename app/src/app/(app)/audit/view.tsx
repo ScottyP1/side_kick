@@ -2,25 +2,40 @@
 
 /**
  * Security & audit (/audit): the organization's audit log: sign-ins, access changes, uploads, deletions,
- * Teams links and every action Sidekick takes on its own. Admins only.
+ * Teams links and every action Sidekick takes on its own. Admins only. "Where your data goes" is built from
+ * /api/health, so it shows the setup actually running (database engine, search, Claude, Teams).
  */
 
 import { useEffect, useState } from "react";
-import { api, fmtTime, Icon, Pill } from "@/components/ui";
+import { api, fmtTime, Icon, useReportError } from "@/components/ui";
 
 type Row = { id: number; actor: string; action: string; kind: string; created_at: string; workspace: string | null };
 
-const FLOW: [string, string][] = [
-  ["Your browser", "Signed-in session, HTTPS in production"],
-  ["Sidekick server", "Checks role and workspace on every request"],
-  ["Claude API", "Anthropic · moves to Azure-hosted Claude in step 2"],
-  ["Local database", "SQLite on this machine · Azure Postgres + AI Search in step 2"],
-];
+/** What /api/health reports (yes/no facts only). */
+type Health = { database: { engine: string }; claude: boolean; search: string; teams: boolean };
+
+/** The data path, step by step, for the setup that is running now. */
+function flowFor(h: Health | null): [string, string][] {
+  const search = !h ? "…" : h.search === "azure-hybrid" ? "Azure AI Search (keyword + meaning), filtered to your workspace" : h.search === "azure-keyword" ? "Azure AI Search (keyword), filtered to your workspace" : "Keyword search inside Sidekick's own database";
+  return [
+    ["Your browser", "Signed-in session, HTTPS in production"],
+    ["Sidekick server", "Checks role and workspace on every request"],
+    ["Claude", !h ? "…" : h.claude ? "Anthropic's Claude API: sees only the passages needed for one answer" : "Not connected yet"],
+    ["Database", !h ? "…" : h.database.engine === "postgres" ? "PostgreSQL" : "SQLite on the machine running Sidekick"],
+    ["Search", search],
+    ...(h?.teams ? [["Microsoft Teams", "Only chats and channels an admin linked to a workspace"] as [string, string]] : []),
+  ];
+}
 
 export default function AuditPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [err, setErr] = useState("");
   const [kind, setKind] = useState("All");
+  const [health, setHealth] = useState<Health | null>(null);
+  const reportError = useReportError();
+  useEffect(() => {
+    api<Health>("/api/health").then(setHealth).catch(reportError);
+  }, [reportError]);
   useEffect(() => {
     api<{ rows: Row[] }>("/api/audit").then((r) => setRows(r.rows)).catch((e) => setErr(e.message));
   }, []);
@@ -38,10 +53,10 @@ export default function AuditPage() {
         </div>
       </div>
       <div className="panel">
-        <div className="panel-h"><h2>Where your data goes (step 1)</h2><Pill kind="info">Local demo</Pill></div>
+        <div className="panel-h"><h2>Where your data goes</h2></div>
         <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="flow">
-            {FLOW.map(([a, b], i) => (
+            {flowFor(health).map(([a, b], i) => (
               <div key={a} style={{ display: "contents" }}>
                 {i > 0 && <span className="flow-arrow" aria-hidden="true">→</span>}
                 <div className="flow-step"><b>{a}</b><span className="muted">{b}</span></div>

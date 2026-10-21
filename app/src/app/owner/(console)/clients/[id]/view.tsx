@@ -3,7 +3,8 @@
 /**
  * One client (/owner/clients/:id): who is in this organization (role, workspaces, Microsoft sign-in, last
  * active), its workspaces, and its restrictions: feature switches that apply to this client only.
- * Operators only; opening the page is recorded in the operator log. Shows no document or meeting content.
+ * Operators only; opening the page is recorded in the operator log once per visit (reloads after a switch
+ * flip aren't). Shows no document or meeting content.
  */
 
 import Link from "next/link";
@@ -36,7 +37,8 @@ function Client() {
   const [d, setD] = useState<Detail | null>(null);
   const [pending, setPending] = useState<Flag | null>(null);
 
-  const load = useCallback(() => api<Detail>(`/api/owner/tenants/${id}`).then(setD), [id]);
+  // `reload`: refreshing after a change during this visit, so the server doesn't log another "Viewed".
+  const load = useCallback((reload = false) => api<Detail>(`/api/owner/tenants/${id}${reload ? "?reload=1" : ""}`).then(setD), [id]);
   useEffect(() => {
     load().catch(reportError);
   }, [load, reportError]);
@@ -46,7 +48,7 @@ function Client() {
       await api(`/api/owner/tenants/${id}/flags`, { method: "POST", json: { key: f.key, enabled } });
       toast(`${f.label} is ${enabled ? "on" : "off"} for ${d?.org.name}`);
       setPending(null);
-      load().catch(reportError);
+      load(true).catch(reportError);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Couldn't update.");
     }

@@ -19,7 +19,7 @@ import { z } from "zod";
 import { all, get, newId, now, run, tx } from "./db";
 import { structured } from "./claude";
 import { indexText, searchPassages } from "./search";
-import { auditAsSidekick, type User } from "./auth";
+import { audit, auditAsSidekick, type User } from "./auth";
 import { assertEnabled } from "./owner";
 import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenQuestion, type GuardPlace, type RuleId } from "./guardrails";
 
@@ -327,6 +327,7 @@ export async function refreshInsights(user: User, workspaceId: string) {
     "INSERT INTO insights (workspace_id, json, refreshed_at) VALUES (?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET json = excluded.json, refreshed_at = excluded.refreshed_at",
     workspaceId, json, now(),
   );
-  await auditAsSidekick(user.org_id, `Refreshed knowledge map: ${out.topics.length} topics, ${out.gaps.length} gaps`, "Agent action", workspaceId);
+  // The person pressed Refresh, so the log names them (Sidekick did the mapping on their behalf).
+  await audit(user, `Refreshed the knowledge map: ${out.topics.length} topics, ${out.gaps.length} gaps`, "Agent action", workspaceId);
   return JSON.parse(json);
 }

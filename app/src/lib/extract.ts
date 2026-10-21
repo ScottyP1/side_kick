@@ -19,6 +19,14 @@ export const ACCEPTED = [".pdf", ".docx", ".txt", ".md", ".vtt", ".csv", ".json"
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
+ * Longest meeting transcript accepted, pasted or from a file (300,000 characters: roughly five hours of
+ * talk, about 75,000 tokens). The whole transcript goes to Claude in one request to write the notes, so this
+ * keeps each import within Claude's context and its cost predictable (well under a dollar). Longer meetings
+ * can be imported in parts.
+ */
+export const MAX_TRANSCRIPT_CHARS = 300_000;
+
+/**
  * Extracts the text of an uploaded file. PDFs get a `[Page N]` marker per page; `.vtt` transcripts are
  * converted to readable "[time] Speaker: words" lines.
  * @throws HttpError 415 for file types Sidekick can't read yet

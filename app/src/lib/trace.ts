@@ -83,15 +83,35 @@ export function traceUserId(): string | null {
   return store.getStore()?.trace.userId ?? null;
 }
 
-/** Marks the trace as failed with an HTTP status and (optionally) the reference code the person saw. */
-export function traceFailed(httpStatus: number, error: string, ref?: string) {
+/**
+ * Marks the trace as failed with an HTTP status and (optionally) the reference code the person saw.
+ * - `opts.refusal`: a deliberate "no" with a 5xx status (a feature paused or turned off by the Sidekick team);
+ *   recorded like a 4xx refusal, not counted as a failure of Sidekick.
+ * - `opts.reason`: why it failed, for the trace's first step (e.g. "TypeError: x.trim is not a function"),
+ *   when the message shown to the person is the generic one. Never document text: see `failureReason`.
+ */
+export function traceFailed(httpStatus: number, error: string, ref?: string, opts: { refusal?: boolean; reason?: string } = {}) {
+  const refusal = opts.refusal ?? false;
   const t = store.getStore()?.trace;
   if (!t) return;
   // 4xx = refused (not allowed, not found, bad input): recorded, but not counted as a failure of Sidekick.
-  if (httpStatus >= 500) t.status = "error";
+  if (httpStatus >= 500 && !refusal) t.status = "error";
   t.httpStatus = httpStatus;
   t.error = error.slice(0, 300);
   t.ref = ref ?? null;
+  // The root step carries the reason too, so a failed trace's timeline says why (message only, no data).
+  const root = t.spans[0];
+  if (root && httpStatus >= 500 && !refusal) root.error = (opts.reason ? `${error} · ${opts.reason}` : error).slice(0, 300);
+}
+
+/**
+ * A short, data-free reason for an unexpected error: its type and message, with anything quoted (which could
+ * be a piece of a document or a value someone typed) replaced by "…", cut to 160 characters.
+ */
+export function failureReason(e: unknown): string {
+  const name = e instanceof Error ? e.name : typeof e;
+  const msg = (e instanceof Error ? e.message : String(e)).split("\n")[0].replace(/(["'`“”‘’]).*?\1/g, "“…”");
+  return `${name}: ${msg}`.slice(0, 160);
 }
 
 /** Adds non-sensitive attributes to the current span (or the trace's root span). */
@@ -150,7 +170,7 @@ export async function withTrace<T>(
   try {
     return await store.run({ trace: t, spanId: rootSpan.id }, fn);
   } catch (e) {
-    if (t.status === "ok") traceFailed(500, e instanceof Error ? e.message : String(e));
+    if (t.status === "ok") traceFailed(500, "Failed unexpectedly", undefined, { reason: failureReason(e) });
     throw e;
   } finally {
     rootSpan.duration = Date.now() - t.startedAt;

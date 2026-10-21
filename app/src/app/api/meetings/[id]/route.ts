@@ -27,7 +27,7 @@ async function load(id: string, edit?: string) {
 export const GET = handle(async (_req: Request, { params }: Ctx) => {
   const { m } = await load((await params).id);
   const items = await all("SELECT id, kind, text, who, answered FROM items WHERE meeting_id = ? ORDER BY rowid", m.id);
-  const actions = await all("SELECT id, text, owner, due, status, ticket FROM action_items WHERE meeting_id = ? ORDER BY rowid", m.id);
+  const actions = await all("SELECT id, text, owner, due, due_on, status, ticket FROM action_items WHERE meeting_id = ? ORDER BY rowid", m.id);
   return { meeting: m, items, actions };
 });
 

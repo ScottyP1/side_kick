@@ -2,18 +2,25 @@
 
 /**
  * Meetings (/meetings): import a transcript (Teams .vtt, Word or pasted text) and read the notes Sidekick wrote:
- * summary, decisions, action items, open questions and facts. Notes also go to the workspace's linked Teams channels.
+ * summary, decisions, action items (editable here: owner, due date, status), open questions and facts. Notes also go
+ * to the workspace's linked Teams chats. A failed import is still saved; the page then opens it with **Try again**.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { NeedsWorkspace, useApp } from "@/components/shell";
-import { api, fmtDate, Icon, Modal, Pill, Spinner, useReportError, useToast } from "@/components/ui";
+import { api, ApiError, fmtDate, Icon, Modal, Pill, Spinner, useReportError, useToast } from "@/components/ui";
+import { ActionItemsTable, useUpdateAction, type ActionItem } from "@/components/action-items";
+
+/** Same limit as the server (lib/extract.ts MAX_TRANSCRIPT_CHARS), so the dialog can say so before sending. */
+const MAX_TRANSCRIPT_CHARS = 300_000;
+/** The Transcript tab shows a long transcript in pieces of this many characters, so the page stays quick. */
+const TRANSCRIPT_PAGE = 40_000;
 
 type M = { id: string; title: string; held_at: string; external_guests: number; status: string; error: string | null; decisions: number; actions: number; open_questions: number };
 type Detail = {
   meeting: { id: string; title: string; held_at: string; summary: string | null; transcript: string; status: string; error: string | null; external_guests: number };
   items: { id: string; kind: string; text: string; who: string | null; answered: number | null }[];
-  actions: { id: string; text: string; owner: string | null; due: string | null; status: string }[];
+  actions: ActionItem[];
 };
 
 export default function MeetingsPage() {
@@ -23,6 +30,7 @@ export default function MeetingsPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState("Notes");
+  const [shownChars, setShownChars] = useState(TRANSCRIPT_PAGE);
   const [importing, setImporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -39,17 +47,30 @@ export default function MeetingsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set after the request resolves
     load().catch(reportError);
   }, [load, reportError]);
+  const loadDetail = useCallback(async () => {
+    if (openId) setDetail(await api<Detail>(`/api/meetings/${openId}`));
+  }, [openId]);
   useEffect(() => {
-    if (openId) api<Detail>(`/api/meetings/${openId}`).then(setDetail).catch((e) => toast(e.message));
-  }, [openId, toast]);
+    loadDetail().catch(reportError);
+  }, [loadDetail, reportError]);
+  const updateAction = useUpdateAction(
+    (id, patch) => setDetail((d) => (d ? { ...d, actions: d.actions.map((x) => (x.id === id ? { ...x, ...patch } : x)) } : d)),
+    () => loadDetail().catch(reportError),
+  );
   const openMeeting = (id: string | null) => {
     setDetail(null);
     setTab("Notes");
+    setShownChars(TRANSCRIPT_PAGE);
     setOpenId(id);
   };
 
   if (!ws) return <NeedsWorkspace />;
 
+  const resetImport = () => {
+    setImporting(false);
+    setFile(null);
+    setForm({ title: "", held_at: new Date().toISOString().slice(0, 10), external: false, text: "" });
+  };
   const submit = async () => {
     setBusy(true);
     setErr("");
@@ -62,15 +83,22 @@ export default function MeetingsPage() {
     if (file) fd.set("file", file);
     try {
       const r = await api<{ id: string }>("/api/meetings", { method: "POST", body: fd });
-      setImporting(false);
-      setFile(null);
-      setForm({ title: "", held_at: new Date().toISOString().slice(0, 10), external: false, text: "" });
+      resetImport();
       toast("Notes are ready");
       await load();
       openMeeting(r.id);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Import failed.");
-      load();
+      // The meeting was saved but its notes failed: close the dialog and open it, with Try again, so the
+      // person retries there instead of importing it again (which left duplicate Failed meetings).
+      const savedId = e instanceof ApiError && typeof e.data?.meeting_id === "string" ? e.data.meeting_id : null;
+      if (savedId) {
+        resetImport();
+        toast("The meeting is saved, but Sidekick couldn't write the notes. Use Try again.", "error");
+        openMeeting(savedId);
+      } else {
+        setErr(e instanceof Error ? e.message : "Import failed.");
+      }
+      load().catch(reportError);
     } finally {
       setBusy(false);
     }
@@ -84,8 +112,9 @@ export default function MeetingsPage() {
       await load();
       openMeeting(id);
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Still failing.");
-      load();
+      toast(e instanceof Error ? e.message : "Still failing.", "error");
+      load().catch(reportError);
+      loadDetail().catch(reportError);
     } finally {
       setBusy(false);
     }
@@ -95,7 +124,7 @@ export default function MeetingsPage() {
     await api(`/api/meetings/${id}`, { method: "DELETE" });
     toast("Meeting, notes and transcript deleted");
     openMeeting(null);
-    load();
+    load().catch(reportError);
   };
 
   if (openId) {
@@ -115,7 +144,10 @@ export default function MeetingsPage() {
           <>
             <div className="page-head">
               <div>
-                <div className="eyebrow">{fmtDate(m!.held_at)}{m!.external_guests ? " · client guests present" : " · internal"}</div>
+                <div className="eyebrow">
+                  {fmtDate(m!.held_at)}{m!.external_guests ? " · client guests present" : " · internal"}{" "}
+                  <Pill kind={m!.status === "Ready" ? "good" : m!.status === "Failed" ? "bad" : "info"}>{m!.status}</Pill>
+                </div>
                 <h1>{m!.title}</h1>
               </div>
               {canEdit && (
@@ -127,7 +159,7 @@ export default function MeetingsPage() {
             </div>
             {m!.status === "Failed" && <div className="callout bad"><Icon n="alert" /><div>Sidekick couldn&apos;t write notes: {m!.error}</div></div>}
             <div className="grid g4">
-              {[["Decisions", of("decision").length], ["Action items", detail.actions.length], ["Open questions", of("question").filter((q) => !q.answered).length], ["Facts learned", of("requirement").length + of("fact").length + of("risk").length + of("glossary").length]].map(([l, v]) => (
+              {[["Decisions", of("decision").length], ["Open action items", detail.actions.filter((a) => a.status !== "Done").length], ["Open questions", of("question").filter((q) => !q.answered).length], ["Facts learned", of("requirement").length + of("fact").length + of("risk").length + of("glossary").length]].map(([l, v]) => (
                 <div key={l as string} className="kpi" style={{ cursor: "default" }}>
                   <span className="eyebrow">{l}</span>
                   <span className="v" style={{ fontSize: 22 }}>{v}</span>
@@ -152,15 +184,7 @@ export default function MeetingsPage() {
                     <div>
                       <h3>Action items</h3>
                       {detail.actions.length ? (
-                        <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-                          {detail.actions.map((a) => (
-                            <li key={a.id}>
-                              {a.owner ? <b>{a.owner}: </b> : <span style={{ color: "var(--hand)" }}>No owner yet: </span>}
-                              {a.text}
-                              {a.due && <span className="muted">, due {a.due}</span>}
-                            </li>
-                          ))}
-                        </ul>
+                        <ActionItemsTable items={detail.actions} canEdit={canEdit} onChange={updateAction} />
                       ) : <p className="muted" style={{ margin: "4px 0 0" }}>None</p>}
                     </div>
                     <div>
@@ -176,7 +200,17 @@ export default function MeetingsPage() {
                     <Section title="Requirements, facts & risks" items={[...of("requirement"), ...of("fact"), ...of("risk"), ...of("glossary")].map((f) => `${f.kind[0].toUpperCase() + f.kind.slice(1)}: ${f.text}`)} />
                   </div>
                 )}
-                {tab === "Transcript" && <pre className="transcript-raw">{m!.transcript}</pre>}
+                {tab === "Transcript" && (
+                  <>
+                    {m!.transcript ? <pre className="transcript-raw">{m!.transcript.slice(0, shownChars)}</pre> : <p className="muted">No transcript text.</p>}
+                    {m!.transcript.length > shownChars && (
+                      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10 }}>
+                        <span className="muted">Showing {shownChars.toLocaleString()} of {m!.transcript.length.toLocaleString()} characters.</span>
+                        <button className="btn small" onClick={() => setShownChars((n) => n + TRANSCRIPT_PAGE)}>Show more</button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </>
@@ -191,7 +225,7 @@ export default function MeetingsPage() {
         <div>
           <div className="eyebrow">Meetings</div>
           <h1>{list ? `${list.length} meeting${list.length === 1 ? "" : "s"}` : "Meetings"}</h1>
-          <p>Import a Teams transcript and Sidekick writes the notes: summary, decisions, action items, open questions and facts to remember. Live meeting joining arrives in step 3.</p>
+          <p>Import a Teams transcript and Sidekick writes the notes: summary, decisions, action items, open questions and facts to remember.</p>
         </div>
         {canEdit && (
           <div className="actions">
@@ -226,7 +260,8 @@ export default function MeetingsPage() {
               <tbody>
                 {list?.map((x) => (
                   <tr key={x.id} className="clickable" onClick={() => openMeeting(x.id)}>
-                    <td><b>{x.title}</b></td>
+                    {/* The title is a real button, so the row can be reached and opened with the keyboard. */}
+                    <td><button type="button" className="linklike" onClick={(e) => { e.stopPropagation(); openMeeting(x.id); }}><b>{x.title}</b></button></td>
                     <td className="muted">{fmtDate(x.held_at)}</td>
                     <td><Pill kind={x.status === "Ready" ? "good" : x.status === "Failed" ? "bad" : "info"}>{x.status}</Pill></td>
                     <td className="r num">{x.decisions}</td>
@@ -247,7 +282,7 @@ export default function MeetingsPage() {
           footer={
             <>
               <button className="btn" disabled={busy} onClick={() => setImporting(false)}>Cancel</button>
-              <button className="btn primary" disabled={busy || (!file && !form.text.trim()) || (!file && !form.title.trim())} onClick={submit}>
+              <button className="btn primary" disabled={busy || (!file && !form.text.trim()) || (!file && !form.title.trim()) || (!file && form.text.length > MAX_TRANSCRIPT_CHARS)} onClick={submit}>
                 {busy ? <><Spinner /> Sidekick is writing notes…</> : "Import & write notes"}
               </button>
             </>
@@ -276,6 +311,11 @@ export default function MeetingsPage() {
             <div className="field">
               <label htmlFor="mtext">Or paste the transcript</label>
               <textarea id="mtext" className="input" rows={6} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder={"Priya: Let's lock sprint 14…\nSam: …"} />
+              <span className={`hint${form.text.length > MAX_TRANSCRIPT_CHARS ? " err" : ""}`}>
+                {form.text.length > MAX_TRANSCRIPT_CHARS
+                  ? `Too long: ${form.text.length.toLocaleString()} characters (limit ${MAX_TRANSCRIPT_CHARS.toLocaleString()}). Split it into parts.`
+                  : `Up to ${MAX_TRANSCRIPT_CHARS.toLocaleString()} characters (about five hours of talk).`}
+              </span>
             </div>
           )}
           {err && <p className="err">{err}</p>}

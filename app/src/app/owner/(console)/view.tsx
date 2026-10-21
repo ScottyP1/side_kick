@@ -57,7 +57,7 @@ export default function OwnerOverview() {
         <div className="kpi" style={{ cursor: "default" }}>
           <span className="eyebrow">Clients</span>
           <span className="v">{k.tenants}</span>
-          <span className="d muted">{k.activeTenants} active in the last 7 days</span>
+          <span className="d muted">{k.activeTenants} active in the last 7 days · {k.activeUsers} of {k.users} users active this week</span>
         </div>
         <div className="kpi" style={{ cursor: "default" }}>
           <span className="eyebrow">Error rate</span>
@@ -67,7 +67,7 @@ export default function OwnerOverview() {
         <div className="kpi" style={{ cursor: "default" }}>
           <span className="eyebrow">Avg response time</span>
           <span className="v">{(k.avgLatency / 1000).toFixed(1)} s</span>
-          <span className="d muted">{k.activeUsers} of {k.users} users active this week</span>
+          <span className="d muted">Per Claude request, this month</span>
         </div>
       </div>
 

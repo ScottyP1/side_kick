@@ -115,6 +115,15 @@ Payments are in **test mode** for now: no money moves, prices are made up, and S
 
 **Free trial and paying.** Every new organization gets a **14-day free trial**. On checkout you see the plan, the price per person, how many people you have and the total every 30 days, and one **Pay (test mode)** button. **Not now** keeps the trial; everyone sees a "Free trial: N days left" note at the top until you pay.
 
+**Setup wizard.** After checkout (paying or **Not now**) a new organization lands on **Get started** (**/get-started**), which walks you through first-time setup one step at a time:
+1. **Welcome**: your plan and trial, and how groups and Team Leads work.
+2. **Connect Microsoft 365** (Org Owner): sign in once with your work account so your people can use **Sign in with Microsoft** (the same as Settings → Microsoft sign-in). The page lists, in plain words, what Microsoft asks you to allow.
+3. **Add to Teams**: who should get the Sidekick app (recommended: only Team Leads and admins) and what your Teams admin does in the Teams admin center.
+4. **Rules**: a guardrails starting point. **Standard** is the usual defaults; **Strict** turns every switch on, for regulated clients. Only the Org Owner can change it; it's the same as the Guardrails page.
+5. **First groups**: a name, client and Team Lead for each client team. Pick the Team Lead from your organization or choose **Someone new…** to add them (they become a Team Lead and you get their temporary password once, to share privately).
+
+Then **Done** shows what's set and what's left, and **Finish setup** ends it. Any step can be skipped (**Do this later**) and you can come back: until setup is finished, Org Owners and Org Admins see a **Finish setting up Sidekick** banner with a **Continue setup** link. Finishing is in the audit log. Organizations set up by the Sidekick team don't get the banner.
+
 **Plan on Usage & billing** (Org Owners, Org Admins and Billing Admins see it; **only the Org Owner and Billing Admins** can change it):
 - **Current plan**, its status (Free trial, Active, Payment failed, Canceled) and dates; **people** used against the plan's limit and **workspaces** against its limit. A person is anyone with an account, any role.
 - **Pay now** (when not active) opens checkout. **Change plan…** switches straight away (the paid-until date stays); a plan you've outgrown (more people or workspaces than it allows) is refused with the numbers.

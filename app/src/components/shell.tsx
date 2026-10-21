@@ -19,6 +19,8 @@ export type Me = {
   branding: { logo?: string | null; accent?: string | null };
   /** What the organization's plan allows now (lib/plans.ts accessFor) and the notice to show, if any. */
   billing?: { mode: "full" | "read_only"; notice: string | null };
+  /** Org Owners/Admins: the setup wizard was opened but isn't finished (shows the "Finish setting up" banner). */
+  setupPending?: boolean;
 };
 
 type Ctx = { me: Me; ws: string; setWs: (id: string) => void; reload: () => Promise<void> };
@@ -171,6 +173,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Icon n="alert" />
                 <span>
                   <b>Claude isn&apos;t connected yet.</b> Add your key as <code>ANTHROPIC_API_KEY</code> in <code>app/.env.local</code>, then restart the app. Uploads and search work without it; answers and meeting notes need it.
+                </span>
+              </div>
+            )}
+            {me.setupPending && !path.startsWith("/get-started") && (
+              <div className="banner info">
+                <Icon n="check" />
+                <span>
+                  Finish setting up Sidekick: connect Microsoft 365, choose your rules and create your first groups.{" "}
+                  <Link href="/get-started">Continue setup</Link>
                 </span>
               </div>
             )}

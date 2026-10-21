@@ -407,3 +407,40 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .ck .ico{width:12px;height:12px;stroke-width:3}
 @media (max-width:900px){.ng{grid-template-columns:minmax(0,1fr)}.ng-summary{position:static}.gstats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.ng-two{grid-template-columns:minmax(0,1fr)}.ng-sec{grid-template-columns:minmax(0,1fr);padding:18px}.ng-sec .n{display:none}}
+
+/* Setup wizard (get-started/view.tsx): steps on the left, one step's card on the right; plain-words permission
+   rows; radio "choice" cards; the "Finish setting up" banner in the shell. */
+.callout.good{background:var(--good-soft);border-color:color-mix(in srgb,var(--good) 30%,transparent)}
+.banner.info{background:var(--accent-soft)}
+.wiz{display:grid;grid-template-columns:240px minmax(0,1fr);gap:24px;align-items:start}
+.wiz-side{display:flex;flex-direction:column;gap:16px;position:sticky;top:72px}
+.wiz-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.wiz-steps li{display:flex;gap:12px;align-items:flex-start;padding:8px 0;position:relative}
+.wiz-steps li:not(:last-child)::after{content:"";position:absolute;left:13px;top:38px;bottom:-4px;width:2px;background:var(--line)}
+.wiz-steps li.done:not(:last-child)::after{background:var(--accent)}
+.wiz-steps .n{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--muted);background:var(--surface);flex:none}
+.wiz-steps li.done .n{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.wiz-steps li.now .n{border-color:var(--accent);color:var(--accent)}
+.wiz-steps .n .ico{width:13px;height:13px;stroke-width:3}
+.wiz-steps button{all:unset;cursor:pointer;display:flex;flex-direction:column;padding-top:3px}
+.wiz-steps button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+.wiz-steps b{font-weight:600;font-size:13.5px}
+.wiz-steps li:not(.now):not(.done) b{color:var(--muted);font-weight:500}
+.wiz-steps small{color:var(--muted);font-size:12px}
+.wiz-card{padding:28px;display:flex;flex-direction:column;gap:20px;box-shadow:var(--shadow)}
+.wiz-card > header{display:flex;flex-direction:column;gap:6px}
+.wiz-card > header p{color:var(--muted);max-width:640px;font-size:15px;margin:0}
+.wiz-foot{display:flex;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:18px;flex-wrap:wrap}
+.wiz-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.2fr) auto;gap:10px;align-items:end}
+.choice{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border:1px solid var(--line);border-radius:9px;cursor:pointer;background:var(--surface);text-align:left;width:100%;font:inherit;color:inherit}
+.choice:hover:not(:disabled){border-color:var(--faint)}
+.choice:disabled{cursor:default;opacity:.75}
+.choice[aria-checked="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:color-mix(in srgb,var(--accent-soft) 45%,var(--surface))}
+.choice .radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--faint);flex:none;margin-top:2px;display:grid;place-items:center}
+.choice[aria-checked="true"] .radio{border-color:var(--accent)}
+.choice[aria-checked="true"] .radio::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.perm{display:grid;grid-template-columns:22px minmax(0,1fr);gap:4px 10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.perm:last-child{border-bottom:0}
+.perm .ico{color:var(--good);margin-top:3px}
+.perm.no .ico{color:var(--bad)}
+@media (max-width:860px){.wiz{grid-template-columns:minmax(0,1fr)}.wiz-side{position:static}.wiz-steps{flex-direction:row;overflow-x:auto;gap:6px}.wiz-steps li{flex-direction:column;align-items:center;min-width:72px;text-align:center}.wiz-steps li::after{display:none}.wiz-steps small{display:none}.wiz-card{padding:18px}.wiz-row{grid-template-columns:minmax(0,1fr)}}

@@ -61,6 +61,10 @@ CREATE TABLE IF NOT EXISTS login_failures (
 );
 CREATE INDEX IF NOT EXISTS login_failures_email ON login_failures(email, created_at);
 CREATE INDEX IF NOT EXISTS login_failures_ip ON login_failures(ip, created_at);
+-- Setup wizard progress per organization (lib/setup.ts): which steps are done or skipped, and when it finished.
+CREATE TABLE IF NOT EXISTS org_setup (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), json TEXT NOT NULL, completed_at TEXT, updated_at TEXT NOT NULL
+);
 -- Self-service sign-up attempts (lib/signup.ts), for the per-IP sign-up limit. Kept one day.
 CREATE TABLE IF NOT EXISTS signup_attempts (
   id TEXT PRIMARY KEY, ip TEXT, created_at TEXT NOT NULL

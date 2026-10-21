@@ -13,6 +13,7 @@ import { helpLink } from "@/lib/help";
 import { parseMarkdown, plainText } from "@/lib/markdown";
 import { metadataFor } from "@/lib/site";
 import { publicArticle } from "@/lib/support-articles";
+import { BRAND } from "@/lib/brand";
 
 // Articles live in the database, so the page is rendered per request and waits for the article (a real 404 for others).
 export const instant = false;
@@ -21,9 +22,9 @@ export const instant = false;
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   await connection();
   const a = await publicArticle((await params).slug);
-  if (!a) return { title: "Not found · Sidekick" };
+  if (!a) return { title: `Not found · ${BRAND.name}` };
   const first = parseMarkdown(a.body, helpLink).find((b) => b.t === "p");
-  return metadataFor({ title: `${a.title} · Sidekick help center`, description: first && first.t === "p" ? plainText(first.c).slice(0, 200) : a.title });
+  return metadataFor({ title: `${a.title} · ${BRAND.name} help center`, description: first && first.t === "p" ? plainText(first.c).slice(0, 200) : a.title });
 }
 
 export default async function ArticlePage({ params }: { params: Promise<{ slug: string }> }) {

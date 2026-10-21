@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, Modal, Pill, Spinner, Switch, fmtTime, useReportError, useToast } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Rule = { id: string; workspaceId: string | null; text: string; version: number; updatedBy: string | null; updatedAt: string };
 type Rules = {
@@ -91,8 +92,8 @@ export default function GuardrailsPage() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Guardrails</div>
-          <h1>Rules Sidekick always follows</h1>
-          <p>These apply to every workspace, in the portal and in Teams. Questions are checked before Sidekick answers, and answers are checked again before anyone sees them. A workspace can be made stricter than the rest, never looser.</p>
+          <h1>Rules {BRAND.name} always follows</h1>
+          <p>These apply to every workspace, in the portal and in Teams. Questions are checked before {BRAND.name} answers, and answers are checked again before anyone sees them. A workspace can be made stricter than the rest, never looser.</p>
         </div>
       </div>
 
@@ -390,7 +391,7 @@ function TestBox({ workspace, limit }: { workspace: Rules["workspace"]; limit: n
       </div>
       <form className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 10 }} onSubmit={run}>
         <div className="muted" style={{ fontSize: 13 }}>
-          Type a question to see whether Sidekick would refuse it{workspace ? ` in ${workspace.name}` : ""}, and why. Add a draft rule to try it before saving.
+          Type a question to see whether {BRAND.name} would refuse it{workspace ? ` in ${workspace.name}` : ""}, and why. Add a draft rule to try it before saving.
         </div>
         <div className="field">
           <label htmlFor="test-q">Question</label>

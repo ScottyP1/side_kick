@@ -32,6 +32,7 @@ import { assertGoodPassword } from "./passwords";
 import { planById } from "./plans";
 import { startSetup } from "./setup";
 import { span, traceScope } from "./trace";
+import { BRAND } from "./brand";
 
 /** Sign-up attempts allowed per IP address within the window. */
 export const SIGNUP_LIMIT = 5;
@@ -39,7 +40,7 @@ export const SIGNUP_LIMIT = 5;
 export const SIGNUP_WINDOW_MINUTES = 60;
 
 /** Shown when sign-up isn't open (the default) or was switched off in the Owner Console. */
-export const SIGNUP_CLOSED = "Self-service sign-up isn't open yet. Contact the Sidekick team (see Support) to get an organization set up.";
+export const SIGNUP_CLOSED = `Self-service sign-up isn't open yet. Contact the ${BRAND.name} team (see Support) to get an organization set up.`;
 
 /** What the sign-up form sends. */
 export type SignUpInput = {
@@ -67,7 +68,7 @@ export async function signUp(input: SignUpInput, ip: string): Promise<{ orgId: s
   const since = new Date(Date.now() - SIGNUP_WINDOW_MINUTES * 60_000).toISOString();
   if (ip) {
     const n = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM signup_attempts WHERE ip = ? AND created_at > ?", ip, since))?.n ?? 0);
-    if (n >= SIGNUP_LIMIT) throw new HttpError(429, `Too many sign-up attempts from your network. Wait an hour and try again, or contact the Sidekick team.`);
+    if (n >= SIGNUP_LIMIT) throw new HttpError(429, `Too many sign-up attempts from your network. Wait an hour and try again, or contact the ${BRAND.name} team.`);
   }
   await run("INSERT INTO signup_attempts (id, ip, created_at) VALUES (?, ?, ?)", newId(), ip || null, now());
 
@@ -84,7 +85,7 @@ export async function signUp(input: SignUpInput, ip: string): Promise<{ orgId: s
     await assertGoodPassword(password, { email });
   }
   if (await get("SELECT id FROM users WHERE email = ?", email)) throw new HttpError(409, "An account with that email already exists. Sign in instead, or use another email.");
-  if (ms && (await get("SELECT id FROM orgs WHERE entra_tenant_id = ?", ms.tenantId))) throw new HttpError(409, "Your Microsoft organization already uses Sidekick. Ask its Org Owner to add you.");
+  if (ms && (await get("SELECT id FROM orgs WHERE entra_tenant_id = ?", ms.tenantId))) throw new HttpError(409, `Your Microsoft organization already uses ${BRAND.name}. Ask its Org Owner to add you.`);
 
   return span("billing", "Sign up", async () => {
     const ids = await tx(async () => {

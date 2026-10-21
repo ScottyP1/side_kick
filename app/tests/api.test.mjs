@@ -1436,6 +1436,14 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await other("POST", `/api/workspaces/${s.wsB}/members`, { users: [(await other("GET", "/api/me")).body.user.id] })).status, 404);
   assert.equal((await other("DELETE", `/api/workspaces/${s.wsB}/members?user=${s.bea}`)).status, 404);
   assert.equal((await other("POST", "/api/workspaces", { name: "Steal", lead: s.bea })).status, 404, "can't make someone from another org a lead");
+  // Roll-off and export: another org can't export, end or keep workspace B, or see this org's roll-offs.
+  assert.equal((await other("GET", `/api/workspaces/${s.wsB}/export`)).status, 404);
+  assert.equal((await other("POST", `/api/workspaces/${s.wsB}/rolloff`, { days: 7 })).status, 404);
+  assert.equal((await other("DELETE", `/api/workspaces/${s.wsB}/rolloff`)).status, 404);
+  const theirExport = await other("GET", "/api/export");
+  assert.equal(theirExport.status, 200);
+  assert.ok(!/ZEBRA|B secrets|Workspace B/.test(String(theirExport.body)), "an organization's export holds only its own groups");
+  assert.deepEqual((await other("GET", "/api/rolloffs")).body.rolloffs, []);
   const theirWs = (await other("POST", "/api/workspaces", { name: "Leak WS" })).body.id;
   assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "vault code ZEBRA-7731" })));
   // From a Teams chat linked to workspace A.
@@ -2445,7 +2453,7 @@ test(`[${ENGINE}] sign-up: creates the organization, its Org Owner and a free tr
   assert.equal(b.subscription.provider, "mock");
   assert.equal(b.testMode, true);
   assert.equal(b.canManage, true);
-  assert.deepEqual(b.usage, { seats: 1, workspaces: 0 });
+  assert.deepEqual(b.usage, { seats: 1, workspaces: 0, ending: 0 });
   assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /Signed up: created organization “Fabrikam Labs” on the Team plan/);
   const t = (await owner("GET", "/api/owner/tenants")).body.tenants.find((x) => x.name === "Fabrikam Labs");
   assert.equal(t.plan, "team");
@@ -2566,7 +2574,7 @@ test(`[${ENGINE}] mock checkout: pay, change plan, a failed payment, pay again a
   for (const n of ["One", "Two", "Three"]) assert.equal((await c("POST", "/api/workspaces", { name: `Fab ${n}` })).status, 200);
   const tooSmall = await post({ action: "change", plan: "starter" });
   assert.equal(tooSmall.status, 409);
-  assert.match(tooSmall.body.error, /Starter allows 2 workspaces and your organization has 3/);
+  assert.match(tooSmall.body.error, /Starter allows 1 group and your organization has 3\. Pick a bigger plan, add extra groups/);
   r = await post({ action: "fail" });
   assert.equal(r.body.subscription.status, "past_due");
   assert.equal(r.body.access.mode, "full", "the grace period keeps everything working");
@@ -2582,7 +2590,7 @@ test(`[${ENGINE}] mock checkout: pay, change plan, a failed payment, pay again a
   assert.equal((await post({ action: "cancel" })).status, 400);
   assert.equal((await post({ action: "refund" })).status, 400);
   const log = JSON.stringify((await c("GET", "/api/audit")).body);
-  for (const line of [/Paid for the Team plan \(test mode, no money moved\)/, /Changed the plan from Team to Starter/, /Simulated a failed payment \(test mode\)/, /Canceled the Team plan/]) assert.match(log, line);
+  for (const line of [/Paid for the Team, \$699 a month \(test mode, no money moved\)/, /Changed the plan from Team to Starter/, /Simulated a failed payment \(test mode\)/, /Canceled the Team plan/]) assert.match(log, line);
   // A managed organization (no self-service plan) has nothing to pay.
   assert.equal((await admin("GET", "/api/billing")).body.subscription, null);
   assert.equal((await admin("POST", "/api/billing", { action: "pay", plan: "team" })).status, 404);
@@ -2621,7 +2629,7 @@ test(`[${ENGINE}] a lapsed plan makes the portal read-only (everything visible, 
   assert.equal((await owner("PATCH", `/api/owner/tenants/${orgId}/billing`, { status: "canceled" })).status, 200);
   const me = (await s.fabMember("GET", "/api/me")).body;
   assert.equal(me.billing.mode, "read_only");
-  assert.match(me.billing.notice, /read-only for your organization because the plan is canceled/);
+  assert.match(me.billing.notice, /read-only for your organization because the plan was canceled, and everything in it will be deleted on/);
   // Reading still works.
   assert.equal((await c("GET", "/api/workspaces")).status, 200);
   assert.equal((await c("GET", `/api/docs?ws=${ws}`)).status, 200);
@@ -2696,9 +2704,10 @@ test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meet
   s.lee = c;
   const lines = (await c("GET", "/api/billing")).body.limits;
   const line = (k) => lines.find((l) => l.key === k);
-  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors", "aiCreditUsd"].map((k) => line(k).limit), [10, 2, 5, 20, 0, 200, 0, 20], "Starter's numbers");
-  // The operator tightens the limits for this client (custom terms), so each can be hit quickly.
-  await terms({ limits: { seats: 2, workspaces: 1, chats: 0, meetingHours: 1, documents: 1 } });
+  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors", "aiCreditUsd"].map((k) => line(k).limit), [15, 1, 5, 30, 0, 500, 0, 40], "Starter's numbers");
+  // The operator tightens the limits for this client (custom terms), so each can be hit quickly. Groups
+  // keep Starter's own limit (1), so the message offers extra groups or an upgrade.
+  await terms({ limits: { seats: 2, chats: 0, meetingHours: 1, documents: 1 } });
 
   const ws = await c("POST", "/api/workspaces", { name: "Limit Group", code: "WBS-1001", client: "Northwind Bank" });
   assert.equal(ws.status, 200, JSON.stringify(ws.body));
@@ -2707,7 +2716,8 @@ test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meet
   assert.equal(ws2.status, 402);
   assert.equal(ws2.body.kind, "limit");
   assert.equal(ws2.body.limit, "workspaces");
-  assert.match(ws2.body.error, /Your Starter plan allows 1 group and you have 1\. An Org Owner or Billing Admin can move to a bigger plan on Usage & billing/);
+  assert.match(ws2.body.error, /Your Starter plan allows 1 group and you have 1\. An Org Owner or Billing Admin can add 1 extra group \(Starter \+ 1 extra group for \$328 a month\), or move to Team for \$699 a month on Usage & billing/);
+  assert.deepEqual([ws2.body.need, ws2.body.options.cheaper, ws2.body.options.extra.priceUsd, ws2.body.options.upgrade.plan], [2, "extra", 328, "team"], "the page gets both options with prices");
 
   const m = await c("POST", "/api/users", { name: "Lou Member", email: "lou@limitco.test", role: "Member", workspaces: [s.limitWs] });
   assert.equal(m.status, 200, JSON.stringify(m.body));
@@ -2742,7 +2752,7 @@ test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meet
   assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /Set plan terms: custom limits/);
   assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Set plan terms for Limit Co/.test(l.action)));
   await terms({ limits: null });
-  assert.equal((await c("GET", "/api/billing")).body.limits.find((l) => l.key === "seats").limit, 10, "back to the plan's numbers");
+  assert.equal((await c("GET", "/api/billing")).body.limits.find((l) => l.key === "seats").limit, 15, "back to the plan's numbers");
   // Customers can't pick Enterprise themselves; the operator can set it.
   assert.match((await c("POST", "/api/billing", { action: "change", plan: "enterprise" })).body.error, /Enterprise is set up with the Sidekick team/);
 });
@@ -2878,7 +2888,7 @@ test(`[${ENGINE}] Owner Console business view: revenue, margin, trials, payments
   assert.ok(Math.abs(limitCo.margin + limitCo.aiCost) < 1e-9, "margin = revenue - AI cost");
   const fab = b.body.clients.find((c) => c.name === "Fabrikam Labs");
   assert.equal(fab.plan, "Business");
-  assert.equal(fab.revenue, fab.people * 25, "active Business: people × $25");
+  assert.equal(fab.revenue, 1999, "active Business: $1,999 a month for the organization, whatever the number of people");
   assert.ok(b.body.kpis.mrr >= fab.revenue);
   assert.ok(b.body.planMix.Starter >= 1 && b.body.planMix.Managed >= 1);
   assert.ok(b.body.trialsEnding.every((t) => t.name), "trials ending soon are listed by name");
@@ -2909,6 +2919,226 @@ async function loginFrom(ip, email, password, path = "/api/auth/login") {
   const r = await fetch(BASE + path, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify({ email, password }) });
   return { status: r.status, body: await r.json() };
 }
+
+/* ---------- Group pricing, roll-off (groups and organizations), export and deletion certificates ---------- */
+
+/** GET `url` as `call`'s signed-in person and return the raw bytes (zip and PDF downloads). */
+async function download(call, url) {
+  const { cookies } = await call("GET", "/api/me");
+  const res = await fetch(BASE + url, { headers: { cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join("; ") } });
+  return { status: res.status, type: res.headers.get("content-type"), disposition: res.headers.get("content-disposition"), bytes: Buffer.from(await res.arrayBuffer()) };
+}
+/** Files in a zip (name → text), read with zlib like any unzip tool would. */
+async function unzip(buf) {
+  const zlib = await import("node:zlib");
+  const out = {};
+  let p = 0;
+  while (p + 30 <= buf.length && buf.readUInt32LE(p) === 0x04034b50) {
+    const size = buf.readUInt32LE(p + 18);
+    const nameLen = buf.readUInt16LE(p + 26);
+    const extra = buf.readUInt16LE(p + 28);
+    const name = buf.subarray(p + 30, p + 30 + nameLen).toString("utf8");
+    const start = p + 30 + nameLen + extra;
+    out[name] = zlib.inflateRawSync(buf.subarray(start, start + size)).toString("utf8");
+    p = start + size;
+  }
+  return out;
+}
+const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET } }).then((r) => r.json());
+/** Every table with an org_id column, read from the real schema (so a new table can't be forgotten). */
+async function orgTables() {
+  const list = ENGINE === "postgres"
+    ? await dbValue("SELECT string_agg(table_name, ',') FROM information_schema.columns WHERE column_name = 'org_id' AND table_schema = current_schema()")
+    : await dbValue("SELECT group_concat(m.name) FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type = 'table' AND p.name = 'org_id'");
+  return [...new Set(list.split(",").filter(Boolean))];
+}
+
+test(`[${ENGINE}] group pricing: extra groups or an upgrade make room, with prices; checkout pays for extras; managed orgs stay unlimited`, async () => {
+  const c = client();
+  assert.equal((await signUpAs(c, { org: "Group Co", name: "Gus Group", email: "gus@groupco.test", password: "correct horse battery", plan: "starter" })).status, 200);
+  s.gus = c;
+  assert.equal((await c("POST", "/api/workspaces", { name: "GC One", client: "Northwind Bank" })).status, 200);
+  const full = await c("POST", "/api/workspaces", { name: "GC Two" });
+  assert.equal(full.status, 402);
+  assert.deepEqual([full.body.limit, full.body.need, full.body.options.cheaper, full.body.options.extra.extras, full.body.options.extra.priceUsd, full.body.options.upgrade.plan, full.body.options.upgrade.priceUsd], ["workspaces", 2, "extra", 1, 328, "team", 699]);
+  assert.match(full.body.error, /add 1 extra group \(Starter \+ 1 extra group for \$328 a month\), or move to Team for \$699 a month/);
+  // Two extra groups: room for 3, and each brings its share of the other limits.
+  assert.equal((await c("POST", "/api/billing", { action: "extras", extraGroups: -1 })).status, 400);
+  const two = await c("POST", "/api/billing", { action: "extras", extraGroups: 2 });
+  assert.equal(two.status, 200, JSON.stringify(two.body));
+  const b = (await c("GET", "/api/billing")).body;
+  assert.equal(b.priceUsd, 457, "Starter $199 + 2 × $129");
+  const limit = (k) => b.limits.find((l) => l.key === k).limit;
+  assert.deepEqual([limit("workspaces"), limit("seats"), limit("meetingHours"), limit("aiCreditUsd")], [3, 45, 90, 120]);
+  for (const n of ["GC Two", "GC Three"]) assert.equal((await c("POST", "/api/workspaces", { name: n })).status, 200);
+  const fourth = await c("POST", "/api/workspaces", { name: "GC Four" });
+  assert.equal(fourth.status, 402);
+  assert.deepEqual([fourth.body.need, fourth.body.options.extra.priceUsd, fourth.body.options.cheaper], [4, 586, "extra"], "Starter + 3 extra ($586) is cheaper than Team ($699)");
+  // Fewer extras than the groups need is refused; nothing is deleted.
+  const fewer = await c("POST", "/api/billing", { action: "extras", extraGroups: 1 });
+  assert.equal(fewer.status, 409);
+  assert.match(fewer.body.error, /Starter \+ 1 extra group allows 2 groups and your organization has 3/);
+  // Checkout: pay for Team with no extras (5 groups) → $699.
+  const paid = await c("POST", "/api/billing", { action: "pay", plan: "team", extraGroups: 0 });
+  assert.equal(paid.status, 200, JSON.stringify(paid.body));
+  assert.deepEqual([paid.body.subscription.plan, paid.body.subscription.extra_groups, paid.body.priceUsd], ["team", 0, 699]);
+  const log = JSON.stringify((await c("GET", "/api/audit")).body);
+  assert.match(log, /Changed extra groups from 0 to 2 \(Starter \+ 2 extra groups, \$457 a month\)/);
+  assert.match(log, /Paid for the Team, \$699 a month \(test mode, no money moved\)/);
+  // The operator can set extra groups too; managed organizations have no group limit at all.
+  const org = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Group Co").id;
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${org}/billing`, { extraGroups: 1 })).status, 200);
+  assert.equal((await c("GET", "/api/billing")).body.priceUsd, 828);
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${org}/billing`, { extraGroups: 0 })).status, 200);
+  assert.equal((await admin("GET", "/api/billing")).body.limits.find((l) => l.key === "workspaces").limit, null);
+});
+
+test(`[${ENGINE}] group roll-off: ending makes a group read-only and frees its slot; export, cancel, then deletion on schedule with a certificate`, async () => {
+  const c = s.gus;
+  const ws = (await c("GET", "/api/workspaces")).body.workspaces.find((w) => w.name === "GC One").id;
+  assert.equal((await uploadDoc(c, ws, "Rolloff runbook.md", "Northwind cutover: the blue switch is flipped at 21:00.")).status, 200);
+  assert.equal((await importMeeting(c, ws, "Wrap-up", "[00:00:00] Ana: We decided to hand over on Friday.\n[00:10:00] Ben: Ben will send the final report.")).status, 200);
+  assert.equal((await c("POST", "/api/ask", { ws, question: "When is the blue switch flipped?" })).status, 200);
+  // A Teams group chat assigned to the group hears about it.
+  const conv = { id: "19:rolloff-chat@thread.v2", conversationType: "groupChat", tenantId: "tenant-1" };
+  const mark = sent.length;
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: conv }));
+  const codeMsg = await waitForSent((m) => sent.indexOf(m) >= mark && m.url.includes("rolloff-chat") && cardsOf(m).some((x) => /Link this chat/.test(cardText(x))));
+  const code = cardText(cardsOf(codeMsg)[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+  assert.equal((await c("POST", "/api/teams-links", { code, ws })).status, 200);
+  // Only Org Owners and Org Admins end a group; at least 7 days' notice.
+  const m = await c("POST", "/api/users", { name: "Mo Member", email: "mo@groupco.test", role: "Member", workspaces: [ws] });
+  const mo = client();
+  await firstSignIn(mo, "mo@groupco.test", m.body.tempPassword);
+  assert.equal((await mo("POST", `/api/workspaces/${ws}/rolloff`, { days: 30 })).status, 403);
+  assert.equal((await mo("GET", `/api/workspaces/${ws}/export`)).status, 403);
+  assert.equal((await c("POST", `/api/workspaces/${ws}/rolloff`, { days: 3 })).status, 400);
+  const before = sent.length;
+  const end = await c("POST", `/api/workspaces/${ws}/rolloff`, { days: 7 });
+  assert.equal(end.status, 200, JSON.stringify(end.body));
+  assert.ok(Math.abs(Date.parse(end.body.rolloff.deleteOn) - (Date.now() + 7 * 86400_000)) < 120_000);
+  assert.equal((await c("POST", `/api/workspaces/${ws}/rolloff`, { days: 7 })).status, 409, "already ending");
+  await waitForSent((x) => sent.indexOf(x) >= before && cardsOf(x).some((k) => /“GC One” has ended/.test(cardText(k))));
+  assert.equal((await c("GET", "/api/teams-links")).body.links.filter((l) => l.workspace_id === ws).length, 0, "its chats are unlinked");
+  // Read-only: reading works, changing doesn't (for everyone), and it no longer counts toward the plan.
+  const g = (await c("GET", "/api/workspaces")).body.workspaces.find((w) => w.id === ws);
+  assert.ok(g.ending && g.ending.requestedBy === "Gus Group");
+  assert.equal((await mo("GET", `/api/docs?ws=${ws}`)).status, 200);
+  for (const r of [await uploadDoc(c, ws, "New.md", "more"), await c("PATCH", `/api/workspaces/${ws}`, { name: "Renamed" }), await mo("POST", "/api/ask", { ws, question: "blue switch?" })]) {
+    assert.equal(r.status, 409);
+    assert.match(r.body.error, /This group is ending: it's read-only/);
+  }
+  assert.deepEqual([(await c("GET", "/api/billing")).body.usage.workspaces, (await c("GET", "/api/billing")).body.usage.ending], [2, 1]);
+  // Export: a zip with an index page, the document's text, the meeting, questions, chats and people.
+  const zip = await download(c, `/api/workspaces/${ws}/export`);
+  assert.equal(zip.status, 200);
+  assert.equal(zip.type, "application/zip");
+  assert.match(zip.disposition, /GC One export/);
+  const files = await unzip(zip.bytes);
+  for (const f of ["index.html", "notes-and-decisions.csv", "action-items.csv", "questions-and-gaps.csv", "teams-chats.md", "people.csv"]) assert.ok(f in files, `${f} in the export`);
+  assert.match(files["documents/Rolloff runbook.txt"], /blue switch is flipped at 21:00/);
+  assert.ok(Object.keys(files).some((f) => /^meetings\/2026-10-20 Wrap-up\.md$/.test(f)));
+  assert.match(files["questions-and-gaps.csv"], /When is the blue switch flipped\?/);
+  assert.match(files["people.csv"], /mo@groupco\.test/);
+  assert.match(files["index.html"], /Northwind Bank/);
+  // Cancel: a normal group again, its chat relinked.
+  const keep = await c("DELETE", `/api/workspaces/${ws}/rolloff`);
+  assert.equal(keep.status, 200, JSON.stringify(keep.body));
+  assert.equal(keep.body.relinked, 1);
+  assert.equal((await c("GET", "/api/workspaces")).body.workspaces.find((w) => w.id === ws).ending, null);
+  assert.equal((await uploadDoc(c, ws, "Back.md", "back again")).status, 200);
+  assert.equal((await c("DELETE", `/api/workspaces/${ws}/rolloff`)).status, 404, "nothing to cancel");
+  // End it again, the operator brings it forward, and the timer deletes it with a certificate.
+  const again = await c("POST", `/api/workspaces/${ws}/rolloff`, {});
+  assert.ok(Math.abs(Date.parse(again.body.rolloff.deleteOn) - (Date.now() + 30 * 86400_000)) < 120_000, "30 days by default");
+  const id = again.body.rolloff.id;
+  assert.equal((await owner("PATCH", `/api/owner/rolloffs/${id}`, { action: "extend", days: 0 })).status, 400);
+  assert.equal((await owner("PATCH", `/api/owner/rolloffs/${id}`, { action: "extend", days: 60 })).status, 200);
+  assert.equal((await c("PATCH", `/api/owner/rolloffs/${id}`, { action: "now" })).status, 401, "client accounts can't");
+  assert.equal((await owner("PATCH", `/api/owner/rolloffs/${id}`, { action: "now" })).status, 200);
+  assert.ok((await tick()).deleted >= 1);
+  assert.equal((await c("GET", "/api/workspaces")).body.workspaces.some((w) => w.id === ws), false);
+  for (const t of ["documents", "meetings", "questions", "passages", "action_items", "items"]) assert.equal(await rows(t, "workspace_id", ws), 0, `${t} deleted`);
+  const list = (await c("GET", "/api/rolloffs")).body.rolloffs;
+  const done = list.find((r) => r.id === id);
+  assert.equal(done.status, "done");
+  assert.match(done.certificate.id, /^DEL-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  assert.equal(done.certificate.counts.Documents, 2);
+  assert.equal(list.filter((r) => r.status === "canceled").length, 1, "the cancelled one is listed too");
+  const text = (await c("GET", `/api/rolloffs/${id}/certificate`)).body;
+  assert.match(text, /deletion certificate/i);
+  assert.match(text, /Documents: 2/);
+  assert.match(text, /within 35 days/);
+  assert.doesNotMatch(text, /blue switch|hand over on Friday|mo@groupco/, "no content in the certificate");
+  const pdf = await download(c, `/api/rolloffs/${id}/certificate?format=pdf`);
+  assert.equal(pdf.type, "application/pdf");
+  assert.equal(pdf.bytes.subarray(0, 5).toString(), "%PDF-");
+  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /Deleted group “GC One” and everything in it\. Deletion certificate DEL-/);
+  assert.ok((await owner("GET", "/api/owner/rolloffs")).body.rolloffs.some((r) => r.id === id && r.certificate));
+  // Deleting a group by hand gets a certificate too.
+  const three = (await c("GET", "/api/workspaces")).body.workspaces.find((w) => w.name === "GC Three").id;
+  const del = await c("DELETE", `/api/workspaces/${three}`);
+  assert.match(del.body.certificate, /^DEL-/);
+  // Another organization never sees these roll-offs or certificates.
+  assert.equal((await admin("GET", `/api/rolloffs/${id}/certificate`)).status, 404);
+  assert.ok(!(await admin("GET", "/api/rolloffs")).body.rolloffs.some((r) => r.id === id));
+});
+
+test(`[${ENGINE}] organization roll-off: canceling leads to read-only, export and full deletion; paying again stops it`, async () => {
+  const c = client();
+  assert.equal((await signUpAs(c, { org: "Leaving Co", name: "Lea Leaver", email: "lea@leaving.test", password: "correct horse battery", plan: "starter" })).status, 200);
+  const ws = (await c("POST", "/api/workspaces", { name: "Last Engagement" })).body.id;
+  assert.equal((await uploadDoc(c, ws, "Handover.md", "The archive password hint is the river's name.")).status, 200);
+  const m = await c("POST", "/api/users", { name: "Lee Leaving", email: "lee@leaving.test", role: "Member", workspaces: [ws] });
+  const lee = client();
+  await firstSignIn(lee, "lee@leaving.test", m.body.tempPassword);
+  assert.equal((await c("POST", "/api/billing", { action: "pay", plan: "starter" })).status, 200);
+  // Canceling: still usable until the end of the paid period, and the banner gives the deletion date.
+  const canceled = await c("POST", "/api/billing", { action: "cancel" });
+  assert.equal(canceled.body.access.mode, "full");
+  assert.match(canceled.body.access.notice, /Your organization's data will be deleted on .*To keep it, an Org Owner or Billing Admin can pay again/);
+  const pending = (await c("GET", "/api/rolloffs")).body.rolloffs.find((r) => r.scope === "org");
+  assert.equal(pending.status, "scheduled");
+  assert.ok(Date.parse(pending.deleteOn) - Date.parse(pending.readOnlyFrom) === 30 * 86400_000, "30 days after the paid period ends");
+  // Paying again stops it.
+  assert.equal((await c("POST", "/api/billing", { action: "pay", plan: "starter" })).status, 200);
+  assert.equal((await c("GET", "/api/rolloffs")).body.rolloffs.find((r) => r.id === pending.id).status, "canceled");
+  assert.equal((await c("GET", "/api/me")).body.billing.notice, null);
+  // The operator ends the client: read-only now, export still works.
+  const org = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Leaving Co").id;
+  assert.equal((await c("POST", `/api/owner/tenants/${org}/rolloff`, {})).status, 401);
+  assert.equal((await owner("POST", `/api/owner/tenants/${org}/rolloff`, { days: 2 })).status, 400, "at least 7 days");
+  assert.equal((await owner("POST", `/api/owner/tenants/${org}/rolloff`, {})).status, 200);
+  const me = (await lee("GET", "/api/me")).body;
+  assert.equal(me.billing.mode, "read_only");
+  assert.match(me.billing.notice, /because the Sidekick team ended the service, and everything in it will be deleted on .*download everything on Settings → Export your data.*pay again/);
+  assert.equal((await c("POST", "/api/workspaces", { name: "Nope" })).status, 402);
+  assert.equal((await lee("GET", "/api/export")).status, 403, "Members can't export the organization");
+  const zip = await download(c, "/api/export");
+  assert.equal(zip.status, 200);
+  const files = await unzip(zip.bytes);
+  for (const f of ["index.html", "people.csv", "audit-log.csv", "groups/Last Engagement/index.html", "groups/Last Engagement/documents/Handover.txt"]) assert.ok(f in files, `${f} in the export`);
+  assert.match(files["people.csv"], /lee@leaving\.test/);
+  assert.match(files["audit-log.csv"], /Ended|Scheduled the organization's data for deletion/);
+  // Deletion: everything with the organization's id is gone, except the roll-off record and its certificate.
+  const roll = (await owner("GET", "/api/owner/rolloffs")).body.rolloffs.find((r) => r.orgId === org && r.status === "scheduled");
+  assert.equal((await owner("PATCH", `/api/owner/rolloffs/${roll.id}`, { action: "now" })).status, 200);
+  assert.ok((await tick()).deleted >= 1);
+  const tables = await orgTables();
+  assert.ok(tables.includes("users") && tables.includes("audit_log") && tables.includes("rolloffs"), "schema read");
+  for (const t of tables) assert.equal(await rows(t, "org_id", org), t === "rolloffs" ? 2 : 0, `${t}: nothing left for the deleted organization`);
+  assert.equal(await rows("orgs", "id", org), 0);
+  assert.equal(await rows("workspace_members", "workspace_id", ws), 0);
+  assert.equal((await client()("POST", "/api/auth/login", { email: "lea@leaving.test", password: "correct horse battery" })).status, 401, "nobody can sign in any more");
+  assert.equal((await c("GET", "/api/me")).status, 401, "sessions are gone");
+  assert.ok(!(await owner("GET", "/api/owner/tenants")).body.tenants.some((t) => t.id === org));
+  const cert = (await owner("GET", `/api/owner/rolloffs/${roll.id}/certificate`)).body;
+  assert.match(cert, /Leaving Co/);
+  assert.match(cert, /People \(portal accounts\): 2/);
+  assert.match(cert, /Groups: 1/);
+  assert.doesNotMatch(cert, /river|lee@leaving/, "no content in the certificate");
+  assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Deleted Leaving Co and all its data\. Deletion certificate DEL-/.test(l.action)));
+});
 
 test(`[${ENGINE}] password change signs the person out everywhere else, and must pick a different password`, async () => {
   const { call } = await newPerson("Pat Phone", "pat@test.local", "Member");

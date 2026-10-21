@@ -7,6 +7,7 @@
  */
 
 /** A small window frame with a title bar around a mock screen. */
+import { BRAND } from "@/lib/brand";
 function Frame({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="site-mock">
@@ -24,7 +25,7 @@ const Field = ({ label, value }: { label: string; value: string }) => (
 /** Step 1: the sign-up form. */
 export function SignupMock() {
   return (
-    <Frame title="Sidekick · Sign up">
+    <Frame title={`${BRAND.name} · Sign up`}>
       <Field label="Organization" value="Contoso Consulting" />
       <Field label="Work email" value="ana@contoso.example" />
       <div className="site-mock-plans"><span>Starter</span><span className="on">Team</span><span>Business</span></div>
@@ -37,7 +38,7 @@ export function SignupMock() {
 export function ApproveMock() {
   return (
     <Frame title="Microsoft · Permissions requested">
-      <b className="site-mock-title">Sidekick wants to:</b>
+      <b className="site-mock-title">{BRAND.name} wants to:</b>
       <ul className="site-mock-checks">
         <li>Sign you in and read your profile</li>
         <li>Read people&apos;s names and work emails</li>
@@ -54,7 +55,7 @@ export function InstallMock() {
     <Frame title="Teams · Apps">
       <div className="site-mock-app">
         <span className="site-avatar sk">S</span>
-        <div><b>Sidekick</b><small>AI teammate for client teams</small></div>
+        <div><b>{BRAND.name}</b><small>AI teammate for client teams</small></div>
       </div>
       <div className="site-mock-row"><span className="site-mock-chip">Chats</span><span className="site-mock-chip">Channels</span></div>
       <span className="site-mock-btn">Add</span>
@@ -65,7 +66,7 @@ export function InstallMock() {
 /** Step 4: a group card with its client and Team Lead. */
 export function GroupMock() {
   return (
-    <Frame title="Sidekick · Groups">
+    <Frame title={`${BRAND.name} · Groups`}>
       <div className="site-mock-group">
         <div className="site-mock-row" style={{ justifyContent: "space-between" }}><b>Payments Platform</b><span className="pill good">On track</span></div>
         <small>Client: Northwind Bank · NWB-204</small>
@@ -79,7 +80,7 @@ export function GroupMock() {
 /** Step 5: a Teams chat waiting to be assigned to a group. */
 export function WaitingChatMock() {
   return (
-    <Frame title="Sidekick · Chats waiting for a group">
+    <Frame title={`${BRAND.name} · Chats waiting for a group`}>
       <div className="site-mock-group">
         <div className="site-mock-row" style={{ justifyContent: "space-between" }}><b>Wave 2 cutover</b><span className="pill warn">Waiting</span></div>
         <small>Group chat · added by Dan Ortiz · 9 people</small>
@@ -94,7 +95,7 @@ export function WaitingChatMock() {
 export function AnswerMock() {
   return (
     <Frame title="Teams · Wave 2 cutover">
-      <div className="site-bubble"><span className="mention">@Sidekick</span> who owns the rollback?</div>
+      <div className="site-bubble"><span className="mention">@{BRAND.name}</span> who owns the rollback?</div>
       <div className="site-tcard">
         <p><b>Dan Ortiz</b> owns the rollback for wave 2, with Priya as backup.</p>
         <div className="src"><span>Cutover plan v3.docx</span></div>

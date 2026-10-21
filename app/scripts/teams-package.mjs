@@ -14,9 +14,12 @@
 // which is how Sidekick may remove itself from a chat (lib/teams/install.ts, docs/TEAMS-MULTITENANT.md).
 // Public website (store listing: website, privacy /privacy and terms /terms pages): SIDEKICK_WEBSITE_URL if
 // set (e.g. a custom domain), otherwise the app's own address, which serves those pages.
+// Names, tagline, accent color and icons come from app/src/lib/brand.ts (the single brand setting; Node runs
+// the TypeScript file directly), filled into the {{BRAND_*}} placeholders of teams/manifest.template.json.
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { BRAND, fillBrand } from "./teams-manifest.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const src = path.join(root, "teams");
@@ -71,7 +74,7 @@ if (env.SIDEKICK_WEBSITE_URL) {
 }
 
 const template = fs.readFileSync(path.join(src, "manifest.template.json"), "utf8");
-const manifest = template
+const manifest = fillBrand(template)
   .replaceAll("{{AAD_APP_ID}}", (env.ENTRA_CLIENT_ID || botId).toLowerCase())
   .replaceAll("{{BOT_ID}}", botId.toLowerCase())
   .replaceAll("{{PUBLIC_URL}}", publicUrl.origin)
@@ -93,7 +96,8 @@ fs.rmSync(path.join(out, zip), { force: true });
 for (const old of ["sidekick-teams.zip", "manifest.json", "color.png", "outline.png"]) fs.rmSync(path.join(out, old), { force: true });
 fs.mkdirSync(stage, { recursive: true });
 fs.writeFileSync(path.join(stage, "manifest.json"), manifestOut);
-for (const icon of ["color.png", "outline.png"]) fs.copyFileSync(path.join(src, icon), path.join(stage, icon));
+fs.copyFileSync(path.join(root, BRAND.logo.teamsColor), path.join(stage, "color.png"));
+fs.copyFileSync(path.join(root, BRAND.logo.teamsOutline), path.join(stage, "outline.png"));
 execFileSync("zip", ["-q", path.join(out, zip), "manifest.json", "color.png", "outline.png"], { cwd: stage });
 
 console.log(`✓ Built teams/build/${zip} (${flavor}, version ${version})
@@ -102,7 +106,7 @@ console.log(`✓ Built teams/build/${zip} (${flavor}, version ${version})
 ${
   flavor === "live"
     ? `Upload it once to the org app catalog: Teams admin center → Teams apps → Manage apps → Upload new app
-(an update: open Sidekick there → Upload file). People then add it from "Built for your org".`
+(an update: open ${BRAND.name} there → Upload file). People then add it from "Built for your org".`
     : `⚠ Local package: only useful while the Azure Bot's messaging endpoint points at your dev tunnel.
   Uploading it replaces the live package in Teams (same app ID); upload the live one again afterwards.`
 }`);

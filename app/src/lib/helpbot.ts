@@ -49,6 +49,7 @@ import { rankKnowledge } from "./search";
 import { recordArticleUses } from "./support-articles";
 import { FAQ } from "./faq";
 import { span, spanAttrs } from "./trace";
+import { BRAND } from "@/lib/brand";
 
 /** The browser cookie that ties a visitor's conversation to their browser (random, nothing else in it). */
 export const VISITOR_COOKIE = "sk_visitor";
@@ -127,7 +128,7 @@ export async function purgeHelpbot() {
   await run("DELETE FROM helpbot_events WHERE created_at < ?", new Date(Date.now() - 90 * 86400_000).toISOString());
 }
 
-const DONT_KNOW = "I don't know that one, and I'd rather not guess. Use “Talk to a human” and the Sidekick team will answer, or browse the help center.";
+const DONT_KNOW = `I don't know that one, and I'd rather not guess. Use “Talk to a human” and the ${BRAND.name} team will answer, or browse the help center.`;
 
 const AnswerSchema = z.object({
   found: z.boolean().describe("true only if the sources answer the question"),
@@ -135,7 +136,7 @@ const AnswerSchema = z.object({
   source_ids: z.array(z.string()).describe("The sources (K1, K2…) the answer uses"),
 });
 
-const SYSTEM = `You are "Ask about Sidekick", the AI help bot on Sidekick's public website. Sidekick is an AI teammate for client teams in Microsoft Teams. You answer visitors' questions about Sidekick using only the numbered sources.
+const SYSTEM = `You are "Ask about ${BRAND.name}", the AI help bot on ${BRAND.name}'s public website. ${BRAND.name} is an AI teammate for client teams in Microsoft Teams. You answer visitors' questions about ${BRAND.name} using only the numbered sources.
 Rules:
 - Answer in 1-3 short sentences, plain friendly language, and cite the sources you used like [K1]. If the sources don't answer it, set found false.
 - Never invent or guess features, prices, discounts, dates, limits, integrations or promises (no "coming soon", no guarantees). Prices are only what the sources say, and they are test-mode prices.

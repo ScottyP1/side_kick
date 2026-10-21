@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtTime, Icon, Pill, Spinner, useReportError } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Ticket = { id: string; ref: string; subject: string; category: string; priority: string; status: string; requester: string; updatedAt: string; mine: boolean; unread: boolean };
 type Choices = { categories: { id: string; label: string }[]; priorities: string[]; attachmentTypes: string; maxAttachmentMb: number };
@@ -65,7 +66,7 @@ export default function HelpView() {
 
   return (
     <>
-      <div className="page-head"><div><h1>Help &amp; support</h1><p>Most answers are in the <Link href="/docs">help center</Link>. The Help chat (the round button, bottom left → I need help) can check your setup and fix common problems. For anything else, contact the Sidekick team here.</p></div></div>
+      <div className="page-head"><div><h1>Help &amp; support</h1><p>Most answers are in the <Link href="/docs">help center</Link>. The Help chat (the round button, bottom left → I need help) can check your setup and fix common problems. For anything else, contact the {BRAND.name} team here.</p></div></div>
       <div className="grid g2">
         <form className="panel" onSubmit={submit}>
           <div className="panel-h"><h2>Contact support</h2></div>

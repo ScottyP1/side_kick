@@ -1,4 +1,5 @@
 "use client";
+import { BRAND } from "@/lib/brand";
 
 /**
  * Last-resort crash screen, for when the whole app frame (root layout) fails. It replaces the page
@@ -8,10 +9,10 @@ export default function GlobalError({ error, retry }: { error: Error & { digest?
   return (
     <html lang="en">
       <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", background: "#0f1416", color: "#e8eceb", display: "grid", placeItems: "center", minHeight: "100vh" }}>
-        <title>Sidekick – something went wrong</title>
+        <title>{BRAND.name} – something went wrong</title>
         <div role="alert" style={{ maxWidth: 440, padding: 28, textAlign: "center", lineHeight: 1.5 }}>
-          <h1 style={{ fontSize: 22, margin: "0 0 8px" }}>Sidekick hit a problem</h1>
-          <p style={{ margin: "0 0 16px", opacity: 0.85 }}>The app couldn&apos;t load. Your data is safe. Try again in a moment; if it keeps happening, contact the Sidekick team.</p>
+          <h1 style={{ fontSize: 22, margin: "0 0 8px" }}>{BRAND.name} hit a problem</h1>
+          <p style={{ margin: "0 0 16px", opacity: 0.85 }}>The app couldn&apos;t load. Your data is safe. Try again in a moment; if it keeps happening, contact the {BRAND.name} team.</p>
           {error.digest && (
             <p style={{ margin: "0 0 16px", fontSize: 13, opacity: 0.75 }}>
               Reference code: <b style={{ fontFamily: "ui-monospace, monospace" }}>{error.digest}</b>

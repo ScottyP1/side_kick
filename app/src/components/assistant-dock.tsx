@@ -16,6 +16,7 @@ import { Assistant } from "./assistant";
 import { Dock } from "./dock";
 import { SupportChat } from "./support-chat";
 import { api, useReportError } from "./ui";
+import { BRAND } from "@/lib/brand";
 
 const TAB_KEY = "sidekick.dock.tab";
 
@@ -58,7 +59,7 @@ export function AssistantDock() {
       open={open}
       setOpen={setOpen}
       label="Assistant and help"
-      title={tab === "assist" ? "Sidekick assistant" : "Help"}
+      title={tab === "assist" ? `${BRAND.name} assistant` : "Help"}
       dot={unread > 0}
       dotLabel={`${unread} new support ${unread === 1 ? "reply" : "replies"}`}
       focusRef={tab === "assist" ? assistInput : helpInput}

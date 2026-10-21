@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, usd, useReportError, useToast } from "@/components/ui";
 import { PlanSection } from "./plan";
+import { BRAND } from "@/lib/brand";
 
 type Credit = { month: string; creditUsd: number | null; topUpUsd: number; usedUsd: number; pct: number; level: "unlimited" | "ok" | "warn" | "essentials" };
 
@@ -73,11 +74,11 @@ function CreditPanel({ c }: { c: Credit }) {
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <b className="num" style={{ fontSize: 18 }}>{usd(c.usedUsd)}{c.creditUsd !== null && <span className="muted" style={{ fontWeight: 400 }}> of {usd(c.creditUsd)}</span>}</b>
         {c.creditUsd !== null && <div className="meter"><span style={{ width: `${pct}%`, background: c.level === "essentials" ? "var(--bad)" : c.level === "warn" ? "var(--warn)" : undefined }} /></div>}
-        {c.topUpUsd > 0 && <span className="muted">Includes a {usd(c.topUpUsd)} top-up from the Sidekick team.</span>}
+        {c.topUpUsd > 0 && <span className="muted">Includes a {usd(c.topUpUsd)} top-up from the {BRAND.name} team.</span>}
         <span className="muted">
           {c.creditUsd === null ? "Your organization's AI use isn't capped."
-            : c.level === "essentials" ? "Used up: Sidekick keeps answering questions and checking them against your guardrails; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st. Ask the Sidekick team for a top-up, or move to a bigger plan."
-            : "At 80% the Org Owner, Org Admins and Billing Admins see a notice. At 100% Sidekick keeps answering questions and pauses the extras until the 1st."}
+            : c.level === "essentials" ? `Used up: ${BRAND.name} keeps answering questions and checking them against your guardrails; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st. Ask the ${BRAND.name} team for a top-up, or move to a bigger plan.`
+            : `At 80% the Org Owner, Org Admins and Billing Admins see a notice. At 100% ${BRAND.name} keeps answering questions and pauses the extras until the 1st.`}
         </span>
       </div>
     </div>

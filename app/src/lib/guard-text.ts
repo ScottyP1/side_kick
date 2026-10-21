@@ -14,6 +14,7 @@
  *   before it's stored (contact details, plus long digit runs such as card or account numbers).
  */
 import type { BuiltinRuleId, GuardSettings } from "./guardrails";
+import { BRAND } from "./brand";
 
 // Ways of trying to switch the guardrails off through a rule ("ignore the rules", "turn off the filter").
 const LOOSEN_RULES = /\b(ignore|disregard|forget|override|bypass|skip|disable|turn off|switch off|relax|loosen|lift|suspend|remove|drop)\b.{0,25}\b(rules?|guardrails?|restrictions?|filters?|floor|limits?|checks?|instructions?|policy|policies|safety)\b/i;
@@ -23,9 +24,9 @@ const PERMIT = /\b(may|can|could|allowed to|free to|ok to|okay to|fine to|permit
 const PERMIT_TARGET = /\b(swear\w*|curs\w*|profan\w*|slurs?|insult\w*|explicit|sexual|guess\w*|speculat\w*|make (things )?up|invent\w*|other (clients?|workspaces?|organi[sz]ations?|orgs?)|system prompt|instructions|rules|cite|sources?|judg\w*|rank\w*|rate people|jokes?|small talk|chit-?chat|competitors?|emails?|phone|contact)\b/i;
 
 const LOCAL_REASONS = {
-  loosen: "This would loosen Sidekick's guardrails: it tries to switch off or get around them. Custom rules can only add restrictions; the locked rules and the organization switches can't be relaxed here.",
-  permit: "This would loosen Sidekick's guardrails: it gives Sidekick permission to do something they forbid. Custom rules can only add restrictions, e.g. “Never quote day rates”.",
-  hate: "This rule contains language Sidekick never uses. Rewrite it without it.",
+  loosen: `This would loosen ${BRAND.name}'s guardrails: it tries to switch off or get around them. Custom rules can only add restrictions; the locked rules and the organization switches can't be relaxed here.`,
+  permit: `This would loosen ${BRAND.name}'s guardrails: it gives ${BRAND.name} permission to do something they forbid. Custom rules can only add restrictions, e.g. “Never quote day rates”.`,
+  hate: `This rule contains language ${BRAND.name} never uses. Rewrite it without it.`,
 };
 
 /** Quick local check of a proposed rule (no AI). Returns the reason it's refused, or null. */
@@ -151,7 +152,7 @@ const TOO_BROAD_SHORT = /^\s*(?:answer|say|share)\s+nothing\s*[.!]*\s*$|^\s*(?:n
 
 /** Why a rule that blocks (nearly) every question is refused at save time. Shared with the Claude check. */
 export const TOO_BROAD_REASON =
-  "This rule is too broad: it would refuse every ordinary work question in the workspace. Name the topic to avoid instead, e.g. “Never quote day rates”. To stop Sidekick answering altogether, ask the Sidekick team to pause it.";
+  `This rule is too broad: it would refuse every ordinary work question in the workspace. Name the topic to avoid instead, e.g. “Never quote day rates”. To stop ${BRAND.name} answering altogether, ask the ${BRAND.name} team to pause it.`;
 
 /**
  * Quick local check for a proposed custom rule that would block all or most work questions. Returns the

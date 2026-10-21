@@ -46,6 +46,7 @@ import { all, newId, now, run } from "./db";
 import { assertEnabled } from "./owner";
 import { span, spanAttrs, traceUserId } from "./trace";
 import { addSpend, creditGate } from "./credit";
+import { BRAND } from "./brand";
 
 // One place to choose models. Defaults to Claude Opus 5.5 everywhere; override per feature in .env.local
 // (e.g. SIDEKICK_MODEL_ASK=claude-sonnet-5-5) to trade quality for cost. In step 2 this client is swapped
@@ -298,7 +299,7 @@ class FakeBusyError extends Error {
  */
 export class AiBusyError extends HttpError {
   constructor() {
-    super(503, "Sidekick's AI is very busy right now. Try again in a minute.");
+    super(503, `${BRAND.name}'s AI is very busy right now. Try again in a minute.`);
   }
 }
 
@@ -342,7 +343,7 @@ let client: Anthropic | null = null;
  */
 function aiClient(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
-    throw new HttpError(503, "AI answers aren't set up on this server yet. The Sidekick team needs to add the AI key (ANTHROPIC_API_KEY), then restart the app.");
+    throw new HttpError(503, `AI answers aren't set up on this server yet. The ${BRAND.name} team needs to add the AI key (ANTHROPIC_API_KEY), then restart the app.`);
   }
   client ??= new Anthropic({ maxRetries: 0, timeout: 120_000 });
   return client;

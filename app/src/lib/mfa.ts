@@ -40,6 +40,7 @@ import { HttpError } from "./auth";
 import { all, get, newId, now, run, tx } from "./db";
 import { canSealSecrets, openSecret, sealSecret, SecretKeyMissingError } from "./secret-box";
 import { span, spanAttrs } from "./trace";
+import { BRAND } from "./brand";
 
 /** Whose account: a portal user or an Owner Console owner. */
 export type AccountKind = "user" | "owner";
@@ -116,7 +117,7 @@ function matchTotp(secret: string, code: string, lastStep: number | null): numbe
 export function relyingParty(req: Request) {
   const base = process.env.NODE_ENV === "production" && process.env.SIDEKICK_PUBLIC_URL ? process.env.SIDEKICK_PUBLIC_URL : new URL(req.url).origin;
   const u = new URL(base);
-  return { rpID: u.hostname, origin: u.origin, rpName: "Sidekick" };
+  return { rpID: u.hostname, origin: u.origin, rpName: BRAND.name };
 }
 const registerKey = (a: Pick<Account, "kind" | "id">) => `register:${a.kind}:${a.id}`;
 /** The encryption context of a factor's secret: a sealed secret only opens on its own row. */
@@ -153,7 +154,7 @@ export async function secondFactorMethods(kind: AccountKind, id: string): Promis
  * SIDEKICK_ENCRYPTION_KEY this refuses with 503 rather than store it in the clear.
  */
 export async function startTotpSetup(a: Account) {
-  if (!canSealSecrets()) throw new SecretKeyMissingError("Authenticator apps aren't available yet: the Sidekick team needs to set this server's encryption key. Use a passkey instead.");
+  if (!canSealSecrets()) throw new SecretKeyMissingError(`Authenticator apps aren't available yet: the ${BRAND.name} team needs to set this server's encryption key. Use a passkey instead.`);
   const secret = base32Encode(crypto.randomBytes(20));
   const id = newId();
   await run("DELETE FROM mfa_factors WHERE account_kind = ? AND account_id = ? AND kind = 'totp' AND enabled = 0", a.kind, a.id);
@@ -161,7 +162,7 @@ export async function startTotpSetup(a: Account) {
     "INSERT INTO mfa_factors (id, account_kind, account_id, kind, label, secret, enabled, created_at) VALUES (?, ?, ?, 'totp', ?, ?, 0, ?)",
     id, a.kind, a.id, "Authenticator app", sealSecret(secret, secretContext(id)), now(),
   );
-  const issuer = a.kind === "owner" ? "Sidekick Owner Console" : "Sidekick";
+  const issuer = a.kind === "owner" ? `${BRAND.name} Owner Console` : BRAND.name;
   const uri = `otpauth://totp/${encodeURIComponent(`${issuer}:${a.email}`)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
   return { id, secret, uri, qr: await QRCode.toDataURL(uri, { margin: 1, width: 220 }) };
 }
@@ -187,7 +188,7 @@ export async function passkeySetupOptions(a: Account, req: Request) {
   const { rpID, rpName } = relyingParty(req);
   const existing = await enabledFactors(a.kind, a.id);
   const options = await generateRegistrationOptions({
-    rpName: a.kind === "owner" ? "Sidekick Owner Console" : rpName,
+    rpName: a.kind === "owner" ? `${BRAND.name} Owner Console` : rpName,
     rpID,
     userName: a.email,
     userDisplayName: a.name,

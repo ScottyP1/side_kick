@@ -21,6 +21,8 @@ import { now, run } from "./db";
 import { failureReason, traceFailed, withTrace } from "./trace";
 import { crossSiteRefusal } from "./security";
 import { readOnlyRefusal } from "./billing";
+import { runRequest } from "./request-scope";
+import { BRAND } from "./brand";
 
 /**
  * "/api/meetings/3f2a…" → "/api/meetings/:id", so the Activity page groups requests by operation. Every
@@ -36,7 +38,7 @@ export function routeName(req: unknown) {
  * The collections with a dynamic `[id]` segment (app/api/<collection>/[id]); the segment right after one of
  * them is always an id. Add a collection here when adding such a route.
  */
-const ID_COLLECTIONS = new Set(["meetings", "action-items", "docs", "users", "tenants", "tickets", "attachments"]);
+const ID_COLLECTIONS = new Set(["meetings", "action-items", "docs", "users", "tenants", "workspaces", "rolloffs", "tickets", "attachments"]);
 
 /** The path with dynamic segments replaced by ":id" (see `routeName`). */
 export function normalisePath(pathname: string) {
@@ -91,7 +93,7 @@ export async function errorMessageFor(req: Request, e: unknown): Promise<string>
   const ref = newRef();
   await logAppError(ref, 500, req, e);
   traceFailed(500, "Sign-in failed unexpectedly", ref);
-  return `Something went wrong on our side. Try again; if it keeps happening, contact the Sidekick team. (Reference ${ref})`;
+  return `Something went wrong on our side. Try again; if it keeps happening, contact the ${BRAND.name} team. (Reference ${ref})`;
 }
 
 const DETAILS = Symbol("sidekick.errorDetails");
@@ -102,11 +104,13 @@ const DETAILS = Symbol("sidekick.errorDetails");
  * that was saved even though writing its notes failed (so the page can open it with **Try again**).
  * Only ids and other non-sensitive values: they go to the browser.
  */
-export function withErrorDetails<E>(e: E, details: Record<string, string | number>): E {
+export function withErrorDetails<E>(e: E, details: Record<string, ErrorDetail>): E {
   if (e && typeof e === "object") (e as Record<symbol, unknown>)[DETAILS] = details;
   return e;
 }
-const detailsOf = (e: unknown) => ((e && typeof e === "object" && (e as Record<symbol, unknown>)[DETAILS]) || {}) as Record<string, string | number>;
+const detailsOf = (e: unknown) => ((e && typeof e === "object" && (e as Record<symbol, unknown>)[DETAILS]) || {}) as Record<string, ErrorDetail>;
+/** A value `withErrorDetails` may attach: plain JSON (ids, numbers, small objects such as upgrade options). */
+export type ErrorDetail = string | number | boolean | null | ErrorDetail[] | { [k: string]: ErrorDetail };
 
 /**
  * Wraps a route handler so its return value becomes JSON and thrown errors become clean JSON errors the
@@ -117,6 +121,8 @@ const detailsOf = (e: unknown) => ((e && typeof e === "object" && (e as Record<s
  *   the error log (`logAppError`), never to the browser, so internal details can't leak.
  * - Before the route runs, a change (anything but GET) from an organization whose plan has lapsed is
  *   refused with 402 and the reason (`readOnlyRefusal` in lib/billing.ts), so read-only holds for every route.
+ * - The route runs inside `runRequest` (lib/request-scope.ts), so `requireWorkspace` can keep groups that
+ *   are ending read-only for every route that changes something.
  */
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>) {
   return async (...args: A) =>
@@ -127,7 +133,7 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
       if (crossSite) throw new HttpError(403, crossSite);
       const readOnly = args[0] instanceof Request ? await readOnlyRefusal(args[0]) : null;
       if (readOnly) throw new HttpError(402, readOnly);
-      const out = await fn(...args);
+      const out = await runRequest(args[0], () => fn(...args));
       return out instanceof Response ? out : NextResponse.json(out ?? { ok: true });
     } catch (e) {
       // Next.js signals things like "this route needs the request (cookies)" by throwing; let those through.
@@ -150,10 +156,10 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
         traceFailed(e.status, e.message);
         return NextResponse.json({ ...detailsOf(e), error: e.message }, { status: e.status });
       }
-      if (e instanceof Anthropic.AuthenticationError) return fail(502, "Claude rejected the API key. The Sidekick team needs to update it.");
+      if (e instanceof Anthropic.AuthenticationError) return fail(502, `Claude rejected the API key. The ${BRAND.name} team needs to update it.`);
       if (e instanceof Anthropic.RateLimitError) return fail(429, "Claude is busy right now (rate limit). Wait a minute and try again.");
       if (e instanceof Anthropic.APIError) return fail(502, `Claude couldn't answer right now (${e.status ?? "network"}). Try again in a minute.`);
-      return fail(500, "Something went wrong on our side. Try again; if it keeps happening, contact the Sidekick team.");
+      return fail(500, `Something went wrong on our side. Try again; if it keeps happening, contact the ${BRAND.name} team.`);
     }
     });
 }

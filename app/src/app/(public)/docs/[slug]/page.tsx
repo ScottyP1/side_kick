@@ -11,6 +11,7 @@ import { MarkdownBlocks } from "@/components/markdown";
 import { PublicShell } from "@/components/public-shell";
 import { guide, guides } from "@/lib/help";
 import { metadataFor } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 
 /**
  * The page waits for its guide name before sending anything (no streamed shell), so an unknown name gets a
@@ -26,8 +27,8 @@ export function generateStaticParams() {
 /** Title and description from the guide itself. */
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const g = guide((await params).slug);
-  if (!g) return { title: "Not found · Sidekick" };
-  return metadataFor({ title: `${g.title} · Sidekick help center`, description: g.summary.slice(0, 200) });
+  if (!g) return { title: `Not found · ${BRAND.name}` };
+  return metadataFor({ title: `${g.title} · ${BRAND.name} help center`, description: g.summary.slice(0, 200) });
 }
 
 export default async function GuidePage({ params }: { params: Promise<{ slug: string }> }) {

@@ -15,24 +15,25 @@
  *   at request time; the live address is never written in the repo.
  */
 import type { Metadata } from "next";
+import { BRAND } from "./brand";
 
 /** One public page: its path and how it appears in search results and link previews. */
 export type PublicPage = { path: string; title: string; description: string };
 
 /** Every public page with fixed content, in sitemap order. Help-center guides are added by `lib/help.ts`. */
 export const PUBLIC_PAGES: readonly PublicPage[] = [
-  { path: "/", title: "Sidekick: the AI teammate for your team in Microsoft Teams", description: "Sidekick answers your team's questions in Microsoft Teams with sources, writes meeting notes and reminds the chat about what's due. One walled-off group per client engagement." },
-  { path: "/features", title: "Features · Sidekick", description: "Answers with sources, meeting notes and action items, reminders, guardrails, groups per client and an audit log: what Sidekick does for your team in Microsoft Teams." },
-  { path: "/how-it-works", title: "How it works · Sidekick", description: "Sign up, approve Sidekick for Microsoft 365, install it in Teams, create a group per client with its Team Lead and pick the chats. The setup wizard walks you through it." },
-  { path: "/security", title: "Security & trust · Sidekick", description: "Walls between companies and between client groups, guardrails on every answer, an audit log, hosting in Microsoft Azure and encryption in transit. Powered by Claude." },
-  { path: "/pricing", title: "Plans and pricing · Sidekick", description: "Sidekick's plans, priced per person per month, each with a free trial." },
-  { path: "/faq", title: "FAQ · Sidekick", description: "Plain answers to common questions: what Sidekick can see, where data lives, AI training, Microsoft 365 permissions, Teams setup, billing and cancelling." },
-  { path: "/docs", title: "Help center · Sidekick", description: "Guides for using Sidekick: concepts, setting up your organization, Sidekick in Teams, and roles and permissions." },
-  { path: "/support", title: "Support · Sidekick", description: "How to get help with Sidekick and answers to common questions." },
-  { path: "/changelog", title: "Changelog · Sidekick", description: "What's new in Sidekick, release by release." },
-  { path: "/signup", title: "Sign up · Sidekick", description: "Create your organization's Sidekick account and start a free trial." },
-  { path: "/privacy", title: "Privacy policy (draft) · Sidekick", description: "How Sidekick handles your data. A plain-language draft for legal review." },
-  { path: "/terms", title: "Terms of use (draft) · Sidekick", description: "The terms for using Sidekick. A plain-language draft for legal review." },
+  { path: "/", title: `${BRAND.name}: the AI teammate for your team in Microsoft Teams`, description: `${BRAND.name} answers your team's questions in Microsoft Teams with sources, writes meeting notes and reminds the chat about what's due. One walled-off group per client engagement.` },
+  { path: "/features", title: `Features · ${BRAND.name}`, description: `Answers with sources, meeting notes and action items, reminders, guardrails, groups per client and an audit log: what ${BRAND.name} does for your team in Microsoft Teams.` },
+  { path: "/how-it-works", title: `How it works · ${BRAND.name}`, description: `Sign up, approve ${BRAND.name} for Microsoft 365, install it in Teams, create a group per client with its Team Lead and pick the chats. The setup wizard walks you through it.` },
+  { path: "/security", title: `Security & trust · ${BRAND.name}`, description: "Walls between companies and between client groups, guardrails on every answer, an audit log, hosting in Microsoft Azure and encryption in transit. Powered by Claude." },
+  { path: "/pricing", title: `Plans and pricing · ${BRAND.name}`, description: `${BRAND.name}'s plans, priced per organization by groups (one per client engagement), each with a free trial.` },
+  { path: "/faq", title: `FAQ · ${BRAND.name}`, description: `Plain answers to common questions: what ${BRAND.name} can see, where data lives, AI training, Microsoft 365 permissions, Teams setup, billing and cancelling.` },
+  { path: "/docs", title: `Help center · ${BRAND.name}`, description: `Guides for using ${BRAND.name}: concepts, setting up your organization, ${BRAND.name} in Teams, and roles and permissions.` },
+  { path: "/support", title: `Support · ${BRAND.name}`, description: `How to get help with ${BRAND.name} and answers to common questions.` },
+  { path: "/changelog", title: `Changelog · ${BRAND.name}`, description: `What's new in ${BRAND.name}, release by release.` },
+  { path: "/signup", title: `Sign up · ${BRAND.name}`, description: `Create your organization's ${BRAND.name} account and start a free trial.` },
+  { path: "/privacy", title: `Privacy policy (draft) · ${BRAND.name}`, description: `How ${BRAND.name} handles your data. A plain-language draft for legal review.` },
+  { path: "/terms", title: `Terms of use (draft) · ${BRAND.name}`, description: `The terms for using ${BRAND.name}. A plain-language draft for legal review.` },
 ];
 
 /** The main links in the public header, in order (Sign in and Get started are separate buttons). */
@@ -72,7 +73,7 @@ export function pageMetadata(path: string): Metadata {
 
 /** The same metadata for any title and description (help-center guides use it with their own text). */
 export function metadataFor({ title, description }: { title: string; description: string }): Metadata {
-  return { title, description, openGraph: { title, description, siteName: "Sidekick", type: "website", locale: "en_US" } };
+  return { title, description, openGraph: { title, description, siteName: BRAND.name, type: "website", locale: "en_US" } };
 }
 
 /** Metadata for pages search engines should skip (portal, Owner Console, sign-in, checkout). */

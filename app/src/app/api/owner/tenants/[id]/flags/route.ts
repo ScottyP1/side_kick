@@ -10,6 +10,7 @@ import { handle, readJson } from "@/lib/api";
 import { audit, HttpError } from "@/lib/auth";
 import { get, now, run } from "@/lib/db";
 import { FLAGS, isPlatformOnly, platformLog, requireOwner, type FlagKey } from "@/lib/owner";
+import { BRAND } from "@/lib/brand";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -26,7 +27,7 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
      ON CONFLICT (org_id, flag_key) DO UPDATE SET enabled = excluded.enabled, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
     org.id, key, enabled ? 1 : 0, owner.name, now(),
   );
-  await audit({ org_id: org.id, name: "Sidekick team" }, `${enabled ? "Turned on" : "Turned off"} ${label} for this organization`, "Policy change");
+  await audit({ org_id: org.id, name: `${BRAND.name} team` }, `${enabled ? "Turned on" : "Turned off"} ${label} for this organization`, "Policy change");
   await platformLog(owner.name, `${enabled ? "Turned on" : "Turned off"} ${label} for ${org.name}`);
   return { ok: true };
 });

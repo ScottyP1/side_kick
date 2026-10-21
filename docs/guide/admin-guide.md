@@ -126,9 +126,9 @@ Open the round button (bottom left) → **I need help**, or **Help & support** i
 ## 15. Sign-up, plan and billing
 Payments are in **test mode** for now: no money moves, prices are made up, and Sidekick **never asks for card or bank details** (a blue "Test mode" note shows wherever billing appears).
 
-**Signing up.** On **/signup** enter your organization's name, your name, work email, a password (at least 12 characters, and not one from a known data breach) and a plan (Starter, Team or Business; compare them on **/pricing**). You become the **Org Owner**, are signed in straight away and land on **checkout**. Each email can only have one Sidekick account, in any organization. Sign-up is **off until the Sidekick team opens it**: until then **/signup** says "Sign-up isn't open yet" and **/pricing** shows **Contact us** instead of **Start free trial**; contact them to get an organization set up. Too many sign-up attempts from one network (5 an hour) are paused for an hour.
+**Signing up.** On **/signup** enter your organization's name, your name, work email, a password (at least 12 characters, and not one from a known data breach) and a plan (Starter, Team or Business; compare them on **/pricing**). Plans are priced **per organization per month by groups** (one group per client engagement), not per person. You become the **Org Owner**, are signed in straight away and land on **checkout**. Each email can only have one Sidekick account, in any organization. Sign-up is **off until the Sidekick team opens it**: until then **/signup** says "Sign-up isn't open yet" and **/pricing** shows **Contact us** instead of **Start free trial**; contact them to get an organization set up. Too many sign-up attempts from one network (5 an hour) are paused for an hour.
 
-**Free trial and paying.** Every new organization gets a **14-day free trial**. On checkout you see the plan, the price per person, how many people you have and the total every 30 days, and one **Pay (test mode)** button. **Not now** keeps the trial; everyone sees a "Free trial: N days left" note at the top until you pay.
+**Free trial and paying.** Every new organization gets a **14-day free trial**. On checkout you pick the plan and any **extra groups** ($129 each a month) and see the plan's price, the extra groups' price, the total every 30 days and how many groups and people that covers, and one **Pay (test mode)** button. **Not now** keeps the trial; everyone sees a "Free trial: N days left" note at the top until you pay.
 
 **Setup wizard.** After checkout (paying or **Not now**) a new organization lands on **Get started** (**/get-started**), which walks you through first-time setup one step at a time:
 1. **Welcome**: your plan and trial, and how groups and Team Leads work.
@@ -140,9 +140,10 @@ Payments are in **test mode** for now: no money moves, prices are made up, and S
 Then **Done** shows what's set and what's left, and **Finish setup** ends it. Any step can be skipped (**Do this later**) and you can come back: until setup is finished, Org Owners and Org Admins see a **Finish setting up Sidekick** banner with a **Continue setup** link. Finishing is in the audit log. Organizations set up by the Sidekick team don't get the banner.
 
 **Plan on Usage & billing** (Org Owners, Org Admins and Billing Admins see it; **only the Org Owner and Billing Admins** can change it):
-- **Current plan**, its status (Free trial, Active, Payment failed, Canceled) and dates, and a table of **every limit** with how much you use (see section 16). A person is anyone with an account, any role.
-- **Pay now** (when not active) opens checkout. **Change plan…** switches straight away (the paid-until date stays); a plan you've outgrown (more people or workspaces than it allows) is refused with the numbers.
-- **Cancel plan** asks first. Sidekick stays fully usable until the end of what you paid for (or the trial), then turns read-only.
+- **Current plan** (with any extra groups, e.g. "Starter + 2 extra groups"), the **monthly price for the organization**, its status (Free trial, Active, Payment failed, Canceled) and dates, groups used (ending groups aren't counted), people, and a table of **every limit** with how much you use (see section 16). A person is anyone with an account, any role.
+- **Extra groups**: set the number and press **Update** ($129 each a month; each also adds 15 people, 30 meeting hours, $40 of AI credit, 5 tracked chats and 500 documents). Fewer than your groups need is refused; nothing is deleted.
+- **Pay now** (when not active) opens checkout. **Change plan…** switches straight away (the paid-until date stays; extra groups stay); a plan you've outgrown (more people or groups than it allows, with its extra groups) is refused with the numbers.
+- **Cancel plan** asks first. Sidekick stays fully usable until the end of what you paid for (or the trial), then turns read-only for 30 days so you can export, then everything is deleted (section 17). Paying again before then keeps everything.
 - **Simulate a failed payment** (test mode only) shows what your team would see when a payment fails.
 - Every change is on **Security & audit** (kind "Billing").
 
@@ -151,26 +152,30 @@ Then **Done** shows what's set and what's left, and **Finish setup** ends it. An
 |---|---|
 | Free trial | Full use until the trial ends, with a note at the top saying how many days are left. |
 | Payment failed | Full use for a **7-day grace period**, with a warning to fix it. |
-| Canceled | Full use until the end of what was paid for, with a note. |
-| Any of these after its date | **Read-only**: everyone can still sign in and see everything; nothing can be added or changed (refused with "Sidekick is read-only for your organization because…"), and Sidekick doesn't answer in the portal, Teams or the assistant, write meeting notes or send reminders. Nothing is deleted. Paying on Usage & billing turns everything back on at once. |
+| Canceled | Full use until the end of what was paid for, with a note that gives the deletion date (30 days later). |
+| Any of these after its date | **Read-only**: everyone can still sign in and see everything; nothing can be added or changed (refused with "Sidekick is read-only for your organization because…"), and Sidekick doesn't answer in the portal, Teams or the assistant, write meeting notes or send reminders. Paying on Usage & billing turns everything back on at once. A free trial or failed payment that isn't fixed deletes nothing; a canceled plan is deleted after its 30 read-only days (section 17). |
 
 Organizations set up by the Sidekick team (or the very first one on an install) have no self-service plan: Usage & billing says the plan is managed by the Sidekick team, and still shows any limits the team set. **Enterprise** is the same: set up with the Sidekick team, with limits and a price agreed for your organization.
 
 ## 16. Plan limits, AI credit and the usage export
-**Limits.** Each plan includes a number of each of these (placeholders while pricing is decided):
+**Limits.** Each plan includes a number of each of these (placeholder prices while pricing is decided). The price is **per organization per month**, whatever the number of people:
 
-| | Starter | Team | Business | Enterprise |
-|---|---|---|---|---|
-| People | 10 | 50 | 500 | Agreed with you |
-| Groups | 2 | 10 | Unlimited | Agreed with you |
-| Tracked Teams chats (chats assigned to a group) | 5 | 30 | 200 | Agreed with you |
-| Meeting hours per month (imported transcripts) | 20 | 100 | 500 | Agreed with you |
-| Live meeting hours per month (Sidekick joining calls; coming later) | Not included | Not included | Not included | Included (100 by default) |
-| Documents | 200 | 2,000 | 20,000 | Agreed with you |
-| Connectors to other tools | None | 1 | All | Agreed with you |
-| **AI credit per month** | $20 | $150 | $1,000 | Agreed with you |
+| | Starter | Team | Business | Enterprise | Each extra group |
+|---|---|---|---|---|---|
+| **Price per month** | $199 | $699 | $1,999 | From about $5,000, agreed with you | +$129 |
+| **Groups** (client engagements) | 1 | 5 | 20 | Unlimited | +1 |
+| People | 15 | 75 | 300 | Agreed with you | +15 |
+| Meeting hours per month (imported transcripts) | 30 | 150 | 600 | Agreed with you | +30 |
+| **AI credit per month** | $40 | $200 | $800 | Agreed with you | +$40 |
+| Tracked Teams chats (chats assigned to a group) | 5 | 25 | 100 | Agreed with you | +5 |
+| Documents | 500 | 2,500 | 10,000 | Agreed with you | +500 |
+| Connectors to other tools | None | 1 | All | All | |
+| Live meeting hours per month (Sidekick joining calls; coming later) | Not included | Not included | Not included | Included (100 by default) | |
+| Also included | Answers, notes, guardrails, audit log | + reminders, Team Leads, custom rules | + require Microsoft sign-in, priority support | + live in meetings, dedicated database option | |
 
-When a limit is reached, adding another one is refused with a message saying which limit, the numbers, and how to get more ("Your Starter plan allows 2 groups and you have 2. An Org Owner or Billing Admin can move to a bigger plan on Usage & billing."). Meeting hours start again on the 1st of each month (UTC). **Nothing is ever deleted** because of a limit: if you move to a smaller plan (or the Sidekick team lowers a limit) while using more, everything stays, the limit shows **Over limit** on Usage & billing, and you just can't add more until you're under it. **Near limit** shows from 80%.
+**More groups.** When you create a group past your plan, Sidekick says which limit and the cheaper way to make room, with the monthly price of each, for example on Starter with 1 group: "add 1 extra group (Starter + 1 extra group for $328 a month), or move to Team for $699 a month". With 3 groups on Starter, extra groups ($457) beat Team ($699); from 5 groups, Team is cheaper. **See both options on Usage & billing** opens the plan with one button for each (Org Owner and Billing Admins). Groups that are **ending** (section 17) don't count toward the limit.
+
+When any other limit is reached, adding another one is refused with a message saying which limit, the numbers, and how to get more. Meeting hours start again on the 1st of each month (UTC). **Nothing is ever deleted** because of a limit: if you move to a smaller plan (or the Sidekick team lowers a limit) while using more, everything stays, the limit shows **Over limit** on Usage & billing, and you just can't add more until you're under it. **Near limit** shows from 80%. Organizations that were on the earlier per-person plans keep their plan name and get these numbers; if they have more groups than that now includes, their groups keep working and only new ones are refused.
 
 **AI credit.** Your plan includes a monthly amount of AI use, measured in dollars of AI cost (shown on Usage & billing → **AI credit this month**):
 - **At 80%** the Org Owner, Org Admins and Billing Admins see a notice at the top of every page, and it's recorded once on **Security & audit**.
@@ -181,9 +186,19 @@ When a limit is reached, adding another one is refused with a message saying whi
 
 **Usage export (CSV, for chargeback).** On Usage & billing, pick **This month**, **Last 3 months** or **Last 12 months** and press **Export CSV** (Org Owners, Org Admins and Billing Admins). One row per group per month with: month, group, **engagement code**, **client**, AI requests, **AI cost (USD)**, questions asked, meetings imported, meeting hours and documents added. AI work not tied to a group is one "Organization-wide" row. Set each group's engagement code and client on its **Settings** tab so the file lines up with your WBS codes. Only your own organization's groups are ever in the file.
 
+## 17. When an engagement ends: roll-off, export and deletion
+**Ending one group** (Org Owners and Org Admins): open the group → **Settings** → **When the engagement ends**.
+- **Export everything (zip)** downloads the group at any time: each document's text as Sidekick extracted it (the original files aren't kept), one file per meeting with notes, decisions, action items and the transcript, spreadsheets (CSV) of decisions and notes, action items, and questions with the knowledge gaps, a summary of the tracked Teams chats with their saved messages, the people in the group, and an **index.html** to open first. Exports are recorded on Security & audit.
+- **End this group…** asks for a deletion date (**30 days** by default, at least 7, at most a year). From then on the group shows **Ending** with the date: it's **read-only** for everyone (nothing can be uploaded, imported, asked or renamed; reading still works), its Teams chats get a short notice and are unlinked (Sidekick stops answering there), and it **no longer counts** toward your plan's groups.
+- **Cancel the ending** (until the date) makes it a normal group again and relinks its Teams chats where nobody linked them elsewhere.
+- **On the date** Sidekick deletes everything in the group (documents and their search entries, meetings and notes, action items, questions, saved chat messages, rules and members) and writes a **deletion certificate**: which kinds of data were deleted and how many, when, who asked, and that deleted data leaves the database backups within 35 days. It holds **no content**. It's in the audit log and on **Settings → Your data → Roll-offs and certificates**, as a PDF or text file. **Delete group now…** deletes at once, also with a certificate.
+
+**When your whole organization leaves.** After you cancel (or the Sidekick team ends the service), Sidekick stays usable until the end of what you paid for, then everything is **read-only for 30 days** with a banner giving the deletion date. Org Owners and Org Admins can download everything on **Settings → Your data → Export your data** (every group in its own folder, everyone in the organization, the audit log). Then all of it is deleted: groups, people and their sign-ins, Teams links, settings, usage details and the audit log. Paying again before the date keeps everything. Only a minimal record of the deletion (organization name, dates, who asked, the certificate's counts) is kept by the Sidekick team; they can send you the certificate, since nobody can sign in afterwards.
+
 ## Troubleshooting
 | You see | What to do |
 |---|---|
+| "This group is ending: it's read-only…" | The group is scheduled for deletion. An Org Owner or Org Admin can export it or **Cancel the ending** on its Settings tab. |
 | A dialog "Something went wrong on our side" with a reference code | It's on Sidekick's side, not yours. Try again; if it repeats, click **Copy details** and send it (with the reference code) to the Sidekick team. |
 | "Refused by your organization's guardrails" (or "Your organization has a rule that stops me…") on a normal work question | Paste the question into **Guardrails → Test it** to see which rule caught it. A switch may be stricter than you need (for example "Stick to work"), or a custom rule may be worded too broadly: edit it and test again. If a locked rule refused an ordinary question, send the wording to the Sidekick team. |
 | "This would loosen Sidekick's guardrails" when adding a rule | Custom rules can only add restrictions. Rewrite it as something Sidekick must not do, e.g. "Never quote day rates". |

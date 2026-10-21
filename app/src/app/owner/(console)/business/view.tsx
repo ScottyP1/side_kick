@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Pill, usd, useReportError } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Client = {
   id: string; name: string; paused: boolean; plan: string; status: string; people: number; revenue: number; aiCost: number; margin: number;
@@ -64,7 +65,7 @@ export default function BusinessPage() {
       <div className="grid g4">
         {[
           ["MRR", money(k.mrr), `${k.paying} paying of ${k.clients} clients`],
-          ["AI cost this month", money(k.aiCost), "What Claude cost Sidekick so far"],
+          ["AI cost this month", money(k.aiCost), `What Claude cost ${BRAND.name} so far`],
           ["Margin this month", money(k.margin), k.mrr ? `${Math.round((k.margin / k.mrr) * 100)}% of MRR` : "No revenue yet"],
           ["Near or over a limit", String(k.nearLimit), k.nearLimit ? "See the clients table" : "Nobody is close"],
         ].map(([l, v, d]) => (

@@ -6,6 +6,7 @@
 import { handle, readJson } from "@/lib/api";
 import { canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { refreshInsights } from "@/lib/sidekick";
+import { BRAND } from "@/lib/brand";
 
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
@@ -13,6 +14,6 @@ export const POST = handle(async (req: Request) => {
   const { ws } = await readJson<{ ws?: string }>(req);
   const id = await requireWorkspace(user, ws);
   const out = await refreshInsights(user, id);
-  if (!out) throw new HttpError(400, "Add documents or import a meeting first, so Sidekick has something to map.");
+  if (!out) throw new HttpError(400, `Add documents or import a meeting first, so ${BRAND.name} has something to map.`);
   return { ok: true };
 });

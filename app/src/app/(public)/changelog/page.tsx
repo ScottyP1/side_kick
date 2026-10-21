@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { PublicShell } from "@/components/public-shell";
 import { CHANGELOG } from "@/lib/changelog";
 import { pageMetadata } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 
 export const metadata: Metadata = pageMetadata("/changelog");
 
@@ -13,7 +14,7 @@ export default function ChangelogPage() {
     <PublicShell layout="full" current="/changelog">
       <div className="site-wrap site-narrow site-page-head">
         <span className="site-eyebrow">Changelog</span>
-        <h1>What&apos;s new in Sidekick</h1>
+        <h1>What&apos;s new in {BRAND.name}</h1>
         <p>Every customer-visible change, newest first.</p>
       </div>
       <div className="site-wrap site-narrow site-stack">

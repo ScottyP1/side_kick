@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { SecondStepForm } from "@/components/two-step";
 import { api } from "@/components/ui";
 import { takeFlash } from "@/lib/flash";
+import { BRAND } from "@/lib/brand";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -32,7 +33,7 @@ export default function LoginPage() {
       if (r.needsSetup) location.href = "/setup";
       setNeedsSetup(r.needsSetup);
       setMicrosoft(r.microsoft);
-    }).catch((e) => setError(e instanceof Error ? e.message : "Couldn't reach Sidekick."));
+    }).catch((e) => setError(e instanceof Error ? e.message : `Couldn't reach ${BRAND.name}.`));
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -67,7 +68,7 @@ export default function LoginPage() {
         <div className="brand" style={{ padding: 0 }}>
           <span className="brand-mark">S</span>
           <div>
-            <b style={{ color: "var(--fg)" }}>Sidekick</b>
+            <b style={{ color: "var(--fg)" }}>{BRAND.name}</b>
           </div>
         </div>
         <div>
@@ -94,7 +95,7 @@ export default function LoginPage() {
         {error && <p className="err" role="alert">{error}</p>}
         <button className="btn primary" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         {needsSetup && <Link href="/setup">Set up your organization</Link>}
-        <span className="muted" style={{ fontSize: 13 }}>New to Sidekick? <Link href="/signup">Sign up</Link> or see <Link href="/pricing">plans</Link>.</span>
+        <span className="muted" style={{ fontSize: 13 }}>New to {BRAND.name}? <Link href="/signup">Sign up</Link> or see <Link href="/pricing">plans</Link>.</span>
       </form>
     </div>
   );

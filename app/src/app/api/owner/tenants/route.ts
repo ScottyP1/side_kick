@@ -8,6 +8,7 @@ import { handle, readJson, requireText } from "@/lib/api";
 import { audit, createUser, HttpError } from "@/lib/auth";
 import { all, get, newId, now, run, tx } from "@/lib/db";
 import { platformLog, requireOwner } from "@/lib/owner";
+import { BRAND } from "@/lib/brand";
 
 export const GET = handle(async () => {
   await requireOwner();
@@ -47,7 +48,7 @@ export const POST = handle(async (req: Request) => {
     await run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", orgId, org, now());
     await createUser(orgId, name, email, "Org Owner", temp, true);
   });
-  await audit({ org_id: orgId, name: "Sidekick team" }, `Created organization “${org}” with ${name} as Org Owner`, "Access");
+  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Created organization “${org}” with ${name} as Org Owner`, "Access");
   await platformLog(owner.name, `Onboarded ${org} (${email})`);
   return { id: orgId, tempPassword: temp };
 });

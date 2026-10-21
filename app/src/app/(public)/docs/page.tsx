@@ -13,6 +13,7 @@ import { HelpSearch } from "@/components/help-search";
 import { PublicShell } from "@/components/public-shell";
 import { guides, helpSections } from "@/lib/help";
 import { pageMetadata } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 import { publishedArticles } from "@/lib/support-articles";
 
 /** The published public support articles (known issues and fixes), read per request inside a Suspense boundary. */
@@ -39,7 +40,7 @@ export default function HelpCenterPage() {
       <div className="site-wrap site-page-head">
         <span className="site-eyebrow">Help center</span>
         <h1>How can we help?</h1>
-        <p>Plain-language guides for everyone who uses Sidekick. New here? Start with <Link href="/docs/concepts">Concepts</Link>.</p>
+        <p>Plain-language guides for everyone who uses {BRAND.name}. New here? Start with <Link href="/docs/concepts">Concepts</Link>.</p>
       </div>
       <div className="site-wrap site-stack">
         <HelpSearch sections={helpSections()}>

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/components/ui";
 import { PublicShell, TestModeBanner } from "@/components/public-shell";
 import { PLANS, priceText, TRIAL_DAYS, type PlanId } from "@/lib/plans";
+import { BRAND } from "@/lib/brand";
 
 export default function SignupPage() {
   const [f, setF] = useState({ org: "", name: "", email: "", password: "", plan: "team" as PlanId });
@@ -25,7 +26,7 @@ export default function SignupPage() {
     const plan = PLANS.find((p) => p.id === new URLSearchParams(location.search).get("plan"));
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (plan) setF((cur) => ({ ...cur, plan: plan.id }));
-    api<{ open: boolean }>("/api/signup").then((r) => setOpen(r.open)).catch((e) => setError(e instanceof Error ? e.message : "Couldn't reach Sidekick."));
+    api<{ open: boolean }>("/api/signup").then((r) => setOpen(r.open)).catch((e) => setError(e instanceof Error ? e.message : `Couldn't reach ${BRAND.name}.`));
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -54,20 +55,20 @@ export default function SignupPage() {
         {open === false ? (
           <div className="auth-card">
             <h1>Sign-up isn&apos;t open yet</h1>
-            <p className="muted" style={{ margin: 0 }}>Sidekick is taking new organizations by invitation for now. <Link href="/support">Contact us</Link> and we&apos;ll set yours up. Already have an account? <Link href="/login">Sign in</Link>.</p>
+            <p className="muted" style={{ margin: 0 }}>{BRAND.name} is taking new organizations by invitation for now. <Link href="/support">Contact us</Link> and we&apos;ll set yours up. Already have an account? <Link href="/login">Sign in</Link>.</p>
             <Link className="btn primary" href="/support">Contact us</Link>
           </div>
         ) : (
           <form className="auth-card" onSubmit={submit}>
             <div>
               <div className="eyebrow">Start your {TRIAL_DAYS}-day free trial</div>
-              <h1>Sign up for Sidekick</h1>
+              <h1>Sign up for {BRAND.name}</h1>
               <p className="muted" style={{ margin: "4px 0 0" }}>You&apos;ll be your organization&apos;s Org Owner and can add your team afterward.</p>
             </div>
             <TestModeBanner />
             {field("org", "Organization name")}
             {field("name", "Your name", "text", undefined, "name")}
-            {field("email", "Work email", "email", "One Sidekick account per email.", "username")}
+            {field("email", "Work email", "email", `One ${BRAND.name} account per email.`, "username")}
             {field("password", "Password", "password", "At least 12 characters, and not one from a known data breach.", "new-password")}
             <div className="field">
               <label htmlFor="plan">Plan</label>

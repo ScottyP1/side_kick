@@ -19,17 +19,18 @@ import { useEffect, type Ref } from "react";
 import { useApp } from "./shell";
 import { ActionCard, ChatInput, ChatThread, runAction, useConversation, type CardState, type ChatAction, type ChatTurn } from "./chat";
 import { Icon } from "./ui";
+import { BRAND } from "@/lib/brand";
 
 /** Starter prompts, by what the person's role can do. */
 function suggestionsFor(role: string, admin: boolean): string[] {
   if (admin) return ["Create a workspace", "Add a person to a workspace", "Link a Teams chat", "What did we spend on AI this month?"];
   if (role === "Billing Admin") return ["What did we spend on AI this month?", "What can my role do?", "How is cost tracked?"];
   if (role === "Viewer") return ["What can my role do?", "How do I find a decision from a meeting?", "What are knowledge gaps?"];
-  return ["How do I import a meeting?", "Refresh the knowledge map", "How do I use Sidekick in Teams?"];
+  return ["How do I import a meeting?", "Refresh the knowledge map", `How do I use ${BRAND.name} in Teams?`];
 }
 
 /** What the thinking bubble cycles through, in order (the last one repeats until the reply arrives). */
-const THINKING_LABELS = ["Reading your question", "Checking what your role allows", "Looking through how Sidekick works", "Weighing the options", "Drafting a reply", "Double-checking the details", "Almost there"];
+const THINKING_LABELS = ["Reading your question", "Checking what your role allows", `Looking through how ${BRAND.name} works`, "Weighing the options", "Drafting a reply", "Double-checking the details", "Almost there"];
 
 type AssistReply = { conversation: string; reply: string; action: ChatAction | null; followUp: string | null };
 
@@ -73,8 +74,8 @@ export function Assistant({ onThinking, inputRef, compact }: { onThinking?: (on:
         inputRef={inputRef}
         onSend={(m) => chat.send(m)}
         busy={thinking}
-        placeholder={me.user.admin ? "Ask about Sidekick, or say “create a workspace for Fabrikam”…" : "Ask how something works in Sidekick…"}
-        label="Message the Sidekick assistant"
+        placeholder={me.user.admin ? `Ask about ${BRAND.name}, or say “create a workspace for Fabrikam”…` : `Ask how something works in ${BRAND.name}…`}
+        label={`Message the ${BRAND.name} assistant`}
       />
       {chat.error && <p className="err" style={{ margin: 0 }}>{chat.error}</p>}
       {chat.notice && <div className="callout info" role="status"><Icon n="lock" /><div>{chat.notice}</div></div>}
@@ -89,7 +90,7 @@ export function Assistant({ onThinking, inputRef, compact }: { onThinking?: (on:
           <button type="button" className="btn small ghost" onClick={chat.reset} disabled={thinking}>New conversation</button>
         </div>
       )}
-      {!compact && <p className="assist-note muted">Answers questions about Sidekick. Anything that changes data waits for you to press Confirm. For questions about a project, use Ask Sidekick on Knowledge &amp; docs.</p>}
+      {!compact && <p className="assist-note muted">Answers questions about {BRAND.name}. Anything that changes data waits for you to press Confirm. For questions about a project, use Ask {BRAND.name} on Knowledge &amp; docs.</p>}
     </div>
   );
 }
@@ -107,7 +108,7 @@ function resultOf(a: ChatAction, out: Record<string, unknown>): CardState {
         link: { href: "/users", label: "Open Users & access" },
       };
     case "link_teams":
-      return { state: "done", note: `Linked${out.name ? ` “${out.name}”` : ""}. Sidekick posted a confirmation in Teams.`, link: { href: "/workspaces", label: "Open Workspaces" } };
+      return { state: "done", note: `Linked${out.name ? ` “${out.name}”` : ""}. ${BRAND.name} posted a confirmation in Teams.`, link: { href: "/workspaces", label: "Open Workspaces" } };
     case "refresh_map":
       return { state: "done", note: "Knowledge map refreshed.", link: { href: "/memory", label: "Open Memory & gaps" } };
     default:

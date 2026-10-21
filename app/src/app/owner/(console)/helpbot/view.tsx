@@ -9,6 +9,7 @@
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, fmtTime, Pill, usd, useReportError, useToast } from "@/components/ui";
+import { BRAND } from "@/lib/brand";
 
 type Review = {
   budget: { spentToday: number; dailyUsd: number };
@@ -39,7 +40,7 @@ export default function HelpbotView() {
   const total = (o: string) => r.outcomes.filter((x) => x.outcome === o).reduce((n, x) => n + x.n, 0);
   return (
     <>
-      <div className="page-head"><div><h1>Help bot</h1><p>“Ask about Sidekick” on the website: public help content only, every answer cited, its own budget. The switch is on <Link href="/owner/releases">Releases &amp; switches</Link>.</p></div><Pill kind={r.enabled ? "good" : "warn"}>{r.enabled ? "On" : "Paused"}</Pill></div>
+      <div className="page-head"><div><h1>Help bot</h1><p>“Ask about {BRAND.name}” on the website: public help content only, every answer cited, its own budget. The switch is on <Link href="/owner/releases">Releases &amp; switches</Link>.</p></div><Pill kind={r.enabled ? "good" : "warn"}>{r.enabled ? "On" : "Paused"}</Pill></div>
       <div className="grid g3">
         <div className="panel"><div className="panel-b"><div className="eyebrow">Spent today</div><b className="num">{usd(r.budget.spentToday)} of {usd(r.budget.dailyUsd)}</b></div></div>
         <div className="panel"><div className="panel-b"><div className="eyebrow">Limits</div><b>{r.limits.perVisitorHour}/hour per visitor · {r.limits.perIpHour}/hour per network</b></div></div>

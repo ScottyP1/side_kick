@@ -12,6 +12,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { UserMenu } from "./shell";
 import { api, Icon, Pill, ToastProvider } from "./ui";
+import { BRAND } from "@/lib/brand";
 
 const NAV: [string, string, string][] = [
   ["/owner", "Overview", "home"],
@@ -20,6 +21,7 @@ const NAV: [string, string, string][] = [
   ["/owner/support", "Support inbox", "chat"],
   ["/owner/articles", "Support articles", "doc"],
   ["/owner/helpbot", "Help bot", "shield"],
+  ["/owner/rolloffs", "Roll-offs", "folder"],
   ["/owner/performance", "Performance & errors", "chart"],
   ["/owner/releases", "Releases & switches", "gear"],
   ["/owner/security", "Security", "lock"],
@@ -52,7 +54,7 @@ export function OwnerShell({ children }: { children: ReactNode }) {
           <div className="brand">
             <span className="brand-mark owner-mark">S</span>
             <div>
-              <b>Sidekick</b>
+              <b>{BRAND.name}</b>
               <small>Owner Console</small>
             </div>
           </div>

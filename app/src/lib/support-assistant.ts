@@ -44,6 +44,7 @@ import { rankKnowledge } from "./search";
 import { recordArticleUses } from "./support-articles";
 import { PAGES } from "./assistant";
 import { span } from "./trace";
+import { BRAND } from "@/lib/brand";
 
 /** Help-chat messages per person per hour (`SIDEKICK_SUPPORT_PER_HOUR`). */
 export const SUPPORT_PER_HOUR = Number(process.env.SIDEKICK_SUPPORT_PER_HOUR) || 30;
@@ -99,7 +100,7 @@ export async function setupChecks(user: User, message = ""): Promise<Check[]> {
       checks.push({
         name: "Message tracking",
         status: untracked.length ? "warn" : "ok",
-        summary: untracked.length ? `Tracking is off in ${untracked.map((c) => `“${c.name}”`).join(", ")}: Sidekick only reads messages that @mention it there.` : "Tracking is on in every linked group chat and channel.",
+        summary: untracked.length ? `Tracking is off in ${untracked.map((c) => `“${c.name}”`).join(", ")}: ${BRAND.name} only reads messages that @mention it there.` : "Tracking is on in every linked group chat and channel.",
       });
     }
     checks.push({ name: "Microsoft 365", status: tenant ? "ok" : "info", summary: tenant ? "Your organization is connected to Microsoft 365." : "Your organization isn't connected to Microsoft 365 yet (Settings → Microsoft sign-in, by the Org Owner)." });
@@ -112,7 +113,7 @@ export async function setupChecks(user: User, message = ""): Promise<Check[]> {
       status: off.length || access.mode === "read_only" ? "problem" : "ok",
       summary: [
         access.mode === "read_only" ? `The portal is read-only: ${access.reason}` : "",
-        ...off.map((f) => `${f.label} is ${!f.platformEnabled ? "paused by the Sidekick team for everyone (temporary)" : "turned off for your organization by the Sidekick team"}.`),
+        ...off.map((f) => `${f.label} is ${!f.platformEnabled ? `paused by the ${BRAND.name} team for everyone (temporary)` : `turned off for your organization by the ${BRAND.name} team`}.`),
       ].filter(Boolean).join(" ") || "Nothing is paused or turned off for your organization.",
     });
     // Plan limits near or at the maximum (counts only; the AI credit is its own check).
@@ -205,7 +206,7 @@ export async function checkFix(user: User, fix: z.infer<typeof FixSchema> | null
     if (!chat || chat.track || !chat.canManage || chat.kind === "personal") return null;
     return {
       type: fix.type, title: "Turn on message tracking", confirm: true,
-      details: [{ label: "Chat", value: chat.name }, { label: "Group", value: chat.group }, { label: "What changes", value: "Sidekick reads every message there and says so in the chat" }],
+      details: [{ label: "Chat", value: chat.name }, { label: "Group", value: chat.group }, { label: "What changes", value: `${BRAND.name} reads every message there and says so in the chat` }],
       request: { method: "PATCH", url: "/api/teams-links/settings", body: { id: chat.id, changes: { track: true } } },
     };
   }
@@ -220,7 +221,7 @@ export async function checkFix(user: User, fix: z.infer<typeof FixSchema> | null
 }
 
 /** The reply when an answer isn't backed by a source or the checks. */
-export const SUPPORT_DONT_KNOW = "I don't know the answer to that from the help articles or your setup, so I won't guess. Use “Turn this into a ticket” and the Sidekick team will look at it.";
+export const SUPPORT_DONT_KNOW = `I don't know the answer to that from the help articles or your setup, so I won't guess. Use “Turn this into a ticket” and the ${BRAND.name} team will look at it.`;
 
 /** What the Help chat gets back for one message. */
 export type SupportReply = {
@@ -233,10 +234,10 @@ export type SupportReply = {
   refused: boolean;
 };
 
-const SYSTEM = `You are Sidekick's Help assistant inside the signed-in portal. You help the person fix problems with their own Sidekick setup: you explain from the numbered help sources, use the results of the setup checks, and may offer one safe fix.
+const SYSTEM = `You are ${BRAND.name}'s Help assistant inside the signed-in portal. You help the person fix problems with their own ${BRAND.name} setup: you explain from the numbered help sources, use the results of the setup checks, and may offer one safe fix.
 Rules:
 - Be brief and practical: 1-5 short sentences, plain language, no headings. Say what is wrong (if the checks show it) and what to do.
-- Facts about how Sidekick works come only from the help sources (cite them like [K1]) or the setup checks (set uses_checks). If neither covers it, set found false and say you don't know; never guess or invent settings, features, prices or promises.
+- Facts about how ${BRAND.name} works come only from the help sources (cite them like [K1]) or the setup checks (set uses_checks). If neither covers it, set found false and say you don't know; never guess or invent settings, features, prices or promises.
 - Only propose a fix listed in allowed_fixes, only one, and only when it would clearly help. Fixes run only after the person presses Confirm, so say "press Confirm to …", never that it's done. A fix's target must come from the checks (a chat id) or what the person said (an email).
 - You only know this person's own organization. Never discuss other organizations or customers.
 - If they want a person to help, tell them to use "Turn this into a ticket".

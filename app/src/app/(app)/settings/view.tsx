@@ -3,7 +3,9 @@
 /**
  * Settings (/settings): Microsoft sign-in (connect the org's Microsoft tenant, require it), organization
  * branding (logo and brand color) and your own account: password, two-step sign-in (components/two-step.tsx)
- * and where you're signed in (sign out other sessions).
+ * and where you're signed in (sign out other sessions). Org Owners and Org Admins also get **Export your
+ * data** (the whole organization as a zip, GET /api/export) and **Roll-offs and certificates**: groups
+ * ending, a pending deletion of the organization, and deletion certificates to download (GET /api/rolloffs).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,6 +13,8 @@ import { useApp } from "@/components/shell";
 import { TwoStepPanel } from "@/components/two-step";
 import { api, Icon, Pill, Switch, useReportError, useToast } from "@/components/ui";
 import { takeFlash } from "@/lib/flash";
+import { BACKUP_RETENTION_DAYS, ORG_GRACE_DAYS } from "@/lib/rolloff-policy";
+import { BRAND } from "@/lib/brand";
 
 type MsStatus = { configured: boolean; connected: boolean; tenantId: string | null; required: boolean; linked: boolean; canManage: boolean };
 
@@ -47,7 +51,7 @@ function MicrosoftPanel() {
     }
   };
   const disconnect = async () => {
-    if (!confirm("Disconnect Microsoft sign-in? People will need their Sidekick password to sign in.")) return;
+    if (!confirm(`Disconnect Microsoft sign-in? People will need their ${BRAND.name} password to sign in.`)) return;
     try {
       await api("/api/auth/microsoft", { method: "DELETE" });
       toast("Microsoft sign-in disconnected");
@@ -65,15 +69,15 @@ function MicrosoftPanel() {
       </div>
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="muted" style={{ margin: 0 }}>
-          People sign in with the Microsoft work account they use for Teams and Outlook. Sidekick still decides what they can see: they must be added on Users &amp; access first, and their role and workspaces apply as usual.
+          People sign in with the Microsoft work account they use for Teams and Outlook. {BRAND.name} still decides what they can see: they must be added on Users &amp; access first, and their role and workspaces apply as usual.
         </p>
-        {!s.configured && <p className="callout warn" style={{ margin: 0 }}>Microsoft sign-in isn&apos;t set up on this Sidekick yet (the Sidekick team adds the app details).</p>}
+        {!s.configured && <p className="callout warn" style={{ margin: 0 }}>Microsoft sign-in isn&apos;t set up on this {BRAND.name} yet (the {BRAND.name} team adds the app details).</p>}
         {s.configured && s.connected && s.tenantId && <span className="muted" style={{ fontSize: 12.5 }}>Microsoft tenant: <code>{s.tenantId}</code></span>}
         <span style={{ fontSize: 13 }}>Your account: {s.linked ? <Pill kind="good">Linked to Microsoft</Pill> : <Pill>Not linked yet</Pill>}{!s.linked && s.connected && s.configured && <> · <a href="/api/auth/microsoft/start?next=/settings">Sign in with Microsoft to link it</a></>}</span>
         {s.canManage && s.configured && !s.connected && (
           <div>
             <a className="btn primary" href="/api/auth/microsoft/start?mode=link">Connect with Microsoft</a>
-            <span className="hint" style={{ display: "block", marginTop: 6 }}>Sign in with your work account: your company&apos;s Microsoft organization gets connected to this Sidekick organization.</span>
+            <span className="hint" style={{ display: "block", marginTop: 6 }}>Sign in with your work account: your company&apos;s Microsoft organization gets connected to this {BRAND.name} organization.</span>
           </div>
         )}
         {s.canManage && s.connected && (
@@ -86,7 +90,7 @@ function MicrosoftPanel() {
             {!s.required && (
               <span className="callout" style={{ margin: 0, fontSize: 13 }}>
                 Recommended: require Microsoft sign-in. Microsoft then checks every sign-in with your company&apos;s own rules (multi-factor
-                sign-in, Conditional Access), and nobody can guess a Sidekick password. If Microsoft sign-in ever breaks, the Sidekick team
+                sign-in, Conditional Access), and nobody can guess a {BRAND.name} password. If Microsoft sign-in ever breaks, the {BRAND.name} team
                 can let you back in.
               </span>
             )}
@@ -143,6 +147,43 @@ function SessionsPanel() {
 }
 
 const ACCENTS: [string, string | null][] = [["Default", null], ["Cobalt", "#2457c5"], ["Crimson", "#b4233c"], ["Violet", "#7a3fd1"], ["Purple", "#A100FF"], ["Graphite", "#3d4a52"]];
+
+type RolloffRow = { id: string; scope: "group" | "org"; group: string | null; status: "scheduled" | "running" | "canceled" | "done"; deleteOn: string; requestedBy: string; closedAt: string | null; certificate: { id: string } | null };
+
+/**
+ * Export your data and the organization's roll-offs (Org Owners and Org Admins): download everything as
+ * a zip at any time (also while read-only after canceling), see groups that are ending or the
+ * organization's scheduled deletion, and download each deletion certificate (PDF or text).
+ */
+function DataPanel() {
+  const reportError = useReportError();
+  const [rows, setRows] = useState<RolloffRow[] | null>(null);
+  useEffect(() => {
+    api<{ rolloffs: RolloffRow[] }>("/api/rolloffs").then((r) => setRows(r.rolloffs)).catch(reportError);
+  }, [reportError]);
+  const label = (r: RolloffRow) => (r.scope === "group" ? `Group “${r.group}”` : "The whole organization");
+  const day = (s: string | null) => (s ? new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "");
+  return (
+    <div className="panel">
+      <div className="panel-h"><h2>Your data</h2><span className="muted">Export, roll-offs, certificates</span></div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div><a className="btn" href="/api/export"><Icon n="upload" />Export your data (zip)</a></div>
+        <span className="hint">Every group (documents&apos; text, meetings with notes and action items, questions, Teams chat summary), everyone in the organization and the audit log, with an index page. To end one engagement, open its group → Settings. If you cancel your plan, everything stays read-only for {ORG_GRACE_DAYS} days after the paid period, then it&apos;s deleted; backups age out within {BACKUP_RETENTION_DAYS} days.</span>
+        <h3 style={{ margin: "6px 0 0", fontSize: 15 }}>Roll-offs and certificates</h3>
+        {!rows ? <span className="muted">Loading…</span> : !rows.length ? <span className="muted">Nothing has been scheduled for deletion.</span> : (
+          <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+            {rows.map((r) => (
+              <li key={r.id}>
+                {label(r)}: {r.status === "done" ? `deleted ${day(r.closedAt)}` : r.status === "canceled" ? "deletion cancelled" : `deleted on ${day(r.deleteOn)}`} <span className="muted">(asked by {r.requestedBy})</span>
+                {r.certificate && <> · <a href={`/api/rolloffs/${r.id}/certificate?format=pdf`}>Certificate {r.certificate.id} (PDF)</a> · <a href={`/api/rolloffs/${r.id}/certificate`}>text</a></>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const { me, reload } = useApp();
@@ -230,6 +271,7 @@ export default function SettingsPage() {
         </form>
         <TwoStepPanel base="/api/auth/mfa" note="Signing in with Microsoft skips this step: Microsoft runs its own checks." />
         <SessionsPanel />
+        {me.user.admin && <DataPanel />}
       </div>
     </>
   );

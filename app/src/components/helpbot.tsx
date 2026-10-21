@@ -14,11 +14,12 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ChatInput, ChatThread, useConversation, type ChatTurn } from "./chat";
 import { Dock } from "./dock";
 import { api, Spinner } from "./ui";
+import { BRAND } from "@/lib/brand";
 
 type BotReply = { conversation: string | null; reply: string; mode: "answer" | "faq"; faq?: ChatTurn["faq"]; dontKnow: boolean };
 
 const LABELS = ["Reading your question", "Looking through the help center", "Writing a short answer"];
-const STARTERS = ["What does Sidekick do?", "How much does it cost?", "Is our data used to train AI?", "How do I add Sidekick to Teams?"];
+const STARTERS = [`What does ${BRAND.name} do?`, "How much does it cost?", "Is our data used to train AI?", `How do I add ${BRAND.name} to Teams?`];
 
 /** The website's assistant button and the help bot panel. */
 export function HelpBotDock() {
@@ -33,9 +34,9 @@ export function HelpBotDock() {
   }, [open, restore]);
 
   return (
-    <Dock open={open} setOpen={setOpen} label="Ask about Sidekick" title="Ask about Sidekick" focusRef={input}>
+    <Dock open={open} setOpen={setOpen} label={`Ask about ${BRAND.name}`} title={`Ask about ${BRAND.name}`} focusRef={input}>
       <p className="muted chat-small" style={{ margin: 0 }}>
-        I&apos;m an AI assistant. I answer questions about Sidekick from the <Link href="/docs">help center</Link> and <Link href="/faq">FAQ</Link>, and I can be wrong. Please don&apos;t share personal details here.
+        I&apos;m an AI assistant. I answer questions about {BRAND.name} from the <Link href="/docs">help center</Link> and <Link href="/faq">FAQ</Link>, and I can be wrong. Please don&apos;t share personal details here.
       </p>
       <ChatThread
         turns={chat.turns}
@@ -51,7 +52,7 @@ export function HelpBotDock() {
           ) : null
         }
       />
-      {!human && <ChatInput inputRef={input} onSend={(m) => chat.send(m)} busy={chat.thinking} placeholder="Ask about Sidekick…" label="Ask about Sidekick" max={500} />}
+      {!human && <ChatInput inputRef={input} onSend={(m) => chat.send(m)} busy={chat.thinking} placeholder={`Ask about ${BRAND.name}…`} label={`Ask about ${BRAND.name}`} max={500} />}
       {chat.error && <p className="err" style={{ margin: 0 }}>{chat.error}</p>}
       {chat.notice && <p className="muted" role="status" style={{ margin: 0 }}>{chat.notice}</p>}
       {chat.turns.length === 0 && !human && (
@@ -81,7 +82,7 @@ function HumanForm({ conversation, onClose }: { conversation: string; onClose: (
     setState({ s: "busy" });
     try {
       const r = await api<{ ref?: string }>("/api/support/public", { method: "POST", json: { ...f, subject: f.description.slice(0, 80) || "Question from the website", category: "question", page, conversation: conversation || undefined } });
-      setState({ s: "done", msg: r.ref ? `Thanks. Your reference is ${r.ref}; the Sidekick team will reply by email, usually within two working days.` : "Thanks, we've got it." });
+      setState({ s: "done", msg: r.ref ? `Thanks. Your reference is ${r.ref}; the ${BRAND.name} team will reply by email, usually within two working days.` : "Thanks, we've got it." });
     } catch (x) {
       setState({ s: "failed", msg: x instanceof Error ? x.message : "Couldn't send it. Try again." });
     }

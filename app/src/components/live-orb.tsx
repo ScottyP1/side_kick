@@ -23,6 +23,7 @@ import Link from "next/link";
 import { api } from "./ui";
 import CrystalizedBall from "./crystalized-ball/CrystalizedBall";
 import { Assistant } from "./assistant";
+import { BRAND } from "@/lib/brand";
 
 type Health = { state: "ok" | "degraded" | "failing" | "idle" | "off"; calls?: number; errors?: number; avgMs?: number; last?: string | null };
 type Live = {
@@ -199,7 +200,7 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
   const busy = Boolean(live?.busy) || thinking;
 
   const summary = live
-    ? `Sidekick is ${busy ? "working right now" : "idle"}. ` +
+    ? `${BRAND.name} is ${busy ? "working right now" : "idle"}. ` +
       conns.map((n) => `${n.label}: ${STATE_LABEL[n.state]}, ${n.detail}.`).join(" ") +
       ` ${live.peopleCount} ${live.peopleCount === 1 ? "person" : "people"} active in the last 15 minutes.`
     : "Loading live status.";
@@ -208,7 +209,7 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
     <div className="panel live-orb">
       <div className="panel-h">
         <div>
-          <h2>Sidekick live</h2>
+          <h2>{BRAND.name} live</h2>
           <span className="muted" style={{ fontSize: 12.5 }}>
             {failed ? "Live status unavailable right now" : thinking ? "Writing a reply" : live?.busy ? "Working right now" : "Idle · watching for activity"}
           </span>
@@ -239,7 +240,7 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
         )}
       </div>
       {shown.some((n) => n.state === "degraded" || n.state === "failing") && (
-        <p className="orb-note muted">Something is slower than usual. Sidekick retries on its own; if it keeps happening, contact support.</p>
+        <p className="orb-note muted">Something is slower than usual. {BRAND.name} retries on its own; if it keeps happening, contact support.</p>
       )}
       <div className="panel-b orb-assist">
         <Assistant onThinking={setThinking} />

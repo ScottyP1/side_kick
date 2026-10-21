@@ -6,10 +6,11 @@
  */
 
 /** The demo chat window. `compact` leaves out the notes card (for narrow spots). */
+import { BRAND } from "@/lib/brand";
 export function TeamsDemo({ compact }: { compact?: boolean }) {
   return (
     <figure style={{ margin: 0 }}>
-      <div className="site-demo" role="img" aria-label="Example: Sidekick answering a question with sources, posting meeting notes and a reminder in a Microsoft Teams group chat (made-up data)">
+      <div className="site-demo" role="img" aria-label={`Example: ${BRAND.name} answering a question with sources, posting meeting notes and a reminder in a Microsoft Teams group chat (made-up data)`}>
         <div className="site-demo-bar" aria-hidden="true">
           <span className="dots"><i /><i /><i /></span>
           <b>Contoso · Payments Platform</b>
@@ -20,13 +21,13 @@ export function TeamsDemo({ compact }: { compact?: boolean }) {
             <span className="site-avatar">PR</span>
             <div>
               <div className="who"><b>Priya Raman</b>9:12 AM</div>
-              <div className="site-bubble"><span className="mention">@Sidekick</span> when is the wave 2 cutover and how many stores are in it?</div>
+              <div className="site-bubble"><span className="mention">@{BRAND.name}</span> when is the wave 2 cutover and how many stores are in it?</div>
             </div>
           </div>
           <div className="site-msg">
             <span className="site-avatar sk">S</span>
             <div>
-              <div className="who"><b>Sidekick</b>9:12 AM</div>
+              <div className="who"><b>{BRAND.name}</b>9:12 AM</div>
               <div className="site-tcard">
                 <p>Wave 2 cuts over on <b>Saturday, November 14</b>, starting 10 PM. It covers <b>38 stores</b> in the Northeast region; the rollback owner is Dan Ortiz.</p>
                 <div className="src"><span>Cutover plan v3.docx</span><span>Weekly sync, Oct 13</span></div>
@@ -37,7 +38,7 @@ export function TeamsDemo({ compact }: { compact?: boolean }) {
             <div className="site-msg">
               <span className="site-avatar sk">S</span>
               <div>
-                <div className="who"><b>Sidekick</b>Meeting notes</div>
+                <div className="who"><b>{BRAND.name}</b>Meeting notes</div>
                 <div className="site-tcard notes">
                   <h4>Weekly sync: notes</h4>
                   <p className="muted">Store pilot went well; card-reader firmware is the last blocker.</p>
@@ -45,7 +46,7 @@ export function TeamsDemo({ compact }: { compact?: boolean }) {
                     <li><b>Decided:</b> freeze the price file on Nov 10</li>
                     <li><b>Action:</b> Dan to confirm firmware with the vendor, due Nov 6</li>
                   </ul>
-                  <div className="site-acts"><span>Open in Sidekick</span></div>
+                  <div className="site-acts"><span>Open in {BRAND.name}</span></div>
                 </div>
               </div>
             </div>
@@ -53,7 +54,7 @@ export function TeamsDemo({ compact }: { compact?: boolean }) {
           <div className="site-msg">
             <span className="site-avatar sk">S</span>
             <div>
-              <div className="who"><b>Sidekick</b>Reminder</div>
+              <div className="who"><b>{BRAND.name}</b>Reminder</div>
               <div className="site-tcard remind">
                 <h4>2 things need an owner</h4>
                 <ul>
@@ -66,7 +67,7 @@ export function TeamsDemo({ compact }: { compact?: boolean }) {
           </div>
         </div>
       </div>
-      <figcaption className="site-demo-caption">Example with made-up data. Sidekick posts these cards in your Teams chats.</figcaption>
+      <figcaption className="site-demo-caption">Example with made-up data. {BRAND.name} posts these cards in your Teams chats.</figcaption>
     </figure>
   );
 }

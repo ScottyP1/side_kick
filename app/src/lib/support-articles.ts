@@ -27,6 +27,7 @@ import { all, get, newId, now, run } from "./db";
 import { structured } from "./claude";
 import { maskContacts } from "./guard-text";
 import { span } from "./trace";
+import { BRAND } from "@/lib/brand";
 
 /** Who an article is for (see the file header). */
 export const ARTICLE_LEVELS = ["public", "customer", "internal"] as const;
@@ -35,7 +36,7 @@ export type ArticleLevel = (typeof ARTICLE_LEVELS)[number];
 export const LEVEL_LABELS: Record<ArticleLevel, string> = {
   public: "Public (help center, help bot, support assistant)",
   customer: "Customers, when relevant (support assistant only)",
-  internal: "Internal (Sidekick team only)",
+  internal: `Internal (${BRAND.name} team only)`,
 };
 export type ArticleStatus = "draft" | "published";
 
@@ -58,26 +59,26 @@ const toArticle = (r: Row): Article => ({
 export const SEED_ARTICLES: { slug: string; title: string; level: ArticleLevel; tags: string[]; body: string }[] = [
   {
     slug: "group-chat-consent",
-    title: "Sidekick doesn't see plain messages in a group chat",
+    title: `${BRAND.name} doesn't see plain messages in a group chat`,
     level: "customer",
     tags: ["teams", "group chat", "tracking", "consent"],
-    body: `If Sidekick answers when you @mention it but never picks up ordinary messages in a **group chat** (it does in channels), your Microsoft 365 tenant probably doesn't allow apps to read chats yet. That permission is called resource-specific consent, and Microsoft has separate settings for teams and for chats.
+    body: `If ${BRAND.name} answers when you @mention it but never picks up ordinary messages in a **group chat** (it does in channels), your Microsoft 365 tenant probably doesn't allow apps to read chats yet. That permission is called resource-specific consent, and Microsoft has separate settings for teams and for chats.
 
 1. A Teams admin opens the Teams admin center → Teams apps → Manage apps → Actions → Org-wide app settings.
 2. Turn on resource-specific consent for **chats** (the teams setting doesn't cover group chats).
-3. In the group chat, remove Sidekick and add it again, so Teams asks for the permission once more.
+3. In the group chat, remove ${BRAND.name} and add it again, so Teams asks for the permission once more.
 4. Send a test message. Once the chat is assigned to a group, it shows up in that group's Teams chats with tracking on.`,
   },
   {
     slug: "plain-text-mention",
-    title: "Typing @Sidekick doesn't get an answer",
+    title: `Typing @${BRAND.name} doesn't get an answer`,
     level: "public",
     tags: ["teams", "mention", "@sidekick"],
-    body: `In Teams, typing the letters "@Sidekick" isn't always a real mention. A real mention is picked from the list that pops up while you type and shows highlighted in the message.
+    body: `In Teams, typing the letters "@${BRAND.name}" isn't always a real mention. A real mention is picked from the list that pops up while you type and shows highlighted in the message.
 
-- In a chat or channel assigned to a group (where Sidekick reads every message), Sidekick answers both a real mention and "@Sidekick" typed as plain text.
-- Anywhere else, Teams only sends Sidekick the message when it's a real mention: start typing @Sid and pick Sidekick from the list.
-- In a 1:1 chat with Sidekick, every message is a question; no mention needed.`,
+- In a chat or channel assigned to a group (where ${BRAND.name} reads every message), ${BRAND.name} answers both a real mention and "@${BRAND.name}" typed as plain text.
+- Anywhere else, Teams only sends ${BRAND.name} the message when it's a real mention: start typing @Sid and pick ${BRAND.name} from the list.
+- In a 1:1 chat with ${BRAND.name}, every message is a question; no mention needed.`,
   },
   {
     slug: "temporary-password",
@@ -87,17 +88,17 @@ export const SEED_ARTICLES: { slug: string; title: string; level: ArticleLevel; 
     body: `When an Org Owner, Org Admin or Team Lead adds you, they get a one-time temporary password to pass on to you privately.
 
 1. Sign in with your email and the temporary password.
-2. Sidekick asks you to pick your own password straight away. Until you do, nothing else works.
+2. ${BRAND.name} asks you to pick your own password straight away. Until you do, nothing else works.
 3. Your new password needs at least 12 characters and must not be one that appeared in a known data breach. A password manager can make one.
 
-Lost the temporary password, or it doesn't work? Ask whoever added you to reset it from Users & access. The Sidekick team never asks for your password.`,
+Lost the temporary password, or it doesn't work? Ask whoever added you to reset it from Users & access. The ${BRAND.name} team never asks for your password.`,
   },
   {
     slug: "first-channel-name",
     title: "A team's first channel shows the team's name",
     level: "customer",
     tags: ["teams", "channel", "name"],
-    body: `Microsoft Teams doesn't tell apps the name of a team's first channel (the one usually called "General"). Until Teams sends the real name, Sidekick shows the channel under the team's name instead of guessing.
+    body: `Microsoft Teams doesn't tell apps the name of a team's first channel (the one usually called "General"). Until Teams sends the real name, ${BRAND.name} shows the channel under the team's name instead of guessing.
 
 Nothing is wrong: answers, notes and reminders work the same. The name updates by itself once Teams includes it in a message.`,
   },
@@ -115,13 +116,13 @@ Fix: create the encryption-key secret on the Container App (docs/HOSTING.md → 
     title: "\"Essentials only\": what happens when the monthly AI credit runs out",
     level: "public",
     tags: ["billing", "ai credit", "essentials", "limits"],
-    body: `Every plan includes a monthly AI credit. At 80% Org Owners, Org Admins and Billing Admins see a notice. At 100% Sidekick switches to **essentials only** until the 1st of next month:
+    body: `Every plan includes a monthly AI credit. At 80% Org Owners, Org Admins and Billing Admins see a notice. At 100% ${BRAND.name} switches to **essentials only** until the 1st of next month:
 
 - Answers to questions keep working (in Teams and the portal), and so do the guardrail checks.
 - Notes for short meetings keep working.
 - Extras pause with a plain notice: automatic reminders, knowledge map updates, the in-app assistant and notes for long meetings.
 
-Nothing is deleted. The credit starts again on the 1st; the Sidekick team can also add a one-off top-up. The Help chat and support tickets never use your AI credit.`,
+Nothing is deleted. The credit starts again on the 1st; the ${BRAND.name} team can also add a one-off top-up. The Help chat and support tickets never use your AI credit.`,
   },
 ];
 
@@ -135,7 +136,7 @@ export async function ensureSeedArticles() {
   const at = now();
   for (const a of SEED_ARTICLES) {
     await run(
-      "INSERT INTO support_articles (id, slug, title, body, level, status, tags, source_ticket_id, seed, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, 'published', ?, NULL, 1, 'Sidekick', ?, NULL, ?) ON CONFLICT (slug) DO NOTHING",
+      `INSERT INTO support_articles (id, slug, title, body, level, status, tags, source_ticket_id, seed, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, 'published', ?, NULL, 1, '${BRAND.name}', ?, NULL, ?) ON CONFLICT (slug) DO NOTHING`,
       newId(), a.slug, a.title, a.body, a.level, JSON.stringify(a.tags), at, at,
     );
   }
@@ -268,7 +269,7 @@ const DraftSchema = z.object({
   tags: z.array(z.string()).describe("Up to 6 short lower-case keywords"),
 });
 
-const DRAFT_SYSTEM = `You write short support articles for Sidekick, an AI teammate for client teams in Microsoft Teams, from a support ticket the Sidekick team resolved.
+const DRAFT_SYSTEM = `You write short support articles for ${BRAND.name}, an AI teammate for client teams in Microsoft Teams, from a support ticket the ${BRAND.name} team resolved.
 - Describe the problem the way a customer would notice it, why it happens (if the ticket says), and the steps that fixed it.
 - Plain, friendly language, short paragraphs and numbered steps. 80-250 words.
 - Only use what the ticket says. Never invent settings, features, prices or promises.
@@ -287,7 +288,7 @@ export async function draftFromTicket(ticketId: unknown, by: string): Promise<Ar
   if (t.status !== "resolved") throw new HttpError(409, "Resolve the ticket first: drafts are written from how a problem was solved.");
   const msgs = await all<{ author_kind: string; body: string; internal: number }>("SELECT author_kind, body, internal FROM support_messages WHERE ticket_id = ? ORDER BY created_at", t.id);
   const clean = (s: string) => maskContacts(s.replace(/<\/?[a-z_]+[^>]*>/gi, "")).text.slice(0, 3000);
-  const thread = msgs.map((m) => `${m.author_kind === "customer" ? "Customer" : m.internal ? "Team note" : "Sidekick team"}: ${clean(m.body)}`).join("\n\n");
+  const thread = msgs.map((m) => `${m.author_kind === "customer" ? "Customer" : m.internal ? "Team note" : `${BRAND.name} team`}: ${clean(m.body)}`).join("\n\n");
   return span("ai", "Support: draft an article from a ticket", async () => {
     const out = await structured("support", { orgId: null, workspaceId: null, payer: "support" }, {
       system: DRAFT_SYSTEM,

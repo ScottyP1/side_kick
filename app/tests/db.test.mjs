@@ -220,7 +220,7 @@ const iso = (ms) => new Date(ms).toISOString();
 
 test(`[${engine}] plans: one list, cheapest first, and unknown ids aren't plans`, () => {
   assert.deepEqual(plans.PLANS.map((p) => p.id), ["starter", "team", "business"]);
-  assert.ok(plans.PLANS.every((p, i) => i === 0 || p.pricePerSeat > plans.PLANS[i - 1].pricePerSeat));
+  assert.ok(plans.PLANS.every((p, i) => i === 0 || p.priceUsd > plans.PLANS[i - 1].priceUsd));
   assert.equal(plans.planById("team").name, "Team");
   assert.equal(plans.planById("platinum"), undefined);
   assert.equal(plans.planById(undefined), undefined);
@@ -344,7 +344,7 @@ test(`[${engine}] plan limits: every plan has every limit; Enterprise isn't for 
   for (const p of plans.ALL_PLANS) for (const k of plans.LIMIT_KEYS) assert.ok(k in p, `${p.id} has ${k}`);
   assert.equal(plans.planById("enterprise").selfService, false);
   assert.ok(!plans.PLANS.some((p) => p.id === "enterprise"), "buyers never see Enterprise");
-  assert.deepEqual(plans.PLANS.map((p) => p.aiCreditUsd), [20, 150, 1000]);
+  assert.deepEqual(plans.PLANS.map((p) => p.aiCreditUsd), [40, 200, 800]);
   assert.deepEqual(plans.ALL_PLANS.map((p) => p.liveMeetingHours), [0, 0, 0, 100], "live meetings are Enterprise only");
   assert.deepEqual(plans.limitState(4, 5), { used: 4, limit: 5, pct: 80, over: false, full: false, near: true });
   assert.equal(plans.limitState(6, 5).over, true, "a plan that shrank shows over limit");
@@ -451,4 +451,76 @@ test(`[${engine}] breached-password check: only a 5-character hash prefix is sen
     else process.env.PWNED_PASSWORDS_URL = saved;
     server.close();
   }
+});
+
+/* ---------- Group pricing, roll-off rules, zip/PDF writers and the brand setting (no I/O) ---------- */
+test(`[${engine}] group pricing: per-organization prices, extra groups and the cheaper way to make room`, () => {
+  assert.deepEqual(plans.PLANS.map((p) => [p.priceUsd, p.workspaces, p.seats, p.meetingHours]), [[199, 1, 15, 30], [699, 5, 75, 150], [1999, 20, 300, 600]]);
+  assert.equal(plans.ENTERPRISE.workspaces, null, "Enterprise: unlimited groups");
+  assert.equal(plans.monthlyPrice(plans.planById("starter"), 2), 457);
+  assert.equal(plans.monthlyPrice(plans.ENTERPRISE, 5), plans.ENTERPRISE.priceUsd, "no extra groups on Enterprise");
+  const l = plans.limitsWithExtras(plans.planById("starter"), 2);
+  assert.deepEqual([l.workspaces, l.seats, l.meetingHours, l.aiCreditUsd, l.chats, l.documents, l.connectors], [3, 45, 90, 120, 15, 1500, 0]);
+  assert.equal(plans.limitsWithExtras(plans.planById("business"), 1).connectors, null, "unlimited stays unlimited");
+  // The example Cody approved: 3 groups on Starter → Starter + 2 extra ($457) beats Team ($699).
+  const a = plans.groupOptions(plans.planById("starter"), 0, 3);
+  assert.deepEqual([a.extra.extras, a.extra.priceUsd, a.upgrade.plan, a.upgrade.priceUsd, a.cheaper], [2, 457, "team", 699, "extra"]);
+  const b = plans.groupOptions(plans.planById("starter"), 0, 6);
+  assert.deepEqual([b.extra.priceUsd, b.upgrade.plan, b.cheaper], [844, "team", "upgrade"], "6 groups: Team wins");
+  const c = plans.groupOptions(plans.planById("team"), 0, 25);
+  assert.deepEqual([c.extra.priceUsd, c.upgrade.plan, c.upgrade.extras, c.upgrade.priceUsd, c.cheaper], [3279, "business", 5, 2644, "upgrade"], "past Business, extras on Business");
+  assert.equal(plans.groupOptions(plans.planById("business"), 0, 21).upgrade, null, "nothing bigger to self-serve");
+  assert.equal(plans.planWithExtras(plans.planById("team"), 1), "Team + 1 extra group");
+  assert.equal(plans.priceText(plans.ENTERPRISE), "From $5,000 / month");
+});
+
+test(`[${engine}] roll-off: a pending deletion makes the organization read-only from its date and says when`, () => {
+  const now = Date.parse("2026-10-21T12:00:00Z");
+  const full = { mode: "full", notice: null, reason: null };
+  assert.equal(plans.withRolloff(full, null, { selfService: true }, now), full);
+  const soon = plans.withRolloff(full, { read_only_from: iso(now + DAY), delete_on: iso(now + 31 * DAY), reason: "the plan was canceled" }, { selfService: true }, now);
+  assert.equal(soon.mode, "full", "usable until the paid period ends");
+  assert.match(soon.notice, /deleted on Nov 21, 2026\. To keep it, an Org Owner or Billing Admin can pay again/);
+  const ro = plans.withRolloff(full, { read_only_from: iso(now - DAY), delete_on: iso(now + 29 * DAY), reason: "the plan was canceled" }, { selfService: false }, now);
+  assert.equal(ro.mode, "read_only");
+  assert.match(ro.reason, /read-only for your organization because the plan was canceled, and everything in it will be deleted on Nov 19, 2026\. .*Export your data.*contact the Sidekick team/);
+});
+
+test(`[${engine}] zip and PDF writers: what they write reads back; names can't escape the folder`, async () => {
+  const zip = await import("../src/lib/zip.ts");
+  const files = [{ name: "index.html", data: "<h1>Hi</h1>" }, { name: "documents/Ünïcode – notes.txt", data: "x".repeat(5000) }];
+  const back = zip.readZip(zip.buildZip(files));
+  assert.deepEqual(back.map((f) => [f.name, f.data.toString()]), files.map((f) => [f.name, f.data]));
+  assert.equal(zip.safeName("../../etc/passwd"), "etc passwd");
+  assert.equal(zip.safeName("  "), "untitled");
+  const uniq = zip.uniqueNames();
+  assert.deepEqual(["a.txt", "A.txt", "a.txt"].map(uniq), ["a.txt", "A (2).txt", "a (3).txt"]);
+  const { textPdf } = await import("../src/lib/pdf.ts");
+  const pdf = textPdf("Test (1)", ["# Heading", "A line with (parens) and a backslash \\", ...Array.from({ length: 120 }, (_, i) => `Line ${i}`)]).toString("latin1");
+  assert.ok(pdf.startsWith("%PDF-1.4") && pdf.trimEnd().endsWith("%%EOF"));
+  assert.match(pdf, /\/Count 3 /, "long text runs onto more pages");
+  assert.match(pdf, /\\\(parens\\\)/, "parentheses are escaped");
+  const xref = Number(/startxref\n(\d+)/.exec(pdf)[1]);
+  assert.equal(pdf.slice(xref, xref + 4), "xref", "the cross-reference table is where the trailer says");
+});
+
+test(`[${engine}] brand: one setting names the product in the Teams manifest, page titles and site metadata`, async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { BRAND, pageTitle } = await import("../src/lib/brand.ts");
+  const template = fs.readFileSync(path.join(import.meta.dirname, "../../teams/manifest.template.json"), "utf8");
+  assert.doesNotMatch(template, /Sidekick/, "the manifest template has no hard-coded name");
+  const { fillBrand } = await import("../scripts/teams-manifest.mjs");
+  const manifest = JSON.parse(fillBrand(template));
+  assert.equal(manifest.name.short, BRAND.shortName);
+  assert.equal(manifest.name.full, `${BRAND.name}: ${BRAND.tagline}`);
+  assert.equal(manifest.developer.name, BRAND.name);
+  assert.equal(manifest.accentColor, BRAND.accent);
+  assert.ok(manifest.bots[0].commandLists[0].commands[0].description.includes(BRAND.shortName));
+  const site = await import("../src/lib/site.ts");
+  for (const p of site.PUBLIC_PAGES) assert.ok(p.title.includes(BRAND.name), `${p.path} title names the brand`);
+  assert.equal(site.metadataFor({ title: "x", description: "y" }).openGraph.siteName, BRAND.name);
+  assert.equal(pageTitle("Usage"), `Usage · ${BRAND.name}`);
+  const layout = fs.readFileSync(path.join(import.meta.dirname, "../src/app/layout.tsx"), "utf8");
+  assert.match(layout, /title: BRAND\.name/, "the root page title comes from the brand");
 });

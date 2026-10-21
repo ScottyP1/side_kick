@@ -26,6 +26,7 @@ import { audit, auditAsSidekick, HttpError } from "./auth";
 import { get, newId, now, run } from "./db";
 import { monthKey, monthStart, orgPlan } from "./limits";
 import { FeatureOffError, platformLog } from "./owner";
+import { BRAND } from "./brand";
 
 /** Where an organization stands this month. `creditUsd` includes top-ups; null = no credit limit. */
 export type CreditStatus = {
@@ -130,7 +131,7 @@ async function notice(orgId: string, s: CreditStatus) {
   } else {
     await auditAsSidekick(orgId, `This month's AI credit (${credit}) is used up: essentials only until the 1st (answers keep working)`, "Billing");
     const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", orgId);
-    await platformLog("Sidekick", `${org?.name ?? orgId} used up its AI credit (${credit}): essentials only`);
+    await platformLog(BRAND.name, `${org?.name ?? orgId} used up its AI credit (${credit}): essentials only`);
   }
 }
 
@@ -166,6 +167,6 @@ export async function grantTopUp(orgId: string, amountUsd: unknown, note: unknow
   const month = monthKey();
   await run("INSERT INTO credit_topups (id, org_id, month, amount_usd, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", newId(), orgId, month, Math.round(amount * 100) / 100, text, ownerName, now());
   forgetCredit(orgId);
-  await audit({ org_id: orgId, name: "Sidekick team" }, `Added $${amount.toFixed(2)} of AI credit for ${month}${text ? ` (${text})` : ""}`, "Billing");
+  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Added $${amount.toFixed(2)} of AI credit for ${month}${text ? ` (${text})` : ""}`, "Billing");
   return creditStatus(orgId, { fresh: true });
 }

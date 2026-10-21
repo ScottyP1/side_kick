@@ -43,6 +43,7 @@ import { orgPlan } from "./limits";
 import { linkUsesToTicket } from "./support-articles";
 import { maskPersonalData } from "./guard-text";
 import { span } from "./trace";
+import { BRAND } from "@/lib/brand";
 
 export const CATEGORIES = ["question", "bug", "billing", "access", "feature"] as const;
 export type Category = (typeof CATEGORIES)[number];
@@ -302,7 +303,7 @@ export async function customerAct(user: User, id: unknown, body: Record<string, 
   if (body.action === "resolve") {
     if (t.status === "resolved") return ticketFor(user, t.id);
     await run("UPDATE support_tickets SET status = 'resolved', resolved_at = ?, updated_at = ?, staff_unread = 1 WHERE id = ?", now(), now(), t.id);
-    await addMessage(t, "system", "Sidekick", `${user.name} marked this resolved.`, false, null);
+    await addMessage(t, "system", `${BRAND.name}`, `${user.name} marked this resolved.`, false, null);
     await audit(user, `Marked support ticket ${t.ref} resolved`, "Support");
     await notify({ kind: "resolved", ticket: t, to: "staff" });
     return ticketFor(user, t.id);
@@ -312,7 +313,7 @@ export async function customerAct(user: User, id: unknown, body: Record<string, 
   const reopen = t.status !== "open";
   await tx(async () => {
     await addMessage(t, "customer", user.name, message || "(file attached)", false, attachment);
-    if (reopen) await addMessage(t, "system", "Sidekick", `Reopened by ${user.name}'s reply.`, false, null);
+    if (reopen) await addMessage(t, "system", `${BRAND.name}`, `Reopened by ${user.name}'s reply.`, false, null);
     await run("UPDATE support_tickets SET status = 'open', resolved_at = NULL, staff_unread = 1, updated_at = ? WHERE id = ?", now(), t.id);
   });
   await audit(user, `Replied to support ticket ${t.ref}${reopen ? " (reopened)" : ""}`, "Support");
@@ -411,7 +412,7 @@ export async function ticketContext(t: TicketRow, threadText: string) {
     : [];
   const detail = (ref: string) => logged.find((l) => l.ref === ref);
   return {
-    client: org ? { id: org.id, name: org.name, status: org.status, plan: plan?.name ?? "Managed by the Sidekick team", subscription: sub?.status ?? null } : null,
+    client: org ? { id: org.id, name: org.name, status: org.status, plan: plan?.name ?? `Managed by the ${BRAND.name} team`, subscription: sub?.status ?? null } : null,
     errors: errors.map((e) => ({ ref: e.ref, what: e.name, error: e.error, status: e.http_status, who: e.actor, at: e.started_at, logged: detail(e.ref)?.message ?? null })),
     quoted: quoted.map((q) => ({ ref: q.ref, what: q.name, error: q.error, at: q.started_at, logged: detail(q.ref)?.message ?? null })),
   };
@@ -440,17 +441,17 @@ export async function ownerTicket(id: unknown) {
  */
 export async function ownerAct(owner: { name: string }, id: unknown, body: Record<string, unknown>, attachment: AttachmentInput | null) {
   const t = await ownerTicketRow(id);
-  const clientLog = (action: string) => (t.org_id ? audit({ org_id: t.org_id, name: `${owner.name} (Sidekick team)` }, action, "Support") : Promise.resolve());
+  const clientLog = (action: string) => (t.org_id ? audit({ org_id: t.org_id, name: `${owner.name} (${BRAND.name} team)` }, action, "Support") : Promise.resolve());
   const at = now();
   switch (body.action) {
     case "reply": {
       const message = text(body.message, 8000);
       if (!message) throw new HttpError(400, "Write the reply first.");
       await tx(async () => {
-        await addMessage(t, "staff", `${owner.name} (Sidekick team)`, message, false, attachment);
+        await addMessage(t, "staff", `${owner.name} (${BRAND.name} team)`, message, false, attachment);
         await run("UPDATE support_tickets SET status = CASE WHEN status = 'resolved' THEN 'resolved' ELSE 'waiting' END, customer_unread = 1, staff_unread = 0, updated_at = ? WHERE id = ?", at, t.id);
       });
-      await clientLog(`Sidekick team replied to support ticket ${t.ref}`);
+      await clientLog(`${BRAND.name} team replied to support ticket ${t.ref}`);
       await platformLog(owner.name, `Replied to support ticket ${t.ref}`);
       await notify({ kind: "staff_reply", ticket: t, to: "customer" });
       break;
@@ -466,7 +467,7 @@ export async function ownerAct(owner: { name: string }, id: unknown, body: Recor
     case "assign": {
       const to = text(body.to, 120) || null;
       await run("UPDATE support_tickets SET assigned_to = ?, updated_at = ? WHERE id = ?", to, at, t.id);
-      await addMessage(t, "system", "Sidekick", to ? `Assigned to ${to}.` : "Unassigned.", true, null);
+      await addMessage(t, "system", `${BRAND.name}`, to ? `Assigned to ${to}.` : "Unassigned.", true, null);
       await platformLog(owner.name, `${to ? `Assigned support ticket ${t.ref} to ${to}` : `Unassigned support ticket ${t.ref}`}`);
       break;
     }
@@ -475,8 +476,8 @@ export async function ownerAct(owner: { name: string }, id: unknown, body: Recor
       if (!PRIORITIES.includes(p)) throw new HttpError(400, "Pick a priority: low, normal, high or urgent.");
       if (p === t.priority) break;
       await run("UPDATE support_tickets SET priority = ?, updated_at = ? WHERE id = ?", p, at, t.id);
-      await addMessage(t, "system", "Sidekick", `Priority changed from ${t.priority} to ${p}.`, true, null);
-      await clientLog(`Sidekick team changed support ticket ${t.ref} priority to ${p}`);
+      await addMessage(t, "system", `${BRAND.name}`, `Priority changed from ${t.priority} to ${p}.`, true, null);
+      await clientLog(`${BRAND.name} team changed support ticket ${t.ref} priority to ${p}`);
       await platformLog(owner.name, `Changed support ticket ${t.ref} priority from ${t.priority} to ${p}`);
       break;
     }
@@ -485,8 +486,8 @@ export async function ownerAct(owner: { name: string }, id: unknown, body: Recor
       const resolve = body.action === "resolve";
       if ((t.status === "resolved") === resolve) break;
       await run("UPDATE support_tickets SET status = ?, resolved_at = ?, customer_unread = 1, updated_at = ? WHERE id = ?", resolve ? "resolved" : "open", resolve ? at : null, at, t.id);
-      await addMessage(t, "system", "Sidekick", resolve ? `Resolved by ${owner.name} (Sidekick team).` : `Reopened by ${owner.name} (Sidekick team).`, false, null);
-      await clientLog(`Sidekick team ${resolve ? "resolved" : "reopened"} support ticket ${t.ref}`);
+      await addMessage(t, "system", `${BRAND.name}`, resolve ? `Resolved by ${owner.name} (${BRAND.name} team).` : `Reopened by ${owner.name} (${BRAND.name} team).`, false, null);
+      await clientLog(`${BRAND.name} team ${resolve ? "resolved" : "reopened"} support ticket ${t.ref}`);
       await platformLog(owner.name, `${resolve ? "Resolved" : "Reopened"} support ticket ${t.ref}`);
       await notify({ kind: resolve ? "resolved" : "reopened", ticket: t, to: "customer" });
       break;

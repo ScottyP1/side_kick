@@ -12,11 +12,12 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type Ref } from "react";
 import { ActionCard, ChatInput, ChatThread, runAction, useConversation, type ChatAction, type ChatTurn } from "./chat";
 import { api, Icon, Spinner } from "./ui";
+import { BRAND } from "@/lib/brand";
 
 type SupportReply = { conversation: string; reply: string; action: ChatAction | null; followUp: string | null; checks: ChatTurn["checks"] };
 
 const LABELS = ["Reading your question", "Checking your setup", "Looking through the help articles", "Drafting a reply", "Almost there"];
-const STARTERS = ["Sidekick doesn't answer in our Teams chat", "Why is the assistant paused?", "I saw an error with a reference code", "Someone can't sign in"];
+const STARTERS = [`${BRAND.name} doesn't answer in our Teams chat`, "Why is the assistant paused?", "I saw an error with a reference code", "Someone can't sign in"];
 
 /** Status words for the checks list. */
 const STATUS: Record<string, string> = { ok: "OK", warn: "Check", problem: "Problem", info: "Info" };
@@ -35,7 +36,7 @@ export function SupportChat({ inputRef }: { inputRef?: Ref<HTMLInputElement> }) 
   async function confirm(turn: ChatTurn) {
     if (!turn.action) return;
     chat.setCard(turn.id, { state: "running" });
-    chat.setCard(turn.id, await runAction(turn.action, () => ({ state: "done", note: turn.action!.type === "turn_on_tracking" ? "Tracking is on. Sidekick told the chat." : "Done." })));
+    chat.setCard(turn.id, await runAction(turn.action, () => ({ state: "done", note: turn.action!.type === "turn_on_tracking" ? `Tracking is on. ${BRAND.name} told the chat.` : "Done." })));
   }
 
   async function makeTicket() {
@@ -50,7 +51,7 @@ export function SupportChat({ inputRef }: { inputRef?: Ref<HTMLInputElement> }) 
 
   return (
     <div className="assist">
-      {chat.turns.length === 0 && <p className="muted chat-small" style={{ margin: 0 }}>Tell me what isn&apos;t working. I&apos;ll check your setup and the help articles, and you can turn this into a ticket for the Sidekick team at any time.</p>}
+      {chat.turns.length === 0 && <p className="muted chat-small" style={{ margin: 0 }}>Tell me what isn&apos;t working. I&apos;ll check your setup and the help articles, and you can turn this into a ticket for the {BRAND.name} team at any time.</p>}
       <ChatThread
         turns={chat.turns}
         thinking={chat.thinking}

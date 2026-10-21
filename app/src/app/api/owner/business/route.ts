@@ -21,13 +21,13 @@ import { all, get } from "@/lib/db";
 import { requireOwner } from "@/lib/owner";
 import { creditStatus } from "@/lib/credit";
 import { limitReport, monthStart } from "@/lib/limits";
-import { planById, STATUS_LABEL, type PlanId, type SubStatus } from "@/lib/plans";
+import { monthlyPrice, planById, planWithExtras, STATUS_LABEL, type PlanId, type SubStatus } from "@/lib/plans";
 import { buildInfo, healthFacts, noteRelease } from "@/lib/ops";
 
 type OrgRow = {
   id: string; name: string; status: string; created_at: string;
   plan: PlanId | null; sub_status: SubStatus | null; provider: string | null; trial_ends_at: string | null; past_due_since: string | null; current_period_end: string | null;
-  monthly_price_usd: number | null; partner: string | null;
+  monthly_price_usd: number | null; partner: string | null; extra_groups: number | null;
 };
 
 export const GET = handle(async () => {
@@ -35,7 +35,7 @@ export const GET = handle(async () => {
   await noteRelease();
   const month = monthStart();
   const orgs = await all<OrgRow>(
-    `SELECT o.id, o.name, o.status, o.created_at, s.plan, s.status AS sub_status, s.provider, s.trial_ends_at, s.past_due_since, s.current_period_end,
+    `SELECT o.id, o.name, o.status, o.created_at, s.plan, s.status AS sub_status, s.provider, s.trial_ends_at, s.past_due_since, s.current_period_end, s.extra_groups,
             t.monthly_price_usd, t.partner
        FROM orgs o LEFT JOIN subscriptions s ON s.org_id = o.id LEFT JOIN org_terms t ON t.org_id = o.id ORDER BY o.name`,
   );
@@ -47,13 +47,13 @@ export const GET = handle(async () => {
     const plan = o.plan ? planById(o.plan) : null;
     const custom = !plan || !plan.selfService;
     const revenue = o.sub_status === "active" || (!o.plan && o.monthly_price_usd !== null)
-      ? custom ? (o.monthly_price_usd ?? 0) : people * plan!.pricePerSeat
+      ? custom ? (o.monthly_price_usd ?? 0) : monthlyPrice(plan!, Number(o.extra_groups ?? 0))
       : 0;
     const aiCost = cost.get(o.id) ?? 0;
     const credit = await creditStatus(o.id);
     const { lines } = await limitReport(o.id, credit.usedUsd);
     return {
-      id: o.id, name: o.name, paused: o.status !== "Active", plan: plan?.name ?? "Managed", status: o.sub_status ? STATUS_LABEL[o.sub_status] : "Managed",
+      id: o.id, name: o.name, paused: o.status !== "Active", plan: plan?.name ?? "Managed", planLabel: plan ? planWithExtras(plan, plan.selfService ? Number(o.extra_groups ?? 0) : 0) : "Managed", status: o.sub_status ? STATUS_LABEL[o.sub_status] : "Managed",
       people, revenue, aiCost, margin: revenue - aiCost, creditPct: Math.round(credit.pct), creditLevel: credit.level, partner: o.partner,
       near: lines.filter((l) => l.near && !l.over).map((l) => l.label), over: lines.filter((l) => l.over).map((l) => l.label),
     };

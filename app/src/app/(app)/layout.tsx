@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AppShell } from "@/components/shell";
 import { NOINDEX } from "@/lib/site";
+import { BRAND } from "@/lib/brand";
 
 export const metadata: Metadata = NOINDEX;
 
@@ -16,7 +17,7 @@ export const instant = false;
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={<div className="auth-wrap"><span className="muted">Loading Sidekick…</span></div>}>
+    <Suspense fallback={<div className="auth-wrap"><span className="muted">Loading {BRAND.name}…</span></div>}>
       <AppShell>{children}</AppShell>
     </Suspense>
   );

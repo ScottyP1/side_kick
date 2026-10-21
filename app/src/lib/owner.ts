@@ -13,6 +13,10 @@
  * - **Per-organization switches** (`org_flags`): the same features can also be turned off for one client
  *   only (a restriction set on that client's page in the Owner Console). A feature runs only when both
  *   the platform-wide switch and that organization's switch are on.
+ * - **Platform-only switches**: `signup` (self-service sign-up at /signup) is a switch for the whole platform
+ *   that has no per-client meaning, so it's marked `platformOnly` and left out of the per-client list.
+ * - **Billing**: a client whose plan has lapsed (lib/plans.ts `accessFor`) is refused new AI work by
+ *   `assertEnabled` too, as a restriction, so the portal, Teams and reminders all stop the same way.
  * - **Operator log**: owner actions are recorded in `platform_log`, separate from each client's audit log.
  */
 import "server-only";
@@ -20,6 +24,7 @@ import crypto from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { get, newId, now, run } from "./db";
 import { hashPassword, HttpError, verifyPassword } from "./auth";
+import { orgAccess } from "./billing";
 
 // Owner sessions are shorter than client sessions (12 hours) because the console sees every client.
 export const OWNER_COOKIE = "sk_owner";
@@ -104,8 +109,11 @@ export const FLAGS = {
   guard: { label: "Guardrail check", help: "Checks every question first. Pausing it also pauses answers: Sidekick never answers unchecked" },
   uploads: { label: "Document uploads", help: "New files from any client" },
   remind: { label: "Reminders in Teams", help: "Daily and after-meeting reminder cards posted to Teams chats" },
+  signup: { label: "Self-service sign-up", help: "New companies creating an organization at /signup (test-mode payment). Off: only you add clients", platformOnly: true },
 } as const;
 export type FlagKey = keyof typeof FLAGS;
+/** True for switches that only exist platform-wide (no per-client restriction), e.g. `signup`. */
+export const isPlatformOnly = (key: FlagKey) => "platformOnly" in FLAGS[key];
 
 /** Whether a feature is on. A switch nobody has touched yet counts as on. */
 export async function flagEnabled(key: FlagKey): Promise<boolean> {
@@ -121,7 +129,7 @@ export async function orgFlagEnabled(orgId: string, key: FlagKey): Promise<boole
 
 /** Every switch for one organization: its own setting plus whether the platform-wide one is on. */
 export async function orgFlags(orgId: string) {
-  return Promise.all((Object.keys(FLAGS) as FlagKey[]).map(async (key) => ({
+  return Promise.all((Object.keys(FLAGS) as FlagKey[]).filter((key) => !isPlatformOnly(key)).map(async (key) => ({
     key, ...FLAGS[key], enabled: await orgFlagEnabled(orgId, key), platformEnabled: await flagEnabled(key),
   })));
 }
@@ -140,7 +148,8 @@ export class FeatureOffError extends HttpError {
 
 /**
  * Throws `FeatureOffError` if the owner has paused this feature for everyone or (with `orgId`) turned it off
- * for that organization. Call it before starting that work; pass the org whenever the work belongs to one.
+ * for that organization, or that organization's plan has lapsed (read-only, see lib/billing.ts). Call it
+ * before starting that work; pass the org whenever the work belongs to one.
  *
  * @param role the reader's role, when known, so the restriction says what *they* can do: an Org Owner is told
  *   to contact the Sidekick team, everyone else to ask their Org Owner. Without it (Teams, background work)
@@ -150,6 +159,10 @@ export async function assertEnabled(key: FlagKey, orgId?: string | null, role?: 
   if (!(await flagEnabled(key))) throw new FeatureOffError("paused", `${FLAGS[key].label} is paused by the Sidekick team. Try again later.`);
   if (orgId && !(await orgFlagEnabled(orgId, key))) {
     throw new FeatureOffError("restricted", restrictedMessage(FLAGS[key].label, role));
+  }
+  if (orgId) {
+    const access = await orgAccess(orgId);
+    if (access.mode === "read_only") throw new FeatureOffError("restricted", access.reason!);
   }
 }
 

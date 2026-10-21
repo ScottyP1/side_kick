@@ -225,3 +225,15 @@ CREATE TABLE IF NOT EXISTS reminder_state (
 -- Reminders: due dates as real dates (YYYY-MM-DD).
 ALTER TABLE action_items ADD COLUMN IF NOT EXISTS due_on TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS due_on TEXT;
+-- Self-service sign-up attempts (lib/signup.ts), for the per-IP sign-up limit. Kept one day.
+CREATE TABLE IF NOT EXISTS signup_attempts (
+  id TEXT PRIMARY KEY, ip TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS signup_attempts_ip ON signup_attempts(ip, created_at);
+-- One subscription per organization (lib/billing.ts); no row = managed by the Sidekick team.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), plan TEXT NOT NULL, status TEXT NOT NULL,
+  provider TEXT NOT NULL, provider_ref TEXT, trial_ends_at TEXT, current_period_end TEXT,
+  past_due_since TEXT, canceled_at TEXT, access_until TEXT,
+  updated_by TEXT, updated_at TEXT NOT NULL, created_at TEXT NOT NULL
+);

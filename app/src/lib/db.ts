@@ -343,6 +343,18 @@ function migrate(conn: DatabaseSync) {
   // Reminders: due dates as real dates (YYYY-MM-DD), worked out from what was said and the meeting date.
   if (!has("action_items", "due_on")) conn.exec("ALTER TABLE action_items ADD COLUMN due_on TEXT");
   if (!has("items", "due_on")) conn.exec("ALTER TABLE items ADD COLUMN due_on TEXT");
+  // Multi-tenant Teams (lib/tenants.ts): who added Sidekick to a chat (shown on "Waiting to be assigned"),
+  // and when the org's Microsoft admin approved Sidekick's directory permission (lib/directory.ts).
+  if (!has("teams_conversations", "added_by")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN added_by TEXT");
+  if (!has("teams_conversations", "added_by_oid")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN added_by_oid TEXT");
+  if (!has("orgs", "graph_consent_at")) conn.exec("ALTER TABLE orgs ADD COLUMN graph_consent_at TEXT");
+  conn.exec("CREATE INDEX IF NOT EXISTS teams_conversations_tenant ON teams_conversations(tenant_id)");
+  // Unassigned chats (lib/teams/install.ts): since when a chat waits (Sidekick leaves after 7 days), the team's
+  // Microsoft 365 group id (to remove Sidekick from a channel's team), and a pending departure.
+  if (!has("teams_conversations", "waiting_since")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN waiting_since TEXT");
+  if (!has("teams_conversations", "team_aad_id")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN team_aad_id TEXT");
+  if (!has("teams_conversations", "leaving")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN leaving TEXT");
+  if (!has("teams_conversations", "leave_tried_at")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN leave_tried_at TEXT");
   // Groups: the client a workspace (group) is for, e.g. "Northwind Bank".
   if (!has("workspaces", "client")) conn.exec("ALTER TABLE workspaces ADD COLUMN client TEXT");
 }

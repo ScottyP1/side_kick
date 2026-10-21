@@ -1,14 +1,45 @@
 # Sidekick
 
-An AI teammate for Microsoft Teams. This folder holds the step 1 build: a working web dashboard where Sidekick reads your documents and meeting transcripts, writes meeting notes, answers questions with sources, and maps what the team knows and doesn't.
+An AI teammate for Microsoft Teams, built for consultancies and tech firms that run many client
+engagements. Each client engagement gets a **group** (a walled-off workspace with its own Team Lead,
+people, documents, meetings and Teams chats). Sidekick answers questions in Teams and the portal **with
+sources**, writes meeting notes and action items, posts reminders about what's still open, and maps what the
+team knows and doesn't, inside guardrails each company sets.
 
-- `app/` – the Next.js (React) app: dashboard + server API
-- `docs/guide/` – user guides: concepts, roles and permissions, admin guide, Sidekick in Teams, Owner Console
-- `docs/ARCHITECTURE.md` – how the code fits together, and the rules every change keeps
-- `docs/BLUEPRINT.md` – the full product blueprint (steps 1–3, architecture, security)
-- `docs/sidekick-dashboard*.html` – the original clickable mockups
-- `samples/` – a sample Teams transcript and documents for demos
-- `teams/` – the Teams app package (manifest template + icons)
+> **Private repository.** This repo stays private (a ground rule). Personal accounts and made-up sample
+> data only: nothing from Accenture or real clients. Secrets live only in `app/.env.local` (git-ignored)
+> and in Azure; never commit them. The public website is served *by* the app; the code is never published.
+
+## Status (October 2026)
+
+- **Live on Azure** (Container Apps + Postgres + Azure AI Search + Azure Bot), health-checked, with uptime
+  and restart alerts, 35-day database backups and budgets on every service. Teams works in the Sidekick
+  Labs test tenant.
+- **Built:** portal (groups, documents, meetings, Ask, memory & gaps, guardrails, roles incl. Team Lead,
+  activity, audit, usage), Teams bot (answers, notes, reminders with Assign / Mark done / Snooze / Not
+  relevant, chat tracking), Microsoft sign-in, Owner Console (all clients, switches, errors, plans),
+  self-service sign-up with a **test-mode** checkout (off by default), public pricing/privacy/terms/support
+  pages, Indigo design.
+- **What's next and who does what:** `docs/PROGRESS.md` → **Roadmap & queue** (the single source of truth).
+
+## Where things live
+
+| Path | What |
+|---|---|
+| `app/` | The Next.js app: portal, public pages, Owner Console (`/owner`), API, Teams bot (`/api/messages`) |
+| `app/src/lib/` | Server logic. Claude only via `claude.ts`, search via `search.ts`, database via `db.ts`, guardrails via `guardrails.ts` |
+| `app/tests/` | End-to-end and database tests (both SQLite and Postgres) |
+| `teams/` | Teams app package: manifest template + icons (`npm --prefix app run teams:package`) |
+| `infra/azure/` | Deploy, status, freeze/unfreeze scripts |
+| `docs/PROGRESS.md` | Status, roadmap & queue, handoff notes: **read first** |
+| `docs/guide/` | User guides: concepts, roles & permissions, admin, Teams, Owner Console |
+| `docs/ARCHITECTURE.md` | How the code fits together and the rules every change keeps |
+| `docs/HOSTING.md` | What runs where in Azure, costs, budgets, monitoring, Teams package |
+| `docs/RUNBOOKS.md` | Roll back, restore the database, rotate secrets, incidents, site down |
+| `docs/security/` | Security & operations reviews (Oct 2026) |
+| `docs/BLUEPRINT.md` | The full product blueprint |
+| `docs/mockups/`, `docs/sidekick-dashboard*.html` | Clickable design mockups (onboarding/groups, original dashboard) |
+| `samples/` | Made-up Contoso engagement: documents and Teams transcripts for demos and tests |
 
 ## Run it
 
@@ -27,13 +58,13 @@ An AI teammate for Microsoft Teams. This folder holds the step 1 build: a workin
 npm --prefix app test
 ```
 
-Runs 90 automated tests on **both** databases (SQLite and Postgres): the database layer, plus end-to-end checks of sign-in, workspace walls, roles, the client-guest filter, uploads, meeting notes, failures, the Teams bot, the in-app assistant, Microsoft sign-in (including forged and replayed replies), kill switches and suspension. They use a throwaway database, a fake Claude (free, canned answers, test mode only), a fake Teams connector and a fake Microsoft sign-in service, so nothing real is touched or paid for. The Postgres half needs Postgres running on this Mac (`brew services start postgresql@17`); without it those are skipped with a warning.
+Runs about 200 automated tests (the exact count is in `CLAUDE.md`) on **both** databases (SQLite and Postgres): the database layer, plus end-to-end checks of sign-in and the sign-in limit, temporary passwords, organization and group walls, every role's permissions, the client-guest filter, uploads, meeting notes, guardrails, sign-up and test-mode billing, failures, the Teams bot and reminders, the in-app assistant, Microsoft sign-in (including forged and replayed replies), kill switches, security headers and suspension. They use a throwaway database, a fake Claude (free, canned answers, test mode only), a fake Teams connector and a fake Microsoft sign-in service, so nothing real is touched or paid for. The Postgres half needs Postgres running on this Mac (`brew services start postgresql@17`); without it those are skipped with a warning.
 
 Last, it runs a **production build** (`next build`, the same step as the Docker image and the Azure deploy) in a throwaway build folder, so it works while your dev server is running and never touches `app/data`. The other tests use `next dev`, which allows some things a production build refuses; if the build fails, the run fails and prints the end of the build error. It adds a minute or two; `SKIP_BUILD=1 npm --prefix app test` leaves it out while you iterate, but run the full thing before committing.
 
 On GitHub, every pull request runs the same tests automatically (`.github/workflows/test.yml`, on GitHub's free minutes with its own throwaway Postgres). The result shows as a check on the pull request; don't merge while it's red.
 
-## Postgres and the container (for hosting in Azure later)
+## Postgres and the container
 
 - **Database:** without `DATABASE_URL` the app uses the local SQLite file (`app/data/sidekick.db`). With `DATABASE_URL=postgres://…` it uses Postgres and creates its tables on start (`app/db/schema.postgres.sql`). In production it refuses to run on SQLite, so data can't silently vanish.
 - **Move existing data to Postgres** (your SQLite file is only read, never changed; safe to run twice; prints a row-count check):
@@ -53,7 +84,7 @@ On GitHub, every pull request runs the same tests automatically (`.github/workfl
 
 ## Hosting in Azure
 
-Sidekick runs in Azure Container Apps with Postgres; see [docs/HOSTING.md](docs/HOSTING.md) for what runs where, costs, budgets, and the `infra/azure/` scripts to deploy, freeze and unfreeze it.
+Sidekick runs in Azure Container Apps with Postgres; see [docs/HOSTING.md](docs/HOSTING.md) for what runs where, costs, budgets, monitoring and alerts, and the `infra/azure/` scripts to deploy (with a health check and the rollback command), freeze and unfreeze it. When something goes wrong in production: [docs/RUNBOOKS.md](docs/RUNBOOKS.md).
 
 ## Microsoft sign-in (Entra ID)
 
@@ -173,7 +204,7 @@ That writes `teams/build/sidekick-teams-local.zip` (it passes Microsoft's 62 app
 
 ## Demo script (5 minutes)
 
-1. **Workspaces** → create “Contoso Retail – Cloud Migration”.
+1. **Groups** → New group “Contoso Retail – Cloud Migration”.
 2. **Knowledge & docs** → drop in the two files from `samples/` (mark them Shareable).
 3. **Meetings** → Import transcript → `samples/Contoso - Sprint 14 planning.vtt`, tick “Client guests attended”. Notes appear in ~15 seconds.
 4. **Knowledge & docs** → Ask: “Why did we choose Cosmos DB?” and “When is wave 2 and how many stores?” (it flags the 48 vs 52 conflict).
@@ -181,16 +212,17 @@ That writes `teams/build/sidekick-teams-local.zip` (it passes Microsoft's 62 app
 6. **Memory & gaps** → Refresh knowledge map: topics with coverage, gaps, and the action-item tracker.
 7. **Usage & billing** → what each AI feature cost.
 
-## What step 1 does and doesn't do
+## What works now and what's next
 
-| Works now | Comes later |
+| Works now | Next (see PROGRESS → Roadmap & queue) |
 |---|---|
-| Sign-in (Microsoft or password), roles, workspace walls, audit log | |
-| Upload PDF / Word / text / Teams transcripts; keyword search, plus Azure AI Search meaning-based search when configured | |
-| Meeting notes, Q&A with sources, knowledge map, gaps, action items | Jira/DevOps stories – step 2 |
-| Teams bot: @Sidekick answers, notes and action-item cards (tested in Agents Playground) | Real Teams install (Azure Bot, manifest, tunnel) – step 2 |
-| Usage and cost metering per feature/model | Live meetings with voice and virtual hand-raise – step 3 |
-| Branding (logo + color) | Connectors (Outlook, SharePoint, Jira, …) – step 2 |
-| Owner Console: all clients, spend, errors, kill switches | Release pipeline and staged rollouts – step 2 |
+| Sign-in (Microsoft or password, sign-in limit, temporary passwords), six roles incl. Team Lead, group walls, audit log | Multi-tenant Microsoft 365 (any company), directory import, chat picker instead of link codes |
+| Groups with Team Leads; documents (PDF / Word / text / transcripts); keyword + Azure AI Search meaning search | Plan limits and monthly AI credit, bring-your-own AI for Enterprise |
+| Meeting notes, Q&A with sources, knowledge map, gaps, action items | Notes chat per group with automatic Teams meeting transcripts; "save to knowledge" cards |
+| Teams: @Sidekick answers, notes, reminders with card buttons, chat tracking | Azure DevOps and Jira connectors |
+| Usage and cost per feature/model; Owner Console (clients, switches, errors, plans) | Support tickets + support assistant; Owner Console business view |
+| Sign-up with test-mode checkout (off by default); public pricing/privacy/terms/support | Full public website & help center; real payments; Teams Store listing; own domain |
+| Hosted on Azure with probes, uptime alerts, logs, backups, runbooks | Live voice in meetings (step 3) |
 
-Data lives in `app/data/sidekick.db` (SQLite, local only). Delete that file to start fresh.
+Local data lives in `app/data/` (SQLite). Use a separate copy for testing (`SIDEKICK_DATA_DIR`, or the
+`sidekick-preview` / `e2e-*` launch configs) so real local data is never touched.

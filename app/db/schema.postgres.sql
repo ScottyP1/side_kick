@@ -229,6 +229,17 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS due_on TEXT;
 CREATE TABLE IF NOT EXISTS org_setup (
   org_id TEXT PRIMARY KEY REFERENCES orgs(id), json TEXT NOT NULL, completed_at TEXT, updated_at TEXT NOT NULL
 );
+-- Multi-tenant Teams (lib/tenants.ts, lib/directory.ts): who added Sidekick to a chat, and when the org's
+-- Microsoft admin approved the directory permission.
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS added_by TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS added_by_oid TEXT;
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS graph_consent_at TEXT;
+CREATE INDEX IF NOT EXISTS teams_conversations_tenant ON teams_conversations(tenant_id);
+-- Unassigned chats (lib/teams/install.ts): waiting since, the team's Microsoft 365 group id, pending departure.
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS waiting_since TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS team_aad_id TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leaving TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leave_tried_at TEXT;
 -- Self-service sign-up attempts (lib/signup.ts), for the per-IP sign-up limit. Kept one day.
 CREATE TABLE IF NOT EXISTS signup_attempts (
   id TEXT PRIMARY KEY, ip TEXT, created_at TEXT NOT NULL

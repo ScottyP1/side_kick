@@ -18,7 +18,7 @@ export const metadata: Metadata = pageMetadata("/");
 
 const HIGHLIGHTS: [string, string, string][] = [
   ["answer", "Answers with sources", "Ask in the chat. Sidekick answers from that client's documents, meetings and chat, and shows where each answer came from. If it doesn't know, it says so."],
-  ["notes", "Meeting notes, done", "From your meeting transcripts: a summary, decisions, open questions and action items with owners and due dates, posted to the chat. Automatic notes after every meeting: coming soon."],
+  ["notes", "Meeting notes, done", "Add a meeting's transcript and Sidekick writes the summary, decisions, open questions and action items with owners and due dates, and posts them to the team's chat. Automatic notes after every Teams meeting are coming soon."],
   ["bell", "Reminders that matter", "Overdue and unowned action items, decisions still waiting, and documents that look out of date, raised in the chat before they slip."],
   ["groups", "One group per client", "Each engagement gets its own walled-off group with its own Team Lead, chats and documents. One client's material never shows up in another's answers."],
   ["shield", "Guardrails on every answer", "Company-wide and per-group rules, checked before Sidekick answers and again after. Client guests only ever see what's marked shareable."],
@@ -32,11 +32,15 @@ export default function HomePage() {
         <section className="site-hero" aria-labelledby="hero-title">
           <div>
             <span className="site-eyebrow">AI teammate for Microsoft Teams</span>
-            <h1 id="hero-title">Every client team gets a teammate that <em>remembers everything</em>.</h1>
+            <h1 id="hero-title">Every meeting, <em>remembered</em>.</h1>
             <p className="site-hero-text">
-              Sidekick works in your Teams group chats for consultancies and tech firms running many client engagements at once.
-              It answers questions with sources, writes the meeting notes and reminds the team about what&apos;s due, with a wall around every client.
+              Sidekick turns your Teams meetings into notes, decisions and action items, posted straight to your team&apos;s chat, then keeps everyone on track.
             </p>
+            <p className="site-hero-sub">A fast, reliable teammate in Teams chats, channels and 1:1. Answers with sources. A wall around every client.</p>
+            <ul className="site-hero-badges" aria-label="Coming soon">
+              <li><span className="site-badge">Coming soon</span> Automatic notes after every Teams meeting</li>
+              <li><span className="site-badge">Enterprise · coming soon</span> Sidekick live in your meetings</li>
+            </ul>
             <div className="site-hero-cta">
               <Link className="btn primary" href="/signup">Get started</Link>
               <Link className="btn" href="/login">Sign in</Link>
@@ -117,7 +121,7 @@ export default function HomePage() {
         <div className="site-wrap">
           <div className="site-band">
             <div>
-              <h2>Give every client team a Sidekick</h2>
+              <h2>Give every team a Sidekick</h2>
               <p>Start a {TRIAL_DAYS}-day free trial, or read the help center first.</p>
             </div>
             <div className="site-hero-cta">

@@ -327,6 +327,7 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .orb-fallback{width:72%;height:72%;margin:14%;border-radius:50%;background:radial-gradient(circle at 35% 30%,color-mix(in srgb,#fff 45%,var(--accent)),var(--accent) 45%,color-mix(in srgb,var(--accent) 60%,#000) 100%);box-shadow:0 0 60px color-mix(in srgb,var(--accent) 45%,transparent);animation:orbBreathe 6s ease-in-out infinite}
 @keyframes orbBreathe{50%{transform:scale(1.04);filter:brightness(1.08)}}
 .orb-status{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 18px;padding:4px 16px 12px;font-size:12.5px}
+.orb-note{text-align:center;margin:0 16px 10px;font-size:12.5px}
 .orb-conn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .orb-dot{width:8px;height:8px;border-radius:50%;flex:none}
 .orb-assist{border-top:1px solid var(--line)}
@@ -451,3 +452,7 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .perm .ico{color:var(--good);margin-top:3px}
 .perm.no .ico{color:var(--bad)}
 @media (max-width:860px){.wiz{grid-template-columns:minmax(0,1fr)}.wiz-side{position:static}.wiz-steps{flex-direction:row;overflow-x:auto;gap:6px}.wiz-steps li{flex-direction:column;align-items:center;min-width:72px;text-align:center}.wiz-steps li::after{display:none}.wiz-steps small{display:none}.wiz-card{padding:18px}.wiz-row{grid-template-columns:minmax(0,1fr)}}
+
+.site-hero-badges{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:6px;font-size:14px;color:var(--muted)}
+.site-badge{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
+.site-hero-sub{margin:10px 0 0;font-size:15px;color:var(--muted)}

@@ -21,8 +21,8 @@ export type PublicPage = { path: string; title: string; description: string };
 
 /** Every public page with fixed content, in sitemap order. Help-center guides are added by `lib/help.ts`. */
 export const PUBLIC_PAGES: readonly PublicPage[] = [
-  { path: "/", title: "Sidekick: the AI teammate for client teams in Microsoft Teams", description: "Sidekick answers your team's questions in Microsoft Teams with sources, writes meeting notes and reminds the chat about what's due. One walled-off group per client engagement." },
-  { path: "/features", title: "Features · Sidekick", description: "Answers with sources, meeting notes and action items, reminders, guardrails, groups per client and an audit log: what Sidekick does for client teams in Microsoft Teams." },
+  { path: "/", title: "Sidekick: the AI teammate for your team in Microsoft Teams", description: "Sidekick answers your team's questions in Microsoft Teams with sources, writes meeting notes and reminds the chat about what's due. One walled-off group per client engagement." },
+  { path: "/features", title: "Features · Sidekick", description: "Answers with sources, meeting notes and action items, reminders, guardrails, groups per client and an audit log: what Sidekick does for your team in Microsoft Teams." },
   { path: "/how-it-works", title: "How it works · Sidekick", description: "Sign up, approve Sidekick for Microsoft 365, install it in Teams, create a group per client with its Team Lead and pick the chats. The setup wizard walks you through it." },
   { path: "/security", title: "Security & trust · Sidekick", description: "Walls between companies and between client groups, guardrails on every answer, an audit log, hosting in Microsoft Azure and encryption in transit. Powered by Claude." },
   { path: "/pricing", title: "Plans and pricing · Sidekick", description: "Sidekick's plans, priced per person per month, each with a free trial." },

@@ -22,6 +22,12 @@
  * - **Sign-in limit**: password guessing is slowed down in lib/login-limit.ts.
  * - **Two-step sign-in**: people who add an authenticator app or a passkey (lib/mfa.ts) need it after
  *   their password before a session starts. New passwords follow lib/passwords.ts.
+ * - **Required two-step sign-in** (`orgs.mfa_required`, the Org Owner's switch on Settings): everyone who
+ *   signed in with a password and has no authenticator app or passkey yet is asked to set one up before
+ *   anything else works (`needs_two_step`; `requireUser` refuses with `TWO_STEP_SETUP_REQUIRED` except for
+ *   the routes that opt in with `allowPendingTwoStep`: /api/me, the password change and the two-step setup).
+ *   Sessions started with Microsoft sign-in (`sessions.via = 'microsoft'`) are exempt: Microsoft runs its
+ *   own checks.
  * - **Where you're signed in**: each session remembers when and from which browser and network address it
  *   started, and when it was last used, so people can see their sessions and sign the others out
  *   (`listSessions`, `endOtherSessions`). A password change signs out every other session.
@@ -53,7 +59,12 @@ export type User = {
   email: string;
   role: Role;
   must_change_password: number;
+  /** True when the org requires two-step sign-in, this session came from a password and the user has no factor yet. */
+  needs_two_step?: boolean;
 };
+
+/** How a session was started: a password (plus any second step), or Microsoft sign-in (exempt from required two-step). */
+export type SessionVia = "password" | "microsoft";
 
 /**
  * Hashes a password with scrypt (slow on purpose, so guessing is expensive) and a random salt.
@@ -87,16 +98,18 @@ const LAST_SEEN_EVERY_MS = 5 * 60_000;
 /**
  * Signs a user in: creates a session row (with when, the browser and the network address) and sets the
  * `sk_session` cookie (httpOnly, 7 days). Callers must have checked the password and any second step.
+ * `via` records how the person signed in (the Microsoft sign-in callback passes "microsoft"), which decides
+ * whether the organization's "Require two-step sign-in" applies to this session.
  * Also drops expired session rows (anyone's), so the table doesn't grow forever.
  */
-export async function startSession(userId: string) {
+export async function startSession(userId: string, via: SessionVia = "password") {
   const token = crypto.randomBytes(32).toString("base64url");
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
   const userAgent = ((await headers()).get("user-agent") ?? "").slice(0, 300);
   await run("DELETE FROM sessions WHERE expires_at < ?", new Date().toISOString());
   await run(
-    "INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen, user_agent, ip) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    sha256(token), userId, expires.toISOString(), now(), now(), userAgent || null, (await clientIp()) || null,
+    "INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen, user_agent, ip, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    sha256(token), userId, expires.toISOString(), now(), now(), userAgent || null, (await clientIp()) || null, via,
   );
   await run("UPDATE users SET last_active = ? WHERE id = ?", now(), userId);
   (await cookies()).set(SESSION_COOKIE, token, {
@@ -128,13 +141,14 @@ export async function endOtherSessions(userId: string): Promise<number> {
 
 /**
  * Returns the signed-in user for this request, or null if there is no valid session.
- * Throws 403 if the user's organization has been paused from the Owner Console.
+ * Throws 403 if the user's organization has been paused from the Owner Console. Sets `needs_two_step` when
+ * the organization requires two-step sign-in and this password session's user hasn't set one up.
  */
 export async function currentUser(): Promise<User | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const row = await get<User & { expires_at: string; org_status: string; last_seen: string | null }>(
-    `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password, s.expires_at, s.last_seen, o.status AS org_status
+  const row = await get<User & { expires_at: string; org_status: string; last_seen: string | null; mfa_required: number; via: string | null }>(
+    `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password, s.expires_at, s.last_seen, s.via, o.status AS org_status, o.mfa_required
        FROM sessions s JOIN users u ON u.id = s.user_id JOIN orgs o ON o.id = u.org_id WHERE s.token_hash = ?`,
     sha256(token),
   );
@@ -143,7 +157,9 @@ export async function currentUser(): Promise<User | null> {
     await run("UPDATE sessions SET last_seen = ? WHERE token_hash = ?", now(), sha256(token));
   }
   if (row.org_status === "Suspended") throw new HttpError(403, `This organization's ${BRAND.name} access is paused. Contact the ${BRAND.name} team.`);
-  return { id: row.id, org_id: row.org_id, name: row.name, email: row.email, role: row.role, must_change_password: row.must_change_password };
+  const needsTwoStep = Number(row.mfa_required) === 1 && row.via !== "microsoft"
+    && !(await get("SELECT id FROM mfa_factors WHERE account_kind = 'user' AND account_id = ? AND enabled = 1 LIMIT 1", row.id));
+  return { id: row.id, org_id: row.org_id, name: row.name, email: row.email, role: row.role, must_change_password: row.must_change_password, needs_two_step: needsTwoStep };
 }
 
 /** One place someone is signed in, as shown on Settings. `id` is a short public handle, never the token. */
@@ -184,14 +200,18 @@ export { HttpError } from "./http-error";
 
 /**
  * Returns the signed-in user or throws 401. Pass `roles` to also require one of those roles (403 otherwise).
- * The first line of almost every API route.
+ * The first line of almost every API route. Until a temporary password is changed (403
+ * `PASSWORD_CHANGE_REQUIRED`) or a required second step is set up (403 `TWO_STEP_SETUP_REQUIRED`), only the
+ * routes that opt in with `allowPendingPassword` / `allowPendingTwoStep` work.
  */
-export async function requireUser(roles?: readonly Role[], opts: { allowPendingPassword?: boolean } = {}): Promise<User> {
+export async function requireUser(roles?: readonly Role[], opts: { allowPendingPassword?: boolean; allowPendingTwoStep?: boolean } = {}): Promise<User> {
   const user = await currentUser();
   if (!user) throw new HttpError(401, "Sign in to continue.");
   traceScope({ orgId: user.org_id, actor: user.name, userId: user.id });
   // A temporary password must be changed before anything else (only /api/me and the password change pass this).
   if (user.must_change_password && !opts.allowPendingPassword) throw new HttpError(403, PASSWORD_CHANGE_REQUIRED);
+  // The organization requires two-step sign-in and this person hasn't set it up yet (see the file header).
+  if (user.needs_two_step && !opts.allowPendingTwoStep) throw new HttpError(403, TWO_STEP_SETUP_REQUIRED);
   if (roles && !roles.includes(user.role)) throw new HttpError(403, onlyRolesMessage(roles));
   return user;
 }
@@ -209,6 +229,9 @@ export function onlyRolesMessage(roles: readonly Role[]): string {
 
 /** The refusal while someone still has a temporary password; the portal shows the change-password screen instead. */
 export const PASSWORD_CHANGE_REQUIRED = `Change your temporary password first. Then you can use ${BRAND.name}.`;
+
+/** The refusal while the org requires two-step sign-in and it isn't set up; the portal shows the setup screen instead. */
+export const TWO_STEP_SETUP_REQUIRED = `Your organization requires two-step sign-in. Set up an authenticator app or a passkey first. Then you can use ${BRAND.name}.`;
 
 /**
  * The user behind this browser's session, or null, without the paused-organization check. Only for

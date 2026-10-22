@@ -40,7 +40,7 @@ export const GET = handle(async (req: Request) => {
       return go(`${saved.next_path === "/get-started" ? "/get-started" : "/settings"}?microsoft=connected`);
     }
     const userId = await signInAs(who);
-    await startSession(userId);
+    await startSession(userId, "microsoft");
     return go(safeNext(saved.next_path));
   } catch (e) {
     const message = await errorMessageFor(req, e);

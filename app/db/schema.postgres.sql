@@ -408,3 +408,6 @@ CREATE TABLE IF NOT EXISTS helpbot_events (
 CREATE INDEX IF NOT EXISTS helpbot_events_time ON helpbot_events(created_at);
 -- Who pays for an AI call (lib/claude.ts `payer`): null = the organization's AI credit, support / helpbot = Sidekick.
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS payer TEXT;
+-- Required two-step sign-in (lib/auth.ts): the Org Owner's switch, and how each session started (password | microsoft).
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS mfa_required INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS via TEXT;

@@ -3,6 +3,8 @@
 /**
  * The client portal frame: sidebar menu and top bar (with the workspace label or switcher on workspace pages), around every signed-in page.
  * It loads /api/me once and shares it through `useApp()`: the user, their role, branding, workspaces and the current workspace.
+ * Until a temporary password is changed, or a second step the organization requires is set up, it shows only
+ * that screen (the server refuses everything else meanwhile; lib/auth.ts).
  */
 
 import Link from "next/link";
@@ -10,11 +12,13 @@ import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, Icon, Pill, ToastProvider } from "./ui";
 import { AssistantDock } from "./assistant-dock";
+import { TwoStepPanel } from "./two-step";
 import { BRAND } from "@/lib/brand";
 
 export type Workspace = { id: string; name: string; code: string | null; color: string };
 export type Me = {
-  user: { id: string; name: string; email: string; role: string; mustChangePassword: boolean; admin: boolean; lead?: boolean };
+  /** `needsTwoStep`: the organization requires two-step sign-in and this person hasn't set it up yet. */
+  user: { id: string; name: string; email: string; role: string; mustChangePassword: boolean; needsTwoStep?: boolean; admin: boolean; lead?: boolean };
   org: { name: string };
   workspaces: Workspace[];
   /** Plain status of AI answers (no model or provider names in the portal). */
@@ -128,6 +132,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (!me) return <div className="auth-wrap"><span className="muted">Loading {BRAND.name}…</span></div>;
   // The server refuses everything else until a temporary password is changed, so show only that.
   if (me.user.mustChangePassword) return <ChangeTemporaryPassword name={me.user.name} onDone={reload} />;
+  if (me.user.needsTwoStep) return <SetUpRequiredTwoStep name={me.user.name} owner={me.user.role === "Org Owner"} onDone={reload} />;
 
   const items = NAV.map((g) => ({ g: g.g, items: g.items.filter((i) => !i[3] || i[3](me)) })).filter((g) => g.items.length);
   const active = (href: string) => path.startsWith(href);
@@ -310,6 +315,49 @@ export function UserMenu({ name, detail, onSignOut }: { name: string; detail: st
  * Full-screen step shown while the person still has the temporary password they were given: they pick a
  * new one (or sign out) before anything else. Microsoft sign-in also clears this step.
  */
+/**
+ * Shown instead of the portal while the organization requires two-step sign-in (Settings, Org Owner) and this
+ * person, signed in with a password, has no authenticator app or passkey yet. Uses the same setup panel as
+ * Settings; **Continue** reloads the account and opens the portal once a method is added. The Org Owner also
+ * gets **Turn the requirement off** (PATCH /api/auth/two-step-policy works while their own setup is pending),
+ * so an owner who can't add a method right now isn't stuck.
+ */
+function SetUpRequiredTwoStep({ name, owner, onDone }: { name: string; owner: boolean; onDone: () => Promise<void> }) {
+  const [err, setErr] = useState("");
+  const next = async () => {
+    setErr("");
+    await onDone();
+    setErr("Add an authenticator app or a passkey first, then continue.");
+  };
+  const turnOff = async () => {
+    if (!confirm("Stop requiring two-step sign-in for everyone in your organization?")) return;
+    setErr("");
+    try {
+      await api("/api/auth/two-step-policy", { method: "PATCH", json: { required: false } });
+      await onDone();
+    } catch (x) {
+      setErr(x instanceof Error ? x.message : "Couldn't change it.");
+    }
+  };
+  return (
+    <ToastProvider>
+      <div className="auth-wrap">
+        <div className="auth-card" style={{ maxWidth: 560 }}>
+          <h2>Set up two-step sign-in</h2>
+          <p className="muted">Welcome, {name}. Your organization asks everyone to use a second step when signing in with a password: an authenticator app or a passkey (Face ID, Touch ID, Windows Hello or a security key). It takes a minute.</p>
+          <TwoStepPanel base="/api/auth/mfa" />
+          {err && <p className="err" role="alert">{err}</p>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn primary" onClick={next}>Continue</button>
+            <button className="btn ghost" onClick={signOut}>Sign out</button>
+            {owner && <button className="btn ghost" onClick={turnOff}>Turn the requirement off</button>}
+          </div>
+        </div>
+      </div>
+    </ToastProvider>
+  );
+}
+
 function ChangeTemporaryPassword({ name, onDone }: { name: string; onDone: () => Promise<void> }) {
   const [pw, setPw] = useState({ current: "", next: "" });
   const [err, setErr] = useState("");

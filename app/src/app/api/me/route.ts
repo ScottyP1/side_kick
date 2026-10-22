@@ -7,6 +7,8 @@
  * `credit` (Org Owners, Org Admins and Billing Admins only) is this month's AI credit: level ok | warn
  * (80%+, the portal shows a banner) | essentials (used up) | unlimited, with the percent used.
  * `plan` is the plan's name and the connectors it includes (for the Connectors page).
+ * `user.needsTwoStep`: the org requires two-step sign-in and this password session has none yet (the portal
+ * then shows only the setup screen; lib/auth.ts). Works while a password change or that setup is pending.
  * `setupPending` (Org Owners and Admins only) is true while the setup wizard was opened but not finished.
  */
 import { handle } from "@/lib/api";
@@ -21,7 +23,7 @@ import { setupPending } from "@/lib/setup";
 const CREDIT_ROLES = ["Org Owner", "Org Admin", "Billing Admin"];
 
 export const GET = handle(async () => {
-  const user = await requireUser(undefined, { allowPendingPassword: true });
+  const user = await requireUser(undefined, { allowPendingPassword: true, allowPendingTwoStep: true });
   const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", user.org_id);
   const ids = await workspaceIdsFor(user);
   const workspaces = ids.length
@@ -30,7 +32,7 @@ export const GET = handle(async () => {
   const settings = await get<{ json: string }>("SELECT json FROM settings WHERE org_id = ?", user.org_id);
   const [{ plan, limits }, credit] = await Promise.all([orgPlan(user.org_id), CREDIT_ROLES.includes(user.role) ? creditStatus(user.org_id) : null]);
   return {
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, mustChangePassword: Boolean(user.must_change_password), admin: isAdmin(user), lead: isLead(user) },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, mustChangePassword: Boolean(user.must_change_password), needsTwoStep: Boolean(user.needs_two_step), admin: isAdmin(user), lead: isLead(user) },
     org: { name: org?.name ?? "" },
     workspaces,
     ai: { working: claudeConfigured() },

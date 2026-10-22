@@ -37,6 +37,21 @@ In a 1:1 chat with Sidekick you don't need the mention. You get a card with:
 
 If the workspace doesn't contain the answer, Sidekick says so instead of guessing, and logs it as a knowledge gap for the team to fill.
 
+Answers also use your organization's **firm library** (policies, standards, templates); those sources show as **Firm policy · <title>**. If sources disagree, the card says so and cites both. Each card has **👍 Helpful** and **👎 Not helpful** buttons: only your vote is recorded (no text), and your admins see the counts.
+
+### Follow-up questions
+Sidekick remembers your last few questions, so you can ask a short follow-up:
+
+> @Sidekick when is the wave 2 cutover?
+> @Sidekick and wave 3?
+
+- **In a channel**: reply in the **same thread**. A new post starts a new conversation.
+- **In a group chat or a 1:1 chat**: ask within **30 minutes** of the last answer. After that a message is treated as a new question.
+- The card shows **Following up on: "…"** when it built on an earlier question.
+- `@Sidekick new question` forgets the earlier questions; `@Sidekick new question <your question>` asks afresh straight away.
+
+It's your conversation only (each person has their own), in that chat's group only, and it's forgotten after 24 hours. Guardrails check every follow-up, so a refused question stays refused however it's rephrased.
+
 Your organization's **guardrails** apply in Teams exactly as in the portal. A question that breaks them (abuse, trying to get Sidekick to drop its rules, asking about another client, something your Org Owner switched off, or one of your organization's or workspace's custom rules) gets a short, polite refusal card instead of an answer.
 
 ## Meeting notes
@@ -91,7 +106,8 @@ Sidekick needs to know who's asking: sign in to the Sidekick portal with Microso
 ## Commands
 | Type | Does |
 |---|---|
-| `@Sidekick <question>` | Answer with sources |
+| `@Sidekick <question>` | Answer with sources (a follow-up builds on your last question: same thread in a channel, within 30 minutes in a chat) |
+| `@Sidekick new question` | Start afresh: forget your earlier questions here (add a question to ask it straight away) |
 | `@Sidekick link` | Show the link code, or which workspace this chat is linked to |
 | `@Sidekick add @name` | Add someone to this chat's workspace (Team Lead or Org Admin) |
 | `@Sidekick remove @name` | Take someone off this chat's workspace (Team Lead or Org Admin) |
@@ -100,6 +116,6 @@ Sidekick needs to know who's asking: sign in to the Sidekick portal with Microso
 ## What Sidekick can and can't see
 - It only reads messages that mention it (every message in a 1:1 chat with it), unless an admin turned on **Keep track of every message** for that chat (Sidekick announces it there).
 - Meeting notes go to the chats an admin left notes switched on for (all linked chats by default), so a workspace can keep them in one dedicated notes chat.
-- It only answers from the linked workspace. It never uses other workspaces or other clients' material.
-- In chats and channels marked as having **client guests**, it only uses documents tagged *Shareable*, never posts notes from internal-only meetings there, and only reminds about items whose every source is Shareable.
+- It only answers from the linked workspace and your organization's firm library. It never uses other workspaces or other clients' material.
+- In chats and channels marked as having **client guests**, it only uses documents tagged *Shareable* (group and firm library), never posts notes from internal-only meetings there, and only reminds about items whose every source is Shareable.
 - If the chat or channel is unlinked, Sidekick stops answering and posting there until it's linked again.

@@ -57,6 +57,16 @@ The approval is recorded on Security & audit; your Microsoft admin can withdraw 
 
 You can change the tag later; it takes effect immediately. **Delete** asks you to confirm first, then removes the document from search, so Sidekick can no longer use it.
 
+A file whose text is already in the group (the same document uploaded twice, even under another name) is refused with the name of the copy that's there. Uploading a **newer version** under the same name apart from the version ("Runbook v0.3" → "Runbook v0.4") is fine: answers prefer the newer one and flag the older as "may be out of date". Delete the old one when nobody needs it.
+
+### 5a. The firm library (Org Owner and Org Admins)
+**Firm library** in the menu holds what applies to every engagement: policies (expenses, travel), standards, templates, methods, rate-card rules. Add it once and every group's answers can use it; groups still never see each other's documents.
+- **Add**: choose files (PDF, Word, text, Markdown, CSV or JSON, up to 25 MB each). With one file you can give it a **title** (what citations show, e.g. "Expense policy v3"), an **effective date**, whether it's **Internal** or **Shareable** (only Shareable ones are used where client guests are present), and what it **replaces**: the older document is then marked *superseded*, stays searchable for history questions, but counts less and is flagged as out of date in answers.
+- **Change**: re-tag Internal/Shareable, **Rename**, set the **Date**, or make a superseded document **Current again**. **Delete** removes it from search for every group.
+- Answers cite firm documents as **Firm policy · <title>**, prefer them for policy and compliance questions, and say so when a group's own document disagrees (for example a travel note booking business class against the travel policy).
+- The same text can't be added twice. Firm documents count toward your plan's document limit, and are deleted with the organization when it rolls off.
+- Everyone in the organization can see the list (read-only).
+
 ## 6. Import meetings
 **Meetings → Import transcript.** Upload the Teams transcript (`.vtt`), a Word file or paste the text, give it a title and date, and tick **Client guests attended** if the client was there. Notes are usually ready in 20–60 seconds.
 - **Limits:** files up to 25 MB, and the transcript text (pasted or from the file) up to 300,000 characters, about five hours of talk. The whole transcript goes to the AI in one request, so this keeps each import within what it can read at once and its cost predictable. Split a longer meeting into parts. Each meeting's length (from its timestamps, or its length without them) counts toward your plan's **meeting hours** this month (see section 16).
@@ -87,6 +97,9 @@ Reminders only cover the chat's own workspace, and a chat with client guests onl
 
 ## 8. Keep knowledge healthy
 **Memory & gaps → Refresh knowledge map** after adding material (Members and Admins can; Viewers and Billing Admins can't, since each refresh is a paid AI request). Work through the gaps: upload the missing document, or assign the gap to someone. Track action items in the same place: tick them done, set the owner, the due date (pick a date; a due date said in the meeting, like "next Friday", shows underneath until you do) and the status. Every change is in the audit log with what changed. The same edits work on the meeting's own page.
+
+### 8a. Answer quality: 👍/👎
+Every answer has 👍/👎, in the portal and on Teams answer cards. Under **Ask** on Knowledge & docs, Org Owners and Org Admins see the last 30 days for the whole organization: answers given, how many were "I don't know", and the 👍/👎 counts. Only counts are kept, never the question or answer text. Lots of 👎 or "I don't know" in a group usually means a document is missing or out of date: check its gaps on Memory & gaps.
 
 ## 9. Watch usage and activity
 - **Usage & billing**: your **plan** and its limits at the top (see sections 15 and 16), the **AI credit this month**, then AI cost by feature, group and day for the whole month (also open to Billing Admins). Work that isn't tied to a group, such as the home assistant, shows as **Organization-wide**. **Export CSV** downloads the cost per group (see section 16).

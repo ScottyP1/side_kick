@@ -411,3 +411,25 @@ ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS payer TEXT;
 -- Required two-step sign-in (lib/auth.ts): the Org Owner's switch, and how each session started (password | microsoft).
 ALTER TABLE orgs ADD COLUMN IF NOT EXISTS mfa_required INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS via TEXT;
+-- Firm library (lib/firm.ts): org-wide documents every group's answers can use (see the SQLite schema in
+-- lib/db.ts for the columns). Passages are indexed once per org under workspace id "firm".
+CREATE TABLE IF NOT EXISTS firm_docs (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), title TEXT NOT NULL, name TEXT NOT NULL, mime TEXT,
+  size INTEGER NOT NULL, audience TEXT NOT NULL DEFAULT 'internal', status TEXT NOT NULL, error TEXT,
+  chunk_count INTEGER NOT NULL DEFAULT 0, effective_on TEXT, superseded_by TEXT, content_hash TEXT,
+  uploaded_by TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS firm_docs_org ON firm_docs(org_id, created_at);
+-- Thumbs up/down on answers (lib/feedback.ts): counts only, no text.
+CREATE TABLE IF NOT EXISTS answer_feedback (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL, question_id TEXT NOT NULL, user_id TEXT NOT NULL,
+  vote INTEGER NOT NULL, channel TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE (question_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS answer_feedback_org ON answer_feedback(org_id, created_at);
+-- Answer quality: hash of each document's text (duplicate uploads).
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT;
+-- Follow-ups in Ask and Teams: the group a conversation belongs to, and the Teams thread or chat (scope_key).
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS scope_key TEXT;
+CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key);

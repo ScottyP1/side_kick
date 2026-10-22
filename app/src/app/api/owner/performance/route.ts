@@ -1,10 +1,12 @@
 /**
- * GET /api/owner/performance: response times (typical and slowest), error rates and cache savings per feature and model.
+ * GET /api/owner/performance: response times (typical and slowest), error rates and cache savings per feature and model,
+ * and answer quality per client (👍/👎 counts, "I don't know" share, weekly trend; counts only, lib/feedback.ts).
  * Who: platform operators only.
  */
 import { handle } from "@/lib/api";
 import { all } from "@/lib/db";
 import { requireOwner } from "@/lib/owner";
+import { qualityTrends } from "@/lib/feedback";
 
 const pct = (xs: number[], p: number) => {
   if (!xs.length) return 0;
@@ -35,6 +37,7 @@ export const GET = handle(async () => {
       };
     });
   return {
+    quality: await qualityTrends(since),
     byFeature: group("feature"),
     byModel: group("model"),
     errors: await all(

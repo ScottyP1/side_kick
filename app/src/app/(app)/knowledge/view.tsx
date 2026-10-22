@@ -1,18 +1,25 @@
 "use client";
 
 /**
- * Knowledge & docs (/knowledge): upload documents to the current workspace, tag them Internal or Shareable,
- * and try Ask Sidekick. Shareable documents are the only ones used when client guests are present.
- * Deleting a document asks for confirmation first; unsupported or empty files are refused by the server.
+ * Knowledge & docs (/knowledge): upload documents to the current workspace (group), tag them Internal or Shareable,
+ * and Ask Sidekick. Shareable documents are the only ones used when client guests are present.
+ * Deleting a document asks for confirmation first; unsupported, empty or duplicate files are refused by the server.
+ *
+ * Ask (`AskPanel`): answers come from this group and the organization's firm library (cited as "Firm policy · …").
+ * Filters narrow the sources by type (documents, meetings, chats, decisions, firm library) and date. Follow-ups build
+ * on the conversation: the page keeps the conversation id (per group and guests setting, in this browser tab) and
+ * sends it back; the answer says what it followed up on, and New question starts afresh. Each answer has 👍/👎.
+ * Org Owners/Admins also see the answer-quality counts for the last 30 days (no text).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { AskPanel } from "./ask";
 import { NeedsWorkspace, useApp } from "@/components/shell";
-import { api, CitedText, fmtBytes, fmtDate, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
+import { api, fmtBytes, fmtDate, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 
 type Doc = { id: string; name: string; size: number; audience: string; status: string; error: string | null; chunk_count: number; created_at: string; uploaded_by: string | null };
-type Answer = { found: boolean; answer: string; blocked?: string | null; sources: { id: string; title: string; loc: string; type: string; excerpt: string }[] };
 
 export default function KnowledgePage() {
   const { ws, me } = useApp();
@@ -22,11 +29,6 @@ export default function KnowledgePage() {
   const [over, setOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [audience, setAudience] = useState<"internal" | "shareable">("internal");
-  const [q, setQ] = useState("");
-  const [guests, setGuests] = useState(false);
-  const [asking, setAsking] = useState(false);
-  const [answer, setAnswer] = useState<Answer | null>(null);
-  const [askErr, setAskErr] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const canEdit = !["Viewer", "Billing Admin"].includes(me.user.role);
 
@@ -65,22 +67,6 @@ export default function KnowledgePage() {
     }
   };
 
-  const askNow = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!q.trim()) return;
-    setAsking(true);
-    setAskErr("");
-    setAnswer(null);
-    try {
-      setAnswer(await api<Answer>("/api/ask", { method: "POST", json: { ws, question: q, guests } }));
-      load();
-    } catch (err) {
-      setAskErr(err instanceof Error ? err.message : "Couldn't get an answer.");
-    } finally {
-      setAsking(false);
-    }
-  };
-
   const setDocAudience = async (d: Doc, a: string) => {
     setDocs((cur) => cur?.map((x) => (x.id === d.id ? { ...x, audience: a } : x)) ?? null);
     try {
@@ -108,48 +94,11 @@ export default function KnowledgePage() {
         <div>
           <div className="eyebrow">Knowledge & documents</div>
           <h1>{wsName}</h1>
-          <p>Everything {BRAND.name} can reference in this workspace. Tag documents “Internal” to keep them out of answers when client guests are present.</p>
+          <p>Everything {BRAND.name} can reference in this group, plus your organization&apos;s <Link href="/firm-library">firm library</Link>. Tag documents “Internal” to keep them out of answers when client guests are present.</p>
         </div>
       </div>
 
-      <div className="panel">
-        <div className="panel-h">
-          <h2>Ask {BRAND.name}</h2>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
-            <input type="checkbox" checked={guests} onChange={(e) => setGuests(e.target.checked)} />
-            Client guests are present (use Shareable sources only)
-          </label>
-        </div>
-        <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <form style={{ display: "flex", gap: 8 }} onSubmit={askNow}>
-            <input className="input" placeholder="e.g. What did we decide about the cutover date?" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Question" />
-            <button className="btn primary" type="submit" disabled={asking || !q.trim()}>{asking ? <><Spinner /> Thinking</> : "Ask"}</button>
-          </form>
-          {askErr && <p className="err">{askErr}</p>}
-          {answer && (
-            <div className="answer">
-              {answer.blocked ? <Pill kind="warn">Refused by your organization&apos;s guardrails (see Guardrails)</Pill> : !answer.found && <Pill kind="hand">No answer in your sources. Logged as a knowledge gap</Pill>}
-              <p style={{ margin: 0 }}>
-                <CitedText text={answer.answer} />
-              </p>
-              {answer.sources.length > 0 && (
-                <div className="list" style={{ border: "1px solid var(--line)", borderRadius: 8 }}>
-                  {answer.sources.map((s) => (
-                    <div key={s.id} className="li" style={{ padding: "8px 12px" }}>
-                      <span className="cite">{s.id}</span>
-                      <div className="grow">
-                        <b style={{ fontSize: 13 }}>{s.title}</b>
-                        {s.loc && <span className="muted" style={{ fontSize: 12 }}> · {s.loc}</span>}
-                        <div className="muted" style={{ fontSize: 12.5 }}>{s.excerpt}…</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      <AskPanel ws={ws} admin={me.user.admin} onAsked={() => load().catch(reportError)} />
 
       {canEdit && (
         <div

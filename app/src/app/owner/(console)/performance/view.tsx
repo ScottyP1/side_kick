@@ -1,21 +1,28 @@
 "use client";
 
 /**
- * Performance & errors (/owner/performance): response times, error rates and cache savings per feature and model.
+ * Performance & errors (/owner/performance): answer quality per client (👍/👎 and "I don't know" share, weekly trend;
+ * counts only), response times, error rates and cache savings per feature and model.
  */
 
 import { useEffect, useState } from "react";
 import { api, fmtTime, Pill, usd } from "@/components/ui";
 
 type G = { name: string; calls: number; errors: number; p50: number; p95: number; cost: number; cacheHit: number };
+type Tally = { up: number; down: number; helpful: number | null };
+type Quality = {
+  clients: (Tally & { orgId: string; client: string; answers: number; dontKnow: number; dontKnowShare: number | null })[];
+  weeks: (Tally & { week: string })[];
+};
 type P = {
+  quality: Quality;
   byFeature: G[];
   byModel: G[];
   errors: { created_at: string; feature: string; model: string; latency_ms: number; error: string | null; tenant: string | null }[];
   processing: { tenant: string; failed_docs: number; failed_meetings: number; unanswered: number; questions: number }[];
   appErrors: { ref: string; status: number; method: string | null; route: string | null; message: string; created_at: string }[];
 };
-const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check" };
+const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", followup: "Follow-up rewrite" };
 const sec = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 function Table({ title, rows, label }: { title: string; rows: G[]; label: (n: string) => string }) {
@@ -63,6 +70,32 @@ export default function PerformancePage() {
           <h1>Speed, reliability and cost</h1>
           <p>How fast each feature responds, how often it fails, and how much prompt caching saves.</p>
         </div>
+      </div>
+      <div className="panel">
+        <div className="panel-h"><h2>Answer quality by client</h2><span className="muted">Last 30 days · 👍/👎 on answers, counts only</span></div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Client</th><th className="r">Answers</th><th className="r">&ldquo;I don&apos;t know&rdquo;</th><th className="r">👍</th><th className="r">👎</th><th className="r">Helpful</th></tr></thead>
+            <tbody>
+              {p.quality.clients.map((c) => (
+                <tr key={c.orgId}>
+                  <td>{c.client}</td>
+                  <td className="r num">{c.answers}</td>
+                  <td className="r num">{c.dontKnow}{c.dontKnowShare !== null && <span className="faint"> ({c.dontKnowShare}%)</span>}</td>
+                  <td className="r num">{c.up}</td>
+                  <td className="r num" style={{ color: c.down > c.up ? "var(--warn)" : undefined }}>{c.down}</td>
+                  <td className="r num">{c.helpful === null ? "—" : `${c.helpful}%`}</td>
+                </tr>
+              ))}
+              {!p.quality.clients.length && <tr><td colSpan={6} className="muted">No answers yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {p.quality.weeks.length > 0 && (
+          <div className="panel-b muted" style={{ fontSize: 13 }}>
+            Weekly, all clients: {p.quality.weeks.map((w) => `week of ${w.week}: ${w.helpful === null ? "—" : `${w.helpful}% helpful`} (${w.up} 👍, ${w.down} 👎)`).join(" · ")}
+          </div>
+        )}
       </div>
       <Table title="By feature" rows={p.byFeature} label={(n) => FEATURE[n] ?? n} />
       <Table title="By model" rows={p.byModel} label={(n) => n} />

@@ -11,7 +11,8 @@
  *   gaps), `people.csv` (the group's members).
  * - `teams-chats.md`: a summary of the Teams chats Sidekick kept track of (messages, first and last date)
  *   followed by the saved messages (kept 90 days).
- * An organization's export adds `people.csv` (everyone) and `audit-log.csv` at the top.
+ * An organization's export adds `firm-library/` (each firm document's text, with its title, audience, effective date
+ * and what supersedes it), `people.csv` (everyone) and `audit-log.csv` at the top.
  *
  * Who: Org Owners and Org Admins (checked by the routes), any time, including while the group is ending or
  * the organization is read-only. Every query is scoped to the organization and the workspace. Exports are
@@ -163,11 +164,24 @@ export async function exportOrganization(orgId: string): Promise<{ filename: str
       entries.push(...part.entries);
       groupLinks.push({ label: `Group: ${g.name}`, href: `groups/${dir}/index.html`, count: part.parts.reduce((n, p) => n + p.count, 0) });
     }
+    // The firm library (lib/firm.ts): one copy for the whole organization, its passages under workspace "firm".
+    const firm = await all<{ id: string; title: string; name: string; audience: string; effective_on: string | null; replaced_by: string | null; created_at: string }>(
+      `SELECT f.id, f.title, f.name, f.audience, f.effective_on, n.title AS replaced_by, f.created_at
+         FROM firm_docs f LEFT JOIN firm_docs n ON n.id = f.superseded_by AND n.org_id = f.org_id WHERE f.org_id = ? ORDER BY f.created_at`,
+      orgId,
+    );
+    const firmName = uniqueNames();
+    for (const f of firm) {
+      const passages = await all<{ text: string; loc: string | null }>("SELECT text, loc FROM passages WHERE source_id = ? AND org_id = ? AND workspace_id = 'firm' ORDER BY rowid", f.id, orgId);
+      const body = passages.map((p) => (p.loc ? `[${p.loc}]\n${p.text}` : p.text)).join("\n\n");
+      const head = `${f.title} (${f.name})\nAdded ${day(f.created_at)}${f.effective_on ? ` · effective from ${f.effective_on}` : ""} · ${f.audience === "shareable" ? "Shareable with client guests" : "Internal"}${f.replaced_by ? ` · superseded by ${f.replaced_by}` : ""}\n\n`;
+      entries.push({ name: `firm-library/${firmName(`${safeName(f.title)}.txt`)}`, data: head + (body || "(No text was extracted from this document.)") + "\n" });
+    }
     const people = await all<{ name: string; email: string; role: string; created_at: string }>("SELECT name, email, role, created_at FROM users WHERE org_id = ? ORDER BY name", orgId);
     entries.push({ name: "people.csv", data: csv(["Name", "Email", "Role", "Added"], people.map((p) => [p.name, p.email, p.role, day(p.created_at)])) });
     const log = await all<{ actor: string; action: string; kind: string; created_at: string }>("SELECT actor, action, kind, created_at FROM audit_log WHERE org_id = ? ORDER BY id", orgId);
     entries.push({ name: "audit-log.csv", data: csv(["When (UTC)", "Who", "What", "Kind"], log.map((l) => [l.created_at.replace("T", " ").slice(0, 19), l.actor, l.action, l.kind])) });
-    const parts = [...groupLinks, { label: "Everyone in the organization (CSV)", href: "people.csv", count: people.length }, { label: "Audit log (CSV)", href: "audit-log.csv", count: log.length }];
+    const parts = [...groupLinks, { label: "Firm library (extracted text)", href: "firm-library/", count: firm.length }, { label: "Everyone in the organization (CSV)", href: "people.csv", count: people.length }, { label: "Audit log (CSV)", href: "audit-log.csv", count: log.length }];
     entries.unshift({ name: "index.html", data: indexPage(org?.name ?? "Organization", `${groups.length} group${groups.length === 1 ? "" : "s"} · ${people.length} people`, parts, "<p>Each group has its own folder with its own index page.</p>") });
     return { filename: zipName(org?.name ?? "organization"), zip: buildZip(entries) };
   });

@@ -3824,6 +3824,8 @@ test(`[${ENGINE}] require two-step sign-in for everyone: password users set one 
   assert.equal(before.required, false);
   assert.equal(before.canManage, true);
   assert.ok(before.withoutTwoStep >= 1, JSON.stringify(before));
+  // Connect Microsoft sign-in first (for the exemption check below); disconnected again at the end.
+  assert.equal((await microsoftSignIn(admin, { tid: TENANT, oid: "oid-admin", email: "admin@test.local", name: "Test Admin" }, { mode: "link" })).to.search, "?microsoft=connected");
   assert.equal((await admin("PATCH", "/api/auth/two-step-policy", { required: true })).status, 200);
   try {
     // Rae (a password session, no second step) is held at the setup screen: only /api/me and the setup work.
@@ -3842,15 +3844,16 @@ test(`[${ENGINE}] require two-step sign-in for everyone: password users set one 
     const factor = (await rae.call("GET", "/api/auth/mfa/status")).body.factors[0];
     assert.match((await rae.call("POST", "/api/auth/mfa/remove", { id: factor.id, password: NEW_PASSWORD })).body.error, /can't remove your last method/);
     // Microsoft sign-in is exempt (Microsoft runs its own checks).
-    assert.equal((await microsoftSignIn(admin, { tid: TENANT, oid: "oid-admin", email: "admin@test.local", name: "Test Admin" }, { mode: "link" })).to.search, "?microsoft=connected");
     const mia = client();
     assert.equal((await microsoftSignIn(mia, { tid: TENANT, oid: "oid-member", email: "member@test.local" })).to.pathname, "/");
     assert.equal((await mia("GET", "/api/me")).body.user.needsTwoStep, false);
     assert.equal((await mia("GET", "/api/auth/sessions")).status, 200);
-    assert.equal((await admin("DELETE", "/api/auth/microsoft")).status, 200);
+    // The Org Owner's own password session is held too (they have no second step), except for turning it off.
+    assert.equal((await admin("GET", "/api/auth/sessions")).status, 403);
   } finally {
     // The Org Owner can turn it off again even while their own setup is pending.
     assert.equal((await admin("PATCH", "/api/auth/two-step-policy", { required: false })).status, 200);
+    assert.equal((await admin("DELETE", "/api/auth/microsoft")).status, 200);
   }
   assert.equal((await admin("GET", "/api/me")).body.user.needsTwoStep, false);
   const log = JSON.stringify((await admin("GET", "/api/audit")).body);

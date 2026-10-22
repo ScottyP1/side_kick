@@ -40,7 +40,9 @@
     ".next-e2e-d/types/**/*.ts",
     ".next-e2e-d/dev/types/**/*.ts",
     ".next-test-sqlite/types/**/*.ts",
-    ".next-test-sqlite/dev/types/**/*.ts"
+    ".next-test-sqlite/dev/types/**/*.ts",
+    ".next-test-postgres/types/**/*.ts",
+    ".next-test-postgres/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

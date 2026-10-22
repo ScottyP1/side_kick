@@ -6,7 +6,9 @@
  * `ai.working` is plain-language status (no model or provider names: those are for the Owner Console).
  * `credit` (Org Owners, Org Admins and Billing Admins only) is this month's AI credit: level ok | warn
  * (80%+, the portal shows a banner) | essentials (used up) | unlimited, with the percent used.
- * `plan` is the plan's name and the connectors it includes (for the Connectors page).
+ * `plan` is the plan's name, the connectors it includes (for the Connectors page) and its plan `features`
+ * (`FeatureKey`s, lib/plans.ts; every feature for managed organizations), so pages can say "not in your plan"
+ * next to a switch before anyone tries it (the server refuses with `assertFeature` either way).
  * `setupPending` (Org Owners and Admins only) is true while the setup wizard was opened but not finished.
  */
 import { handle } from "@/lib/api";
@@ -16,6 +18,7 @@ import { claudeConfigured } from "@/lib/claude";
 import { orgAccess } from "@/lib/billing";
 import { creditStatus } from "@/lib/credit";
 import { orgPlan } from "@/lib/limits";
+import { featuresOf } from "@/lib/plans";
 import { setupPending } from "@/lib/setup";
 
 const CREDIT_ROLES = ["Org Owner", "Org Admin", "Billing Admin"];
@@ -35,7 +38,7 @@ export const GET = handle(async () => {
     workspaces,
     ai: { working: claudeConfigured() },
     credit: credit && { level: credit.level, pct: Math.round(credit.pct) },
-    plan: { name: plan?.name ?? null, connectors: limits.connectors },
+    plan: { name: plan?.name ?? null, connectors: limits.connectors, features: featuresOf(plan) },
     branding: settings ? JSON.parse(settings.json) : {},
     billing: await orgAccess(user.org_id),
     setupPending: isAdmin(user) ? await setupPending(user.org_id) : false,

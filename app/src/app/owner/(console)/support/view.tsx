@@ -3,13 +3,14 @@
 /**
  * Support inbox (/owner/support): every customer ticket, newest activity first, with filters (status, priority,
  * client, category, search), counts per status and the number with new customer activity (unread, marked with a
- * dot). Click a ticket to open it (support/[id]). Operators only.
+ * dot). Tickets from clients whose plan includes priority support (Business and up) come first, marked
+ * "Priority support". Click a ticket to open it (support/[id]). Operators only.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtTime, Pill, useReportError } from "@/components/ui";
 
-type Row = { id: string; ref: string; subject: string; category: string; priority: string; status: string; source: string; requester: string; client: string; assignedTo: string | null; unread: boolean; updatedAt: string };
+type Row = { id: string; ref: string; subject: string; category: string; priority: string; status: string; source: string; requester: string; client: string; assignedTo: string | null; unread: boolean; prioritySupport: boolean; updatedAt: string };
 type Inbox = { tickets: Row[]; counts: Record<string, number>; unread: number; clients: { id: string; name: string }[] };
 
 const STATUS: Record<string, [string, string]> = { open: ["Open", "info"], waiting: ["Waiting on customer", "warn"], resolved: ["Resolved", "good"] };
@@ -50,7 +51,7 @@ export default function SupportInbox() {
             {data.tickets.map((t) => (
               <Link key={t.id} href={`/owner/support/${t.id}`} className={`ticket-row${t.unread ? " unread" : ""}`}>
                 <b>{t.subject}</b>
-                <span style={{ display: "flex", gap: 6 }}><Pill kind={PRIORITY_KIND[t.priority]}>{t.priority}</Pill><Pill kind={STATUS[t.status]?.[1]}>{STATUS[t.status]?.[0] ?? t.status}</Pill></span>
+                <span style={{ display: "flex", gap: 6 }}>{t.prioritySupport && <Pill kind="info">Priority support</Pill>}<Pill kind={PRIORITY_KIND[t.priority]}>{t.priority}</Pill><Pill kind={STATUS[t.status]?.[1]}>{STATUS[t.status]?.[0] ?? t.status}</Pill></span>
                 <span className="meta">{t.ref} · {t.client} · {t.requester} · {t.category} · from {t.source}{t.assignedTo ? ` · ${t.assignedTo}` : " · unassigned"} · {fmtTime(t.updatedAt)}</span>
               </Link>
             ))}

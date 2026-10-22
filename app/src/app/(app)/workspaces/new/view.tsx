@@ -4,7 +4,8 @@
  * New group (/workspaces/new): everything needed to set up a client team on one page: name, client and
  * engagement code, its Team Lead, and its first members. Only the name and a Team Lead are required; the
  * lead adds more people and assigns Teams chats later. Org Owners and Org Admins only (others see a note).
- * Picking a Member or Viewer as lead makes them a Team Lead (the summary says so before saving).
+ * Picking a Member or Viewer as lead makes them a Team Lead (the summary says so before saving). Team Leads
+ * are a plan feature (Team and up): on Starter the lead is optional and only existing Team Leads can be picked.
  * Saves with POST /api/workspaces and opens the new group. Past the plan's group limit the server says the
  * cheaper way to make room (extra groups or the next plan, with monthly prices) and a button opens Usage &
  * billing with both options (`/usage?groups=N`).
@@ -17,6 +18,7 @@ import { useApp } from "@/components/shell";
 import { api, ApiError, Icon, useReportError, useToast } from "@/components/ui";
 import { Avatar, PeoplePicker, type OrgPerson } from "@/components/groups";
 import { BRAND } from "@/lib/brand";
+import { featureNote } from "@/lib/plans";
 
 const LEADABLE = ["Team Lead", "Member", "Viewer"];
 
@@ -44,19 +46,23 @@ export default function NewGroupPage() {
     return <div className="panel"><div className="empty"><h2>Only admins create groups</h2><span>Ask your Org Owner or an Org Admin to create a group and make you its Team Lead.</span><Link className="btn" href="/workspaces">Back to Groups</Link></div></div>;
   }
 
+  // Without Team Leads in the plan, nobody new can become one: the lead is optional, and only people who
+  // are already Team Leads (from a bigger plan) can be picked.
+  const leadNote = featureNote(me.plan, "teamLeads");
+  const leadable = leadNote ? ["Team Lead"] : LEADABLE;
   const byId = new Map((people ?? []).map((p) => [p.id, p]));
   const leadPerson = lead ? byId.get(lead) : undefined;
   const lq = leadQ.trim().toLowerCase();
-  const leadOptions = (people ?? []).filter((p) => LEADABLE.includes(p.role) && (!lq || `${p.name} ${p.email}`.toLowerCase().includes(lq))).slice(0, 6);
+  const leadOptions = (people ?? []).filter((p) => leadable.includes(p.role) && (!lq || `${p.name} ${p.email}`.toLowerCase().includes(lq))).slice(0, 6);
   const memberOptions = (people ?? []).filter((p) => p.id !== lead && p.id !== me.user.id);
-  const ok = { basics: !!form.name.trim(), lead: !!lead, members: members.size > 0 };
+  const ok = { basics: !!form.name.trim(), lead: !!lead || !!leadNote, members: members.size > 0 };
 
   const create = async () => {
     setError("");
     setNeedGroups(0);
     setSaving(true);
     try {
-      const r = await api<{ id: string }>("/api/workspaces", { method: "POST", json: { ...form, lead, members: [...members].filter((m) => m !== lead) } });
+      const r = await api<{ id: string }>("/api/workspaces", { method: "POST", json: { ...form, lead: lead ?? undefined, members: [...members].filter((m) => m !== lead) } });
       await reload();
       toast(`Group “${form.name.trim()}” created. ${leadPerson ? `${leadPerson.name.split(" ")[0]} can now add people and chats.` : ""}`);
       router.push(`/workspaces/${encodeURIComponent(r.id)}`);
@@ -74,7 +80,7 @@ export default function NewGroupPage() {
       <div className="page-head">
         <div>
           <h1>New group</h1>
-          <p>Everything for one client team in one place. Only the name and a Team Lead are needed now; the lead can add people and Teams chats later.</p>
+          <p>Everything for one client team in one place. {leadNote ? "Only the name is needed now; you can add people and Teams chats later." : "Only the name and a Team Lead are needed now; the lead can add people and Teams chats later."}</p>
         </div>
       </div>
       <div className="ng">
@@ -94,8 +100,9 @@ export default function NewGroupPage() {
             <span className={`n${ok.lead ? " ok" : ""}`}>{ok.lead ? <Icon n="check" /> : 2}</span>
             <div className="body">
               <div>
-                <h2>Team Lead</h2>
+                <h2>Team Lead{leadNote && <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}> (optional)</span>}</h2>
                 <span className="hint">Runs the group day to day: adds and removes people, assigns Teams chats, keeps documents up to date. Can&apos;t see other groups.</span>
+                {leadNote && <span className="hint" style={{ display: "block" }}>{leadNote} Without one, Org Owners and Org Admins run the group.</span>}
               </div>
               {leadPerson ? (
                 <div className="row">
@@ -111,7 +118,7 @@ export default function NewGroupPage() {
                         <button key={p.id} className="prow" onClick={() => { setLead(p.id); setMembers((m) => { const n = new Set(m); n.delete(p.id); return n; }); }}>
                           <Avatar name={p.name} /><span className="who"><b>{p.name}</b><span>{p.email} · {p.role}</span></span><span className="btn small">Make lead</span>
                         </button>
-                      )) : <div className="empty">{leadQ ? `Nobody matches “${leadQ}”.` : "Nobody to pick yet."} Add people on <Link href="/users">Users &amp; access</Link> first.</div>}
+                      )) : <div className="empty">{leadQ ? `Nobody matches “${leadQ}”.` : leadNote ? "Nobody here is a Team Lead." : "Nobody to pick yet."} {leadNote ? "You can leave it empty." : <>Add people on <Link href="/users">Users &amp; access</Link> first.</>}</div>}
                   </div>
                 </div>
               )}
@@ -148,7 +155,7 @@ export default function NewGroupPage() {
               <p className="hint" style={{ margin: 0 }}>{leadPerson.name} is a {leadPerson.role} today and becomes a <b>Team Lead</b>, so they can manage the people and chats of every group they&apos;re in.</p>
             )}
             <button className="btn primary" disabled={!ok.basics || !ok.lead || saving} onClick={create}>{saving ? "Creating…" : "Create group"}</button>
-            {(!ok.basics || !ok.lead) && <span className="hint">Add a name and pick a Team Lead to create it.</span>}
+            {(!ok.basics || !ok.lead) && <span className="hint">{leadNote ? "Add a name to create it." : "Add a name and pick a Team Lead to create it."}</span>}
             {error && <p className="err" style={{ margin: 0 }}>{error}</p>}
             {needGroups > 0 && <Link className="btn" href={`/usage?groups=${needGroups}`}>See both options on Usage &amp; billing</Link>}
           </div>

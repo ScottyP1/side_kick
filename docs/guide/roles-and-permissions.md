@@ -53,14 +53,14 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See the AI credit notice (80% used, used up) | ✓ | ✓ | | ✓ | | |
 | Pay for the plan, change it or its extra groups, or cancel it | ✓ | | | ✓ | | |
 | **Running the organization** | | | | | | |
-| Create groups (workspaces), picking their client, Team Lead and first members | ✓ | ✓ | | | | |
+| Create groups (workspaces), picking their client, Team Lead (Team plan and up) and first members | ✓ | ✓ | | | | |
 | Rename a group, change its client or engagement code, delete it (and everything in it) | ✓ | ✓ | | | | |
 | End a group when the engagement ends (read-only, deleted on a date) or cancel that | ✓ | ✓ | | | | |
 | Export a group, or the whole organization's data, as a zip | ✓ | ✓ | | | | |
 | See roll-offs and download deletion certificates | ✓ | ✓ | | | | |
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |
-| Link, change or unlink Teams channels and chats | ✓ | ✓ | ✓ (own workspaces) | | | |
+| Link, change or unlink Teams channels and chats (turning reminders on: Team plan and up) | ✓ | ✓ | ✓ (own workspaces) | | | |
 | Add Sidekick to a Teams chat (anyone else: Sidekick leaves) | ✓ | ✓ | ✓ | | | |
 | See and assign Teams chats waiting to be assigned (portal only) | ✓ | ✓ | ✓ (chats they added, to own groups) | | | |
 | Remove Sidekick from a Teams chat | ✓ | ✓ | ✓ (own groups' chats, or waiting chats they added) | | | |
@@ -69,10 +69,10 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval) | ✓ | ✓ | | | | |
 | See the audit log and Activity (traces, performance) | ✓ | ✓ | | | | |
 | Change branding (logo, brand color) | ✓ | ✓ | | | | |
-| Make a workspace's guardrails stricter, write custom rules, use "Test it" | ✓ | ✓ | | | | |
+| Make a workspace's guardrails stricter, write custom rules (Team plan and up), use "Test it" | ✓ | ✓ | | | | |
 | **Org Owner only** | | | | | | |
 | Turn company-wide guardrail switches on or off | ✓ | | | | | |
-| Connect, require or disconnect Microsoft sign-in | ✓ | | | | | |
+| Connect, require (Business plan and up) or disconnect Microsoft sign-in | ✓ | | | | | |
 
 ## Rules that always hold
 
@@ -82,6 +82,13 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
   what exists.
 - **No one makes an Org Owner** from Users & access, and the Org Owner can't be changed or removed there.
   Org Admins can add other Org Admins and make Team Leads (also by picking a Member or Viewer as a new group's Team Lead).
+- **The plan decides some features, the role decides who uses them.** The **Team Lead** role, reminders in
+  Teams chats and custom guardrail rules come with the Team plan and up; requiring Microsoft sign-in with
+  Business and up. On a plan without one, nobody can switch it on, whatever their role ("Your Starter plan
+  doesn't include Team Leads…"). Moving to a smaller plan never takes it away from what already uses it:
+  existing Team Leads keep the role and everything it allows, existing rules and reminders keep working, and
+  required Microsoft sign-in stays on. Organizations without a subscription (set up by the Sidekick team)
+  and Enterprise have every feature. Details: admin guide, section 16.
 - **Nobody changes their own role or removes themselves.** An Org Admin who wants a different role, or to
   leave, asks the Org Owner or another Org Admin, so nobody locks themselves out by accident.
 - **Temporary passwords first.** Someone added with a temporary password can do nothing but choose a new

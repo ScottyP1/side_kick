@@ -5,7 +5,9 @@
  *
  * GET    ?id=<rule id>  Who: Org Owners/Admins. The rule's history: every version, newest first.
  * POST   { text, ws?: string | null }  Adds a rule, org-wide (no `ws`) or for one workspace (checked
- *        against the workspace wall). 409 when that scope already has the maximum number of rules.
+ *        against the workspace wall). 409 when that scope already has the maximum number of rules. Custom
+ *        rules are a plan feature (Team and up): 402 `kind: "limit"` on Starter. Rules that already exist
+ *        keep working after a downgrade and can still be edited or removed.
  * PUT    { id, text }  Rewrites a rule as a new version.
  * DELETE ?id=<rule id>  Removes a rule (its history is kept).
  * Rules of another organization are never found (404).
@@ -13,6 +15,7 @@
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { addRule, editRule, removeRule, ruleHistory } from "@/lib/guardrails";
+import { assertFeature } from "@/lib/limits";
 
 const ADMINS = ["Org Owner", "Org Admin"] as const;
 const idFrom = (req: Request) => {
@@ -28,6 +31,7 @@ export const GET = handle(async (req: Request) => {
 
 export const POST = handle(async (req: Request) => {
   const user = await requireUser(ADMINS);
+  await assertFeature(user.org_id, "customRules");
   const body = await readJson<{ text?: unknown; ws?: unknown }>(req);
   const ws = body.ws ? await requireWorkspace(user, typeof body.ws === "string" ? body.ws : null) : null;
   const rule = await addRule(user.org_id, ws, user.name, body.text);

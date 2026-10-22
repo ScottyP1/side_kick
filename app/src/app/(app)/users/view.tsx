@@ -7,7 +7,9 @@
  * from the organization stay with admins. New people get a temporary password they must change at first sign-in.
  * Removing someone asks for confirmation first. Nobody can change their own role or remove themselves here.
  * After "Approve Sidekick for your organization" Microsoft comes back here with `?microsoft=approved`, or
- * `?error=1` with the reason in a one-time cookie (lib/flash.ts), shown as a note.
+ * `?error=1` with the reason in a one-time cookie (lib/flash.ts), shown as a note. Team Leads are a plan
+ * feature (Team and up): on Starter "Team Lead" can't be picked for anyone new, and people who already are
+ * Team Leads stay so.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -15,6 +17,7 @@ import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Modal, Pill, useToast } from "@/components/ui";
 import { takeFlash } from "@/lib/flash";
 import { BRAND } from "@/lib/brand";
+import { featureNote } from "@/lib/plans";
 
 type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; microsoft: number; signin_locked?: boolean; workspaces: string[] };
 const ROLES = ["Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"];
@@ -34,6 +37,12 @@ export default function UsersPage() {
   const toast = useToast();
   const lead = !me.user.admin && Boolean(me.user.lead);
   const roles = lead ? LEAD_ROLES : ROLES;
+  // Team Lead isn't in every plan: offered (disabled) with a note, unless the person already is one.
+  const leadNote = featureNote(me.plan, "teamLeads");
+  const roleOption = (r: string, current?: string) => {
+    const off = r === "Team Lead" && !!leadNote && current !== "Team Lead";
+    return <option key={r} value={r} disabled={off}>{off ? "Team Lead (not in your plan)" : r}</option>;
+  };
   const [people, setPeople] = useState<P[] | null>(null);
   const [err, setErr] = useState("");
   const [invite, setInvite] = useState(false);
@@ -156,7 +165,7 @@ export default function UsersPage() {
                     {/* Nobody changes their own role here (the server refuses it too), so an admin can't lock themselves out. */}
                     {p.role === "Org Owner" || lead || p.id === me.user.id ? <b title={p.id === me.user.id ? "Ask the Org Owner or another Org Admin to change your role" : undefined}>{p.role}</b> : (
                       <select className="input" style={{ width: "auto", padding: "4px 8px" }} value={p.role} aria-label={`Role for ${p.name}`} onChange={(e) => patch(p, { role: e.target.value }, `${p.name} is now ${e.target.value}`)}>
-                        {ROLES.map((r) => <option key={r}>{r}</option>)}
+                        {ROLES.map((r) => roleOption(r, p.role))}
                       </select>
                     )}
                   </td>
@@ -190,7 +199,7 @@ export default function UsersPage() {
         <Modal title="Add a person" onClose={() => setInvite(false)} footer={<><button className="btn" onClick={() => setInvite(false)}>Cancel</button><button className="btn primary" onClick={add} disabled={!form.name.trim() || !form.email.trim() || (lead && !form.workspaces.length)}>Add person</button></>}>
           <div className="field"><label htmlFor="pname">Name</label><input id="pname" className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
           <div className="field"><label htmlFor="pemail">Work email</label><input id="pemail" className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-          <div className="field"><label htmlFor="prole">Role</label><select id="prole" className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roles.map((r) => <option key={r}>{r}</option>)}</select></div>
+          <div className="field"><label htmlFor="prole">Role</label><select id="prole" className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roles.map((r) => roleOption(r))}</select>{leadNote && !lead && <span className="hint">{leadNote}</span>}</div>
           {!["Org Admin"].includes(form.role) && (
             <div className="field">
               <label>Workspaces</label>

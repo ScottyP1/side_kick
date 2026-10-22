@@ -135,7 +135,7 @@ async function open() {
     console.error(`✗ No database: DATABASE_URL isn't set and there's no SQLite file at ${file}.`);
     process.exit(1);
   }
-  const db = new DatabaseSync(file);
+  const db = new DatabaseSync(file, { timeout: 10000 }); // wait for a running app's write instead of failing
   db.exec("PRAGMA busy_timeout = 5000");
   const all = async (sql, ...p) => db.prepare(sql).all(...p);
   return {

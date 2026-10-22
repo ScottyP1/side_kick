@@ -9,7 +9,7 @@
  *   team sets some. Enterprise starts from the Business numbers.
  * - **Enforced where created**: each route that creates something counted here calls `assertCanAdd` first
  *   (people: POST /api/users; groups: POST /api/workspaces; tracked chats: POST /api/teams-links; meeting
- *   hours: POST /api/meetings; documents: POST /api/docs; connectors and live meeting hours: when those
+ *   hours: POST /api/meetings; documents: POST /api/docs and POST /api/firm (group documents and the firm library count together); connectors and live meeting hours: when those
  *   exist, e.g. `assertCanAdd(orgId, "liveMeetingHours", hours)` before Sidekick joins a call). The refusal is
  *   a 402 whose message names the limit and how to get more, with `kind: "limit"` and `limit` in the body.
  * - **Never deletes**: when a plan shrinks (or the team lowers a limit) nothing is removed; new things are
@@ -100,7 +100,8 @@ export async function usageCounts(orgId: string): Promise<Record<LimitKey, numbe
     activeGroupCount(orgId),
     count("SELECT COUNT(*) AS n FROM teams_conversations WHERE org_id = ? AND workspace_id IS NOT NULL", orgId),
     count("SELECT COALESCE(SUM(duration_min), 0) AS n FROM meetings WHERE org_id = ? AND created_at >= ?", orgId, monthStart()),
-    count("SELECT COUNT(*) AS n FROM documents WHERE org_id = ?", orgId),
+    // Group documents plus the firm library (lib/firm.ts): both count toward the plan's document limit.
+    count("SELECT (SELECT COUNT(*) FROM documents WHERE org_id = ?) + (SELECT COUNT(*) FROM firm_docs WHERE org_id = ?) AS n", orgId, orgId),
   ]);
   // Live meetings (Sidekick joining calls, product step 3) and connectors aren't built yet: nothing used so far.
   return { seats, workspaces, chats, meetingHours: minutes / 60, liveMeetingHours: 0, documents, connectors: 0, aiCreditUsd: 0 };

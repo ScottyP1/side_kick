@@ -127,11 +127,14 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
     const question = content.slice(content.lastIndexOf("Question:"));
     // Test markers: an answer that claims to be found but cites nothing (grounding check), one with
     // contact details, and one with swearing (answer clean-up).
-    if (question.includes("__UNGROUNDED__")) return { found: true, answer: "The cutover is definitely on Friday.", source_ids: ["S99"] };
-    if (question.includes("__CONTACT__")) return { found: true, answer: "Ask Maria at maria.chen@contoso.example or +1 (555) 010-2233 about the 48 stores [S1].", source_ids: ["S1"] };
-    if (question.includes("__SWEAR__")) return { found: true, answer: "The old runbook was shit, use the new one [S1].", source_ids: ["S1"] };
+    // "__CONFLICT__" says two sources disagree. Answers cite the first two sources (the best ranked), so tests can
+    // check ranking, filters and walls through what's cited.
+    const conflict = question.includes("__CONFLICT__");
+    if (question.includes("__UNGROUNDED__")) return { found: true, answer: "The cutover is definitely on Friday.", source_ids: ["S99"], conflict };
+    if (question.includes("__CONTACT__")) return { found: true, answer: "Ask Maria at maria.chen@contoso.example or +1 (555) 010-2233 about the 48 stores [S1].", source_ids: ["S1"], conflict };
+    if (question.includes("__SWEAR__")) return { found: true, answer: "The old runbook was shit, use the new one [S1].", source_ids: ["S1"], conflict };
     const ids = [...content.matchAll(/<source id="(S\d+)"/g)].map((m) => m[1]);
-    return { found: ids.length > 0, answer: ids.length ? `Test answer from ${ids.join(", ")} [S1].` : "Not in the sources.", source_ids: ids.slice(0, 2) };
+    return { found: ids.length > 0, answer: ids.length ? `Test answer from ${ids.join(", ")} [S1].` : "Not in the sources.", source_ids: ids.slice(0, 2), conflict };
   }
   if (feature === "extract") {
     return {

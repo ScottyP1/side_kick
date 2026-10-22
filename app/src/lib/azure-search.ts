@@ -31,8 +31,11 @@ const EMBED_DEPLOYMENT = process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT || "text-
 const DIMENSIONS = 1536; // text-embedding-3-small's native size
 const EMBED_PRICE_PER_M = 0.02; // USD per million input tokens (text-embedding-3-small list price)
 
-/** One passage as stored in Azure. `id` is `<sourceId>_<n>`; `vector` is absent when embeddings are off. */
-export type AzurePassage = Omit<Passage, "rowid"> & { id: string; workspace_id: string; org_id: string; vector?: number[] };
+/**
+ * One passage as stored in Azure. `id` is `<sourceId>_<n>`; `vector` is absent when embeddings are off.
+ * `workspace_id` is the group, or "firm" for the org's firm library (indexed once per org, see search.ts).
+ */
+export type AzurePassage = Omit<Passage, "rowid" | "workspace_id"> & { id: string; workspace_id: string; org_id: string; vector?: number[] };
 
 /** True when the Azure AI Search endpoint and key are set. */
 export const azureSearchConfigured = () => Boolean(process.env.AZURE_SEARCH_ENDPOINT && process.env.AZURE_SEARCH_API_KEY);
@@ -125,7 +128,7 @@ const keyOf = (sourceId: string, n: number) => `${sourceId.replace(/[^A-Za-z0-9_
 export async function azureIndex(p: { orgId: string; workspaceId: string; sourceType: string; sourceId: string; title: string; audience: string; pieces: { text: string; loc: string }[] }) {
   const { client, ready } = azure();
   await ready;
-  const vectors = embeddingsConfigured() ? await embed(p.pieces.map((x) => `${p.title}\n${x.text}`), { orgId: p.orgId, workspaceId: p.workspaceId }) : null;
+  const vectors = embeddingsConfigured() ? await embed(p.pieces.map((x) => `${p.title}\n${x.text}`), { orgId: p.orgId, workspaceId: p.workspaceId === "firm" ? null : p.workspaceId }) : null; // the firm library isn't one group's usage
   const docs: AzurePassage[] = p.pieces.map((x, i) => ({
     id: keyOf(p.sourceId, i), text: x.text, title: p.title, loc: x.loc, source_type: p.sourceType as Passage["source_type"],
     source_id: p.sourceId, workspace_id: p.workspaceId, org_id: p.orgId, audience: p.audience,
@@ -166,25 +169,31 @@ export async function azureSetAudience(sourceId: string, audience: string) {
 }
 
 /**
- * Hybrid search in one org's workspace. The filter is applied inside Azure before ranking, so results
- * can never come from another org or workspace (or from internal passages when guests are present).
+ * Hybrid search in one org, across the given workspace ids (a group, plus `FIRM_SCOPE` for the org's firm
+ * library). The filter is applied inside Azure before ranking, so results can never come from another org or
+ * group (or from internal passages when guests are present). `types` limits the source types.
  */
-export async function azureSearch(orgId: string, workspaceId: string, question: string, opts: { guests?: boolean; limit: number }): Promise<Passage[]> {
+export async function azureSearch(orgId: string, scopes: string[], question: string, opts: { guests?: boolean; limit: number; types?: string[] }): Promise<Passage[]> {
   const { client, ready } = azure();
   await ready;
-  const filter = [`org_id eq ${lit(orgId)}`, `workspace_id eq ${lit(workspaceId)}`, opts.guests ? `audience eq 'shareable'` : ""].filter(Boolean).join(" and ");
-  const vector = embeddingsConfigured() ? (await embed([question], { orgId, workspaceId }))[0] : null;
+  const filter = [
+    `org_id eq ${lit(orgId)}`,
+    `(${scopes.map((w) => `workspace_id eq ${lit(w)}`).join(" or ")})`,
+    opts.guests ? `audience eq 'shareable'` : "",
+    opts.types?.length ? `(${opts.types.map((t) => `source_type eq ${lit(t)}`).join(" or ")})` : "",
+  ].filter(Boolean).join(" and ");
+  const vector = embeddingsConfigured() ? (await embed([question], { orgId, workspaceId: scopes[0] ?? null }))[0] : null;
   const res = await client.search(question, {
     filter,
     top: opts.limit,
-    select: ["id", "text", "title", "loc", "source_type", "source_id", "audience"],
+    select: ["id", "text", "title", "loc", "source_type", "source_id", "audience", "workspace_id"],
     ...(vector ? { vectorSearchOptions: { queries: [{ kind: "vector", vector, fields: ["vector"], kNearestNeighborsCount: 50 }] } } : {}),
   });
   const out: Passage[] = [];
   let n = 0;
   for await (const r of res.results) {
     const d = r.document;
-    out.push({ rowid: n++, text: d.text, title: d.title, loc: d.loc, source_type: d.source_type, source_id: d.source_id, audience: d.audience });
+    out.push({ rowid: n++, text: d.text, title: d.title, loc: d.loc, source_type: d.source_type, source_id: d.source_id, audience: d.audience, workspace_id: d.workspace_id });
   }
   return out;
 }

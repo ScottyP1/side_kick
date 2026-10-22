@@ -48,7 +48,7 @@ export function useApp() {
 
 const NAV: { g: string; items: [string, string, string, ((m: Me) => boolean)?][] }[] = [
   { g: "Overview", items: [["/home", "Overview", "home"], ["/usage", "Usage & billing", "chart", (m) => ["Org Owner", "Org Admin", "Billing Admin"].includes(m.user.role)], ["/agent", "AI models & agent", "cpu"]] },
-  { g: "Manage", items: [["/workspaces", "Groups", "folder"], ["/knowledge", "Knowledge & docs", "doc"], ["/meetings", "Meetings", "video"], ["/memory", "Memory & gaps", "brain"], ["/connectors", "Connectors", "plug"], ["/users", "Users & access", "users", (m) => m.user.admin || Boolean(m.user.lead)]] },
+  { g: "Manage", items: [["/workspaces", "Groups", "folder"], ["/knowledge", "Knowledge & docs", "doc"], ["/firm-library", "Firm library", "library"], ["/meetings", "Meetings", "video"], ["/memory", "Memory & gaps", "brain"], ["/connectors", "Connectors", "plug"], ["/users", "Users & access", "users", (m) => m.user.admin || Boolean(m.user.lead)]] },
   { g: "Govern", items: [["/guardrails", "Guardrails", "shield"], ["/activity", "Activity", "activity", (m) => m.user.admin], ["/audit", "Security & audit", "lock", (m) => m.user.admin], ["/settings", "Settings", "gear"]] },
   { g: "Help", items: [["/help", "Help & support", "chat"]] },
 ];

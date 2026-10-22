@@ -4,15 +4,22 @@
  *
  * Concepts
  * - **Conversation** (`conversations` + `conversation_turns`): the last few turns between one person and one
- *   assistant. Kinds: `assist` (the portal's in-app assistant), `support` (the signed-in support assistant)
- *   and `helpbot` (the public "Ask about Sidekick" bot on the website).
+ *   assistant. Kinds: `assist` (the portal's in-app assistant), `support` (the signed-in support assistant),
+ *   `helpbot` (the public "Ask about Sidekick" bot on the website), `ask` (Ask on the Knowledge page, per group)
+ *   and `teams` (answers in Teams, per group and Teams thread or chat).
  * - **Owner**: who a conversation belongs to. In the portal: one person in one organization (`orgId` +
  *   `userId`). On the website: one browser (`visitorId`, a random id in the `sk_visitor` cookie). A
  *   conversation is only ever found again by the same owner and kind, so turns never cross people, browsers,
- *   organizations or assistants. Neither the portal assistant nor the support assistant is tied to one group
- *   (they work org-wide on the person's own setup), so there is no per-group conversation to keep apart.
+ *   organizations or assistants. Ask and Teams conversations also carry the **group** (`workspaceId`) and a
+ *   **scope key** (`scopeKey`): in the portal whether client guests are present ("team" or "guests"), in Teams
+ *   the reply thread (channels) or the chat (group and 1:1 chats), plus the guests flag. A conversation is only
+ *   found again with the same group and scope key, so turns never cross groups, threads or guest settings (an
+ *   internal answer can't be summarised into a guest answer). The portal assistant and support assistant are
+ *   org-wide (no group, no scope key).
  * - **Expiry**: a conversation is forgotten 24 hours after its last turn (`EXPIRE_HOURS`). An expired id
- *   simply starts a new conversation; `purgeExpiredConversations` deletes the old rows.
+ *   simply starts a new conversation; `purgeExpiredConversations` deletes the old rows. Teams group and 1:1
+ *   chats have no threads, so there a follow-up must come within `CHAT_FOLLOWUP_MINUTES` of the last answer;
+ *   later messages start afresh.
  * - **Standalone question** (`standaloneQuestion`): before searching or checking, a follow-up ("and wave 3?")
  *   is rewritten by a small Claude call (feature `followup`) into a question that makes sense on its own
  *   ("When is the wave 3 cutover?"). The guardrails then check that standalone question (and the quick check
@@ -23,8 +30,8 @@
  * - **Refused turns are kept** (flagged `refused`), so a follow-up to a refused question carries the refused
  *   topic into the rewrite and is refused again rather than answered out of context.
  *
- * Who calls it: lib/assistant.ts, lib/support-assistant.ts, lib/helpbot.ts and their API routes. Callers mask
- * visitor text (contact details) before saving it.
+ * Who calls it: lib/assistant.ts, lib/support-assistant.ts, lib/helpbot.ts, `ask()` in lib/sidekick.ts (portal Ask
+ * and Teams answers) and their API routes. Callers mask visitor text (contact details) before saving it.
  */
 import "server-only";
 import { z } from "zod";
@@ -34,9 +41,12 @@ import { FeatureOffError } from "./owner";
 import { span, spanAttrs } from "./trace";
 
 /** Which assistant a conversation is with. */
-export type ConversationKind = "assist" | "support" | "helpbot";
-/** Who a conversation belongs to: a person in an organization, or one browser on the website. */
-export type ConversationOwner = { orgId: string; userId: string } | { visitorId: string };
+export type ConversationKind = "assist" | "support" | "helpbot" | "ask" | "teams";
+/**
+ * Who a conversation belongs to: a person in an organization (for Ask and Teams also the group and the scope
+ * key, see the file comment), or one browser on the website.
+ */
+export type ConversationOwner = { orgId: string; userId: string; workspaceId?: string; scopeKey?: string } | { visitorId: string };
 /** One saved turn. `question` is the standalone question a user turn was rewritten into. */
 export type StoredTurn = { role: "user" | "assistant"; text: string; question: string | null; refused: boolean; meta: Record<string, unknown> | null; at: string };
 /** A conversation and its recent turns, oldest first. */
@@ -46,14 +56,31 @@ export type Conversation = { id: string; kind: ConversationKind; orgId: string |
 export const EXPIRE_HOURS = 24;
 /** How many recent turns are kept and used for context (three questions and their answers). */
 export const KEEP_TURNS = 6;
+/** In Teams group and 1:1 chats (no threads), a follow-up must come within this many minutes of the last answer. */
+export const CHAT_FOLLOWUP_MINUTES = 30;
 /** Longest text kept per turn. */
 const MAX_TURN_CHARS = 2000;
 
-const cutoff = () => new Date(Date.now() - EXPIRE_HOURS * 3600_000).toISOString();
+/** The oldest `last_at` still in use: 24 hours ago, or `idleMinutes` ago when that's shorter. */
+const cutoff = (idleMinutes?: number) => new Date(Date.now() - Math.min(EXPIRE_HOURS * 60, idleMinutes ?? Infinity) * 60_000).toISOString();
 
-/** The `WHERE` part and values that limit a lookup to this owner. */
+/**
+ * The `WHERE` part and values that limit a lookup to this owner: the browser, or the person in the org, and for
+ * Ask/Teams the group and scope key (org-wide assistants have neither, so they never match a group's conversation).
+ */
 function ownerFilter(owner: ConversationOwner): [string, string[]] {
-  return "visitorId" in owner ? ["visitor_id = ? AND org_id IS NULL", [owner.visitorId]] : ["org_id = ? AND user_id = ?", [owner.orgId, owner.userId]];
+  if ("visitorId" in owner) return ["visitor_id = ? AND org_id IS NULL", [owner.visitorId]];
+  const where = ["org_id = ? AND user_id = ?"];
+  const values = [owner.orgId, owner.userId];
+  if (owner.workspaceId) {
+    where.push("workspace_id = ?");
+    values.push(owner.workspaceId);
+  } else where.push("workspace_id IS NULL");
+  if (owner.scopeKey) {
+    where.push("scope_key = ?");
+    values.push(owner.scopeKey);
+  } else where.push("scope_key IS NULL");
+  return [where.join(" AND "), values];
 }
 
 /**
@@ -71,20 +98,37 @@ export async function findConversation(kind: ConversationKind, owner: Conversati
   return { id: row.id, kind, orgId: row.org_id, turns: await recentTurns(row.id) };
 }
 
-/** Finds the owner's conversation (see `findConversation`) or starts a new one. */
-export async function openConversation(kind: ConversationKind, owner: ConversationOwner, id: unknown): Promise<Conversation> {
-  const found = await findConversation(kind, owner, id);
-  if (found) return found;
+/**
+ * The owner's most recent unexpired conversation of this kind (same group and scope key), for Teams, where the
+ * message carries no conversation id: the thread or chat is the scope key. `idleMinutes` shortens the expiry
+ * (group and 1:1 chats: `CHAT_FOLLOWUP_MINUTES`).
+ */
+export async function latestConversation(kind: ConversationKind, owner: ConversationOwner, idleMinutes?: number): Promise<Conversation | null> {
+  const [where, values] = ownerFilter(owner);
+  const row = await get<{ id: string; org_id: string | null }>(
+    `SELECT id, org_id FROM conversations WHERE kind = ? AND last_at > ? AND ${where} ORDER BY last_at DESC LIMIT 1`,
+    kind, cutoff(idleMinutes), ...values,
+  );
+  return row ? { id: row.id, kind, orgId: row.org_id, turns: await recentTurns(row.id) } : null;
+}
+
+/** Starts a new, empty conversation for the owner (and its group and scope key). */
+export async function startConversation(kind: ConversationKind, owner: ConversationOwner): Promise<Conversation> {
   // Now and then, clear out expired conversations of everyone (cheap, indexed).
   if (Math.random() < 0.05) await purgeExpiredConversations();
   const fresh = newId();
   const at = now();
-  const orgId = "visitorId" in owner ? null : owner.orgId;
+  const person = "visitorId" in owner ? null : owner;
   await run(
-    "INSERT INTO conversations (id, kind, org_id, user_id, visitor_id, created_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    fresh, kind, orgId, "visitorId" in owner ? null : owner.userId, "visitorId" in owner ? owner.visitorId : null, at, at,
+    "INSERT INTO conversations (id, kind, org_id, user_id, visitor_id, workspace_id, scope_key, created_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    fresh, kind, person?.orgId ?? null, person?.userId ?? null, "visitorId" in owner ? owner.visitorId : null, person?.workspaceId ?? null, person?.scopeKey ?? null, at, at,
   );
-  return { id: fresh, kind, orgId, turns: [] };
+  return { id: fresh, kind, orgId: person?.orgId ?? null, turns: [] };
+}
+
+/** Finds the owner's conversation (see `findConversation`) or starts a new one. */
+export async function openConversation(kind: ConversationKind, owner: ConversationOwner, id: unknown): Promise<Conversation> {
+  return (await findConversation(kind, owner, id)) ?? startConversation(kind, owner);
 }
 
 /** The conversation's last `KEEP_TURNS` turns, oldest first. */

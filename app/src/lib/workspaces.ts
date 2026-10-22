@@ -7,7 +7,8 @@
  * - **Deleting a workspace** removes everything scoped to it, on both database engines: documents and
  *   their search passages (local index and Azure AI Search), meetings with their notes and action items,
  *   questions, the knowledge map and gap states, its guardrail switches and custom rules (with history),
- *   saved Teams chat messages, chat settings, reminders, and its members list. Linked Teams chats are
+ *   saved Teams chat messages, chat settings, reminders, Ask/Teams conversations (follow-ups), 👍/👎 feedback on its
+ *   answers, and its members list. The org's firm library is not touched. Linked Teams chats are
  *   unlinked (Sidekick stops answering there). Kept on purpose: the audit log, AI usage and cost records,
  *   activity traces and guardrail counts, which hold no document text and are needed for billing and audit.
  *
@@ -63,9 +64,11 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
     const linked = await all<{ id: string }>("SELECT id FROM teams_conversations WHERE workspace_id = ? AND org_id = ?", ...ws);
     await run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL WHERE workspace_id = ? AND org_id = ?", ...ws);
     await run("DELETE FROM guard_rule_versions WHERE org_id = ? AND rule_id IN (SELECT id FROM guard_custom_rules WHERE workspace_id = ? AND org_id = ?)", orgId, ...ws);
+    // Ask and Teams conversations in this group (follow-ups), with their turns.
+    await run("DELETE FROM conversation_turns WHERE conversation_id IN (SELECT id FROM conversations WHERE workspace_id = ? AND org_id = ?)", ...ws);
     for (const table of [
       "guard_custom_rules", "guard_workspace_rules", "chat_messages", "teams_chat_settings", "reminder_runs",
-      "action_items", "items", "meetings", "documents", "questions", "passages",
+      "action_items", "items", "meetings", "documents", "questions", "passages", "answer_feedback", "conversations",
     ]) {
       await run(`DELETE FROM ${table} WHERE workspace_id = ? AND org_id = ?`, ...ws);
     }

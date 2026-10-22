@@ -10,7 +10,7 @@ A complete fake engagement for demos and testing: "Contoso Retail – Cloud Migr
 |---|---|---|
 | `meetings/` | Meetings → Import transcript (Teams `.vtt`) | Wave 1 retro + wave 2 kickoff (client), 4 daily standups, internal architecture review, weekly client status. Sprint 14 planning is `../Contoso - Sprint 14 planning.vtt` (client) |
 | `docs-shareable/` | Knowledge & docs, **Shareable** | Cutover runbook v0.3, glossary, architecture overview |
-| `docs-internal/` | Knowledge & docs, **Internal** | RAID log (CSV), staffing plan, two Teams chat exports (team channel, and a Priya ↔ Jordan chat) |
+| `docs-internal/` | Knowledge & docs, **Internal** | RAID log (CSV), staffing plan, two Teams chat exports (team channel, and a Priya ↔ Jordan chat), a cutover travel note |
 
 Also upload `../ADR-007 Cosmos DB for store inventory.md` and `../Contoso SOW v3 - summary.md` as Shareable. Tick "Client guests attended" for the kickoff, client status and sprint 14 planning meetings.
 
@@ -22,6 +22,9 @@ Also upload `../ADR-007 Cosmos DB for store inventory.md` and `../Contoso SOW v3
 - **Only in a meeting:** the 30-minute decision / 45-minute rollback rule; the SKU sync retry design.
 - **Internal only:** hours 6% over budget (architecture review, staffing plan). Must not appear in answers when client guests are present.
 - **Not in any source:** anyone's hourly rate, so Sidekick should say it doesn't know and log a gap.
+- **Against firm policy:** the travel note books business class to Chicago (about 2.5 hours); the sample firm library's travel policy (`../firm-library/`) says economy under 6 hours. With the firm library loaded, answers should say they disagree and cite both.
+
+The accuracy test set for this engagement is `../eval/contoso.json` (`npm --prefix app run eval:answers`).
 
 ## Good questions to try
 

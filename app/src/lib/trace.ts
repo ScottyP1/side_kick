@@ -23,7 +23,8 @@ import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 
-export type SpanKind = "request" | "search" | "ai" | "embed" | "teams" | "index" | "file" | "guard" | "remind" | "billing" | "microsoft" | "auth" | "rolloff";
+/** Kinds of steps. "rank" = re-ranking search results for an answer; "firm" = firm library uploads; "feedback" = 👍/👎. */
+export type SpanKind = "request" | "search" | "rank" | "ai" | "embed" | "teams" | "index" | "file" | "guard" | "remind" | "billing" | "microsoft" | "auth" | "rolloff" | "firm" | "feedback";
 export type Channel = "portal" | "teams" | "system";
 type Attrs = Record<string, string | number | boolean | null>;
 

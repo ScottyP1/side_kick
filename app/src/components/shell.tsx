@@ -13,6 +13,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { api, Icon, Pill, ToastProvider } from "./ui";
 import { AssistantDock } from "./assistant-dock";
 import { TwoStepPanel } from "./two-step";
+// Starts listening for the browser's "can install" event early, before the Help page shows the hint.
+import "./install-app";
 import { BRAND } from "@/lib/brand";
 import type { FeatureKey } from "@/lib/plans";
 

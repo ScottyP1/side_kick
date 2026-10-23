@@ -549,6 +549,47 @@ test(`[${ENGINE}] every response carries the browser security headers and doesn'
   }
 });
 
+test(`[${ENGINE}] installable app: the manifest and icons are public, only portal pages offer install, no service worker`, async () => {
+  // Browsers fetch the manifest and icons without cookies, so they must not redirect to sign-in (proxy.ts).
+  const res = await fetch(`${BASE}/manifest.webmanifest`, { redirect: "manual" });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /application\/manifest\+json/);
+  assert.match(res.headers.get("content-security-policy") ?? "", /default-src 'self'/, "the manifest gets the same security headers");
+  const m = await res.json();
+  const brand = fs.readFileSync(path.join(APP, "src/lib/brand.ts"), "utf8");
+  assert.ok(brand.includes(`name: "${m.name}"`) && brand.includes(`shortName: "${m.short_name}"`), "names come from lib/brand.ts");
+  assert.equal(m.start_url, "/home", "opens on the portal home");
+  assert.equal(m.display, "standalone", "in its own window");
+  assert.equal(m.scope, "/");
+  assert.equal(m.theme_color.toLowerCase(), "#4f46e5", "Indigo title bar");
+  for (const [size, purpose] of [["192x192", "any"], ["512x512", "any"], ["512x512", "maskable"]]) {
+    const icon = m.icons.find((i) => i.sizes === size && i.purpose === purpose);
+    assert.ok(icon, `${size} ${purpose} icon`);
+    const r = await fetch(`${BASE}${icon.src}`, { redirect: "manual" });
+    assert.equal(r.status, 200, icon.src);
+    assert.equal(r.headers.get("content-type"), "image/png", icon.src);
+    const png = Buffer.from(await r.arrayBuffer());
+    assert.equal(`${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`, size, `${icon.src} is really ${size}`);
+  }
+  assert.equal((await fetch(`${BASE}/app-icons/apple-touch-icon.png`, { redirect: "manual" })).status, 200);
+  // Portal and sign-in pages link the manifest and carry the iPhone home-screen tags.
+  for (const [who, p] of [[admin, "/home"], [admin, "/help"], [client(), "/login"]]) {
+    const body = (await who("GET", p)).body;
+    assert.match(body, /<link rel="manifest" href="\/manifest\.webmanifest"/, `${p} offers install`);
+    assert.match(body, /<meta name="mobile-web-app-capable" content="yes"/, `${p} opens full screen from the home screen`);
+    assert.match(body, /<link rel="apple-touch-icon" href="\/app-icons\/apple-touch-icon\.png"/, `${p} has the iPhone icon`);
+  }
+  // The public website and the Owner Console don't (the installable app is the customer portal).
+  for (const [who, p] of [[client(), "/"], [client(), "/pricing"], [client(), "/docs"], [client(), "/owner/login"], [owner, "/owner"]]) {
+    const body = (await who("GET", p)).body;
+    assert.doesNotMatch(body, /rel="manifest"/, `${p} doesn't offer install`);
+    assert.doesNotMatch(body, /mobile-web-app-capable/, p);
+  }
+  // No service worker: nothing signed-in is cached on the device (lib/pwa.ts).
+  assert.equal(fs.existsSync(path.join(APP, "public/sw.js")), false);
+  assert.equal((await fetch(`${BASE}/sw.js`, { redirect: "manual" })).status === 200, false, "no /sw.js is served");
+});
+
 /* ---------- public website and help center ---------- */
 
 /** The paths in sitemap.xml (its addresses use SIDEKICK_PUBLIC_URL, so only the path is compared). */
@@ -574,7 +615,7 @@ test(`[${ENGINE}] website: / shows the website when signed out and sends signed-
 
 test(`[${ENGINE}] website: every public page answers without a session; the portal, Owner Console and checkout don't`, async () => {
   const pages = await sitemapPaths();
-  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/roles-and-permissions"]) {
+  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/roles-and-permissions", "/docs/install-app"]) {
     assert.ok(pages.includes(p), `${p} is in the sitemap`);
   }
   for (const p of pages) {

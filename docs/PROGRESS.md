@@ -28,7 +28,7 @@ The single list of what's done, in flight and next. A coordinating session revie
 
 **Next, in this order**
 1. Finish the demo world PR + pitch folder reorganization (above).
-2. **Installable web app** (PWA: own window/icon, Add to Home Screen).
+2. **Installable web app** (PWA: own window/icon, Add to Home Screen). *Built, PR open (branch `claude/epic-wing-fab9f1`)*: manifest `app/manifest.ts` + `lib/pwa.ts` (start /home, scope "/" because portal pages share no folder; only portal + sign-in pages offer install, website and Owner Console don't), icons `public/app-icons/` (script `scripts/app-icons.mjs`), iPhone tags, quiet Install hint on /help, **no service worker** (Chrome/Edge/Safari don't need one; nothing signed-in cached; CSP unchanged). Guide `docs/guide/install-app.md` (also in the help center). Not yet tried on a real iPhone (Microsoft sign-in inside a home-screen app is the thing to check).
 3. **Job queue + watchers** ("always on": exactly-once jobs replacing the in-app timer; watchers for unanswered questions, failed replies, untracked/removed chats, overdue/unowned items, stale docs, groups without lead or notes chat, broken connectors; AI only when a watcher fires).
 4. **Meetings wave**: automatic notes via Graph after every Teams meeting (within meeting hours), notes chat per group, "save to knowledge" cards, Sidekick as a Teams tab/personal app (also unlocks meeting chats), rename import to "Add a past or outside meeting".
 5. **Connectors**: Azure DevOps Boards, then Jira.

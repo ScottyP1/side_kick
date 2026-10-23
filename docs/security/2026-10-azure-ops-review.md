@@ -147,6 +147,10 @@ live site, the laptop and the live site share the same keys, and Dependabot aler
   `Cognitive Services OpenAI User`) and turn key auth off; optionally Key Vault references for the rest
   (~$0.03 per 10k reads). Narrow the freeze Logic App from Contributor to a custom role that can only
   stop/start the app and the database.
+- *Status (Oct 21, 2026):* partly done. All six secrets are in Key Vault `sidekick-kv` (Key Vault
+  references); the deployer and the freeze Logic App are on narrow custom roles without secret listing
+  (HOSTING → Settings and secrets, Automatic deploys). Still open: separate keys for the laptop and managed-
+  identity auth for Search and Foundry.
 
 **M6. GitHub: no branch protection, Dependabot off, no secret scanning.**
 - *What/where:* repo `ScottyP1/side_kick` is private with one collaborator (Cody, admin), no deploy

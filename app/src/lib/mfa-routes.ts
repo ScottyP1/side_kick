@@ -8,6 +8,8 @@
  *   - `totp-start` → `{ id, secret, uri, qr }`; `totp-confirm { id, code }` → `{ backupCodes }`.
  *   - `passkey-options` → WebAuthn options; `passkey-add { response, label }` → `{ backupCodes }`.
  *   - `remove { id, password }` and `backup-codes { password }` (new codes) need your password again.
+ *     While the organization requires two-step sign-in (lib/auth.ts), your last method can't be removed.
+ *   These all work while a required second step is still waiting to be set up (`allowPendingTwoStep`).
  *   `backupCodes` is the list of new one-time codes when this was your first factor (show once), else null.
  * - The second step at sign-in (no session yet; the challenge is in an httpOnly cookie set by the sign-in):
  *   - `signin-options` → passkey options (or null); `verify { code } | { passkey }` → `{ ok, mustChange? }`
@@ -41,9 +43,11 @@ export async function setSecondStepCookie(kind: AccountKind, token: string) {
 /** The signed-in account for this kind, how to log for it, and its stored password hash (for re-checks). */
 async function signedIn(kind: AccountKind) {
   if (kind === "user") {
-    const u = await requireUser();
+    // Setting up two-step sign-in must work while the organization requires it and it isn't set up yet.
+    const u = await requireUser(undefined, { allowPendingTwoStep: true });
     return {
       account: { kind, id: u.id, email: u.email, name: u.name } satisfies Account,
+      orgId: u.org_id as string | null,
       log: (action: string) => audit(u, action, "Sign-in"),
       passwordHash: async () => (await get<{ password_hash: string }>("SELECT password_hash FROM users WHERE id = ?", u.id))!.password_hash,
     };
@@ -51,6 +55,7 @@ async function signedIn(kind: AccountKind) {
   const o = await requireOwner();
   return {
     account: { kind, id: o.id, email: o.email, name: o.name } satisfies Account,
+    orgId: null as string | null,
     log: (action: string) => platformLog(o.name, action),
     passwordHash: async () => (await get<{ password_hash: string }>("SELECT password_hash FROM platform_admins WHERE id = ?", o.id))!.password_hash,
   };
@@ -99,6 +104,11 @@ export function mfaRoutes(kind: AccountKind) {
       }
       case "remove": {
         await recheckPassword(await me.passwordHash(), body.password);
+        // While the organization requires two-step sign-in, the last method can't be removed (add another first).
+        if (me.orgId && (await secondFactorStatus(me.account)).factors.length <= 1
+          && Number((await get<{ mfa_required: number }>("SELECT mfa_required FROM orgs WHERE id = ?", me.orgId))?.mfa_required) === 1) {
+          throw new HttpError(400, "Your organization requires two-step sign-in, so you can't remove your last method. Add another one first, then remove this one.");
+        }
         const r = await removeFactor(me.account, String(body.id ?? ""));
         await me.log(r.twoStepOff ? `Turned off two-step sign-in (removed “${r.label}”)` : `Removed “${r.label}” from two-step sign-in`);
         return { ok: true, twoStepOff: r.twoStepOff };

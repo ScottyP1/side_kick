@@ -3,7 +3,8 @@
 Sidekick runs in Cody's Sidekick Labs Azure subscription (pay-as-you-go), resource group `sidekick-rg`,
 signed in as CodyScott@SidekickLabs334.onmicrosoft.com. Set up October 16, 2026.
 
-**Live address:** https://sidekick-app.thankfulsky-373e157d.eastus.azurecontainerapps.io (health: `/api/health`)
+**Live address:** not written here; get it with
+`az containerapp show -g sidekick-rg -n sidekick-app --query properties.configuration.ingress.fqdn -o tsv` (health: `/api/health`).
 
 ## What runs where
 
@@ -16,6 +17,7 @@ signed in as CodyScott@SidekickLabs334.onmicrosoft.com. Set up October 16, 2026.
 | Embeddings / Claude via Foundry | `codyscott-9578-resource` | East US 2 | pay per use |
 | Budget freeze | Logic App `sidekick-freeze` + action group `sidekick-freeze-ag` | East US | ~$0 (runs only on alert) |
 | Teams bot registration | Azure Bot `sidekick-bot-dev` (F0, single tenant), endpoint = the live address + `/api/messages` | global | $0 |
+| Secrets | Key Vault `sidekick-kv` (Standard, RBAC, soft-delete 90 days + purge protection) | East US | ~$0.03/month |
 
 Claude itself is still called with the Anthropic API key (not yet via Foundry); set a monthly spend limit
 in the Anthropic console too, since Azure budgets don't see that spend.
@@ -25,30 +27,37 @@ capacity in East US / East US 2 when set up, hence Container Apps and Central US
 
 ## Settings and secrets
 
-Container App environment variables come from `app/.env.local` (never printed or committed):
-`ANTHROPIC_API_KEY`, `CLIENT_SECRET`, `AZURE_SEARCH_API_KEY`, `AZURE_OPENAI_API_KEY` and `DATABASE_URL` are
-Container App **secrets** (encrypted, referenced with `secretref:`); the rest are plain settings,
-plus `SIDEKICK_PUBLIC_URL` (the live address) and `AZURE_SEARCH_INDEX=sidekick-cloud`.
-The database admin password was generated at random and only exists inside `DATABASE_URL`.
+Container App environment variables: `ANTHROPIC_API_KEY`, `CLIENT_SECRET`, `AZURE_SEARCH_API_KEY`,
+`AZURE_OPENAI_API_KEY`, `DATABASE_URL` and `SIDEKICK_ENCRYPTION_KEY` come from Container App **secrets**
+(referenced with `secretref:`); the rest are plain settings, plus `SIDEKICK_PUBLIC_URL` (the live address)
+and `AZURE_SEARCH_INDEX=sidekick-cloud`. The database admin password was generated at random and only exists
+inside `DATABASE_URL`.
 
-**`SIDEKICK_ENCRYPTION_KEY`** (needed before anyone can add an authenticator app on the live site; passkeys
-work without it): the master key that encrypts authenticator-app secrets in the database (`app/src/lib/secret-box.ts`,
-envelope encryption with AES-256-GCM: each secret has its own data key, wrapped by this key). Production refuses
-authenticator setup until it's set, and says so on Settings. Create it once, straight into the Container App
-(the value never appears on screen):
+**Secrets live in Azure Key Vault `sidekick-kv`** (since Oct 21, 2026). Each of the six Container App secrets
+(`anthropic-api-key`, `azure-openai-api-key`, `azure-search-api-key`, `client-secret`, `database-url`,
+`encryption-key`) is a **Key Vault reference** (`keyvaultref:https://sidekick-kv.vault.azure.net/secrets/<name>,identityref:system`)
+with no version, read with the app's own managed identity. So:
 
-```bash
-az containerapp secret set -g sidekick-rg -n sidekick-app --secrets encryption-key="$(openssl rand -base64 32)"
-```
+- **Who can read the values:** Cody ("Key Vault Administrator" on the vault) and the app's managed identity
+  ("Key Vault Secrets User": read only). Nothing else has a role on the vault. The deploy identity and the
+  freeze Logic App have narrow custom roles that can't list the app's secrets (see below): Azure's
+  "list secrets" on a Container App returns the real values even for Key Vault references, so that right
+  is what matters, and only Cody (Owner) has it.
+- **Changing a value:** set a new version in the vault (RUNBOOKS → Rotate secrets). The app picks it up within
+  about 30 minutes, or straight away after a restart.
+- **The vault keeps deleted secrets 90 days** and can't be purged early (purge protection): a deleted
+  secret, or the whole vault, can be recovered. A deleted vault's name stays taken for those 90 days.
+- **Cost:** Standard tier, about $0.03 per 10,000 reads (the app reads at start and checks every 30 minutes):
+  a few cents a month.
+- `app/.env.local` on the Mac still holds its own copies for the laptop (git-ignored, never committed).
 
-```bash
-az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars SIDEKICK_ENCRYPTION_KEY=secretref:encryption-key
-```
-
-Don't change or delete it afterwards: secrets encrypted with it can't be read with another key (people would
-have to remove and re-add their authenticator app; passkeys and backup codes are unaffected). Later, move it to
-Azure Key Vault (a Key Vault reference on the Container App secret, read with the app's managed identity), or let
-Key Vault do the wrapping; the stored format already has a key id for that.
+**`SIDEKICK_ENCRYPTION_KEY`** (`encryption-key`, created Oct 21, 2026): the master key that encrypts
+authenticator-app secrets in the database (`app/src/lib/secret-box.ts`, envelope encryption with AES-256-GCM:
+each secret has its own data key, wrapped by this key). Production refuses authenticator setup without it.
+It was moved into Key Vault **as-is** (fingerprint checked). **Never regenerate or delete it**: secrets
+encrypted with it can't be read with another key (everyone would have to remove and re-add their
+authenticator app; passkeys and backup codes are unaffected). Later, Key Vault could do the wrapping itself;
+the stored format already has a key id for that.
 
 The image is pulled with the app's managed identity (AcrPull role); the registry's admin user is off.
 
@@ -56,9 +65,9 @@ The image is pulled with the app's managed identity (AcrPull role); the registry
 
 Scripts in `infra/azure/` (run after `az login`):
 
-- `./deploy.sh`: builds `origin/main` in the registry and switches the app to it. It prints the version
-  that was live before, waits up to 5 minutes for `/api/health` to answer ok, and otherwise prints the
-  rollback command. What to do when things go wrong (rollback, restore, rotate secrets, incident): `docs/RUNBOOKS.md`.
+- `./deploy.sh`: builds `origin/main` in the registry and switches the app to it (setting `SIDEKICK_COMMIT`
+  like the automatic deploy). It prints the version that was live before, waits up to 10 minutes for
+  `/api/health` to answer ok with the new commit, and otherwise prints the rollback command. What to do when things go wrong (rollback, restore, rotate secrets, incident): `docs/RUNBOOKS.md`.
 - `./status.sh`: is the app/database running, and every budget's limit and spend this month.
 - `./freeze.sh`: stops the app and the database (use when a budget alert arrives). Registry (~$5) and
   database storage (~$4) are still billed while frozen. Azure restarts a stopped Postgres after 7 days.
@@ -67,17 +76,32 @@ Scripts in `infra/azure/` (run after `az login`):
 ## Automatic deploys (GitHub Actions)
 
 Every merge to `main` that changes the app (`app/`, `teams/` or the workflows) deploys itself:
-`.github/workflows/deploy.yml` runs the full test suite on the merged code, builds the image in
-`sidekicklabsacr`, switches `sidekick-app` to it and waits until the new revision gets all traffic, is
-healthy and `/api/health` answers ok. If not within ~5 minutes it **rolls back** to the previous image and
-the run fails (GitHub emails the repo owner). One deploy at a time. Docs-only merges don't deploy; the
-Actions tab has **Run workflow** for a manual deploy, and `./infra/azure/deploy.sh` still works from the Mac.
+`.github/workflows/deploy.yml` first checks the push came through a merged pull request with a green
+`test` check (the **deploy guard**, below), runs the full test suite on the merged code, builds the image in
+`sidekicklabsacr`, switches `sidekick-app` to it and waits until the revision running the new image has all
+traffic and `/api/health` answers ok **with the new commit** (`"commit"`, the short commit from
+`SIDEKICK_COMMIT`), so it's really the new version answering. Azure's own revision health is printed but not
+required: it sometimes stays "None" long after the app serves, which caused a needless rollback on
+Oct 21, 2026 (#39). If the new version isn't answering within ~10 minutes it **rolls back** to the previous
+image and the run fails (GitHub emails the repo owner). One deploy at a time. Docs-only merges don't deploy;
+the Actions tab has **Run workflow** for a manual deploy, and `./infra/azure/deploy.sh` still works from the Mac.
+
+- **Deploy guard (free stand-in for branch protection,** which needs GitHub Pro, ~$4/month: add it once there
+  are paying customers or a second developer). A push to `main` deploys only if it is the merge commit of a
+  pull request merged into `main` whose last commit has a successful `test` check (looked up with the
+  workflow's own read-only token). Otherwise the run ends green with a **Deploy skipped** warning saying why,
+  and nothing is built or changed. Manual runs (**Run workflow**) skip the guard. What to do: RUNBOOKS →
+  Deploy skipped.
 
 - **No stored Azure password.** GitHub's own login token (OIDC) is exchanged for the user-assigned managed
   identity `sidekick-deployer` (resource group `sidekick-rg`), which has a federated credential trusting
-  only `repo:ScottyP1/side_kick:ref:refs/heads/main`. Its roles: Contributor on `sidekicklabsacr` (image
-  builds) and on `sidekick-app` (switch the image). Nothing else: not the database, the other services or
-  the subscription.
+  only `repo:ScottyP1/side_kick:ref:refs/heads/main`. Its only role is the custom role **Sidekick Deployer**
+  (since Oct 21, 2026; it had Contributor before), assigned on `sidekicklabsacr` and on `sidekick-app`: run
+  registry builds and read their logs, read the app and its revisions, update the app (image and settings).
+  It **can't** list the app's secrets, read registry passwords, delete anything or grant access, and has
+  nothing on the database, the vault, the other services or the subscription. (Updating the app is still
+  powerful: it chooses what code runs. That's what the deploy guard and the federated credential protect.)
+  See the role: `az role definition list --name "Sidekick Deployer" -o json`.
 - **Repository variables** (Settings → Secrets and variables → Actions → Variables; ids, not secrets):
   `AZURE_CLIENT_ID` (the identity's client id), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
 - **No manual approval gate:** GitHub's "required reviewers" for environments needs a paid plan on private
@@ -168,8 +192,11 @@ Management if the extra early warning isn't wanted. Budget data lags Azure usage
 
 **Automatic freeze:** when `sidekick-total-50` passes 100% of actual spend, its alert also calls action
 group `sidekick-freeze-ag`, which runs Logic App `sidekick-freeze`. That Logic App stops `sidekick-app`
-and `sidekick-labs-db` (the same as `freeze.sh`). Its managed identity has Contributor on `sidekick-rg`
-only (nothing else in the subscription). Budget data lags real usage by up to a day, so spend can go a
+and `sidekick-labs-db` (the same as `freeze.sh`). Its managed identity has only the custom role
+**Sidekick Freeze** on `sidekick-rg` (since Oct 21, 2026; Contributor before): read, stop and start the
+Container App and the Postgres server, nothing else. Dry run that day: the Logic App was briefly pointed at
+"start" (harmless on running resources) and run; Azure accepted both calls (the database answered "isn't
+stopped", not "not allowed"), then the saved definition was restored. Budget data lags real usage by up to a day, so spend can go a
 little past $50 before the freeze runs. Run `./unfreeze.sh` to start things again (and raise the budget
 first if it would trip again). Not test-fired yet, because firing it takes the live app down.
 
@@ -194,6 +221,9 @@ first if it would trip again). Not test-fired yet, because firing it takes the l
 - Entra app: single tenant, implicit grant off, secret valid until 2027-04-13. Redirect URIs: the live
   address plus localhost:3000/3301. The dev tunnel address was removed and the tunnel stopped.
 - Bot: single tenant; Teams channel plus Azure's default Web Chat test channel (needs a secret).
+- Secrets and rights (Oct 21, 2026): secrets in Key Vault, narrow custom roles for the deployer and the freeze
+  Logic App, the deploy guard, and the Org Owner switch **Require two-step sign-in for everyone** (for
+  email/password organizations; Microsoft sign-in is exempt; `docs/guide/admin-guide.md`).
 
 ## Data
 

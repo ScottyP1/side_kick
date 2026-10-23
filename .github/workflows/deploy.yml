@@ -1,14 +1,23 @@
 # Continuous deployment: every merge to main that changes the app goes live on Azure automatically.
+# 0. Guard (free stand-in for branch protection, which needs GitHub Pro): a push deploys only if it is the
+#    merge commit of a pull request merged into main whose `test` check passed on its last commit. Anything
+#    else (a direct push, a PR merged with a failing or missing test) is skipped with a warning and nothing
+#    is built. Manual runs (Actions → Deploy → Run workflow) skip the guard, so main can always be
+#    redeployed by hand (docs/RUNBOOKS.md → Deploy skipped).
 # 1. Runs the full test suite on the merged code (test.yml); nothing deploys if it fails.
 # 2. Signs in to Azure without any stored password: GitHub's own login token (OIDC) is exchanged for the
-#    user-assigned managed identity `sidekick-deployer`, which trusts only this repo's main branch and may
-#    only build images in `sidekicklabsacr` and update `sidekick-app` (docs/HOSTING.md → Automatic deploys).
-# 3. Builds the image in Azure Container Registry, switches the app to it, then waits for /api/health.
-#    If the new version isn't healthy within ~5 minutes it rolls back to the previous image and fails, so
-#    GitHub emails the repo owner. One deploy at a time; a second merge waits for the first.
+#    user-assigned managed identity `sidekick-deployer`, which trusts only this repo's main branch and has
+#    only the custom role "Sidekick Deployer" on `sidekicklabsacr` and `sidekick-app`: run image builds and
+#    update the app, but not read its secrets (docs/HOSTING.md → Automatic deploys).
+# 3. Builds the image in Azure Container Registry, switches the app to it, then waits until /api/health
+#    answers ok *with the new commit*, so it is the new version answering, not the old one. Azure's own
+#    revision health is shown but not required: it sometimes reports late or never ("None"), which caused
+#    a needless rollback on Oct 21, 2026. If the new version isn't answering within ~10 minutes it rolls
+#    back to the previous image and fails, so GitHub emails the repo owner. One deploy at a time; a second
+#    merge waits for the first.
 # The three ids it needs are repository *variables* (not secrets): AZURE_CLIENT_ID, AZURE_TENANT_ID and
-# AZURE_SUBSCRIPTION_ID. Docs-only merges don't deploy. Run it by hand from the Actions tab if needed.
-# Only the Azure CLI that GitHub's runners already include; no third-party actions.
+# AZURE_SUBSCRIPTION_ID. Docs-only merges don't deploy. Only the GitHub and Azure CLIs that GitHub's runners
+# already include; no third-party actions.
 name: Deploy
 
 on:
@@ -30,13 +39,67 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Read-only token: enough to look up the pull request and its checks.
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - id: check
+        name: Deploy only merged pull requests with a green test check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Manual deploy of $GITHUB_REF_NAME at ${GITHUB_SHA::7}, started by $GITHUB_ACTOR."
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          skip() {
+            echo "::warning title=Deploy skipped::$1"
+            {
+              echo "### Deploy skipped"
+              echo
+              echo "$1"
+              echo
+              echo "Nothing was built or changed in Azure. To deploy anyway: Actions → Deploy → Run workflow (docs/RUNBOOKS.md → Deploy skipped)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          # The pull request whose merge produced exactly this commit (merge, squash and rebase merges all
+          # record it as merge_commit_sha). A direct push to main has none.
+          PR=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "main" and .merge_commit_sha == env.GITHUB_SHA)] | first | select(. != null) | "\(.number) \(.head.sha)"')
+          [ -n "$PR" ] || skip "${GITHUB_SHA::7} wasn't made by merging a pull request into main (a direct push?)."
+          read -r NUM HEAD <<< "$PR"
+          # The PR's last commit needs a successful `test` check (test.yml) and no failed one.
+          RESULTS=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD/check-runs?check_name=test&per_page=100" \
+            --jq '[.check_runs[] | .conclusion // "pending"] | join(",")')
+          case ",$RESULTS," in
+            *,failure,*|*,cancelled,*|*,timed_out,*) skip "Pull request #$NUM's test check failed on its last commit ($RESULTS)." ;;
+            *,success,*) ;;
+            *) skip "Pull request #$NUM was merged without a finished, green test check (${RESULTS:-none found})." ;;
+          esac
+          echo "✓ ${GITHUB_SHA::7} is the merge of pull request #$NUM, whose test check passed."
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: guard
+    if: needs.guard.outputs.ok == 'true'
     uses: ./.github/workflows/test.yml
 
   deploy:
-    needs: test
+    needs: [guard, test]
+    if: needs.guard.outputs.ok == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       RG: sidekick-rg
       APP: sidekick-app
@@ -72,22 +135,30 @@ jobs:
           az acr build -r $ACR -t sidekick:$TAG -t sidekick:latest app -o none
 
       - name: Switch the app to the new image
-        # SIDEKICK_COMMIT / SIDEKICK_RELEASED_AT: shown on the Owner Console's Business page (lib/ops.ts).
+        # SIDEKICK_COMMIT / SIDEKICK_RELEASED_AT: shown on the Owner Console's Business page (lib/ops.ts);
+        # /api/health reports SIDEKICK_COMMIT, which the next step uses to see the new version answering.
         run: az containerapp update -g $RG -n $APP --image $ACR.azurecr.io/sidekick:$TAG --set-env-vars SIDEKICK_COMMIT=$TAG SIDEKICK_RELEASED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) -o none
 
-      - name: Wait for the health check (roll back if it fails)
+      - name: Wait for the new version to answer (roll back if it doesn't)
         run: |
-          # Healthy means: the revision running the new image gets all traffic, Azure's probes say it's
-          # healthy, and /api/health answers ok (so it isn't the old revision answering).
-          for i in $(seq 1 30); do
-            REV=$(az containerapp revision list -g $RG -n $APP --query "[?properties.template.containers[0].image=='$ACR.azurecr.io/sidekick:$TAG' && properties.active] | [0].{h:properties.healthState,t:properties.trafficWeight}" -o tsv 2>/dev/null || true)
-            if [ "$REV" = "$(printf 'Healthy\t100')" ] && curl -fsS "https://$HOST/api/health" | grep -q '"ok":true'; then
-              echo "✓ $TAG is live and healthy (was $PREV)."
+          # Live means: the revision running the new image has all traffic (and Azure doesn't call it
+          # Unhealthy), and /api/health answers ok with the new commit. Up to ~10 minutes (60 × 10 s).
+          for i in $(seq 1 60); do
+            REV=$(az containerapp revision list -g $RG -n $APP -o json 2>/dev/null \
+              | jq -r --arg img "$ACR.azurecr.io/sidekick:$TAG" '[.[] | select(.properties.template.containers[0].image == $img and .properties.active)] | first | select(. != null) | "\(.properties.healthState // "None") \(.properties.trafficWeight // 0)"' || true)
+            HEALTH=$(curl -fsS --max-time 10 "https://$HOST/api/health" 2>/dev/null | jq -r '"\(.ok) \(.commit // "none")"' 2>/dev/null || true)
+            STATE=${REV% *}; WEIGHT=${REV#* }
+            if [ "$WEIGHT" = "100" ] && [ "$STATE" != "Unhealthy" ] && [ "$HEALTH" = "true $TAG" ]; then
+              echo "✓ $TAG is live and answering (Azure's health says: $STATE; was $PREV)."
               exit 0
             fi
-            echo "waiting… ($REV)"
+            echo "waiting… (revision: ${REV:-not yet} | /api/health ok, commit: ${HEALTH:-no answer})"
             sleep 10
           done
-          echo "::error::$TAG didn't report healthy within 5 minutes. Rolling back to $PREV."
+          if [ "$PREV" = "$ACR.azurecr.io/sidekick:$TAG" ]; then
+            echo "::error::$TAG (a redeploy of the version already live) didn't answer within 10 minutes; nothing older to roll back to. See docs/RUNBOOKS.md → The site is down."
+            exit 1
+          fi
+          echo "::error::$TAG didn't answer within 10 minutes. Rolling back to $PREV."
           az containerapp update -g $RG -n $APP --image "$PREV" --set-env-vars SIDEKICK_COMMIT="${PREV##*:}" SIDEKICK_RELEASED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) -o none
           exit 1

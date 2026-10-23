@@ -8,7 +8,7 @@
 #
 # The live database only accepts Azure traffic, so for this run only it:
 #   1. adds a firewall rule for this Mac's public IP address (named reset-password-tmp),
-#   2. reads the app's database-url secret into a variable (never printed or written to disk),
+#   2. reads the database-url secret from Key Vault `sidekick-kv` into a variable (never printed or written to disk),
 #   3. runs the reset, then
 #   4. removes the firewall rule again, even if the reset failed or you pressed Ctrl-C (an EXIT trap).
 # Nothing secret is printed: not the database URL or its password (the reset script blanks them out of any
@@ -43,6 +43,6 @@ RULE_CREATED=1  # set first, so a create that half-worked is still cleaned up
 az postgres flexible-server firewall-rule create -g $RG --name $DB --rule-name $RULE --start-ip-address $IP --end-ip-address $IP -o none || exit 1
 
 # Read into a variable (not exported), so it reaches only the reset script below, never the screen or disk.
-DATABASE_URL=$(az containerapp secret show -g $RG -n sidekick-app --secret-name database-url --query value -o tsv 2>/dev/null) || { echo "✗ Couldn't read the database-url secret (check az login and your access)."; exit 1; }
+DATABASE_URL=$(az keyvault secret show --vault-name sidekick-kv -n database-url --query value -o tsv 2>/dev/null) || { echo "✗ Couldn't read database-url from Key Vault sidekick-kv (check az login and that you have Key Vault Administrator on it)."; exit 1; }
 [[ -n "$DATABASE_URL" ]] || { echo "✗ Couldn't read the database-url secret."; exit 1; }
 DATABASE_URL=$DATABASE_URL node --no-warnings "$ROOT/app/scripts/reset-password.mjs" "$@"

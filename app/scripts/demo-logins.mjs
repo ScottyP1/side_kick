@@ -102,6 +102,7 @@ ${row("Org Owner of a second client (Tailspin Partners, Starter)", tail.owner.na
   "Only Tailspin's own group and people: Northwind doesn't exist from here.",
   "**Users & access → Add person**: one more is fine, the next one hits the Starter limit (15 people) with the price of an extra group or an upgrade.",
   "**Groups → New group**: refused at 1 of 1 group, with both options and prices.",
+  "**Users & access → make someone Team Lead**: refused, because Team Leads come with the Team plan and up (the message names the plan and price).",
   "**Memory & gaps → Build knowledge map**: refused, because the Sidekick team turned the knowledge map off for this organization (the message says so).",
 ])}
 ## Everyone else

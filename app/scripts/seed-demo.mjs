@@ -462,7 +462,9 @@ async function phaseA() {
       const name = ["Zara Quinn", "Yosef Adler"][i];
       ids.push((await orgOwner("POST", "/api/users", { name, email: emailAt(name, org.domain), role: "Viewer" })).id);
     }
-    const ws = (await orgOwner("POST", "/api/workspaces", { name: org.group.name, client: org.group.client, code: org.group.code, lead: ids[0], members: ids })).id;
+    // Team Leads come with the Team plan and up (lib/plans.ts features), so a Starter client's group has none.
+    const lead = org.plan === "starter" ? undefined : ids[0];
+    const ws = (await orgOwner("POST", "/api/workspaces", { name: org.group.name, client: org.group.client, code: org.group.code, lead, members: ids })).id;
     world.groupsByOrg[org.key] = ws;
     const c = smallOrgContent(org);
     for (const d of c.docs) await orgOwner("POST", "/api/docs", undefined, { form: formOf({ ws, audience: d.audience }, [{ field: "files", name: d.name, text: d.text, type: mime(d.name) }]) });
@@ -694,6 +696,14 @@ async function main() {
   log(`\n✔ Demo world ready in ${Math.round((Date.now() - started) / 1000)}s: ${people.length} people at ${NORTHWIND.org}, ${PROFILES.length} groups, ${world.meetings.length} meetings, ${world.docs.length} documents, ${world.chats.length} Teams chats, ${OTHER_ORGS.length} more client organizations.`);
   const shown = guidePath.startsWith(APP) ? path.relative(process.cwd(), guidePath) : guidePath;
   log(`  Logins (passwords) are in ${shown}. Start the copy: preview "sidekick-demo${POSTGRES ? "-pg" : ""}" (port 3330), see docs/DEMO.md.`);
+}
+
+// Interrupted (Ctrl+C, or a test's timeout): stop the app copy too, so it never keeps running on its port.
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    if (server && server.exitCode === null) server.kill("SIGTERM");
+    process.exit(130);
+  });
 }
 
 main().catch((e) => {

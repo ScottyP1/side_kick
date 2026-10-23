@@ -431,6 +431,46 @@ CREATE TABLE IF NOT EXISTS answer_feedback (
   UNIQUE (question_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS answer_feedback_org ON answer_feedback(org_id, created_at);
+-- Connectors to outside tools (lib/connectors.ts): Azure DevOps Boards and Jira, read-only.
+-- connectors: one per organization and tool (kind = ado | jira), connected once by an Org Owner/Admin with the
+-- tool's own sign-in (OAuth; no passwords). access_token / refresh_token are sealed (lib/secret-box.ts, context
+-- "connectors.<column>:<id>") and refreshed before they run out. status = connected | expired (the sign-in ran
+-- out or was revoked: someone must reconnect). account = the ADO organization or the Jira site (cloud id);
+-- api_base / web_base = where its API and its web pages are. last_error = the last connector-wide problem.
+CREATE TABLE IF NOT EXISTS connectors (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, status TEXT NOT NULL,
+  account TEXT NOT NULL, account_name TEXT, api_base TEXT NOT NULL, web_base TEXT NOT NULL,
+  access_token TEXT, refresh_token TEXT, token_expires_at TEXT,
+  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
+  UNIQUE (org_id, kind)
+);
+-- One project (ADO) or project key (Jira) feeding one group's knowledge, set by an Org Owner/Admin or the
+-- group's Team Lead. audience = internal | shareable (like documents). sync_cursor = the latest "changed" time
+-- seen, so each sync only fetches what changed since. Health: last_sync_at (last try), last_ok_at (last
+-- success), last_error (plain reason, null when fine). sync_started_at = claimed by a running sync.
+CREATE TABLE IF NOT EXISTS connector_links (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL, project TEXT NOT NULL, project_name TEXT NOT NULL, audience TEXT NOT NULL DEFAULT 'internal',
+  sync_cursor TEXT, item_count INTEGER NOT NULL DEFAULT 0, last_sync_at TEXT, last_ok_at TEXT, last_error TEXT,
+  sync_started_at TEXT, created_by TEXT, created_at TEXT NOT NULL,
+  UNIQUE (connector_id, workspace_id, project)
+);
+CREATE INDEX IF NOT EXISTS connector_links_ws ON connector_links(org_id, workspace_id);
+-- The work items read from a linked project (title, state, assignee, due date, link...). Their text is in
+-- passages (source_type "workitem", source_id = this id). text_hash skips re-indexing unchanged items.
+CREATE TABLE IF NOT EXISTS connector_items (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+  link_id TEXT NOT NULL REFERENCES connector_links(id) ON DELETE CASCADE, external_id TEXT NOT NULL,
+  item_type TEXT, title TEXT NOT NULL, state TEXT, assignee TEXT, due_on TEXT, url TEXT NOT NULL, changed_at TEXT,
+  blocked_by TEXT, comment_count INTEGER NOT NULL DEFAULT 0, text_hash TEXT, synced_at TEXT NOT NULL,
+  UNIQUE (link_id, external_id)
+);
+CREATE INDEX IF NOT EXISTS connector_items_ws ON connector_items(org_id, workspace_id);
+-- A connector sign-in in progress (OAuth state + PKCE verifier), used once, kept 10 minutes.
+CREATE TABLE IF NOT EXISTS connector_states (
+  state TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, verifier TEXT NOT NULL,
+  site TEXT, expires_at TEXT NOT NULL
+);
 -- Background jobs (lib/jobs.ts): the database-backed job queue (every background task runs on it). kind = what to run
 -- (registered in lib/job-kinds.ts); payload = small JSON of ids (never document text); org_id/workspace_id = whose
 -- work it is (NULL for system sweeps). status = queued | running | done | dead (gave up after max_attempts, the

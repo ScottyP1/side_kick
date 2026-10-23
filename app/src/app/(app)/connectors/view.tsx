@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Connectors (/connectors): the tools Sidekick will read from (Outlook, SharePoint, Jira, ...).
- * Uploads, transcript import and Teams (chats and channels assigned on each group's page) work today; the
- * other tools are planned and will each connect with their own sign-in. Says how many connectors the
- * organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me. Tile icons:
+ * Connectors (/connectors): the tools Sidekick reads from. Uploads, transcript import and Teams (chats and channels
+ * assigned on each group's page) work today, and so do **Azure DevOps Boards and Jira** (read-only, each with its
+ * own sign-in): their tiles show Connected / Needs attention / Sign-in expired / Ready to connect and jump to their
+ * panel below (./tools.tsx: connect, health, linked projects). The other tools are planned. Says how many connectors
+ * the organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me. Tile icons:
  * components/connector-icons.tsx.
  */
 
@@ -12,8 +13,9 @@ import { useApp } from "@/components/shell";
 import { Pill } from "@/components/ui";
 import { CONNECTOR_ICONS } from "@/components/connector-icons";
 import { BRAND } from "@/lib/brand";
+import { toolPill, ToolPanels, useConnectors } from "./tools";
 
-const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; desc: string; live?: boolean }[] = [
+const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; desc: string; live?: boolean; tool?: "ado" | "jira" }[] = [
   { name: "Document upload", g: "Available now", mono: "⇪", bg: "var(--accent)", desc: "PDF, Word, text, Teams transcripts", live: true },
   { name: "Teams transcripts", g: "Available now", mono: "T", bg: "#5B5FC7", desc: "Import .vtt or .docx from meeting recaps", live: true },
   { name: "Outlook", g: "Microsoft 365", mono: "O", bg: "#0F6CBD", desc: "Calendar and email" },
@@ -21,9 +23,9 @@ const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; de
   { name: "SharePoint", g: "Microsoft 365", mono: "S", bg: "#038387", desc: "Sites and document libraries" },
   { name: "OneDrive", g: "Microsoft 365", mono: "OD", bg: "#0364B8", desc: "Shared files and folders" },
   { name: "Planner", g: "Microsoft 365", mono: "P", bg: "#31752F", desc: "Tasks and plans" },
-  { name: "Azure DevOps", g: "Engineering", mono: "DO", bg: "#0078D4", desc: "Boards, Repos, Pipelines" },
+  { name: "Azure DevOps", g: "Engineering", mono: "DO", bg: "#0078D4", desc: "Boards: work items, read-only", tool: "ado" },
   { name: "GitHub", g: "Engineering", mono: "GH", bg: "#24292F", desc: "Issues, PRs, Actions" },
-  { name: "Jira", g: "Work & docs", mono: "J", bg: "#0052CC", desc: "Issues and sprints" },
+  { name: "Jira", g: "Work & docs", mono: "J", bg: "#0052CC", desc: "Issues, read-only", tool: "jira" },
   { name: "Confluence", g: "Work & docs", mono: "C", bg: "#1868DB", desc: "Spaces and pages" },
   { name: "ServiceNow", g: "Business apps", mono: "SN", bg: "#1F3D3A", desc: "Incidents and changes" },
   { name: "Salesforce", g: "Business apps", mono: "SF", bg: "#00A1E0", desc: "Accounts and opportunities" },
@@ -32,19 +34,20 @@ const GROUPS = ["Available now", "Microsoft 365", "Engineering", "Work & docs", 
 
 export default function ConnectorsPage() {
   const { me } = useApp();
+  const { data, load } = useConnectors();
   const included = me.plan?.connectors;
   const yours = me.plan?.name ? `Your ${me.plan.name} plan` : "Your plan";
   const planText = included === undefined ? null
     : included === null ? `${yours} includes every connector.`
     : included === 0 ? `${yours} doesn't include connectors to other tools; Team includes one and Business all of them.`
-    : `${yours} includes ${included} connector${included === 1 ? "" : "s"} to another tool; Business includes all of them.`;
+    : `${yours} includes ${included} connector${included === 1 ? "" : "s"} to another tool (Azure DevOps or Jira); Business includes all of them.`;
   return (
     <>
       <div className="page-head">
         <div>
           <div className="eyebrow">Connectors</div>
           <h1>Give {BRAND.name} access to your tools</h1>
-          <p>Uploads, transcript import and Teams chats and channels work today. The other tools are planned; each will connect with its own sign-in (no passwords stored).</p>
+          <p>Uploads, transcript import, Teams chats and channels, Azure DevOps Boards and Jira work today. Each tool connects with its own sign-in, read-only, and no passwords are stored. The other tools are planned.</p>
           {planText && <p className="muted">{planText}</p>}
         </div>
       </div>
@@ -52,17 +55,26 @@ export default function ConnectorsPage() {
         <section key={g} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div className="eyebrow">{g}</div>
           <div className="app-grid">
-            {APPS.filter((a) => a.g === g).map((a) => (
-              <div key={a.name} className={`app-tile${a.live ? " on" : ""}`} style={{ cursor: "default" }}>
-                <span className="app-ico" style={{ background: a.bg, color: a.fg ?? "#fff", width: 48, height: 48, fontSize: 17 }} aria-hidden="true">{CONNECTOR_ICONS[a.name] ?? a.mono}</span>
-                <b>{a.name}</b>
-                <span className="muted">{a.desc}</span>
-                {a.live ? <Pill kind="good">Ready</Pill> : <Pill>Planned</Pill>}
-              </div>
-            ))}
+            {APPS.filter((a) => a.g === g).map((a) => {
+              const inner = (
+                <>
+                  <span className="app-ico" style={{ background: a.bg, color: a.fg ?? "#fff", width: 48, height: 48, fontSize: 17 }} aria-hidden="true">{CONNECTOR_ICONS[a.name] ?? a.mono}</span>
+                  <b>{a.name}</b>
+                  <span className="muted">{a.desc}</span>
+                  {a.tool ? toolPill(a.tool, data, included) : a.live ? <Pill kind="good">Ready</Pill> : <Pill>Planned</Pill>}
+                </>
+              );
+              // Azure DevOps and Jira jump to their panel below (connect, health, linked projects).
+              return a.tool ? (
+                <a key={a.name} href={`#tool-${a.tool}`} className={`app-tile${data?.connectors.some((c) => c.kind === a.tool) ? " on" : ""}`}>{inner}</a>
+              ) : (
+                <div key={a.name} className={`app-tile${a.live ? " on" : ""}`} style={{ cursor: "default" }}>{inner}</div>
+              );
+            })}
           </div>
         </section>
       ))}
+      <ToolPanels data={data} load={load} />
     </>
   );
 }

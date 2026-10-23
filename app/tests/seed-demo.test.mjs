@@ -27,7 +27,7 @@ after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 function seed() {
   const r = spawnSync(process.execPath, [
     "--no-warnings", "--conditions=react-server", "--import", "./tests/register-ts.mjs", "scripts/seed-demo.mjs",
-    "--data-dir", dataDir, "--port", String(PORT), "--secrets", secrets,
+    "--data-dir", dataDir, "--port", String(PORT), "--tools-port", String(PORT + 1), "--secrets", secrets,
   ], { cwd: APP, encoding: "utf8", timeout: 8 * 60_000, env: { ...process.env, DATABASE_URL: "" } });
   assert.equal(r.status, 0, `seed failed:\n${(r.stdout ?? "").slice(-3000)}\n${(r.stderr ?? "").slice(-3000)}`);
   return r.stdout;
@@ -65,6 +65,11 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE owner IS NULL AND status != 'Done'") >= 5, "unowned action items");
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE status != 'Done' AND due_on < '2026-10-22'") >= 5, "overdue action items");
   assert.ok(count("SELECT COUNT(*) FROM answer_feedback WHERE vote < 0") >= 1 && count("SELECT COUNT(*) FROM answer_feedback WHERE vote > 0") >= 10, "👍 and 👎");
+  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 2, "Azure DevOps and Jira connected");
+  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 3, "three linked projects, synced");
+  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_error LIKE '%refused access%'"), 1, "one lost access since (for the broken-connector watcher)");
+  assert.equal(count("SELECT COUNT(*) FROM connector_health WHERE status = 'broken' AND connector = 'azure-devops' AND workspace_id != ''"), 1);
+  assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'workitem'") >= 9, "their work items are searchable");
   assert.ok(count("SELECT COUNT(*) FROM support_tickets") >= 5 && count("SELECT COUNT(*) FROM support_messages WHERE author_kind = 'staff'") >= 3, "tickets with replies");
   assert.ok(count("SELECT COUNT(*) FROM insights") >= 10, "knowledge maps");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'notes'") >= 50, "the rewritten notes are searchable again");

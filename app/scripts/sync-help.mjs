@@ -21,7 +21,7 @@ const GUIDES = path.resolve(APP, "../docs/guide");
 const OUT = path.join(APP, "src/lib/help-content.ts");
 
 /** The guides published at /docs/<name>, in the order the help center lists them. */
-const PUBLIC_GUIDES = ["concepts", "admin-guide", "teams-guide", "roles-and-permissions", "install-app"];
+const PUBLIC_GUIDES = ["concepts", "admin-guide", "teams-guide", "roles-and-permissions", "connect-devops-jira", "install-app"];
 
 /** A guide's Markdown as the help center shows it: developer-only parts and HTML comments removed. */
 const publicText = (md) =>

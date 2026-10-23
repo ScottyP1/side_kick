@@ -59,6 +59,12 @@ encrypted with it can't be read with another key (everyone would have to remove 
 authenticator app; passkeys and backup codes are unaffected). Later, Key Vault could do the wrapping itself;
 the stored format already has a key id for that.
 
+**Connector apps** (optional, Azure DevOps and Jira: `app/src/lib/connectors.ts`): `ADO_CLIENT_ID` + `ADO_CLIENT_SECRET`
+(`secretref:ado-client-secret`) and `JIRA_CLIENT_ID` + `JIRA_CLIENT_SECRET` (`secretref:jira-client-secret`), Key Vault
+references like the others. Not set = that tool's tile says "Not set up yet". How to create them: RUNBOOKS → Connector
+apps. Customers' tool sign-ins are stored in the database, sealed with `SIDEKICK_ENCRYPTION_KEY` (one more reason
+never to regenerate it: they'd all have to reconnect).
+
 The image is pulled with the app's managed identity (AcrPull role); the registry's admin user is off.
 
 ## Deploy, freeze, unfreeze

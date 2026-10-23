@@ -28,6 +28,7 @@ import { runDueReminders } from "./reminders";
 import { leaveStaleChats } from "./teams/install";
 import { runDueRolloffs } from "./rolloff";
 import { runWatchers } from "./watchers";
+import { dueConnectorLinks, syncDueLink } from "./connectors";
 import { HttpError } from "./auth";
 
 const MIN = 60_000;
@@ -37,6 +38,25 @@ export const WATCH_EVERY_MS = 15 * MIN;
 defineJob("reminders.daily", { label: "Post due reminders", everyMs: 5 * MIN, maxAttempts: 3, run: async () => ({ posted: await runDueReminders() }) });
 defineJob("teams.leave", { label: "Leave unassigned Teams chats", everyMs: 5 * MIN, maxAttempts: 3, run: async () => ({ leftChats: await leaveStaleChats() }) });
 defineJob("rolloffs.run", { label: "Delete ended groups and organizations", everyMs: 5 * MIN, maxAttempts: 3, leaseMs: 30 * MIN, run: async () => ({ deleted: await runDueRolloffs() }) });
+// Connectors (lib/connectors.ts): every 5 minutes, one sync job per linked project that is due (each project syncs
+// every 15 minutes). A tool problem is recorded in the project's health, not retried here.
+defineJob("connectors.schedule", {
+  label: "Schedule Azure DevOps / Jira syncs",
+  everyMs: 5 * MIN,
+  maxAttempts: 3,
+  run: async () => {
+    let queued = 0;
+    for (const l of await dueConnectorLinks()) {
+      if ((await enqueue("connector.sync", { orgId: l.org_id, workspaceId: l.workspace_id, payload: { link: l.id }, key: `connector:${l.id}:${Math.floor(Date.now() / (5 * MIN))}` })).created) queued++;
+    }
+    return { syncQueued: queued };
+  },
+});
+defineJob("connector.sync", {
+  label: "Sync a linked Azure DevOps / Jira project",
+  maxAttempts: 1,
+  run: async ({ job, payload }) => (job.org_id && typeof payload.link === "string" ? syncDueLink(job.org_id, payload.link) : undefined),
+});
 defineJob("jobs.prune", {
   label: "Clear out old jobs",
   everyMs: 6 * 60 * MIN,

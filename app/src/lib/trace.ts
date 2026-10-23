@@ -23,8 +23,8 @@ import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 
-/** Kinds of steps. "rank" = re-ranking search results for an answer; "firm" = firm library uploads; "feedback" = 👍/👎; "job" = a background job (lib/jobs.ts); "watch" = a watcher check (lib/watchers.ts). */
-export type SpanKind = "request" | "search" | "rank" | "ai" | "embed" | "teams" | "index" | "file" | "guard" | "remind" | "billing" | "microsoft" | "auth" | "rolloff" | "firm" | "feedback" | "job" | "watch";
+/** Kinds of steps. "rank" = re-ranking search results for an answer; "firm" = firm library uploads; "feedback" = 👍/👎; "job" = a background job (lib/jobs.ts); "watch" = a watcher check (lib/watchers.ts); "connector" = Azure DevOps / Jira sign-ins and syncs. */
+export type SpanKind = "request" | "search" | "rank" | "ai" | "embed" | "teams" | "index" | "file" | "guard" | "remind" | "billing" | "microsoft" | "auth" | "rolloff" | "firm" | "feedback" | "job" | "watch" | "connector";
 export type Channel = "portal" | "teams" | "system";
 type Attrs = Record<string, string | number | boolean | null>;
 

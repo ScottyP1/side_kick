@@ -261,6 +261,7 @@ async function groupCounts(orgId: string, workspaceId: string): Promise<Record<s
     "Questions and answers": await c("questions"),
     "Saved Teams chat messages": await c("chat_messages"),
     "Custom guardrail rules": await c("guard_custom_rules"),
+    "Work items read from Azure DevOps or Jira": await c("connector_items"),
     "Group members": await n("SELECT COUNT(*) AS n FROM workspace_members WHERE workspace_id = ?", workspaceId),
   };
 }
@@ -328,7 +329,8 @@ export async function deleteGroupWithCertificate(orgId: string, workspaceId: str
  */
 export const ORG_TABLES = [
   "support_attachments", "support_messages", "support_article_uses", "support_tickets", "conversation_turns", "conversations",
-  "answer_feedback", "firm_docs", "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
+  "answer_feedback", "firm_docs", "connector_items", "connector_links", "connectors", "connector_states",
+  "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
   "guard_rule_versions", "guard_custom_rules", "guard_workspace_rules", "guard_events", "guard_rules",
   "chat_messages", "teams_chat_settings", "reminder_runs", "action_items", "items", "meetings", "documents",
   "questions", "passages", "usage_events", "audit_log", "settings", "org_flags", "traces", "org_setup",
@@ -363,6 +365,7 @@ export async function deleteOrganization(orgId: string, actor: string, rolloff?:
     counts["AI usage records"] = await n("SELECT COUNT(*) AS n FROM usage_events WHERE org_id = ?", orgId);
     counts["Activity traces"] = await n("SELECT COUNT(*) AS n FROM traces WHERE org_id = ?", orgId);
     counts["Firm library documents"] = await n("SELECT COUNT(*) AS n FROM firm_docs WHERE org_id = ?", orgId);
+    counts["Connected tools (Azure DevOps, Jira)"] = await n("SELECT COUNT(*) AS n FROM connectors WHERE org_id = ?", orgId);
     counts["Firm library search entries"] = await n("SELECT COUNT(*) AS n FROM passages WHERE org_id = ? AND workspace_id = ?", orgId, FIRM_SCOPE);
     counts["Settings and guardrail switches"] = await n("SELECT COUNT(*) AS n FROM settings WHERE org_id = ?", orgId) + await n("SELECT COUNT(*) AS n FROM guard_rules WHERE org_id = ?", orgId);
 

@@ -7,7 +7,7 @@
  * - overview (&days=1|7|30): request volume, failures, response times (p50/p95), AI calls and cost,
  *   portal vs Teams, the busiest operations, requests per day, and guardrail counts per rule
  *   (`guardrails`, from guard_events: counts only).
- * - traces (&channel=portal|teams&status=error|refused|ok&q=text&limit=…): the most recent traces.
+ * - traces (&channel=portal|teams|system&status=error|refused|ok&q=text&limit=…): the most recent traces.
  * - trace (&id=…): one trace with all its steps (spans), for the waterfall.
  * - messages (&limit=…): questions asked in the portal and in Teams, and whether they were answered.
  * - live: the last few minutes, for the home page orb: active people, each connection's health
@@ -91,6 +91,7 @@ export const GET = handle(async (req: Request) => {
         p95: pct(durations, 95),
         teams: rows.filter((r) => r.channel === "teams").length,
         portal: rows.filter((r) => r.channel === "portal").length,
+        background: rows.filter((r) => r.channel === "system").length,
         people: new Set(rows.map((r) => r.actor).filter(Boolean)).size,
         aiCalls: ai?.calls ?? 0,
         aiCost: ai?.cost ?? 0,
@@ -110,7 +111,7 @@ export const GET = handle(async (req: Request) => {
     const where = ["t.org_id = ?"];
     const params: (string | number)[] = [org];
     const channel = q.get("channel");
-    if (channel === "portal" || channel === "teams") {
+    if (channel === "portal" || channel === "teams" || channel === "system") {
       where.push("t.channel = ?");
       params.push(channel);
     }

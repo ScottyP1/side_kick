@@ -433,3 +433,40 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS scope_key TEXT;
 CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key);
+-- Background jobs (lib/jobs.ts), watcher findings (lib/watchers.ts), the stale-document AI checks, connector
+-- health (lib/connector-health.ts) and failed Teams posts: see the SQLite schema in lib/db.ts for the columns.
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, org_id TEXT, workspace_id TEXT, payload TEXT NOT NULL DEFAULT '{}',
+  idempotency_key TEXT, status TEXT NOT NULL, run_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 5, locked_by TEXT, locked_until TEXT, last_error TEXT, result TEXT,
+  created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT, updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON jobs(idempotency_key);
+CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status, run_at);
+CREATE INDEX IF NOT EXISTS jobs_org ON jobs(org_id, status);
+CREATE TABLE IF NOT EXISTS findings (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, kind TEXT NOT NULL,
+  dedupe_key TEXT NOT NULL, audience TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL,
+  title TEXT NOT NULL, detail TEXT, next_step TEXT NOT NULL, action_href TEXT, action_label TEXT, data_json TEXT,
+  first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, resolved_at TEXT, snoozed_until TEXT, snoozed_by TEXT,
+  updated_at TEXT NOT NULL, UNIQUE (org_id, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS findings_scope ON findings(org_id, status, workspace_id);
+CREATE TABLE IF NOT EXISTS watch_checks (
+  org_id TEXT NOT NULL, workspace_id TEXT NOT NULL, pair_key TEXT NOT NULL, verdict TEXT NOT NULL, reason TEXT,
+  checked_at TEXT NOT NULL, PRIMARY KEY (org_id, pair_key)
+);
+CREATE TABLE IF NOT EXISTS connector_health (
+  org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT NOT NULL DEFAULT '', connector TEXT NOT NULL,
+  label TEXT NOT NULL, status TEXT NOT NULL, message TEXT, fix_href TEXT, checked_at TEXT NOT NULL, broken_since TEXT,
+  PRIMARY KEY (org_id, workspace_id, connector)
+);
+CREATE TABLE IF NOT EXISTS teams_post_failures (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT, conversation_id TEXT NOT NULL, what TEXT NOT NULL,
+  error TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS teams_post_failures_conv ON teams_post_failures(conversation_id, created_at);
+-- Watchers: Sidekick removed from a chat in Teams (when, by whom), and the last post that reached the chat.
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS removed_at TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS removed_by TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS last_post_ok_at TEXT;

@@ -53,6 +53,18 @@ Every answer has **👍 Helpful** and **👎 Not helpful** (portal and Teams). O
 ## "I couldn't find that" and knowledge gaps
 If the workspace doesn't contain the answer, Sidekick says so instead of guessing. The question is saved as a **knowledge gap** so someone can fill it in, for example by uploading the missing document. Gaps also come from questions nobody answered in a meeting, conflicting facts, out-of-date documents, and decisions that only exist in a transcript.
 
+## Needs attention (watchers)
+Sidekick keeps an eye on each group in the background, every 15 minutes, and lists what needs a person under **Needs attention** on Home and on the group's Overview tab. Each item says what's wrong and the **next step**, with a button to the page that fixes it. It watches for:
+- questions Sidekick couldn't answer (in the last two weeks),
+- Teams chats where Sidekick's posts (answers, notes, reminders) stopped getting through,
+- Teams chats waiting to be assigned to a group, and chats someone removed Sidekick from in Teams,
+- action items past their due date, and action items nobody owns two days after the meeting,
+- documents a newer meeting decision seems to change ("may be out of date"),
+- groups without a Team Lead (plans with Team Leads) or without a Teams chat for meeting notes,
+- connectors (such as Jira or Azure DevOps) that stopped working.
+
+Each problem is one item, however long it lasts, and it **clears itself** once it's fixed. You only see items for your own groups: everyone in a group sees its action items, unanswered questions and out-of-date documents; the group's Team Lead and the admins also see its Teams problems; organization-wide items (chats waiting, groups without a lead, connectors) are for Org Owners and Org Admins. Admins and the group's Team Lead can **Snooze** an item for a week; it comes back if it's still there. The checks themselves use no AI; only the "may be out of date" check asks the AI, and only about a document and decision that already look related.
+
 ## Guardrails
 Rules Sidekick follows in every answer, everywhere (portal, Teams, the home assistant). Some are **locked** and always on: no hate, racism, bias, harassment, sexual content or help with harm; it can't be talked out of its rules ("ignore your instructions", "pretend you have no rules"); it never crosses into another workspace or organization; and it only states project facts it can cite, otherwise it says **"I don't know"**. The Org Owner can add stricter **switches** for the whole organization (swearing, small talk, judging people, HR/legal/medical questions, contact details, competitors). Each question is checked before it's answered, and each answer is checked again before you see it: an answer without a real source becomes "I don't know", swear words are masked, and contact details are hidden when that switch is on.
 

@@ -3,7 +3,7 @@
  *
  * Concepts
  * - **Feature**: each kind of AI work has a name (`ask`, `extract`, `insights`, `assist`, `guard`, `remind`, `support`,
- *   `helpbot`, `followup`) so it can use its own
+ *   `helpbot`, `followup`, `watch`) so it can use its own
  *   model, be metered separately on the Usage page, and be paused with a kill switch in the Owner Console.
  * - **Structured output**: instead of free text, Claude must reply with JSON matching a Zod schema, so the
  *   app can save answers, decisions and action items without guessing at their shape.
@@ -72,6 +72,9 @@ export const MODELS = {
   // Rewrites a follow-up ("and wave 3?") into a full question before searching (lib/conversations.ts).
   // A short rewording job, so the cheapest model by default.
   followup: process.env.SIDEKICK_MODEL_FOLLOWUP || "claude-haiku-5-5",
+  // Watchers (lib/watchers.ts): only called when a cheap check already found a likely problem, e.g. "does this
+  // newer decision change what this document says?". A short judgement, so a mid-size model by default.
+  watch: process.env.SIDEKICK_MODEL_WATCH || process.env.SIDEKICK_MODEL || "claude-sonnet-5-5",
 };
 export type Feature = keyof typeof MODELS;
 
@@ -111,6 +114,13 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
   if (feature === "guard") return fakeGuard(content);
   if (feature === "followup") return fakeFollowUp(content);
   if (feature === "helpbot" || feature === "support") return fakeSupport(feature, content);
+  if (feature === "watch") {
+    // Stale-document check: the decision "changes" the document when it says so in so many words
+    // (instead, moved, changed, no longer, replaced, postponed, switched to).
+    const decision = content.match(/<decision[^>]*>([\s\S]*?)<\/decision>/)?.[1] ?? "";
+    const contradicts = /\b(instead|moved|changed|no longer|replaced?|replaces|postponed|switch(?:ed)? to)\b/i.test(decision);
+    return { contradicts, reason: contradicts ? "The decision changes what the document says." : "They agree." };
+  }
   if (feature === "remind") {
     // One point per item it was given, plus one pointing at an item that doesn't exist ("R99"), so tests
     // can check that points without a real source are dropped. "__CONTACT__" in an item adds an email.
@@ -418,6 +428,7 @@ export type Ctx = { orgId: string | null; workspaceId: string | null; role?: str
 const SPAN_NAMES: Record<Feature, string> = {
   ask: "AI: write the answer", extract: "AI: write meeting notes", insights: "AI: build the knowledge map", assist: "AI: in-app assistant", guard: "AI: guardrail check",
   remind: "AI: word the reminders", support: "AI: support assistant", helpbot: "AI: public help bot", followup: "AI: rewrite the follow-up",
+  watch: "AI: check a document against a newer decision",
 };
 export async function structured<S extends z.ZodType>(
   feature: Feature,
@@ -528,8 +539,8 @@ export async function queueStructured(feature: Feature, ctx: Ctx, opts: { system
 
 /**
  * Sends every queued item as one Message Batch, then collects the batches that have ended and hands each
- * result to its handler. Called by the reminder timer every tick (a real batch usually ends within minutes;
- * results are picked up on a later tick). Test mode answers a batch at once with the fake outputs.
+ * result to its handler. Called by the `reminders.daily` job every 5 minutes (a real batch usually ends within minutes;
+ * results are picked up on a later run). Test mode answers a batch at once with the fake outputs.
  * Batched calls are metered at half price. Returns how many results were handled.
  */
 export async function runBatches(): Promise<number> {

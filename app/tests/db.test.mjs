@@ -629,3 +629,163 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
   assert.ok(pnav.isActive("/home", "/home"));
   assert.ok(!pnav.isActive("/homework", "/home"));
 });
+
+/* ---------- Job queue (src/lib/jobs.ts) ---------- */
+
+const jobs = await import("../src/lib/jobs.ts");
+const { spawn } = await import("node:child_process");
+
+/** Runs tests/queue-worker.mjs as its own process (same engine settings as this one) and returns its report. */
+function workerProcess(id) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(process.execPath, ["--no-warnings", "--conditions=react-server", "--import", "./tests/register-ts.mjs", "tests/queue-worker.mjs", id], { env: process.env, stdio: ["ignore", "pipe", "inherit"] });
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.on("exit", (code) => (code === 0 ? resolve(JSON.parse(out.trim().split("\n").pop())) : reject(new Error(`worker ${id} exited ${code}`))));
+  });
+}
+
+test(`[${engine}] job queue: four worker processes at once run each of 60 jobs exactly once`, async () => {
+  await db.run("CREATE TABLE IF NOT EXISTS test_job_runs (job_id TEXT NOT NULL, worker TEXT NOT NULL)");
+  jobs.defineJob("test.record", { label: "Test: record a run", run: async () => ({ recorded: 1 }) });
+  const ids = [];
+  for (let i = 0; i < 60; i++) ids.push((await jobs.enqueue("test.record", { payload: { i } })).id);
+  const reports = await Promise.all(["w1", "w2", "w3", "w4"].map(workerProcess));
+  assert.equal(reports.reduce((s, r) => s + r.ran, 0), 60, JSON.stringify(reports));
+  const runs = await db.all(`SELECT job_id, COUNT(*) AS n FROM test_job_runs WHERE job_id IN (${ids.map(() => "?").join(", ")}) GROUP BY job_id`, ...ids);
+  assert.equal(runs.length, 60, "every job ran");
+  assert.ok(runs.every((r) => r.n === 1), "no job ran twice");
+  assert.equal((await db.get(`SELECT COUNT(*) AS n FROM jobs WHERE status = 'done' AND id IN (${ids.map(() => "?").join(", ")})`, ...ids)).n, 60);
+  assert.ok(reports.filter((r) => r.ran > 0).length >= 2, "the work was shared between processes");
+});
+
+test(`[${engine}] job queue: workers in one process share the work too, never twice`, async () => {
+  const seen = [];
+  jobs.defineJob("test.inproc", { label: "Test: in process", run: async ({ job }) => { seen.push(job.id); await new Promise((r) => setTimeout(r, 2)); return { n: 1 }; } });
+  for (let i = 0; i < 30; i++) await jobs.enqueue("test.inproc");
+  const reports = await Promise.all(["a", "b", "c"].map((w) => jobs.runWorker({ workerId: w, kinds: ["test.inproc"] })));
+  assert.equal(seen.length, 30);
+  assert.equal(new Set(seen).size, 30);
+  assert.equal(reports.reduce((s, r) => s + r.counts.n, 0), 30);
+});
+
+test(`[${engine}] job queue: the same idempotency key keeps one job`, async () => {
+  jobs.defineJob("test.once", { label: "Test: once", run: async () => {} });
+  const key = `test-once-${db.newId()}`;
+  const a = await jobs.enqueue("test.once", { key });
+  const b = await jobs.enqueue("test.once", { key });
+  assert.equal(a.created, true);
+  assert.equal(b.created, false);
+  assert.equal(b.id, a.id);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM jobs WHERE idempotency_key = ?", key)).n, 1);
+  await assert.rejects(jobs.enqueue("test.nope"), /Unknown job kind/);
+});
+
+test(`[${engine}] job queue: recurring jobs are enqueued once per slot, however many copies ask`, async () => {
+  const kind = `test.every.${db.newId()}`;
+  jobs.defineJob(kind, { label: "Test: every hour", everyMs: 3600_000, run: async () => {} });
+  const at = new Date("2026-10-23T10:15:00Z");
+  await Promise.all([jobs.enqueueRecurring(at), jobs.enqueueRecurring(at), jobs.enqueueRecurring(new Date("2026-10-23T10:59:00Z"))]);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM jobs WHERE kind = ?", kind)).n, 1);
+  await jobs.enqueueRecurring(new Date("2026-10-23T11:01:00Z"));
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM jobs WHERE kind = ?", kind)).n, 2, "the next slot gets its own");
+  await jobs.enqueueRecurring(at, { force: true });
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM jobs WHERE kind = ?", kind)).n, 3, "a sweep adds one now");
+  await db.run("UPDATE jobs SET status = 'canceled' WHERE kind = ?", kind);
+});
+
+test(`[${engine}] job queue: a failure is retried with growing waits, then dead-lettered; retry brings it back`, async () => {
+  let calls = 0;
+  jobs.defineJob("test.fail", { label: "Test: always fails", maxAttempts: 3, run: async () => { calls++; throw new Error("Graph said 'no' about \"secret doc\""); } });
+  const { id } = await jobs.enqueue("test.fail");
+  const t0 = new Date();
+  const attempt = async (at) => {
+    const job = await jobs.claimNext("retry-worker", at, { kinds: ["test.fail"] });
+    assert.ok(job, `claimable at ${at.toISOString()}`);
+    await jobs.runClaimed(job, "retry-worker");
+    return db.get("SELECT * FROM jobs WHERE id = ?", id);
+  };
+  let row = await attempt(t0);
+  assert.equal(row.status, "queued");
+  assert.equal(row.attempts, 1);
+  assert.doesNotMatch(row.last_error, /secret doc/, "quoted text isn't stored");
+  assert.match(row.last_error, /Graph said/);
+  const wait1 = Date.parse(row.run_at) - Date.now();
+  assert.ok(wait1 > 20_000 && wait1 < 40_000, `first wait ~30 s, was ${wait1}`);
+  assert.equal(await jobs.claimNext("retry-worker", new Date(), { kinds: ["test.fail"] }), null, "not before its time");
+  row = await attempt(new Date(Date.parse(row.run_at) + 1));
+  const wait2 = Date.parse(row.run_at) - Date.now();
+  assert.ok(wait2 > wait1, "the wait grows");
+  row = await attempt(new Date(Date.parse(row.run_at) + 1));
+  assert.equal(row.status, "dead");
+  assert.equal(calls, 3);
+  assert.equal(await jobs.claimNext("retry-worker", new Date(Date.now() + 86400_000), { kinds: ["test.fail"] }), null, "dead jobs aren't claimed");
+  assert.ok((await jobs.queueHealth()).deadJobs.some((d) => d.id === id && d.label === "Test: always fails"));
+  assert.equal(await jobs.retryJob(id), true);
+  assert.equal((await db.get("SELECT status, attempts FROM jobs WHERE id = ?", id)).status, "queued");
+  assert.equal(await jobs.cancelJob(id), true);
+  assert.equal(await jobs.retryJob("nope"), false);
+  assert.ok(jobs.backoffMs(1, 0) === 30_000 && jobs.backoffMs(2, 0) === 60_000 && jobs.backoffMs(20, 0) === 3600_000);
+});
+
+test(`[${engine}] job queue: a lapsed lease lets another worker take over; the first can't finish it`, async () => {
+  jobs.defineJob("test.lease", { label: "Test: lease", leaseMs: 1000, maxAttempts: 2, run: async () => ({ ok: 1 }) });
+  const { id } = await jobs.enqueue("test.lease");
+  const t0 = new Date();
+  const first = await jobs.claimNext("slow", t0, { kinds: ["test.lease"] });
+  assert.equal(first.id, id);
+  assert.equal(await jobs.claimNext("fast", new Date(t0.getTime() + 500), { kinds: ["test.lease"] }), null, "held while the lease lasts");
+  const second = await jobs.claimNext("fast", new Date(t0.getTime() + 1500), { kinds: ["test.lease"] });
+  assert.equal(second?.id, id, "taken over after the lease");
+  assert.equal(second.attempts, 2);
+  assert.equal(await jobs.completeJob(first, "slow", { ok: 1 }), false, "the old owner can't finish it");
+  assert.equal(await jobs.completeJob(second, "fast", { ok: 1 }), true);
+  assert.equal((await db.get("SELECT status, locked_by FROM jobs WHERE id = ?", id)).status, "done");
+  // A job that keeps losing its worker is dead once its attempts are used up.
+  const { id: id2 } = await jobs.enqueue("test.lease");
+  const t1 = new Date(Date.now() + 10);
+  assert.equal((await jobs.claimNext("x", t1, { kinds: ["test.lease"] }))?.id, id2);
+  assert.equal((await jobs.claimNext("y", new Date(t1.getTime() + 1500), { kinds: ["test.lease"] }))?.id, id2);
+  assert.equal(await jobs.claimNext("z", new Date(t1.getTime() + 3000), { kinds: ["test.lease"] }), null);
+  const dead = await db.get("SELECT status, last_error FROM jobs WHERE id = ?", id2);
+  assert.equal(dead.status, "dead");
+  assert.match(dead.last_error, /worker went away/);
+});
+
+test(`[${engine}] job queue: old finished jobs are pruned; health counts per company without content`, async () => {
+  const org = db.newId();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Queue Health Co", db.now());
+  jobs.defineJob("test.org", { label: "Test: org job", run: async () => ({}) });
+  await jobs.enqueue("test.org", { orgId: org, payload: { note: "private" } });
+  const h = await jobs.queueHealth();
+  const co = h.companies.find((c) => c.org_id === org);
+  assert.equal(co.name, "Queue Health Co");
+  assert.equal(co.backlog, 1);
+  assert.doesNotMatch(JSON.stringify(h), /private/, "payloads never reach the health view");
+  await jobs.runWorker({ kinds: ["test.org"] });
+  await db.run("UPDATE jobs SET updated_at = ? WHERE org_id = ?", new Date(Date.now() - 8 * 86400_000).toISOString(), org);
+  assert.ok((await jobs.pruneJobs()) >= 1);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM jobs WHERE org_id = ?", org)).n, 0);
+});
+
+test(`[${engine}] connector health: broken keeps its first date until it works again; removing forgets it`, async () => {
+  const ch = await import("../src/lib/connector-health.ts");
+  const org = db.newId();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Connector Co", db.now());
+  await ch.reportConnectorHealth({ orgId: org, connector: "jira", label: "Jira", ok: false, message: "The access token expired." });
+  const first = (await ch.brokenConnectors(org))[0];
+  assert.equal(first.status, "broken");
+  assert.equal(first.workspace_id, "", "organization-wide");
+  await new Promise((r) => setTimeout(r, 5));
+  await ch.reportConnectorHealth({ orgId: org, connector: "jira", label: "Jira", ok: false, message: "Still expired." });
+  const again = (await ch.brokenConnectors(org))[0];
+  assert.equal(again.broken_since, first.broken_since, "since the first failure");
+  assert.equal(again.message, "Still expired.");
+  await ch.reportConnectorHealth({ orgId: org, connector: "jira", label: "Jira", ok: true });
+  assert.deepEqual(await ch.brokenConnectors(org), []);
+  assert.equal((await db.get("SELECT broken_since FROM connector_health WHERE org_id = ?", org)).broken_since, null);
+  await ch.reportConnectorHealth({ orgId: org, workspaceId: "ws-1", connector: "azure-devops", label: "Azure DevOps Boards", ok: false });
+  assert.equal((await ch.brokenConnectors(org))[0].message, "It stopped working.");
+  await ch.removeConnectorHealth(org, "azure-devops", "ws-1");
+  assert.deepEqual(await ch.brokenConnectors(org), []);
+});

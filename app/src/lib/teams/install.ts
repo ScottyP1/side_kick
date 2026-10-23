@@ -9,7 +9,7 @@
  * - **Assigned only in the portal.** An unassigned chat waits ("Waiting to be assigned") until a Team Lead or
  *   admin assigns it to a group (workspace). Until then Sidekick reads, saves and answers nothing there.
  * - **Leaving after 7 days.** A chat still unassigned 7 days after Sidekick was added (or unassigned) is left
- *   automatically (`leaveStaleChats`, run by the reminder timer).
+ *   automatically (`leaveStaleChats`, the job queue's `teams.leave` job).
  * - **Removing Sidekick from a chat** in the portal does the same on request.
  * - **How Sidekick leaves**: Microsoft Graph, `DELETE /chats/{id}/installedApps/{installation}` (or
  *   `/teams/{group id}/installedApps/...` for a channel's team), with the application permissions
@@ -124,7 +124,7 @@ export async function leaveChat(conv: TeamsConversation, reason: LeaveReason, op
 }
 
 /**
- * Run by the reminder timer: leaves chats in tied tenants that have waited more than 7 days without being
+ * Run by the job queue (`teams.leave`, every 5 minutes): leaves chats in tied tenants that have waited more than 7 days without being
  * assigned, and retries removals Graph refused earlier (at most once an hour per chat). Returns how many chats
  * Sidekick left. Each chat is handled on its own, so one failure doesn't stop the others.
  */

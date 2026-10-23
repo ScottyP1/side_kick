@@ -37,7 +37,13 @@ let tsconfigBefore;
 const sent = [];
 // Teams' team API (for channel names): one team whose first channel has no name, like real Teams.
 const TEAM = { id: "19:team-test@thread.tacv2", name: "Contoso Migration" };
+// Conversations whose posts the fake Teams refuses (500), for the failed-posts watcher test.
+const failPosts = new Set();
 const connector = http.createServer((req, res) => {
+  if ([...failPosts].some((c) => decodeURIComponent(req.url).includes(c))) {
+    res.writeHead(500, { "content-type": "application/json" });
+    return void res.end(JSON.stringify({ error: { code: "ServiceError", message: "Teams is unavailable" } }));
+  }
   if (req.method === "GET" && decodeURIComponent(req.url).startsWith(`/v3/teams/${TEAM.id}`)) {
     res.writeHead(200, { "content-type": "application/json" });
     const conversations = [{ id: TEAM.id }, { id: "19:cutover@thread.tacv2", name: "Cutover" }];
@@ -220,7 +226,7 @@ before(async () => {
     // Multi-tenant mode has its own suite: tests/teams-multitenant.test.mjs.
     TENANT_ID: "tenant-1",
     SIDEKICK_PUBLIC_URL: "",
-    // The reminder timer is off; tests call its route themselves with this secret.
+    // The job heartbeat is off; tests call its route themselves with this secret (with `sweep` to run every job now).
     SIDEKICK_SCHEDULER: "off",
     SIDEKICK_TICK_SECRET: TICK_SECRET,
     // Self-service sign-up stays at its default (off) until a test opens it from the Owner Console.
@@ -1562,6 +1568,11 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await other("POST", "/api/ask", { ws: theirWs, question: "and wave 3?", conversation: inA.body.conversation })).body.followUp, null);
   assert.ok(!/ZEBRA|vault/i.test(JSON.stringify((await other("GET", "/api/feedback")).body)));
   assert.equal((await admin("DELETE", `/api/firm/${firmId}`)).status, 200);
+  // Watcher findings (lib/watchers.ts): never another organization's or another group's.
+  assert.equal((await other("GET", `/api/findings?ws=${s.wsB}`)).status, 404);
+  assert.equal((await member("GET", `/api/findings?ws=${s.wsB}`)).status, 404, "a member of A can't read B's findings");
+  assert.ok(!leaks(await other("GET", "/api/findings")));
+  assert.ok(!(await member("GET", "/api/findings")).body.findings.some((f) => f.workspaceId === s.wsB));
   // The website's help bot never sees any organization's material.
   assert.ok(!leaks(await client()("POST", "/api/help-bot", { message: "vault code ZEBRA-7731 Fabrikam merger" })));
 });
@@ -2620,7 +2631,7 @@ test(`[${ENGINE}] reminders: chats with client guests only get shareable items; 
 test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; notes only go to chats that take them`, async () => {
   assert.equal((await fetch(`${BASE}/api/reminders/tick`, { method: "POST" })).status, 404);
   assert.equal((await fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": "wrong-secret-wrong-secret-wrong" } })).status, 404);
-  const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET } }).then((x) => x.json());
+  const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET, "content-type": "application/json" }, body: JSON.stringify({ sweep: true }) }).then((x) => x.json());
   assert.equal((await tick()).posted, 1);
   assert.equal((await tick()).posted, 0, "never twice in the same day");
 
@@ -3336,7 +3347,7 @@ async function unzip(buf) {
   }
   return out;
 }
-const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET } }).then((r) => r.json());
+const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET, "content-type": "application/json" }, body: JSON.stringify({ sweep: true }) }).then((r) => r.json());
 /** Every table with an org_id column, read from the real schema (so a new table can't be forgotten). */
 async function orgTables() {
   const list = ENGINE === "postgres"
@@ -3661,6 +3672,158 @@ test(`[${ENGINE}] busy AI: overloaded calls are retried with backoff; if it stay
   assert.match(busy.body.error, /Sidekick's AI is very busy right now\. Try again in a minute/);
   assert.ok(busy.body.meeting_id, "the meeting is kept with Try again, as for any failure");
   assert.doesNotMatch(busy.body.error, /529|overloaded|anthropic/i, "no raw API error");
+});
+
+/* ---------- Job queue + watchers (lib/jobs.ts, lib/job-kinds.ts, lib/watchers.ts) ---------- */
+
+const jobTick = (body = { sweep: true }) =>
+  fetch(`${BASE}/api/jobs/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET, "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+const wa = client();
+const lena = client();
+const max = client();
+const nora = client();
+const w = {};
+const kindsOf = (r) => r.body.findings.map((f) => f.kind).sort();
+
+test(`[${ENGINE}] job queue: the heartbeat needs its secret and runs every recurring job once per sweep`, async () => {
+  assert.equal((await fetch(`${BASE}/api/jobs/tick`, { method: "POST" })).status, 404);
+  assert.equal((await fetch(`${BASE}/api/jobs/tick`, { method: "POST", headers: { "x-sidekick-tick": "wrong-secret-wrong-secret-wrong" } })).status, 404);
+  const quiet = await jobTick({});
+  assert.equal(typeof quiet.ran, "number");
+  const out = await jobTick();
+  assert.ok(out.ran >= 5, JSON.stringify(out));
+  assert.equal(out.failed, 0, JSON.stringify(out));
+  const health = (await owner("GET", "/api/owner/queue")).body;
+  for (const kind of ["reminders.daily", "teams.leave", "rolloffs.run", "watch.all", "watch.org", "jobs.prune"]) assert.ok(health.kinds.some((k) => k.kind === kind && k.status === "done"), kind);
+  assert.equal(health.backlog, 0);
+  assert.equal(health.dead, 0);
+  assert.equal((await admin("GET", "/api/owner/queue")).status, 401, "client users can't see the queue");
+  assert.equal((await owner("POST", "/api/owner/queue", { action: "sweep" })).body.queued >= 5, true);
+  assert.equal((await owner("POST", "/api/owner/queue", { action: "retry", id: "nope" })).status, 409);
+  await jobTick({});
+});
+
+test(`[${ENGINE}] watchers: each check opens a finding with a next step, for the right people only`, async () => {
+  const r = await owner("POST", "/api/owner/tenants", { org: "Watch Co", name: "Wanda Owner", email: "wanda@watch.test" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  await firstSignIn(wa, "wanda@watch.test", r.body.tempPassword);
+  w.org = await dbValue("SELECT id FROM orgs WHERE name = 'Watch Co'");
+  w.g1 = (await wa("POST", "/api/workspaces", { name: "Wave 2 cutover" })).body.id;
+  w.g2 = (await wa("POST", "/api/workspaces", { name: "Quiet group" })).body.id;
+  for (const [call, name, email, role, ws] of [[lena, "Lena Lead", "lena@watch.test", "Team Lead", w.g1], [max, "Max Member", "max@watch.test", "Member", w.g1], [nora, "Nora Member", "nora@watch.test", "Member", w.g2]]) {
+    const u = await wa("POST", "/api/users", { name, email, role, workspaces: [ws] });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    assert.equal((await firstSignIn(call, email, u.body.tempPassword)).status, 200);
+  }
+  // A document, then a later decision that changes it (stale document).
+  assert.equal((await uploadDoc(wa, w.g1, "Cutover runbook.md", "The cutover happens on Saturday night. The database migration runs from the old data center. Rollback owner is Priya.")).status, 200);
+  await dbExec(`UPDATE documents SET created_at = '2026-01-05T09:00:00.000Z' WHERE org_id = '${w.org}'`);
+  await dbExec(`INSERT INTO items (id, org_id, workspace_id, meeting_id, kind, text, who, answered, created_at) VALUES ('watch-decision-1', '${w.org}', '${w.g1}', NULL, 'decision', 'The cutover moved to Sunday night instead of Saturday; the database migration runs from the new data center.', 'Priya', NULL, '${new Date().toISOString()}')`);
+  // Two Teams chats assigned to group 1: one whose posts fail, one Sidekick gets removed from in Teams.
+  for (const [id, name] of [["conv-watch-1", "Wave 2 crew"], ["conv-watch-2", "Old crew"]]) {
+    const before = sent.length;
+    await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id, conversationType: "groupChat", tenantId: "tenant-1", name } }));
+    const card = await waitForSent((m) => sent.indexOf(m) >= before && m.url.includes(id) && /Link this chat/.test(cardText(cardsOf(m)[0] ?? {})));
+    const code = cardText(cardsOf(card)[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+    assert.equal((await wa("POST", "/api/teams-links", { code, ws: w.g1 })).status, 200);
+  }
+  assert.equal((await toBot(activity({ type: "installationUpdate", action: "remove", from: { id: "29:x", name: "Ray Remover" }, conversation: { id: "conv-watch-2", conversationType: "groupChat", tenantId: "tenant-1" } }))).status, 200);
+  failPosts.add("conv-watch-1");
+  // A meeting: its notes can't be posted (failed post), its action items are overdue and unowned.
+  assert.equal((await importMeeting(max, w.g1, "Cutover check-in", "Priya: we agreed the plan. Maria sends the test report.")).status, 200);
+  for (let i = 0; i < 100 && Number(await dbValue("SELECT COUNT(*) FROM teams_post_failures WHERE conversation_id = 'conv-watch-1'")) === 0; i++) await new Promise((res) => setTimeout(res, 200));
+  assert.ok(Number(await dbValue("SELECT COUNT(*) FROM teams_post_failures WHERE conversation_id = 'conv-watch-1'")) > 0, "the failed post was recorded");
+  assert.doesNotMatch(await dbValue("SELECT error FROM teams_post_failures WHERE conversation_id = 'conv-watch-1'"), /Cutover check-in|test report/, "no message text in the record");
+  assert.equal(await dbValue("SELECT what FROM teams_post_failures WHERE conversation_id = 'conv-watch-1' LIMIT 1"), "meeting notes");
+  await dbExec(`UPDATE action_items SET created_at = '2026-01-05T09:00:00.000Z' WHERE org_id = '${w.org}'`);
+  // An unanswered question; a chat waiting in the organization's Microsoft tenant; a broken connector.
+  assert.equal((await max("POST", "/api/ask", { ws: w.g1, question: "What is the purple elephant budget?" })).body.found, false);
+  await dbExec(`UPDATE orgs SET entra_tenant_id = 'watch-tenant' WHERE id = '${w.org}'`);
+  await dbExec(`INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at, waiting_since) VALUES ('conv-watch-wait', '${SERVICE_URL}', 'watch-tenant', 'groupChat', 'Waiting crew', '${new Date().toISOString()}', '${new Date().toISOString()}', '${new Date().toISOString()}')`);
+  await dbExec(`INSERT INTO connector_health (org_id, workspace_id, connector, label, status, message, checked_at, broken_since) VALUES ('${w.org}', '', 'jira', 'Jira', 'broken', 'The access token expired.', '${new Date().toISOString()}', '${new Date().toISOString()}')`);
+
+  const out = await jobTick();
+  // The Org Owner sees all ten kinds, each with a next step and a link.
+  const all = await wa("GET", "/api/findings");
+  assert.deepEqual(kindsOf(all), ["broken_connector", "chat_removed", "chat_waiting", "failed_replies", "no_lead", "no_notes_chat", "overdue_items", "stale_doc", "unanswered", "unowned_items"], JSON.stringify(out));
+  assert.ok(out.opened >= 10, JSON.stringify(out));
+  for (const f of all.body.findings) assert.ok(f.nextStep && f.actionHref && f.canAct, JSON.stringify(f));
+  const byKind = Object.fromEntries(all.body.findings.map((f) => [f.kind, f]));
+  assert.equal(byKind.no_lead.workspaceId, w.g2, "group 2 has no Team Lead");
+  assert.equal(byKind.no_notes_chat.workspaceId, w.g2, "group 2 has no notes chat");
+  assert.match(byKind.stale_doc.title, /Cutover runbook\.md/);
+  assert.match(byKind.stale_doc.detail, /moved to Sunday/);
+  assert.match(byKind.failed_replies.title, /Wave 2 crew/);
+  assert.match(byKind.chat_removed.detail, /Ray Remover/);
+  assert.match(byKind.chat_waiting.title, /1 Teams chat waiting/);
+  assert.match(byKind.unanswered.detail, /purple elephant/);
+  assert.match(byKind.broken_connector.title, /Jira isn't working/);
+  // The Team Lead: their group's members and managers findings, nothing organization-wide or from group 2.
+  assert.deepEqual(kindsOf(await lena("GET", "/api/findings")), ["chat_removed", "failed_replies", "overdue_items", "stale_doc", "unanswered", "unowned_items"]);
+  // A Member: only what everyone in the group sees, and can't snooze it.
+  const mine = await max("GET", "/api/findings");
+  assert.deepEqual(kindsOf(mine), ["overdue_items", "stale_doc", "unanswered", "unowned_items"]);
+  assert.ok(mine.body.findings.every((f) => !f.canAct));
+  assert.equal((await max("POST", "/api/findings", { id: byKind.overdue_items.id, action: "snooze" })).status, 403);
+  assert.equal((await lena("POST", "/api/findings", { id: byKind.no_lead.id, action: "snooze" })).status, 404, "a Team Lead can't snooze one they can't see");
+  assert.equal((await max("POST", "/api/findings", { action: "check" })).status, 403);
+  // Someone in group 2 only sees none of group 1's, and can't open group 1's list.
+  assert.deepEqual(kindsOf(await nora("GET", "/api/findings")), []);
+  assert.equal((await nora("GET", `/api/findings?ws=${w.g1}`)).status, 404);
+  // Another organization sees none of it and can't act on it.
+  assert.ok(!(await admin("GET", "/api/findings")).body.findings.some((f) => f.workspaceId === w.g1 || /Jira|Waiting crew/.test(f.title)));
+  assert.equal((await admin("POST", "/api/findings", { id: byKind.no_lead.id, action: "snooze" })).status, 404);
+  // AI only when a watcher fires: one check for the one candidate pair.
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM usage_events WHERE org_id = '${w.org}' AND feature = 'watch'`)), 1);
+  // Each run is a trace on the organization's Activity page, with a step per watcher.
+  const traces = (await wa("GET", "/api/activity?view=traces&channel=system")).body.traces;
+  const watchRun = traces.find((t) => t.name === "Job: Run the watchers");
+  assert.ok(watchRun, JSON.stringify(traces.map((t) => t.name)));
+  const steps = (await wa("GET", `/api/activity?view=trace&id=${watchRun.id}`)).body.spans;
+  assert.ok(steps.filter((x) => x.kind === "watch").length >= 10);
+  assert.doesNotMatch(JSON.stringify(steps), /purple elephant|Cutover runbook/, "counts only, no content in the trace");
+});
+
+test(`[${ENGINE}] watchers: findings aren't duplicated, can be snoozed, and resolve themselves once fixed`, async () => {
+  const count = () => dbValue(`SELECT COUNT(*) FROM findings WHERE org_id = '${w.org}'`);
+  const before = await count();
+  await jobTick();
+  assert.equal(await count(), before, "the same problems stay one row each");
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM usage_events WHERE org_id = '${w.org}' AND feature = 'watch'`)), 1, "an AI verdict is never asked twice");
+  // The Team Lead snoozes the overdue items for a week.
+  const overdue = (await lena("GET", "/api/findings")).body.findings.find((f) => f.kind === "overdue_items");
+  assert.equal((await lena("POST", "/api/findings", { id: overdue.id, action: "snooze" })).status, 200);
+  assert.ok(!kindsOf(await max("GET", "/api/findings")).includes("overdue_items"));
+  assert.ok((await lena("GET", `/api/findings?ws=${w.g1}&snoozed=1`)).body.findings.some((f) => f.id === overdue.id && f.status === "snoozed"));
+  await jobTick();
+  assert.ok(!kindsOf(await lena("GET", "/api/findings")).includes("overdue_items"), "still snoozed after a run");
+  assert.match(JSON.stringify((await wa("GET", "/api/audit")).body), /Lena Lead.*Snoozed/);
+  assert.equal((await lena("POST", "/api/findings", { id: overdue.id, action: "reopen" })).status, 200);
+  // Fix everything.
+  await dbExec(`UPDATE action_items SET status = 'Done' WHERE org_id = '${w.org}'`);
+  failPosts.delete("conv-watch-1");
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: "conv-watch-2", conversationType: "groupChat", tenantId: "tenant-1", name: "Old crew" } }));
+  assert.equal((await uploadDoc(wa, w.g1, "Cutover runbook v2.md", "The cutover happens on Sunday night from the new data center.")).status, 200);
+  assert.equal((await uploadDoc(wa, w.g1, "Budget.md", "The purple elephant budget is 40k.")).status, 200);
+  assert.equal((await max("POST", "/api/ask", { ws: w.g1, question: "What is the purple elephant budget?" })).body.found, true);
+  await dbExec(`UPDATE connector_health SET status = 'ok', broken_since = NULL WHERE org_id = '${w.org}'`);
+  await dbExec(`DELETE FROM teams_conversations WHERE id = 'conv-watch-wait'`);
+  const n = sent.length;
+  assert.equal((await importMeeting(max, w.g1, "Second check-in", "All good now.")).status, 200);
+  await waitForSent((m) => sent.indexOf(m) >= n && m.url.includes("conv-watch-1"));
+  await dbExec(`UPDATE action_items SET status = 'Done' WHERE org_id = '${w.org}'`);
+  // A Starter plan has no Team Leads, so the Team Lead watcher doesn't run for it.
+  await dbExec(`INSERT INTO subscriptions (org_id, plan, status, provider, updated_at, created_at) VALUES ('${w.org}', 'starter', 'active', 'mock', '${new Date().toISOString()}', '${new Date().toISOString()}')`);
+  const out = await jobTick();
+  assert.ok(out.resolved >= 9, JSON.stringify(out));
+  assert.deepEqual(kindsOf(await wa("GET", "/api/findings")), ["no_notes_chat"], "only group 2's missing notes chat is left");
+  assert.ok(Number(await dbValue(`SELECT COUNT(*) FROM findings WHERE org_id = '${w.org}' AND status = 'resolved'`)) >= 9);
+  await dbExec(`DELETE FROM subscriptions WHERE org_id = '${w.org}'`);
+  // The Owner Console sees counts per kind and company, never the findings' text.
+  const health = (await owner("GET", "/api/owner/queue")).body;
+  assert.ok(health.findings.some((f) => f.kind === "no_notes_chat" && f.open >= 1));
+  assert.ok(health.companies.some((c) => c.name === "Watch Co"));
+  assert.doesNotMatch(JSON.stringify(health), /purple elephant|Cutover runbook|Quiet group/);
 });
 
 /* ---------- access recovery: scripts/reset-password.mjs (run last: it resets the Owner Console account) ---------- */

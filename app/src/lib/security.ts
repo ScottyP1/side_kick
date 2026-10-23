@@ -43,7 +43,7 @@ export function setupRefusal(o: { production: boolean; code: string; sent: unkno
  * and DELETE, including the plain HTML form posts another site could use to ride on someone's session
  * cookie. A change is refused when the browser says it came from another site (`Sec-Fetch-Site` other than
  * same-origin/none) or its `Origin` host isn't Sidekick's own (the request's `Host`/`X-Forwarded-Host`, or
- * `SIDEKICK_PUBLIC_URL`). Requests without these headers (server-to-server: tests, the reminder timer,
+ * `SIDEKICK_PUBLIC_URL`). Requests without these headers (server-to-server: tests, the job heartbeat,
  * curl) carry no browser cookies by accident and pass. Returns the refusal message, or null if allowed.
  * GET and HEAD never change anything, so they're not checked. The Teams endpoint doesn't use `handle()`.
  */

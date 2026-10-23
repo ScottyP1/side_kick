@@ -36,6 +36,7 @@ export const MATRIX = [
   { what: "Rate answers 👍/👎", method: "POST", url: () => "/api/feedback", body: (s) => ({ ws: s.wsA, questionId: NOPE, vote: "up" }), allow: EVERYONE },
   { what: "See the firm library", method: "GET", url: () => "/api/firm", allow: EVERYONE },
   { what: "See connected tools (Azure DevOps, Jira) and their groups' linked projects", method: "GET", url: () => "/api/connectors", allow: EVERYONE },
+  { what: "See Needs attention for their groups", method: "GET", url: () => "/api/findings", allow: EVERYONE },
   // Change workspace content
   { what: "Upload documents", method: "POST", url: () => "/api/docs", form: (s) => ({ ws: s.wsA }), allow: EDITORS },
   { what: "Change or delete a document", method: "DELETE", url: () => `/api/docs/${NOPE}`, allow: EDITORS },
@@ -44,6 +45,7 @@ export const MATRIX = [
   { what: "Update action items", method: "PATCH", url: () => `/api/action-items/${NOPE}`, body: { status: "Done" }, allow: EDITORS },
   { what: "Refresh the knowledge map", method: "POST", url: () => "/api/memory/refresh", body: { ws: NOPE }, allow: EDITORS },
   { what: "Resolve or dismiss knowledge gaps", method: "POST", url: () => "/api/gaps", body: {}, allow: EDITORS },
+  { what: "Snooze a Needs attention item", method: "POST", url: () => "/api/findings", body: { id: NOPE, action: "snooze" }, allow: MANAGERS },
   // Money
   { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ["owner", "admin", "billing"] },
   { what: "See the plan and subscription", method: "GET", url: () => "/api/billing", allow: ["owner", "admin", "billing"] },

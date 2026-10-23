@@ -75,6 +75,8 @@ const REAL = flag("--with-real-claude");
 const VERBOSE = flag("--verbose");
 const BASE = `http://localhost:${PORT}`;
 const TENANT = "00000000-demo-4000-8000-000000000001";
+// The job heartbeat is off in the seeding copy; phase C runs the watchers once through its route with this secret.
+const TICK_SECRET = crypto.randomBytes(24).toString("hex");
 
 const log = (msg) => console.log(msg);
 const fail = (msg) => {
@@ -135,7 +137,13 @@ async function confirmRealClaude() {
 
 /* ---------- fake services: Teams connector, breached-password list ---------- */
 const sent = [];
+// Chats whose posts the fake Teams refuses (500): phase C uses one for the failed-posts watcher.
+const failPosts = new Set();
 const connector = http.createServer((req, res) => {
+  if ([...failPosts].some((c) => decodeURIComponent(req.url).includes(c))) {
+    res.writeHead(500, { "content-type": "application/json" });
+    return void res.end(JSON.stringify({ error: { code: "ServiceError", message: "Teams is unavailable" } }));
+  }
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
@@ -178,7 +186,7 @@ function appEnv() {
     AZURE_SEARCH_ENDPOINT: "", AZURE_SEARCH_API_KEY: "", AZURE_OPENAI_ENDPOINT: "", AZURE_OPENAI_API_KEY: "",
     CLIENT_ID: "", CLIENT_SECRET: "", ENTRA_CLIENT_ID: "", ENTRA_CLIENT_SECRET: "",
     TENANT_ID: TENANT, TEAMS_LOCAL_PLAYGROUND: "true", SIDEKICK_MULTI_TENANT: "",
-    SIDEKICK_PUBLIC_URL: "", SIDEKICK_SCHEDULER: "off", SIDEKICK_SIGNUP_OPEN: "",
+    SIDEKICK_PUBLIC_URL: "", SIDEKICK_SCHEDULER: "off", SIDEKICK_SIGNUP_OPEN: "", SIDEKICK_TICK_SECRET: TICK_SECRET,
     PWNED_PASSWORDS_URL: `http://127.0.0.1:${pwned.address().port}`,
     // A fixed, made-up key for the demo copy only (its launch config sets the same one), so the connector sign-ins
     // sealed while seeding still open when the demo runs. Never used for real data.
@@ -393,6 +401,13 @@ async function phaseA() {
     const r = await world.groups[key].lead("POST", "/api/connectors/links", { connector: toolId(kind), ws: world.groups[key].id, project });
     if (r.link.problem) throw new Error(`Linking ${project} didn't sync: ${r.link.problem}`);
   }
+  // One real problem for the broken-connector watcher: the account loses access to Litware's project, and the next
+  // sync says so (Connectors shows it, the group's managers get a finding). "Sync now" in the demo fixes it.
+  tools.deny("ado", "Data Platform");
+  const litware = (await owner("GET", "/api/connectors")).connectors.find((t) => t.kind === "ado").links.find((l) => l.projectName === "Data Platform");
+  const broken = await world.groups.litware.lead("POST", `/api/connectors/links/${litware.id}/sync`);
+  if (!broken.link.problem) throw new Error("The demo's broken connector didn't break.");
+  tools.allow("ado", "Data Platform");
 
   log("• Firm library (policies, standards, templates)");
   const firmIds = {};
@@ -661,6 +676,41 @@ async function phaseB() {
     if (pending && p.key === "litware") await run("INSERT INTO reminder_state (workspace_id, item_key, status, until_at, updated_by, updated_at) VALUES (?, ?, 'dismissed', NULL, ?, ?) ON CONFLICT (workspace_id, item_key) DO NOTHING", ws, `item:${pending.id}`, lead, iso(nowMs - dayMs));
   }
 
+  log("• Watcher material: chats waiting in Northwind's Microsoft tenant, broken connectors, a decision that changes a runbook");
+  const northwind = world.orgs.northwind;
+  // Northwind's Microsoft tenant is the demo tenant, so chats added there wait to be assigned (Groups page).
+  await run("UPDATE orgs SET entra_tenant_id = ? WHERE id = ?", TENANT, northwind);
+  for (const [i, [name, by, days]] of [["Bid war room", byKey.teamLead.name, 2], ["Friday demo prep", byKey.orgAdmin.name, 5]].entries()) {
+    const since = iso(nowMs - days * dayMs);
+    await run(
+      `INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at, added_by, waiting_since) VALUES (?, ?, ?, 'groupChat', ?, ?, ?, ?, ?)
+       ON CONFLICT (id) DO NOTHING`,
+      `19:demo-waiting-${i}@thread.v2`, SERVICE_URL, TENANT, name, since, since, by, since,
+    );
+  }
+  // Connectors report their own health (lib/connector-health.ts): phase A left Litware's Azure DevOps project
+  // refusing access, which the broken-connector watcher turns into a finding.
+  // Teams posts that failed in one chat nothing posts to later (phase C's reminders go to Contoso and Fabrikam, and a
+  // successful post clears the finding); phase C adds a real failed post in another chat too.
+  const quietChat = world.chats.find((c) => !["contoso", "fabrikam", "litware", "tailwind"].includes(c.key) && !c.guests);
+  if (quietChat) {
+    await run("UPDATE teams_conversations SET last_post_ok_at = ? WHERE id = ?", iso(nowMs - 3 * dayMs), quietChat.id);
+    for (const [what, hours] of [["a reminder", 30], ["meeting notes", 5]]) {
+      await run(
+        "INSERT INTO teams_post_failures (id, org_id, workspace_id, conversation_id, what, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        newId(), northwind, quietChat.ws, quietChat.id, what, "Error: Request failed with status code 403", iso(nowMs - hours * 3600_000),
+      );
+    }
+  }
+  // A newer decision that changes the Contoso wave 2 runbook (the stale-document watcher finds it).
+  const contosoMeeting = await get("SELECT id FROM meetings WHERE workspace_id = ? ORDER BY held_at DESC LIMIT 1", world.groups.contoso.id);
+  await run(
+    "INSERT INTO items (id, org_id, workspace_id, meeting_id, kind, text, who, answered, created_at) VALUES (?, ?, ?, ?, 'decision', ?, ?, NULL, ?)",
+    newId(), northwind, world.groups.contoso.id, contosoMeeting?.id ?? null,
+    "The wave 2 cutover moved to Thursday November 12 instead of November 5; the cutover order stays price tables, SKU sync, then tills.",
+    byKey.teamLead.name, iso(nowMs - 2 * dayMs),
+  );
+
   // A check that the Teams messages all arrived.
   for (const c of world.chats) {
     const n = (await get("SELECT COUNT(*) AS n FROM chat_messages WHERE conversation_id = ?", c.id)).n;
@@ -690,6 +740,20 @@ async function phaseC() {
     const chat = world.chats.find((c) => c.key === key && !c.guests);
     await admin("POST", "/api/reminders", { id: chat.id, action: "send" });
   }
+  log("• Watchers: a Teams chat whose posts fail, one Sidekick was removed from, a new group with no lead");
+  const failing = world.chats.find((c) => c.key === "litware" && !c.guests) ?? world.chats[world.chats.length - 1];
+  failPosts.add(failing.id);
+  await admin("POST", "/api/reminders", { id: failing.id, action: "send" }, { ok: false });
+  failPosts.delete(failing.id);
+  const removed = world.chats.find((c) => c.key === "tailwind" && !c.guests) ?? world.chats.find((c) => c !== failing && c.key !== "contoso");
+  await toBot(activity({ id: removed.id }, { type: "installationUpdate", action: "remove", from: { id: "29:demo-remover", name: "Jordan Lee", aadObjectId: "00000000-0000-4000-8000-0000000000bb" } }));
+  await s.orgOwner("POST", "/api/workspaces", { name: "Bid team – Woodgrove RFP", client: "Woodgrove Bank" });
+  const tick = await fetch(`${BASE}/api/jobs/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET, "content-type": "application/json" }, body: JSON.stringify({ sweep: true, kinds: ["watch.all", "watch.org"] }) }).then((r) => r.json());
+  if (!tick.ran || tick.failed) throw new Error(`The job queue didn't run cleanly: ${JSON.stringify(tick)}`);
+  const found = (await s.orgOwner("GET", "/api/findings")).findings;
+  const kinds = [...new Set(found.map((f) => f.kind))];
+  log(`  ${found.length} findings for Northwind's Org Owner (${kinds.length} kinds: ${kinds.join(", ")})`);
+
   log("• Alpine Ski House set to Ending (engagement over: read-only, deleted in 21 days)");
   await s.orgOwner("POST", `/api/workspaces/${world.groups.alpine.id}/rolloff`, { days: 21 });
 }

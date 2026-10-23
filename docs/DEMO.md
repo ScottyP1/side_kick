@@ -35,7 +35,9 @@ operator, and the Org Owner of a second client), each with things to try. Stop t
 
 **Connectors**: the launch config also starts a fake Azure DevOps and Jira (`app/scripts/fake-tools.mjs`, made-up
 Northwind projects) on port 3331, so Connectors shows both tools connected: the "Wave 2 Cutover" board and the Jira
-project STORE feed the Contoso group ("What's blocking the payment gateway cutover?"), "Data Platform" feeds Litware.
+project STORE feed the Contoso group ("What's blocking the payment gateway cutover?"), "Data Platform" feeds Litware
+and shows a problem ("refused access", also a "Connector not working" finding for Litware's managers): press **Sync now**
+to fix it.
 **Sync now**, Reconnect and the work item links work against the fake; the demo copy and the seed share a made-up
 encryption key so the sealed sign-ins open. `--tools-port <n>` moves the fake when seeding.
 
@@ -48,10 +50,11 @@ post notes to the simulated Teams chats, which aren't running: a harmless "Teams
 | | |
 |---|---|
 | **Northwind Consulting** (Business plan, test mode) | 1 Org Owner, 3 Org Admins, 1 Billing Admin, 10 Team Leads, 80 Members, 20 Viewers |
-| **10 groups** | One per engagement, each with a Team Lead and members. Contoso reuses `samples/contoso/`; the other nine are generated from a profile each in `app/scripts/demo-world.mjs` |
+| **10 groups** (+ 1 new) | One per engagement, each with a Team Lead and members (plus a new bid team with no Team Lead yet, for Needs attention). Contoso reuses `samples/contoso/`; the other nine are generated from a profile each in `app/scripts/demo-world.mjs` |
 | **Per group** | 7–8 documents (SOW, runbook, RAID log, architecture, status report, internal staffing note, glossary), 5–8 meeting transcripts imported through the normal import with notes (decisions, action items with owners and dates, open questions, risks), a tracked Teams chat, questions with 👍/👎, a knowledge map with gaps, reminder states |
 | **Firm library** | Expense policy v3 (replaces v2), travel, rate card, data handling, information security, RAID-log standard, status-report template |
 | **Edge cases** | Alpine Ski House **Ending** (roll-off, deleted in 21 days); Fabrikam Bank with stricter guardrails and a custom rule; a Contoso chat with **client guests** (Shareable-only answers); overdue and unowned action items; a document that contradicts a later meeting in every group (runbook date vs. moved milestone) and a scope conflict; AI credit at ~83% (the 80% notice) |
+| **Needs attention** (watchers) | The seed runs the job queue once, so Home and the groups' Overview tabs show findings of every kind: unanswered questions, a Teams chat whose posts fail, one Sidekick was removed from, two chats waiting in Northwind's Microsoft tenant, overdue and unowned action items, the Contoso runbook a later decision changed, a new "Bid team – Woodgrove RFP" group with no Team Lead and no notes chat, Azure DevOps and Jira connectors that stopped working. Sign in as different roles to see who sees what. The demo copy runs with its job heartbeat off; findings stay as seeded |
 | **Support** | Tickets from four roles with the Sidekick team's replies, an internal note, a resolved one, and one from the public form |
 | **Other clients** | Tailspin Partners (Starter, 14 of 15 people, 1 of 1 group, knowledge map turned off by the Sidekick team), Trey Research Group (trial ending in 4 days), Lucerne Partners (payment failed) |
 | **Owner Console** | An operator account; ~8 weeks of AI usage history per client for Business, Clients and Performance |

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Portal home (/home; signed-in visitors to / are sent here by src/proxy.ts): what Sidekick knows and what needs attention across your workspaces: counts, recent meetings, open gaps and action items.
+ * Portal home (/home; signed-in visitors to / are sent here by src/proxy.ts): what Sidekick knows and what needs attention across your workspaces: counts, recent meetings, open gaps and action items, and what the watchers noticed (components/findings.tsx: only what this person's role and groups allow).
  */
 
 import Link from "next/link";
@@ -10,6 +10,7 @@ import { useApp } from "@/components/shell";
 import { LiveOrb } from "@/components/live-orb";
 import { api, fmtDate, Pill, usd, useReportError } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { FindingRows, useFindings } from "@/components/findings";
 
 type Overview = {
   stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; spendMonth: number; aiCallsMonth: number; spendScope: "org" | "you" };
@@ -28,6 +29,7 @@ export default function OverviewPage() {
   useEffect(() => {
     api<Overview>("/api/overview").then(setData).catch(reportError);
   }, [reportError]);
+  const { findings, reload: reloadFindings } = useFindings();
   const s = data?.stats;
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -42,7 +44,8 @@ export default function OverviewPage() {
   const attention = data
     ? [
         ...data.attention.failedMeetings.map((m) => ({ kind: "bad", label: "Error", title: `Meeting “${m.title}” wasn't processed`, detail: m.error, href: "/meetings", ws: m.workspace_id })),
-        ...data.attention.failedQuestions.map((q) => ({ kind: "hand", label: "Gap", title: `No answer found${q.c > 1 ? ` (asked ${q.c}×)` : ""}`, detail: `“${q.question}”`, href: "/memory", ws: q.workspace_id })),
+        // Groups the unanswered-questions watcher already reports are left out here (one row each, not two).
+        ...data.attention.failedQuestions.filter((q) => !findings?.some((f) => f.kind === "unanswered" && f.workspaceId === q.workspace_id)).map((q) => ({ kind: "hand", label: "Gap", title: `No answer found${q.c > 1 ? ` (asked ${q.c}×)` : ""}`, detail: `“${q.question}”`, href: "/memory", ws: q.workspace_id })),
         ...data.attention.failedDocs.map((d) => ({ kind: "bad", label: "Error", title: `“${d.name}” couldn't be read`, detail: d.error, href: "/knowledge", ws: d.workspace_id })),
       ]
     : [];
@@ -112,7 +115,7 @@ export default function OverviewPage() {
         <div className="panel">
           <div className="panel-h">
             <h2>{steps.every((x) => x.done) ? "Needs attention" : "Get started"}</h2>
-            {attention.length > 0 && <Pill kind="warn">{attention.length}</Pill>}
+            {attention.length + (findings?.length ?? 0) > 0 && <Pill kind="warn">{attention.length + (findings?.length ?? 0)}</Pill>}
           </div>
           <div className="list">
             {!steps.every((x) => x.done) &&
@@ -133,7 +136,8 @@ export default function OverviewPage() {
                 <Link className="btn small" href={a.href} onClick={() => setWs(a.ws)}>View</Link>
               </div>
             ))}
-            {steps.every((x) => x.done) && !attention.length && <div className="li muted">Nothing needs attention right now.</div>}
+            {findings && <FindingRows findings={findings} reload={reloadFindings} showGroup limit={6} onOpen={(f) => f.workspaceId && setWs(f.workspaceId)} />}
+            {steps.every((x) => x.done) && !attention.length && !findings?.length && <div className="li muted">Nothing needs attention right now.</div>}
           </div>
         </div>
       </div>

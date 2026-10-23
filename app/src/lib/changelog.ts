@@ -11,6 +11,16 @@ export type ChangelogEntry = { date: string; label: string; title: string; chang
 /** Every release, newest first. */
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-23",
+    label: "October 23, 2026",
+    title: "Needs attention: Sidekick keeps watch",
+    changes: [
+      `${BRAND.name} now checks every group in the background and lists what needs a person under Needs attention, on Home and on each group's page: unanswered questions, Teams posts that didn't get through, chats waiting to be assigned or that ${BRAND.name} was removed from, overdue and unowned action items, documents a newer decision changed, groups without a Team Lead or a notes chat, and connectors that stopped working.`,
+      "Each item has a next step and a button to fix it, clears itself once fixed, and can be snoozed for a week by admins and the group's Team Lead. Everyone only sees items for their own groups.",
+      "More reliable background work: reminders and other scheduled tasks now run from a queue that retries on its own.",
+    ],
+  },
+  {
     date: "2026-10-21",
     label: "October 21, 2026",
     title: "Firm library, sharper answers and follow-up questions",

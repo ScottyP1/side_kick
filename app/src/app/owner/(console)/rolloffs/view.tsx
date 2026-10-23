@@ -56,7 +56,7 @@ export default function RolloffsPage() {
         <div>
           <div className="eyebrow">Roll-offs</div>
           <h1>Groups ending and clients leaving</h1>
-          <p>Groups ending and clients leaving: read-only until the date, then deleted by the timer, with a deletion certificate (counts only, no content).</p>
+          <p>Groups ending and clients leaving: read-only until the date, then deleted by the job queue, with a deletion certificate (counts only, no content).</p>
         </div>
       </div>
       <div className="panel">
@@ -92,8 +92,8 @@ export default function RolloffsPage() {
         </Modal>
       )}
       {soon && (
-        <Modal title={`Delete ${soon.scope === "group" ? `“${soon.group}”` : `all of ${soon.org}`} now?`} onClose={() => setSoon(null)} footer={<><button className="btn" onClick={() => setSoon(null)}>Back</button><button className="btn danger solid" onClick={() => patch(soon, { action: "now" }, "Deletes on the timer's next run")}>Delete now</button></>}>
-          <p style={{ margin: 0 }}>The timer deletes it within 5 minutes and writes the deletion certificate. This can&apos;t be undone.</p>
+        <Modal title={`Delete ${soon.scope === "group" ? `“${soon.group}”` : `all of ${soon.org}`} now?`} onClose={() => setSoon(null)} footer={<><button className="btn" onClick={() => setSoon(null)}>Back</button><button className="btn danger solid" onClick={() => patch(soon, { action: "now" }, "Deletes on the job queue's next run")}>Delete now</button></>}>
+          <p style={{ margin: 0 }}>The job queue deletes it within 5 minutes and writes the deletion certificate. This can&apos;t be undone.</p>
         </Modal>
       )}
       {cancel && (

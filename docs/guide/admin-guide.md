@@ -101,13 +101,16 @@ Reminders only cover the chat's own workspace, and a chat with client guests onl
 ### 8a. Answer quality: 👍/👎
 Every answer has 👍/👎, in the portal and on Teams answer cards. Under **Ask** on Knowledge & docs, Org Owners and Org Admins see the last 30 days for the whole organization: answers given, how many were "I don't know", and the 👍/👎 counts. Only counts are kept, never the question or answer text. Lots of 👎 or "I don't know" in a group usually means a document is missing or out of date: check its gaps on Memory & gaps.
 
+### 8b. Needs attention: what Sidekick noticed
+Every 15 minutes Sidekick checks each group for things that need a person and lists them under **Needs attention** on Home and on each group's Overview tab: unanswered questions, Teams posts that didn't get through, chats waiting to be assigned or that someone removed Sidekick from, overdue and unowned action items, documents a newer decision changed, groups without a Team Lead or a notes chat, and connectors that stopped working. Each item has a **next step** and a button to the page that fixes it; it clears itself once fixed. Org Owners and Org Admins see everything; a Team Lead sees their own groups' items (including Teams problems); Members and Viewers see their groups' action items, unanswered questions and out-of-date documents. Admins and the group's Team Lead can **Snooze** an item for a week (it's in the audit log).
+
 ## 9. Watch usage and activity
 - **Usage & billing**: your **plan** and its limits at the top (see sections 15 and 16), the **AI credit this month**, then AI cost by feature, group and day for the whole month (also open to Billing Admins). Work that isn't tied to a group, such as the home assistant, shows as **Organization-wide**. **Export CSV** downloads the cost per group (see section 16).
 - **Security & audit**: who did what and when, including everything Sidekick did on its own.
 
 ## 10. See what Sidekick is doing (Activity)
 - **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, AI answers, search, database) with their health, and who's active.
-- **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, the AI and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Kept for 30 days; no document text is stored. Teams steps after a meeting import only appear when there's a linked chat to post to, and a feature the Sidekick team paused or turned off counts as refused, not as a Sidekick or AI error.
+- **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, the AI and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Background work (reminders, the Needs attention checks) shows as **Background** traces ("Job: …"). Kept for 30 days; no document text is stored. Teams steps after a meeting import only appear when there's a linked chat to post to, and a feature the Sidekick team paused or turned off counts as refused, not as a Sidekick or AI error.
 
 ## 11. Set your guardrails (Org Owner and Org Admins)
 **Govern → Guardrails** shows the rules Sidekick follows in every workspace, in the portal, in Teams and in the home assistant. Everyone can read it; who can change what is listed below.

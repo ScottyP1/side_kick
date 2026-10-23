@@ -48,6 +48,10 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | Import, reprocess or delete meetings | ✓ | ✓ | ✓ | | ✓ | |
 | Update action items (portal and Teams card buttons) | ✓ | ✓ | ✓ | | ✓ | |
 | Refresh the knowledge map, resolve or dismiss gaps | ✓ | ✓ | ✓ | | ✓ | |
+| See Needs attention for their groups: action items, unanswered questions, out-of-date documents | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See Needs attention about their groups' Teams chats (posts failing, Sidekick removed, no notes chat) | ✓ | ✓ | ✓ (own groups) | | | |
+| See organization-wide Needs attention (chats waiting, groups without a Team Lead, connectors) | ✓ | ✓ | | | | |
+| Snooze a Needs attention item for a week | ✓ | ✓ | ✓ (own groups' items) | | | |
 | **Money** | | | | | | |
 | See their own AI use this month on the home page | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See Usage & billing and the whole company's AI spend | ✓ | ✓ | | ✓ | | |

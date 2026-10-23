@@ -19,6 +19,7 @@ operations review is in `docs/security/`.
 | A merge didn't deploy ("Deploy skipped") | [Deploy skipped](#deploy-skipped) |
 | Set up (or renew) the Azure DevOps / Jira connector apps | [Connector apps](#connector-apps-azure-devops-and-jira) |
 | A customer's connector shows "Sign-in expired" or a problem | [Connector problems](#connector-problems) |
+| Reminders/watchers stopped, Owner Console → Job queue shows a backlog, stuck or dead jobs | [Job queue stuck](#job-queue-stuck) |
 
 ## Roll back a bad deploy
 
@@ -151,6 +152,39 @@ The uptime alert emails when `/api/health` fails from Azure's test locations (HO
 2. Just deployed? [Roll back](#roll-back-a-bad-deploy).
 3. A budget freeze? `status.sh` shows the app stopped and a budget at 100%: decide whether to raise the
    budget, then `unfreeze.sh`.
+
+## Job queue stuck
+
+Every background task (daily reminders, leaving unassigned Teams chats, roll-off deletions, the watchers,
+clean-up) is a job in the `jobs` table, run by a heartbeat every 30 seconds (HOSTING → Scheduled work).
+Signs of trouble: reminders or "Needs attention" stop updating, or **Owner Console → Job queue** says
+"Needs a look" (backlog waiting more than 5 minutes, stuck jobs, or dead letters).
+
+1. **Is the heartbeat running?** Job queue page → "Last 24 hours … last" should be under a minute or two old.
+   If not:
+   - Is the app up (`/api/health`)? If not, [Site down](#the-site-is-down).
+   - Is `SIDEKICK_SCHEDULER=off` set on the Container App without an external scheduler (HOSTING)? Remove it,
+     or set up the Container Apps job.
+   - Logs: `az containerapp logs show -g sidekick-rg -n sidekick-app --tail 200 --type console | grep -i "heartbeat\|Job "`.
+     "Job heartbeat: the tick answered 5xx" means the tick route itself fails: the reference code in the
+     Owner Console → Performance & errors says why (usually the database).
+2. **Stuck jobs** (running, lease ran out): the worker stopped mid-job (deploy, crash). Nothing to do: the next
+   beat takes the job over (that counts as an attempt). If they keep coming back, the job itself hangs; check
+   its kind's logs.
+3. **Dead letters** (gave up after its attempts): read "Last error" (a reason, never client content).
+   - Fix the cause first (e.g. Teams or Microsoft Graph refusing, a feature paused, the database full).
+   - Then **Retry** on the row (fresh attempts) or **Cancel** if it's no longer needed. A recurring job
+     (reminders, watchers…) doesn't need a retry: its next slot runs on its own.
+4. **Need everything to run now** (after fixing something): **Run all now** on the Job queue page.
+5. **Last resort, in the database** (Postgres, `psql` as in [Restore the database](#restore-the-database)):
+   ```sql
+   -- what's waiting and why
+   SELECT kind, status, COUNT(*), MIN(run_at), MAX(attempts) FROM jobs WHERE status IN ('queued','running','dead') GROUP BY kind, status;
+   -- release every lease (only when no copy of the app is running a job, e.g. app stopped)
+   UPDATE jobs SET status = 'queued', locked_by = NULL, locked_until = NULL WHERE status = 'running';
+   ```
+   Never delete `queued` rows of a kind you don't understand: a roll-off deletion job deletes client data on
+   purpose and must finish or be canceled in the Owner Console (Roll-offs) instead.
 
 ## Microsoft 365 trial ending Nov 14, 2026
 
@@ -306,5 +340,6 @@ help):
   minutes by itself. If every customer shows it, check the tool's status page.
 - **Every connection of one tool fails right after a change on our side**: the app secret expired or was rotated
   wrongly ("didn't confirm the sign-in" on connect). Rotate it (Rotate secrets above) and restart.
-- To see all broken connectors at once: `brokenConnectors()` in `app/src/lib/connectors.ts` lists them (the
-  "broken connector" watcher of the job queue uses it).
+- Customers also get a **Needs attention** finding ("Connector not working") from the broken-connector watcher. To
+  see every broken connector across clients: `connectorProblems()` in `app/src/lib/connectors.ts`; the syncs run as
+  `connector.sync` jobs (Owner Console → Job queue).

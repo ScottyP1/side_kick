@@ -471,6 +471,55 @@ CREATE TABLE IF NOT EXISTS connector_states (
   state TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, verifier TEXT NOT NULL,
   site TEXT, expires_at TEXT NOT NULL
 );
+-- Background jobs (lib/jobs.ts): the database-backed job queue (every background task runs on it). kind = what to run
+-- (registered in lib/job-kinds.ts); payload = small JSON of ids (never document text); org_id/workspace_id = whose
+-- work it is (NULL for system sweeps). status = queued | running | done | dead (gave up after max_attempts, the
+-- dead-letter list) | canceled. A worker claims a job by setting locked_by + locked_until (a lease); a lease that
+-- runs out means the worker stopped, and another one takes the job over. idempotency_key: enqueueing the same
+-- key twice keeps one job (recurring jobs use "every:<kind>:<slot>"). result = small JSON of counts.
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, org_id TEXT, workspace_id TEXT, payload TEXT NOT NULL DEFAULT '{}',
+  idempotency_key TEXT, status TEXT NOT NULL, run_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 5, locked_by TEXT, locked_until TEXT, last_error TEXT, result TEXT,
+  created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT, updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON jobs(idempotency_key);
+CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status, run_at);
+CREATE INDEX IF NOT EXISTS jobs_org ON jobs(org_id, status);
+-- Watcher findings (lib/watchers.ts): something that needs a person, found by a cheap check on the queue.
+-- One row per problem (dedupe_key = kind + group + subject, unique per org), kept up to date on every run and
+-- resolved automatically when the check no longer finds it. workspace_id NULL = organization-wide.
+-- audience = members (everyone in the group) | managers (Team Leads of the group and admins) | admins.
+-- status = open | snoozed (until snoozed_until) | resolved. data_json = counts and ids for the page.
+CREATE TABLE IF NOT EXISTS findings (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, kind TEXT NOT NULL,
+  dedupe_key TEXT NOT NULL, audience TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL,
+  title TEXT NOT NULL, detail TEXT, next_step TEXT NOT NULL, action_href TEXT, action_label TEXT, data_json TEXT,
+  first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, resolved_at TEXT, snoozed_until TEXT, snoozed_by TEXT,
+  updated_at TEXT NOT NULL, UNIQUE (org_id, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS findings_scope ON findings(org_id, status, workspace_id);
+-- The stale-document watcher's AI checks, so each (document, decision) pair is judged once. verdict =
+-- contradicts | fine. reason = Claude's one-line reason (shown on the finding).
+CREATE TABLE IF NOT EXISTS watch_checks (
+  org_id TEXT NOT NULL, workspace_id TEXT NOT NULL, pair_key TEXT NOT NULL, verdict TEXT NOT NULL, reason TEXT,
+  checked_at TEXT NOT NULL, PRIMARY KEY (org_id, pair_key)
+);
+-- Connector health (lib/connector-health.ts): the latest state each connector (Azure DevOps, Jira, ...) reported
+-- for an organization (and group, when it's per group; '' = organization-wide). status = ok | broken.
+-- The broken-connector watcher turns broken rows into findings.
+CREATE TABLE IF NOT EXISTS connector_health (
+  org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT NOT NULL DEFAULT '', connector TEXT NOT NULL,
+  label TEXT NOT NULL, status TEXT NOT NULL, message TEXT, fix_href TEXT, checked_at TEXT NOT NULL, broken_since TEXT,
+  PRIMARY KEY (org_id, workspace_id, connector)
+);
+-- Teams posts that failed (an answer, meeting notes, a reminder): which chat, what, Microsoft's error (no
+-- message text). The failed-replies watcher reports chats whose latest post failed; kept 30 days.
+CREATE TABLE IF NOT EXISTS teams_post_failures (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT, conversation_id TEXT NOT NULL, what TEXT NOT NULL,
+  error TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS teams_post_failures_conv ON teams_post_failures(conversation_id, created_at);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -584,6 +633,8 @@ function migrate(conn: DatabaseSync) {
   if (!has("conversations", "workspace_id")) conn.exec("ALTER TABLE conversations ADD COLUMN workspace_id TEXT");
   if (!has("conversations", "scope_key")) conn.exec("ALTER TABLE conversations ADD COLUMN scope_key TEXT");
   conn.exec("CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key)");
+  // Watchers: when someone removed Sidekick from a chat in Teams (and who), and the last post that reached it.
+  for (const col of ["removed_at", "removed_by", "last_post_ok_at"]) if (!has("teams_conversations", col)) conn.exec(`ALTER TABLE teams_conversations ADD COLUMN ${col} TEXT`);
 }
 
 /**
@@ -668,13 +719,25 @@ async function postgresDriver(): Promise<Driver> {
   });
   const schemaPath = path.join(process.cwd(), "db", "schema.postgres.sql");
   let applied = fs.readFileSync(schemaPath, "utf8");
-  await pool.query(applied);
+  // Several app copies (or job workers) starting at once would apply the schema together, and its ALTER TABLEs
+  // can deadlock each other; a session-level advisory lock lets one copy apply it at a time.
+  const applySchema = async (sql: string) => {
+    const client = await pool.connect();
+    try {
+      await client.query("SELECT pg_advisory_lock(727274)");
+      await client.query(sql);
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(727274)").catch(() => {});
+      client.release();
+    }
+  };
+  await applySchema(applied);
   // In development the server outlives schema edits; re-apply the (idempotent) schema when the file changes.
   const ensureSchema = async () => {
     if (process.env.NODE_ENV === "production") return;
     const current = fs.readFileSync(schemaPath, "utf8");
     if (current !== applied) {
-      await pool.query(current);
+      await applySchema(current);
       applied = current;
     }
   };

@@ -183,7 +183,7 @@ const STOP = new Set(
 );
 
 /** The meaningful words of a question (lower-case letters/digits, stop words removed, no duplicates). */
-function keywords(question: string): string[] {
+export function keywords(question: string): string[] {
   return [...new Set((question.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length > 1 && !STOP.has(w)))];
 }
 
@@ -312,6 +312,15 @@ async function keywordSearch(orgId: string, scopes: string[], question: string, 
       ORDER BY bm25(passages, 1.0, 2.0) LIMIT ?`,
     words.map((w) => `"${w}"*`).join(" OR "), ...filters, opts.limit,
   );
+}
+
+/**
+ * Local keyword search only (never Azure, so no embedding cost): the passages of one group's own sources of the
+ * given types that share words with `text`. For background checks (the stale-document watcher, lib/watchers.ts)
+ * that must stay cheap; answers use `searchPassages`/`findSources`. Always scoped to the org and the group.
+ */
+export async function localMatches(orgId: string, workspaceId: string, text: string, opts: { types?: SourceType[]; limit?: number } = {}): Promise<Passage[]> {
+  return keywordSearch(orgId, [workspaceId], text, { types: opts.types, limit: opts.limit ?? 8 });
 }
 
 /* ---------- The answer pipeline: candidates → source facts → re-rank ---------- */

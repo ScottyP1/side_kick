@@ -2,7 +2,8 @@
 
 /**
  * A group's page (/workspaces/[id]): one client team (a "workspace" in the API) with tabs for
- * - **Overview**: a setup checklist (Team Lead, people, Teams chats, documents) and its counts;
+ * - **Overview**: what the watchers noticed in this group (components/findings.tsx), a setup checklist (Team Lead,
+ *   people, Teams chats, documents) and its counts;
  * - **People**: who is in the group; Org Owners/Admins and the group's Team Lead add people already in the
  *   organization and take Members/Viewers off it (/api/workspaces/:id/members);
  * - **Teams chats**: the chats assigned to the group, with their settings (notes, reminders, client guests;
@@ -24,6 +25,7 @@ import { api, fmtDate, Icon, Modal, Pill, Switch, useReportError, useToast } fro
 import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
 import { Avatar, groupHealth, PeoplePicker, type Group, type OrgPerson } from "@/components/groups";
 import { BRAND } from "@/lib/brand";
+import { FindingRows, useFindings } from "@/components/findings";
 
 type Member = { id: string; name: string; email?: string; role: string; microsoft: number };
 type TeamsLink = {
@@ -105,6 +107,7 @@ export default function GroupView() {
         {tb("docs", "Documents", docs.length)}
         {me.user.admin && tb("settings", "Settings")}
       </div>
+      {tab === "overview" && <GroupFindings id={group.id} />}
       {tab === "overview" && <Overview group={group} members={members} links={links} docs={docs} go={setTab} openDocs={openDocs} />}
       {tab === "people" && <People group={group} members={members} canManage={canManage} reload={load} />}
       {tab === "chats" && <Chats group={group} links={links} canManage={canManage} reload={load} />}
@@ -113,6 +116,18 @@ export default function GroupView() {
         <Settings group={group} onSaved={async () => { await reload(); await load(); toast("Group updated."); }} onChanged={async () => { await reload(); await load(); }} onDeleted={async () => { await reload(); router.push("/workspaces"); }} />
       )}
     </>
+  );
+}
+
+/** "Needs attention": what the watchers found in this group that this person may see (nothing shown when there's none). */
+function GroupFindings({ id }: { id: string }) {
+  const { findings, reload } = useFindings(id);
+  if (!findings?.length) return null;
+  return (
+    <div className="panel" style={{ marginBottom: 14 }}>
+      <div className="panel-h"><h2>Needs attention</h2><Pill kind="warn">{findings.length}</Pill></div>
+      <div className="list"><FindingRows findings={findings} reload={reload} here={`/workspaces/${id}`} /></div>
+    </div>
   );
 }
 

@@ -151,6 +151,7 @@ export const FLAGS = {
   remind: { label: "Reminders in Teams", help: "Daily and after-meeting reminder cards posted to Teams chats" },
   support: { label: "Support assistant", help: "The signed-in Help chat that checks a customer's setup and opens tickets. Paused: people can still contact support with the form" },
   helpbot: { label: "Public help bot", help: "“Ask about Sidekick” on the website. Paused: visitors see the FAQ and the contact form instead", platformOnly: true },
+  watch: { label: "Watchers' AI checks", help: "The background checks' AI step, e.g. whether a newer decision makes a document out of date. Paused: the other checks keep running; nothing new is judged by AI" },
   followup: { label: "Follow-up questions", help: "Rewrites a follow-up (“and wave 3?”) into a full question in the assistants, Ask and Teams answers. Paused: every message is treated as a new question", platformOnly: true },
   signup: { label: "Self-service sign-up", help: "New companies creating an organization at /signup (test-mode payment). Off by default: only you add clients", platformOnly: true },
 } as const;

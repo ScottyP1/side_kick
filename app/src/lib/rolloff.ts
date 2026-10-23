@@ -23,13 +23,13 @@
  *   who asked, the certificate's counts) and the operator log line. Everything with the organization's
  *   id is gone, including its subscription, usage records and its own audit log. Proof of the deletion and
  *   billing history live in that row (and, with a real provider, in Stripe's own records).
- * - **Scheduled job**: `runDueRolloffs` runs on the in-app timer (POST /api/reminders/tick, every 5
+ * - **Scheduled job**: `runDueRolloffs` runs on the job queue (lib/job-kinds.ts `rolloffs.run`, every 5
  *   minutes). Each roll-off is claimed with a conditional update first (status scheduled → running), so two
  *   copies of the app never run the same one. A failure puts it back to scheduled with the error, shown in
- *   the Owner Console, and it's tried again on the next tick. (A real job queue comes later.)
+ *   the Owner Console, and it's tried again on the next run.
  *
  * Callers: /api/workspaces/:id/rolloff, /api/workspaces/:id (delete now), lib/billing.ts, the Owner Console
- * routes under /api/owner/rolloffs and /api/owner/tenants/:id/rolloff, and the timer.
+ * routes under /api/owner/rolloffs and /api/owner/tenants/:id/rolloff, and the job queue.
  */
 import "server-only";
 import crypto from "node:crypto";
@@ -330,6 +330,7 @@ export async function deleteGroupWithCertificate(orgId: string, workspaceId: str
 export const ORG_TABLES = [
   "support_attachments", "support_messages", "support_article_uses", "support_tickets", "conversation_turns", "conversations",
   "answer_feedback", "firm_docs", "connector_items", "connector_links", "connectors", "connector_states",
+  "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
   "guard_rule_versions", "guard_custom_rules", "guard_workspace_rules", "guard_events", "guard_rules",
   "chat_messages", "teams_chat_settings", "reminder_runs", "action_items", "items", "meetings", "documents",
   "questions", "passages", "usage_events", "audit_log", "settings", "org_flags", "traces", "org_setup",
@@ -398,7 +399,7 @@ export async function deleteOrganization(orgId: string, actor: string, rolloff?:
 }
 
 /**
- * The scheduled job (in-app timer, every 5 minutes): deletes every group and organization whose deletion
+ * The scheduled job (the job queue's `rolloffs.run`, every 5 minutes): deletes every group and organization whose deletion
  * date has passed. Each is claimed first (scheduled → running), so it runs once even with two copies of
  * the app; a failure goes back to scheduled with the error and is retried next time. Returns how many
  * were deleted.

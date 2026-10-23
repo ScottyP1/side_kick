@@ -20,12 +20,14 @@
  *   the knowledge map (Memory & gaps) and meeting notes see the group's open items.
  * - **Incremental sync** (`syncLink`): only what changed since the link's cursor (the latest change time seen),
  *   in pages; the cursor is saved after every page, so a failure resumes where it stopped. Unchanged items
- *   (same text) aren't re-indexed. Runs on link, on "Sync now", and every `SYNC_EVERY_MINUTES` from the
- *   scheduler (`runDueConnectorSyncs`, called by the reminder tick today; the job queue can call the same
- *   function). Every sync is a trace step (kind "connector") with counts only, never item text.
- * - **Health** (`connectorHealth` for the Connectors page, `brokenConnectors` for the "broken connector"
- *   watcher): last sync, last success, the last error in plain words, and whether the sign-in expired. A link
- *   with no successful sync for `STALE_HOURS` counts as broken too.
+ *   (same text) aren't re-indexed. Runs on link, on "Sync now", and every `SYNC_EVERY_MINUTES` on the job queue
+ *   (lib/job-kinds.ts: the recurring `connectors.schedule` job queues one `connector.sync` job per due link,
+ *   `dueConnectorLinks` / `syncDueLink`). Every sync is a trace step (kind "connector") with counts only.
+ * - **Health**: on the Connectors page (`connectorHealth`: last sync, last success, the last error in plain words,
+ *   an expired sign-in; a link with no success for `STALE_HOURS` shows a problem), and for the "broken connector"
+ *   watcher through lib/connector-health.ts: every sync reports its group's result (`reportConnectorHealth`, id
+ *   "azure-devops" or "jira"), an expired sign-in is reported organization-wide, and reconnecting, unlinking or
+ *   disconnecting clears it. `connectorProblems` lists everything broken across organizations (operators).
  * - **Plan limits**: the plan's `connectors` limit (lib/plans.ts: none, one tool, or all) is checked before
  *   a *new* tool is connected (`assertCanAdd(org, "connectors")`); reconnecting one never counts again, and a
  *   smaller plan keeps what's connected.
@@ -41,7 +43,8 @@ import { all, get, newId, now, run, tx } from "./db";
 import { audit, auditAsSidekick, HttpError, isAdmin, requireManage, workspaceIdsFor, type User } from "./auth";
 import { openSecret, sealSecret } from "./secret-box";
 import { indexText, removeIndexedMany } from "./search";
-import { span, spanAttrs, withTrace } from "./trace";
+import { span, spanAttrs } from "./trace";
+import { removeConnectorHealth, reportConnectorHealth } from "./connector-health";
 import { assertCanAdd } from "./limits";
 import { BRAND } from "./brand";
 import { ado, MAX_PER_SYNC as ADO_MAX } from "./connector-ado";
@@ -111,6 +114,9 @@ export function kindOf(value: unknown): ConnectorKind {
 /** Whether each tool's app is set up on this server (the Connectors page says "not set up yet" otherwise). */
 export const configuredKinds = (): Record<ConnectorKind, boolean> => ({ ado: ado.configured(), jira: jira.configured() });
 
+/** The ids and names the broken-connector watcher knows each tool by (lib/connector-health.ts). */
+const HEALTH: Record<ConnectorKind, { id: string; label: string }> = { ado: { id: "azure-devops", label: "Azure DevOps Boards" }, jira: { id: "jira", label: "Jira" } };
+
 const expiredMessage = (kind: ConnectorKind) =>
   `The ${KIND_LABEL[kind]} sign-in has expired or was revoked. An Org Owner or Org Admin needs to reconnect it on Connectors.`;
 
@@ -167,6 +173,8 @@ async function markExpired(c: Pick<ConnectorRow, "id" | "org_id" | "kind">) {
   const msg = expiredMessage(c.kind);
   const r = await run("UPDATE connectors SET status = 'expired', last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ? AND org_id = ? AND status <> 'expired'", msg, now(), now(), c.id, c.org_id);
   if (r.changes) await auditAsSidekick(c.org_id, `The ${KIND_LABEL[c.kind]} sign-in expired or was revoked; syncing paused until someone reconnects it`, "Connectors");
+  // Organization-wide for the watcher: the org's admins are the ones who can reconnect.
+  await reportConnectorHealth({ orgId: c.org_id, connector: HEALTH[c.kind].id, label: HEALTH[c.kind].label, ok: false, message: msg, fixHref: "/connectors" });
 }
 
 /**
@@ -311,6 +319,7 @@ export async function finishConnect(req: Request, cookieState: string | undefine
       );
     }
     spanAttrs({ kind, reconnect: Boolean(existing) });
+    await reportConnectorHealth({ orgId: saved.org_id, connector: HEALTH[kind].id, label: HEALTH[kind].label, ok: true, fixHref: "/connectors" });
     await audit(user, `${existing ? "Reconnected" : "Connected"} ${KIND_LABEL[kind]} (${acct.accountName}), read-only`, "Connectors");
     return kind;
   });
@@ -337,6 +346,8 @@ export async function disconnect(user: User, id: unknown): Promise<{ links: numb
       await run("DELETE FROM connector_items WHERE org_id = ? AND link_id IN (SELECT id FROM connector_links WHERE connector_id = ? AND org_id = ?)", user.org_id, c.id, user.org_id);
       await run("DELETE FROM connector_links WHERE connector_id = ? AND org_id = ?", c.id, user.org_id);
       await run("DELETE FROM connectors WHERE id = ? AND org_id = ?", c.id, user.org_id);
+      // Disconnected on purpose: nothing for the broken-connector watcher to report any more.
+      await run("DELETE FROM connector_health WHERE org_id = ? AND connector = ?", user.org_id, HEALTH[c.kind].id);
     });
     spanAttrs({ kind: c.kind, links: links.length, items: items.length });
     await audit(user, `Disconnected ${KIND_LABEL[c.kind]} (${c.account_name ?? c.account}): removed its sign-in, ${links.length} linked project${links.length === 1 ? "" : "s"} and ${items.length} imported item${items.length === 1 ? "" : "s"}`, "Connectors");
@@ -409,6 +420,10 @@ export async function unlinkProject(user: User, id: unknown): Promise<{ items: n
     await run("DELETE FROM connector_items WHERE link_id = ? AND org_id = ?", l.id, user.org_id);
     await run("DELETE FROM connector_links WHERE id = ? AND org_id = ?", l.id, user.org_id);
   });
+  // The group's health entry goes with its last project of this tool.
+  if (!(await get("SELECT id FROM connector_links WHERE connector_id = ? AND workspace_id = ? AND org_id = ?", l.connector_id, l.workspace_id, user.org_id))) {
+    await removeConnectorHealth(user.org_id, HEALTH[l.kind].id, l.workspace_id);
+  }
   await audit(user, `Unlinked ${KIND_LABEL[l.kind]} project ${l.project_name} from this group: removed ${items.length} imported item${items.length === 1 ? "" : "s"}`, "Connectors", l.workspace_id);
   return { items: items.length };
 }
@@ -494,11 +509,13 @@ export async function syncLink(orgId: string, linkId: string): Promise<{ changed
       const at = now();
       await run("UPDATE connector_links SET item_count = ?, last_sync_at = ?, last_ok_at = ?, last_error = NULL WHERE id = ? AND org_id = ?", count, at, at, l.id, orgId);
       spanAttrs({ kind: c.kind, pages, seen, changed, items: count, full: !l.sync_cursor, capped: seen >= ADO_MAX });
+      await reportConnectorHealth({ orgId, workspaceId: l.workspace_id, connector: HEALTH[c.kind].id, label: HEALTH[c.kind].label, ok: true, fixHref: "/connectors" });
       return { changed, seen };
     } catch (e) {
       const message = e instanceof ConnectorError ? e.message : `The sync failed unexpectedly. ${BRAND.name} will try again.`;
       if (!(e instanceof ConnectorError)) console.error("Connector sync failed", e);
-      if (e instanceof ConnectorError && e.reason === "auth") await markExpired(c);
+      if (e instanceof ConnectorError && e.reason === "auth") await markExpired(c); // reported organization-wide
+      else await reportConnectorHealth({ orgId, workspaceId: l.workspace_id, connector: HEALTH[c.kind].id, label: HEALTH[c.kind].label, ok: false, message, fixHref: "/connectors" });
       await run("UPDATE connector_links SET last_sync_at = ?, last_error = ? WHERE id = ? AND org_id = ?", now(), message, l.id, orgId);
       spanAttrs({ kind: c.kind, pages, seen, changed, reason: e instanceof ConnectorError ? e.reason : "unexpected" });
       throw e;
@@ -507,18 +524,16 @@ export async function syncLink(orgId: string, linkId: string): Promise<{ changed
 }
 
 /**
- * The scheduler's step: syncs every linked project that is due (not synced for `SYNC_EVERY_MINUTES`), whose
- * connector is connected, whose organization isn't paused and whose group isn't ending; at most `limit` per run,
- * longest-waiting first. Each runs as its own trace for its organization (Activity page). Returns how many synced.
- *
- * Who calls it: POST /api/reminders/tick (the in-app timer) today. The job queue can call it instead (or
- * `syncLink` per link as one job each): it needs nothing else.
+ * The linked projects due for a scheduled sync: not synced for `SYNC_EVERY_MINUTES`, connector connected,
+ * organization not paused, group not ending, not being synced right now; longest-waiting first, at most `limit`.
+ * Who calls it: the job queue's recurring `connectors.schedule` job (lib/job-kinds.ts), which queues one
+ * `connector.sync` job per link (`syncDueLink`).
  */
-export async function runDueConnectorSyncs(at = new Date(), limit = 10): Promise<number> {
+export async function dueConnectorLinks(at = new Date(), limit = 50): Promise<{ id: string; org_id: string; workspace_id: string }[]> {
   const due = new Date(at.getTime() - SYNC_EVERY_MINUTES * 60_000).toISOString();
   const stale = new Date(at.getTime() - SYNC_CLAIM_MINUTES * 60_000).toISOString();
-  const rows = await all<{ id: string; org_id: string; workspace_id: string; kind: ConnectorKind }>(
-    `SELECT l.id, l.org_id, l.workspace_id, c.kind FROM connector_links l
+  return all<{ id: string; org_id: string; workspace_id: string }>(
+    `SELECT l.id, l.org_id, l.workspace_id FROM connector_links l
        JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
        JOIN orgs o ON o.id = l.org_id
       WHERE c.status = 'connected' AND COALESCE(o.status, 'Active') <> 'Suspended'
@@ -527,14 +542,20 @@ export async function runDueConnectorSyncs(at = new Date(), limit = 10): Promise
       ORDER BY COALESCE(l.last_sync_at, '') LIMIT ?`,
     due, stale, limit,
   );
-  let done = 0;
-  for (const r of rows) {
-    const ok = await withTrace({ name: `Sync ${KIND_LABEL[r.kind]} project`, channel: "system", kind: "connector", orgId: r.org_id, workspaceId: r.workspace_id, actor: BRAND.name, detached: true }, () =>
-      claimAndSync(r.org_id, r.id),
-    ).catch(() => false);
-    if (ok) done++;
+}
+
+/**
+ * One scheduled sync (the job queue's `connector.sync` job): claims and syncs the link. A tool problem isn't a job
+ * failure (it's recorded in the link's health and the next run tries again), so the job never retries in a loop.
+ * Returns what happened, for the job's counts.
+ */
+export async function syncDueLink(orgId: string, linkId: string): Promise<{ synced: number; syncFailed: number; skipped: number }> {
+  try {
+    return (await claimAndSync(orgId, linkId)) ? { synced: 1, syncFailed: 0, skipped: 0 } : { synced: 0, syncFailed: 0, skipped: 1 };
+  } catch (e) {
+    if (e instanceof HttpError && e.status === 404) return { synced: 0, syncFailed: 0, skipped: 1 }; // unlinked meanwhile
+    return { synced: 0, syncFailed: 1, skipped: 0 };
   }
-  return done;
 }
 
 /* ---------------------------------------------------------------- */
@@ -609,7 +630,7 @@ export async function connectorsFor(user: User) {
   return { connectors: await connectorHealth(user.org_id, ids), configured: configuredKinds() };
 }
 
-/** One broken connector or linked project, for the "broken connector" watcher (see `brokenConnectors`). */
+/** One broken connector or linked project, across all organizations (see `connectorProblems`). */
 export type BrokenConnector = {
   orgId: string; connectorId: string; kind: ConnectorKind; linkId: string | null; workspaceId: string | null;
   /** expired = the sign-in ran out or was revoked; error = the last sync failed; stale = no success for STALE_HOURS. */
@@ -619,11 +640,12 @@ export type BrokenConnector = {
 };
 
 /**
- * Every broken connector across all organizations (system use only: the job queue's "broken connector" watcher,
- * or the Owner Console). One entry per expired connector (its links aren't listed separately) and per failing or
- * stale link of a connected one. Pure read: deduplicate on (connectorId, linkId, reason) when notifying.
+ * Every broken connector across all organizations, including links that went **stale** (no success for
+ * `STALE_HOURS`), for operators and scripts (system use only). The watcher itself reads the health each sync
+ * reports through lib/connector-health.ts (`reportHealth` below). One entry per expired connector and per failing
+ * or stale link of a connected one. Pure read.
  */
-export async function brokenConnectors(at = new Date()): Promise<BrokenConnector[]> {
+export async function connectorProblems(at = new Date()): Promise<BrokenConnector[]> {
   const out: BrokenConnector[] = [];
   for (const c of await all<ConnectorRow>("SELECT * FROM connectors WHERE status = 'expired'")) {
     out.push({ orgId: c.org_id, connectorId: c.id, kind: c.kind, linkId: null, workspaceId: null, reason: "expired", problem: c.last_error ?? expiredMessage(c.kind), since: c.last_error_at ?? c.updated_at });

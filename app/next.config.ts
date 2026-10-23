@@ -34,7 +34,8 @@ const TEAMS_FRAME_ANCESTORS = [
   "https://teams.microsoft.com", "https://*.teams.microsoft.com", "https://teams.cloud.microsoft", "https://*.cloud.microsoft",
   "https://*.office.com", "https://outlook.office.com", "https://outlook.office365.com", "https://*.office365.com", "https://*.skype.com",
 ];
-const tabCsp = [...directives, `frame-ancestors ${TEAMS_FRAME_ANCESTORS.join(" ")}`].join("; ");
+// The Teams JavaScript SDK also downloads Microsoft's list of Teams addresses from its CDN.
+const tabCsp = [...directives.map((d) => (d.startsWith("connect-src") ? `${d} https://res.cdn.office.net` : d)), `frame-ancestors ${TEAMS_FRAME_ANCESTORS.join(" ")}`].join("; ");
 
 /**
  * Security headers on every response (pages and API; security review Oct 2026, docs/HOSTING.md → Security):

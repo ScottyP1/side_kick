@@ -64,7 +64,8 @@ export default function TeamsTab() {
     (async () => {
       const { app, authentication } = await import("@microsoft/teams-js");
       const timer = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 4000));
-      if ((await Promise.race([app.initialize().then(() => "ok" as const), timer])) !== "ok") {
+      // Outside Teams the SDK either rejects at once ("No Parent window found") or never answers.
+      if ((await Promise.race([app.initialize().then(() => "ok" as const, () => "outside" as const), timer])) !== "ok") {
         if (!cancelled) setPhase("outside");
         return;
       }

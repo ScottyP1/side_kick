@@ -53,6 +53,8 @@ team knows and doesn't, inside guardrails each company sets.
 
 3. Open http://localhost:3000 for the public website, then **Sign in**. On a fresh install, sign-in asks you to set up your organization first; you become the Org Owner. Once signed in, `/` takes you straight to your portal home (`/home`).
 
+**Demo world:** `npm --prefix app run seed:demo` builds a big made-up test world (a consulting firm with ~115 people in every role, ten client groups full of documents, meetings and Teams chats, three more client organizations) in a local throwaway copy; start it with the `sidekick-demo` preview on port 3330. Logins per role are in the git-ignored `app/.demo-logins.md`. See [docs/DEMO.md](docs/DEMO.md).
+
 ## Tests
 
 ```bash

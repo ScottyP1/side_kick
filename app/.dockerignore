@@ -3,6 +3,9 @@ data
 .playground-data
 .preview-data
 .e2e-data-*
+# the local demo world (docs/DEMO.md): its data and the private logins file with test passwords
+.demo-data
+.demo-logins.*
 .env*
 !.env.example
 .next*

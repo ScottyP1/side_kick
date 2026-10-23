@@ -57,3 +57,12 @@ next-env.d.ts
 
 # answer accuracy check (scripts/answer-eval.mjs): its throwaway build folder
 /.next-eval/
+
+# demo world (scripts/seed-demo.mjs, docs/DEMO.md): its data folder, build folders and the private logins (passwords)
+/.demo-data/
+/.next-demo/
+/.next-demo-seed/
+/.demo-logins.json
+/.demo-logins.md
+# a copy of the logins guide, wherever it is put
+*demo-logins (LOCAL ONLY)*

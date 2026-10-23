@@ -17,6 +17,8 @@ operations review is in `docs/security/`.
 | Microsoft 365 trial ends Nov 14, 2026 | [Trial end](#microsoft-365-trial-ending-nov-14-2026) |
 | Locked out of the portal or the Owner Console | [Locked out](#locked-out-of-the-portal-or-the-owner-console) |
 | A merge didn't deploy ("Deploy skipped") | [Deploy skipped](#deploy-skipped) |
+| Set up (or renew) the Azure DevOps / Jira connector apps | [Connector apps](#connector-apps-azure-devops-and-jira) |
+| A customer's connector shows "Sign-in expired" or a problem | [Connector problems](#connector-problems) |
 | Reminders/watchers stopped, Owner Console → Job queue shows a backlog, stuck or dead jobs | [Job queue stuck](#job-queue-stuck) |
 | Setting up automatic meeting notes and the Teams tab, or they stopped working | [Automatic meeting notes](#automatic-meeting-notes-microsoft-setup) |
 
@@ -86,6 +88,8 @@ picks it up within about 30 minutes; restart (step at the end) to use it straigh
 | `azure-search-api-key` | `az search admin-key renew -g sidekick-rg --service-name sidekick-labs-search --key-kind secondary` | Switch the app to the secondary key, then renew the primary (no downtime). |
 | `azure-openai-api-key` | `az cognitiveservices account keys regenerate -g sidekick-rg -n codyscott-9578-resource --key-name key2` | Same two-key swap as Search. |
 | `encryption-key` (`SIDEKICK_ENCRYPTION_KEY`) | (exists since Oct 21, 2026) | **Never rotate casually**: authenticator-app secrets encrypted with the old key stop opening, so everyone with an authenticator app must remove and re-add it (passkeys and backup codes keep working). Rotate only if it leaked. |
+| `ado-client-secret` (`ADO_CLIENT_SECRET`) | Entra admin center → App registrations → **Sidekick Connectors (Azure DevOps)** → Certificates & secrets | Note its expiry date here when you create it. New secret, set it, restart, connect once from a test org, delete the old one. Customers' connections keep working (their sign-ins aren't tied to the app secret). |
+| `jira-client-secret` (`JIRA_CLIENT_SECRET`) | developer.atlassian.com → My apps → **Sidekick** → Settings → Rotate secret | Atlassian keeps the old secret working for a short overlap; set the new one and restart within it. |
 | `database-url` | `az postgres flexible-server update -g sidekick-rg -n sidekick-labs-db --admin-password "<new>"` | Then rebuild the connection string with the new password. |
 
 Set a new value without it showing on screen. Either type it at a hidden prompt:
@@ -342,3 +346,79 @@ says which case it was:
 **Deploy by hand:** GitHub → Actions → Deploy → **Run workflow** (branch `main`). Or from the Mac:
 `./infra/azure/deploy.sh`. Both deploy the current `main`.
 
+## Connector apps (Azure DevOps and Jira)
+
+Sidekick's connectors (docs/guide/connect-devops-jira.md, code in `app/src/lib/connectors.ts`) need one app
+registration per tool. **Only Cody creates these** (with his own personal accounts, never a client's), and the
+secrets go straight into Key Vault; they are never pasted into chat, a ticket or the repo. Until an app exists, its
+tile says "Not set up yet" and nothing else changes. Use the live address for `<site>` (SIDEKICK_PUBLIC_URL).
+
+**Azure DevOps (Microsoft Entra ID; Azure DevOps' own OAuth apps are deprecated)**
+1. entra.microsoft.com (the Sidekick Labs tenant) → **App registrations → New registration**.
+   - Name: `Sidekick Connectors (Azure DevOps)`.
+   - Supported account types: **Accounts in any organizational directory (Multitenant)**.
+   - Redirect URI: **Web**, `https://<site>/api/connectors/callback`. After creating, add a second Web redirect
+     URI `http://localhost:3000/api/connectors/callback` for the laptop.
+2. **API permissions → Add a permission → APIs my organization uses →** search **Azure DevOps**
+   (app id `499b84ac-1321-427f-aa17-267ca6975798`) → **Delegated** → tick **vso.work** ("Work items (read)") → Add.
+   Nothing else is needed (`offline_access` for the refresh token is asked for at sign-in). Optionally **Grant admin
+   consent** for the Sidekick Labs tenant so your own test sign-in doesn't ask.
+3. **Certificates & secrets → New client secret** (24 months). Copy the **Value** once and store it at the hidden
+   prompt (it never shows on screen):
+   ```bash
+   read -rs "V?ado-client-secret: " && az keyvault secret set --vault-name sidekick-kv -n ado-client-secret --value "$V" -o none; unset V
+   ```
+   Write the expiry date into the Rotate secrets table above.
+4. Point the app at it (the application (client) id is on the app's Overview page; it isn't a secret):
+   ```bash
+   az containerapp secret set -g sidekick-rg -n sidekick-app --secrets ado-client-secret=keyvaultref:https://sidekick-kv.vault.azure.net/secrets/ado-client-secret,identityref:system
+   az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars ADO_CLIENT_ID=<application id> ADO_CLIENT_SECRET=secretref:ado-client-secret -o none
+   ```
+   (Deploys keep these: they only change the image and the release settings.) For the laptop, put the same two
+   lines in `app/.env.local` (`ADO_CLIENT_ID=…`, `ADO_CLIENT_SECRET=…`).
+5. Check: make a free Azure DevOps organization with your personal Microsoft work account (dev.azure.com, connected
+   to the Sidekick Labs tenant: Organization settings → Microsoft Entra), add a project with two made-up work items,
+   then on the live portal **Connectors → Azure DevOps**, type its name, Connect, link the project to a test group
+   and ask about one item. A customer's Azure DevOps organization must be connected to their own Entra tenant, and
+   their IT may need to approve the app once (admin consent).
+
+**Jira Cloud (Atlassian OAuth 2.0, "3LO")**
+1. developer.atlassian.com → **Console → My apps → Create → OAuth 2.0 integration**. Name: `Sidekick` (the working
+   name), with your personal Atlassian account.
+2. **Permissions → Jira API → Add → Configure → Edit scopes (Classic)**: tick **read:jira-work** and
+   **read:jira-user**. Nothing that writes.
+3. **Authorization → OAuth 2.0 (3LO) → Configure**: callback URL `https://<site>/api/connectors/callback`. For the
+   laptop, make a second app ("Sidekick dev") with `http://localhost:3000/api/connectors/callback`.
+4. **Distribution → Edit → Sharing** (otherwise only you can connect): vendor "Sidekick (working name)", privacy
+   policy `https://<site>/privacy`, and answer the personal-data questions: the app **stores personal data**
+   (names of assignees and comment authors, as part of work items) and supports Atlassian's personal data
+   reporting by deleting everything on disconnect. Save.
+5. **Settings**: copy the **Client ID** (not secret) and the **Secret** (store it at the hidden prompt):
+   ```bash
+   read -rs "V?jira-client-secret: " && az keyvault secret set --vault-name sidekick-kv -n jira-client-secret --value "$V" -o none; unset V
+   az containerapp secret set -g sidekick-rg -n sidekick-app --secrets jira-client-secret=keyvaultref:https://sidekick-kv.vault.azure.net/secrets/jira-client-secret,identityref:system
+   az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars JIRA_CLIENT_ID=<client id> JIRA_CLIENT_SECRET=secretref:jira-client-secret -o none
+   ```
+6. Check: a free Jira Cloud site on your personal Atlassian account with one made-up project, then Connect on the
+   live Connectors page, link the project, ask about an issue.
+
+Costs: none from Microsoft or Atlassian for these apps. Each sync is a few API calls per linked project every 15
+minutes (no AI calls; items only cost AI when someone asks).
+
+## Connector problems
+
+What the customer sees on **Connectors** and what to do (an Org Owner/Admin of theirs does the fixing; you only
+help):
+- **Sign-in expired**: their refresh was refused (the person who connected left, their password/MFA changed in a
+  way that revoked tokens, an admin removed the app, or 90 days without any sync). They press **Reconnect** and
+  sign in again. Nothing was deleted.
+- **"refused access to the project …"**: the connected account lost access to that project. Reconnect with an
+  account that can open it, or unlink the project.
+- **"couldn't find …"**: the project or organization was renamed or deleted. Unlink it and link the new one.
+- **"busy or unavailable"** or **"couldn't reach"**: the tool was down or rate limiting; it retries every 15
+  minutes by itself. If every customer shows it, check the tool's status page.
+- **Every connection of one tool fails right after a change on our side**: the app secret expired or was rotated
+  wrongly ("didn't confirm the sign-in" on connect). Rotate it (Rotate secrets above) and restart.
+- Customers also get a **Needs attention** finding ("Connector not working") from the broken-connector watcher. To
+  see every broken connector across clients: `connectorProblems()` in `app/src/lib/connectors.ts`; the syncs run as
+  `connector.sync` jobs (Owner Console → Job queue).

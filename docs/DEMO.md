@@ -33,6 +33,14 @@ service blanked. Sign in at `/login` (portal) or `/owner/login` (Owner Console) 
 operator, and the Org Owner of a second client), each with things to try. Stop the demo copy before seeding again
 (the seed refuses while port 3330 is in use).
 
+**Connectors**: the launch config also starts a fake Azure DevOps and Jira (`app/scripts/fake-tools.mjs`, made-up
+Northwind projects) on port 3331, so Connectors shows both tools connected: the "Wave 2 Cutover" board and the Jira
+project STORE feed the Contoso group ("What's blocking the payment gateway cutover?"), "Data Platform" feeds Litware
+and shows a problem ("refused access", also a "Connector not working" finding for Litware's managers): press **Sync now**
+to fix it.
+**Sync now**, Reconnect and the work item links work against the fake; the demo copy and the seed share a made-up
+encryption key so the sealed sign-ins open. `--tools-port <n>` moves the fake when seeding.
+
 With fake Claude, new questions get short "Test answer…" replies; the seeded history, notes and maps are realistic.
 Start the copy without `SIDEKICK_FAKE_CLAUDE=1` to use the real Claude (costs money). Importing a new meeting tries to
 post notes to the simulated Teams chats, which aren't running: a harmless "Teams notes post failed" line in the terminal.

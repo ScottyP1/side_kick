@@ -42,6 +42,7 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | Ask Sidekick questions (portal and Teams), with follow-ups | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Rate answers 👍/👎 (portal and Teams) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See the firm library (the organization's policies and standards) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See connected tools (Azure DevOps, Jira), their health and the projects feeding their groups | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Inside their workspaces: change** | | | | | | |
 | Upload, rename or delete documents | ✓ | ✓ | ✓ | | ✓ | |
 | Add a past or outside meeting, reprocess or delete meetings | ✓ | ✓ | ✓ | | ✓ | |
@@ -69,6 +70,8 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See roll-offs and download deletion certificates | ✓ | ✓ | | | | |
 | Add, change or delete firm library documents | ✓ | ✓ | | | | |
 | Turn automatic notes after Teams meetings on or off, check now, try a skipped meeting again | ✓ | ✓ | | | | |
+| Connect, reconnect or disconnect Azure DevOps or Jira (read-only; within the plan's connectors) | ✓ | ✓ | | | | |
+| Link a connected tool's project to their groups, sync it now or unlink it | ✓ | ✓ | ✓ | | | |
 | See answer quality (👍/👎 and "I don't know" counts, no text) | ✓ | ✓ | | | | |
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | | |

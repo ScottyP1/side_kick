@@ -10,6 +10,8 @@
  * Who: Microsoft Graph, without a session (no cookies, no Origin, so the cross-site check passes). Nothing is ever
  * returned about the organization; unknown or forged notifications change nothing.
  */
+// Registers the job kinds this route enqueues (meetings.fetch, meetings.poll.org, meetings.subscription).
+import "@/lib/job-kinds";
 import { handle } from "@/lib/api";
 import { handleNotifications, validationResponse } from "@/lib/meetings-graph";
 import { spanAttrs } from "@/lib/trace";

@@ -11,6 +11,8 @@
  *   of that group; `ws` must be one of the meeting's candidate groups).
  *   POST `{ action: "retry", id }` (Org Owners/Admins): try a skipped or failed meeting again.
  */
+// Registers the job kinds this route enqueues (meetings.fetch, meetings.poll.org, meetings.subscription).
+import "@/lib/job-kinds";
 import { handle, readJson } from "@/lib/api";
 import { HttpError, isAdmin, isLead, requireManage, requireUser, workspaceIdsFor } from "@/lib/auth";
 import { autoNotesStatus, requestCheck, retryCapture, setAutoNotes } from "@/lib/meetings-graph";

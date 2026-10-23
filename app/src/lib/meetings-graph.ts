@@ -704,8 +704,9 @@ export async function retryCapture(user: User, id: unknown, workspaceId: string 
   const row = typeof id === "string" ? await get<GraphMeeting>("SELECT * FROM graph_meetings WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
   if (!row || !row.title) throw new HttpError(404, "Meeting not found.");
   if (workspaceId) {
-    if (row.status !== "waiting" || !(JSON.parse(row.candidates ?? "[]") as string[]).includes(workspaceId)) throw new HttpError(400, "Pick one of the groups shown for this meeting.");
-    if (!(await setStatus(row.id, ["waiting"], "queued", { workspace_id: workspaceId, candidates: null, reason: null }))) throw new HttpError(409, "Someone already picked a group for this meeting.");
+    if (!(JSON.parse(row.candidates ?? "[]") as string[]).includes(workspaceId)) throw new HttpError(400, "Pick one of the groups shown for this meeting.");
+    // The candidates stay on the row, so a second pick is told it was already picked.
+    if (!(await setStatus(row.id, ["waiting"], "queued", { workspace_id: workspaceId, reason: null }))) throw new HttpError(409, "Someone already picked a group for this meeting.");
     await audit(user, `Picked the group for the Teams meeting “${row.title}”`, "Data", workspaceId);
   } else {
     if (row.status !== "skipped" && row.status !== "failed") throw new HttpError(400, "Only a skipped or failed meeting can be tried again.");

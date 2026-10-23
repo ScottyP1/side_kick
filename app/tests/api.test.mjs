@@ -4375,12 +4375,12 @@ test(`[${ENGINE}] connectors: Jira connects (rotating refresh tokens), pages thr
   const calls = tools.counts.api.jira;
   await jobTick({ sweep: true, kinds: ["connectors.schedule", "connector.sync"] });
   assert.equal(tools.counts.api.jira, calls, "the scheduler skips an expired connector");
-  assert.equal(await dbValue("SELECT status FROM connector_health WHERE connector = 'jira' AND workspace_id = ''"), "broken", "reported organization-wide for the watcher");
+  assert.equal(await dbValue("SELECT status FROM connector_health WHERE connector = 'jira' AND workspace_id = '' AND org_id = (SELECT id FROM orgs WHERE name = 'Test Org')"), "broken", "reported organization-wide for the watcher");
   // Reconnecting brings it back and the next sync works.
   assert.equal((await connectTool(admin, "jira")).to.search, "?connected=jira");
   assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
   assert.equal((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "jira").status, "ok");
-  assert.equal(await dbValue("SELECT status FROM connector_health WHERE connector = 'jira' AND workspace_id = ''"), "ok", "reconnecting resolves it");
+  assert.equal(await dbValue("SELECT status FROM connector_health WHERE connector = 'jira' AND workspace_id = '' AND org_id = (SELECT id FROM orgs WHERE name = 'Test Org')"), "ok", "reconnecting resolves it");
   s.jira = jira.id;
   tools.state.jiraProjectPage = 50;
   tools.state.jiraIssuePage = 50;

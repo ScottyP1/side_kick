@@ -239,7 +239,7 @@ const command = (conv, from, verb, ...people) =>
   activity(TA, conv, { type: "message", from, text: `<at>Sidekick</at> ${verb} ${people.map((p) => `<at>${ROSTER[p]?.name}</at>`).join(" ")}`, entities: [atSidekick, ...people.map(at)] });
 const TICK_SECRET = crypto.randomBytes(24).toString("hex");
 /** Runs the reminder timer's heartbeat once (it also makes Sidekick leave stale chats). */
-const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET } }).then((r) => r.json());
+const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET, "content-type": "application/json" }, body: JSON.stringify({ sweep: true }) }).then((r) => r.json());
 /** Sidekick is added to a group chat in tenant A by `from` (Teams also records the installation for Graph). */
 const install = (conv, from) => {
   INSTALLED.set(conv, [{ id: `inst-${conv}`, teamsApp: { id: "catalog-id", externalId: TEAMS_APP_ID } }]);

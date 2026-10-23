@@ -18,7 +18,7 @@ import { BRAND } from "@/lib/brand";
 type Overview = {
   days: number;
   guardrails: { total: number; blocked: number; rules: { rule: string; label: string; total: number }[] };
-  kpis: { requests: number; failed: number; refused: number; errorRate: number; p50: number; p95: number; teams: number; portal: number; people: number; aiCalls: number; aiCost: number; aiFailed: number; questions: number; answered: number };
+  kpis: { requests: number; failed: number; refused: number; errorRate: number; p50: number; p95: number; teams: number; portal: number; background: number; people: number; aiCalls: number; aiCost: number; aiFailed: number; questions: number; answered: number };
   series: { key: string; requests: number; errors: number }[];
   operations: { name: string; count: number; errors: number; p50: number; p95: number }[];
 };
@@ -35,7 +35,7 @@ const ms = (n: number) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFi
 const pctText = (x: number) => `${(x * 100).toFixed(x > 0 && x < 0.01 ? 1 : 0)}%`;
 
 /** Plain-language names and colors (CSS classes k-*) for each kind of step. */
-const KINDS: Record<string, string> = { request: "Request", search: "Search", rank: "Re-ranking", firm: "Firm library", feedback: "Answer feedback", rolloff: "Roll-off", ai: "AI", embed: "Embeddings", teams: "Teams", index: "Indexing", file: "Reading a file", guard: "Guardrails", remind: "Reminders", billing: "Sign-up & billing", microsoft: "Microsoft 365", auth: "Sign-in security" };
+const KINDS: Record<string, string> = { request: "Request", search: "Search", rank: "Re-ranking", firm: "Firm library", feedback: "Answer feedback", rolloff: "Roll-off", ai: "AI", embed: "Embeddings", teams: "Teams", index: "Indexing", file: "Reading a file", guard: "Guardrails", remind: "Reminders", billing: "Sign-up & billing", microsoft: "Microsoft 365", auth: "Sign-in security", job: "Background job", watch: "Watchers" };
 
 export default function ActivityPage() {
   const [tab, setTab] = useState<Tab>("Overview");
@@ -88,7 +88,7 @@ function OverviewTab() {
         ))}
       </div>
       <div className="grid g3">
-        <Kpi label="Requests" value={k.requests.toLocaleString()} sub={`${k.portal} portal · ${k.teams} Teams`} />
+        <Kpi label="Requests" value={k.requests.toLocaleString()} sub={`${k.portal} portal · ${k.teams} Teams${k.background ? ` · ${k.background} background` : ""}`} />
         <Kpi label="Failures" value={pctText(k.errorRate)} sub={`${k.failed} failed · ${k.refused} refused (not allowed / not found)`} tone={k.failed ? "bad" : undefined} />
         <Kpi label="Response time" value={ms(k.p50)} sub={`typical · slowest 5% take ${ms(k.p95)} or more`} />
         <Kpi label="AI work" value={`${k.aiCalls} calls`} sub={`${usd(k.aiCost)}${k.aiFailed ? ` · ${k.aiFailed} failed` : ""}`} tone={k.aiFailed ? "bad" : undefined} />
@@ -214,9 +214,10 @@ function TracesTab() {
       <div className="panel-h" style={{ gap: 8 }}>
         <input className="input" style={{ maxWidth: 260 }} placeholder="Search operation, person or reference code" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search traces" />
         <select className="input" style={{ width: "auto" }} value={channel} onChange={(e) => setChannel(e.target.value)} aria-label="Channel">
-          <option value="">Portal and Teams</option>
+          <option value="">Everything</option>
           <option value="portal">Portal only</option>
           <option value="teams">Teams only</option>
+          <option value="system">Background only</option>
         </select>
         <select className="input" style={{ width: "auto" }} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
           <option value="">Any result</option>
@@ -353,7 +354,7 @@ function MessagesTab() {
       <div className="panel-h">
         <h2>Questions asked</h2>
         <select className="input" style={{ width: "auto" }} value={channel} onChange={(e) => setChannel(e.target.value)} aria-label="Channel">
-          <option value="">Portal and Teams</option>
+          <option value="">Everything</option>
           <option value="portal">Portal only</option>
           <option value="teams">Teams only</option>
         </select>

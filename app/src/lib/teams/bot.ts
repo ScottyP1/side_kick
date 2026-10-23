@@ -50,7 +50,7 @@ import { FeatureOffError } from "../owner";
 import { ask, endAskConversation } from "../sidekick";
 import { CHAT_FOLLOWUP_MINUTES } from "../conversations";
 import { recordFeedback } from "../feedback";
-import { span, traceFailed, traceScope, withTrace } from "../trace";
+import { failureReason, span, traceFailed, traceScope, withTrace } from "../trace";
 import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, noticeCard, notSetUpCard, REMIND_PREFIX, unknownTenantCard, VERBS, type ActionItemInput } from "./cards";
 import { leaveChat, mayAddSidekick, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
@@ -173,6 +173,11 @@ export type TeamsConversation = {
   /** Set while Sidekick is leaving this chat ("installer", "stale", "removed"); it's ignored meanwhile. */
   leaving?: string | null;
   leave_tried_at?: string | null;
+  /** Someone removed Sidekick from this chat in Teams (when, and their Teams name); cleared when it's added back. */
+  removed_at?: string | null;
+  removed_by?: string | null;
+  /** The last time a post from Sidekick reached this chat (the failed-posts watcher compares failures with it). */
+  last_post_ok_at?: string | null;
 };
 
 /** The parts of an incoming Teams activity Sidekick uses. */
@@ -417,6 +422,8 @@ function registerHandlers(app: App) {
     const gate = await tenantGate(activity);
     if (!gate.ok) return void (await send(signupCard()));
     const conv = await touchConversation(activity, { name: activity.from.name ?? "Someone in Teams", oid: activity.from.aadObjectId ?? null });
+    // Added back after someone removed it: the chat works again (and the watcher's finding resolves).
+    if (conv.removed_at) await run("UPDATE teams_conversations SET removed_at = NULL, removed_by = NULL WHERE id = ?", conv.id);
     if (conv.workspace_id) return void (await send(helpCard(await workspaceName(conv))));
     // Only a Team Lead or admin of the tenant's org may add Sidekick to a chat; anyone else, Sidekick leaves.
     if (usesPicker(conv, gate.org) && !(await mayAddSidekick(gate.org!.id, activity.from.aadObjectId))) {
@@ -425,6 +432,19 @@ function registerHandlers(app: App) {
       return;
     }
     await send(await unlinkedCard(conv, gate.org));
+  });
+
+  // Someone removed Sidekick from a chat (or uninstalled it from a team) in Teams. A linked chat keeps its link, marked
+  // removed, so the group's managers see it (watcher "removed from a chat") and can add Sidekick back or unlink it;
+  // nothing is posted there meanwhile. A chat that wasn't assigned to a group is simply forgotten. When Sidekick
+  // removed itself (`leaving`), leaveChat already handles the record.
+  app.on("install.remove", async ({ activity }) => {
+    const conv = await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", baseConversationId(activity.conversation.id));
+    if (!conv || conv.leaving) return;
+    if (!conv.workspace_id) return void (await run("DELETE FROM teams_conversations WHERE id = ?", conv.id));
+    traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
+    await run("UPDATE teams_conversations SET removed_at = ?, removed_by = ? WHERE id = ?", now(), (activity.from.name ?? "Someone in Teams").slice(0, 120), conv.id);
+    await audit({ org_id: conv.org_id!, name: activity.from.name ?? "Someone in Teams" }, `Removed ${BRAND.name} from Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}” in Teams`, "Access", conv.workspace_id);
   });
 
   // A channel was renamed: Teams says so to the team's bot, with the channel's id and new name.
@@ -514,7 +534,13 @@ function registerHandlers(app: App) {
             newQuestion: Boolean(fresh),
           });
           const card = answerCard(question, result, (await workspaceName(conv)) ?? "Workspace");
-          await span("teams", "Send the answer card to Teams", () => reply(card));
+          await span("teams", "Send the answer card to Teams", () => reply(card)).then(
+            () => notePostOk(conv.id),
+            async (e) => {
+              await notePostFailed(conv.id, "an answer", e);
+              throw e;
+            },
+          );
         } catch (e) {
           console.error("Teams ask failed", e);
           // A feature paused or turned off by the Sidekick team is a refusal, not a failure of Sidekick.
@@ -594,10 +620,39 @@ const cardMessage = (c: IAdaptiveCard): IMessageActivityInput =>
  * Sends a card into a Teams conversation outside of a reply (a proactive message). Returns the new message
  * id. Pass `conversationId` to post into a channel thread instead of starting a new post.
  */
-export async function postCard(conv: Pick<TeamsConversation, "id" | "service_url">, c: IAdaptiveCard, conversationId = conv.id): Promise<string | undefined> {
+export async function postCard(conv: Pick<TeamsConversation, "id" | "service_url">, c: IAdaptiveCard, conversationId = conv.id, what = "a card"): Promise<string | undefined> {
   if (PLAYGROUND_MODE && !isLocalUrl(conv.service_url)) throw new Error("Playground mode only posts to local conversations.");
   const { app } = await teams();
-  return span("teams", "Post a card to Teams", async () => (await app.api.clone({ serviceUrl: conv.service_url }).conversations.createActivity(conversationId, cardMessage(c))).id);
+  try {
+    const id = await span("teams", "Post a card to Teams", async () => (await app.api.clone({ serviceUrl: conv.service_url }).conversations.createActivity(conversationId, cardMessage(c))).id);
+    await notePostOk(conv.id);
+    return id;
+  } catch (e) {
+    await notePostFailed(conv.id, what, e);
+    throw e;
+  }
+}
+
+/** Records that a post reached this chat (clears the failed-posts watcher's finding on its next run). Never throws. */
+async function notePostOk(conversationId: string) {
+  await run("UPDATE teams_conversations SET last_post_ok_at = ? WHERE id = ?", now(), baseConversationId(conversationId)).catch((e) => console.error("Couldn't record the Teams post", e));
+}
+
+/**
+ * Records a Teams post that failed (`teams_post_failures`: which chat, what, Microsoft's error without any message
+ * text), for the failed-posts watcher (lib/watchers.ts). Only chats that belong to an organization. Never throws.
+ */
+export async function notePostFailed(conversationId: string, what: string, e: unknown) {
+  try {
+    const conv = await get<{ id: string; org_id: string | null; workspace_id: string | null }>("SELECT id, org_id, workspace_id FROM teams_conversations WHERE id = ?", baseConversationId(conversationId));
+    if (!conv?.org_id) return;
+    await run(
+      "INSERT INTO teams_post_failures (id, org_id, workspace_id, conversation_id, what, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      crypto.randomUUID(), conv.org_id, conv.workspace_id, conv.id, what.slice(0, 60), failureReason(e), now(),
+    );
+  } catch (err) {
+    console.error("Couldn't record the failed Teams post", err);
+  }
 }
 
 // Cap so one long meeting can't flood a channel; the full list is always in the portal.
@@ -623,7 +678,7 @@ export async function postMeetingNotes(orgId: string, meetingId: string): Promis
  */
 export async function meetingHasLinkedChat(orgId: string, meetingId: string): Promise<boolean> {
   return Boolean(await get(
-    "SELECT c.id FROM teams_conversations c JOIN meetings m ON m.workspace_id = c.workspace_id WHERE m.id = ? AND m.org_id = ? AND c.org_id = ? LIMIT 1",
+    "SELECT c.id FROM teams_conversations c JOIN meetings m ON m.workspace_id = c.workspace_id WHERE m.id = ? AND m.org_id = ? AND c.org_id = ? AND c.removed_at IS NULL LIMIT 1",
     meetingId, orgId, orgId,
   ));
 }
@@ -637,7 +692,7 @@ async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<
   traceScope({ workspaceId: m.workspace_id });
   // Notes from an internal-only meeting never go to a conversation that has client guests in it.
   const convs = await all<TeamsConversation>(
-    "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND (guests = 0 OR ? = 1)",
+    "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND removed_at IS NULL AND (guests = 0 OR ? = 1)",
     orgId, m.workspace_id, m.external_guests,
   );
   // Only chats an admin left (or set) to receive meeting notes: a workspace can keep them to one notes chat.
@@ -660,10 +715,10 @@ async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<
   let posted = 0;
   for (const conv of targets) {
     try {
-      const postId = await postCard(conv, notes);
+      const postId = await postCard(conv, notes, conv.id, "meeting notes");
       // In a channel the action items go in the notes post's thread; in chats they follow it.
       const target = conv.kind === "channel" && postId ? toThreadedConversationId(conv.id, postId) : conv.id;
-      for (const a of actions.slice(0, MAX_ACTION_CARDS)) await postCard(conv, actionItemCard(a), target);
+      for (const a of actions.slice(0, MAX_ACTION_CARDS)) await postCard(conv, actionItemCard(a), target, "an action item");
       posted++;
     } catch (e) {
       console.error(`Couldn't post meeting notes to Teams conversation ${conv.id}`, e);

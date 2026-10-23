@@ -234,25 +234,30 @@ created). Restore steps: `docs/RUNBOOKS.md` → Restore the database. Not yet do
 The cloud database started empty. Org "Test Suite" (Org Owner Cody, cody.l.scott@outlook.com) with the
 made-up Contoso workspace from `samples/` (9 documents, 8 meetings). Local data on the Mac is separate.
 
-## Scheduled work: reminders (October 17, 2026)
+## Scheduled work: the job queue (October 23, 2026)
 
-Daily Teams reminders need something to run on a clock. For now that's an **in-app timer**: when the
-server starts, `app/src/instrumentation.ts` calls `POST /api/reminders/tick` on itself every 5 minutes
-with a random per-start token. That fits how the app is hosted: exactly **one always-on copy**
-(min = max = 1 replica), so the timer is always running and there is no extra Azure resource or cost.
+Everything that runs on a clock (daily Teams reminders, leaving unassigned chats, roll-off deletions, the
+watchers, clean-up) is a **job** in the database-backed job queue (`app/src/lib/jobs.ts`, kinds in
+`app/src/lib/job-kinds.ts`). Something has to "beat" the queue: when the server starts,
+`app/src/instrumentation.ts` calls `POST /api/jobs/tick` on itself every **30 seconds** with a random
+per-start token. Each beat enqueues the recurring jobs whose slot has come (once per slot, whatever the number
+of copies) and runs due jobs. No extra Azure resource or cost.
 
-Safe with more copies: each reminder claims a unique row (`reminder_runs`, one per chat and day) before
-it's built, so two copies would never post twice; they'd only both check.
+Safe with several copies: every copy beats, and each job is claimed with a lease (Postgres
+`FOR UPDATE SKIP LOCKED` + a compare-and-set update), so it runs once. Failed jobs retry with backoff; after 5
+attempts they're "dead" and listed in **Owner Console → Job queue** (Retry / Cancel). Stuck queue: see
+`docs/RUNBOOKS.md` → Job queue stuck.
 
-When to switch to an **Azure Container Apps job** (a scheduled container, cron `*/5 * * * *`): if the app
-ever scales to zero, runs several copies, or the timer should be visible and retryable in Azure. Then:
+When to switch to an **Azure Container Apps job** (a scheduled container, cron `* * * * *`): only if the app
+ever scales to zero (nothing would beat). Then:
 1. Set `SIDEKICK_TICK_SECRET` (a long random value, as a Container App secret) on the app, and
-   `SIDEKICK_SCHEDULER=off` so the in-app timer stops.
-2. Create the job in `sidekick-env` running `curl -fsS -X POST -H "x-sidekick-tick: $SECRET" https://<app>/api/reminders/tick`
-   with the same secret. Cost: a few seconds of compute every 5 minutes, well inside the free grant.
+   `SIDEKICK_SCHEDULER=off` so the in-app heartbeat stops.
+2. Create the job in `sidekick-env` running `curl -fsS -X POST -H "x-sidekick-tick: $SECRET" https://<app>/api/jobs/tick`
+   with the same secret. (`/api/reminders/tick`, the old name, does the same.) Cost: a few seconds of compute a
+   minute, inside the free grant.
 
 Without the right header the route answers 404. Pausing **Reminders in Teams** in the Owner Console stops
-all reminders immediately.
+all reminders immediately; pausing **Watchers' AI checks** stops only the watchers' AI step.
 
 ## Self-service sign-up
 Off on every new deploy: `/signup` refuses with "Sign-up isn't open yet" until you open it, so nobody can

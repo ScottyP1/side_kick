@@ -28,9 +28,8 @@
  * guests only gets items whose every source is shareable (a meeting guests attended, a Shareable document,
  * a chat with guests). The filtering happens before Claude sees anything.
  *
- * Scheduling: `runDueReminders` is called every few minutes by the in-app timer (instrumentation.ts →
- * POST /api/reminders/tick). Each chat/slot is claimed with a unique row first, so a reminder is never
- * posted twice, even with two servers. See docs/HOSTING.md for why this is an in-app timer for now.
+ * Scheduling: `runDueReminders` runs every 5 minutes as the job queue's `reminders.daily` job (lib/job-kinds.ts).
+ * Each chat/slot is claimed with a unique row first, so a reminder is never posted twice, even with two servers.
  * Daily reminders are worded through Claude's Batch API (half price, nobody waits for them): a tick queues
  * them and sends one batch, and a later tick posts the cards once the batch has ended (usually minutes).
  * Reminders after a meeting, "Send now" and previews stay live calls.
@@ -499,7 +498,7 @@ async function postDigest(conv: TeamsConversation, runId: string, digest: Digest
   const ws = (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", conv.workspace_id, conv.org_id))?.name ?? "Workspace";
   await run("UPDATE reminder_runs SET json = ?, points = ? WHERE id = ?", JSON.stringify({ workspace: ws, ...digest }), digest.points.length, runId);
   try {
-    await postCard(conv, reminderCard({ runId, workspace: ws, intro: digest.intro, points: digest.points, portalUrl: `${PORTAL()}/memory` }));
+    await postCard(conv, reminderCard({ runId, workspace: ws, intro: digest.intro, points: digest.points, portalUrl: `${PORTAL()}/memory` }), conv.id, "a reminder");
   } catch (e) {
     console.error(`Couldn't post a reminder to Teams conversation ${conv.id}`, e);
     throw new HttpError(502, `Couldn't post the reminder in Teams. Check that ${BRAND.name} is still in that chat and that the Teams bot is set up.`);
@@ -551,7 +550,7 @@ export async function previewReminder(conv: TeamsConversation) {
 const linkedChats = (workspaceId?: string) =>
   all<TeamsConversation>(
     `SELECT t.* FROM teams_conversations t JOIN orgs o ON o.id = t.org_id
-      WHERE t.workspace_id IS NOT NULL AND o.status <> 'Suspended'${workspaceId ? " AND t.workspace_id = ?" : ""}`,
+      WHERE t.workspace_id IS NOT NULL AND t.removed_at IS NULL AND o.status <> 'Suspended'${workspaceId ? " AND t.workspace_id = ?" : ""}`,
     ...(workspaceId ? [workspaceId] : []),
   );
 

@@ -4,7 +4,8 @@
  * Markdown itself is a generated copy of docs/guide/ (lib/help-content.ts, from scripts/sync-help.mjs).
  *
  * Concepts
- * - **Public guide**: one of the guides copied into help-content.ts (concepts, admin, Teams, roles). Only
+ * - **Public guide**: one of the guides copied into help-content.ts (concepts, admin, Teams, roles, install as
+ *   an app). Only
  *   those exist here, looked up by name in a fixed map, so no address can reach any other file.
  * - **Links between guides**: `admin-guide.md#7-link-…` becomes `/docs/admin-guide#7-link-…`; links to
  *   anything else that isn't a public guide or a web address (developer docs like ../PROGRESS.md) keep their
@@ -26,6 +27,7 @@ const AUDIENCE: Record<string, string> = {
   "admin-guide": "Org Owners and Org Admins",
   "teams-guide": "Everyone in Teams",
   "roles-and-permissions": "Everyone",
+  "install-app": "Everyone",
 };
 
 /** Turns a guide's link into a help-center address, or null to show only its text (see the file header). */

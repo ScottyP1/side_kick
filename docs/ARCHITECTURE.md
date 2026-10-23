@@ -77,6 +77,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/reminder-rules.ts` | Plain rules for chat settings and reminder timing (defaults, validation, time zones, quiet days); no I/O, unit-tested |
 | `instrumentation.ts` | Starts the in-app timer that calls `POST /api/reminders/tick` every 5 minutes (off with `SIDEKICK_SCHEDULER=off`) |
 | `lib/site.ts` | The public website's map: `PUBLIC_PAGES` (titles, descriptions, sitemap order), header links, `PRIVATE_PATHS` (robots.txt), page metadata helpers (`pageMetadata`, `NOINDEX`), `siteUrl` from `SIDEKICK_PUBLIC_URL`. Pure |
+| `lib/pwa.ts` | **Installable web app**: start page (`/home`), scope (`/`, since portal pages share no folder), colors, icon folder, and the metadata that turns install on (`INSTALLABLE`: portal + sign-in layouts, iPhone tags) or off (`NOT_INSTALLABLE`: website and Owner Console layouts). No service worker, so nothing signed-in is cached on devices. Manifest in `app/manifest.ts`, hint in `components/install-app.tsx`, guide `docs/guide/install-app.md` |
 | `lib/help.ts`, `lib/help-search.ts` | The help center: the public guides by name (fixed list, never file paths), link rewriting, the search index and matching. Pure |
 | `lib/help-content.ts` | **Generated** copy of the public guides in `docs/guide/` (`npm --prefix app run help:sync`, `scripts/sync-help.mjs`; a test fails while it's stale). Needed because the Docker build only sees `app/` |
 | `lib/markdown.ts` | Small Markdown reader for the guides: blocks and inline nodes as data (no HTML strings), rendered by `components/markdown.tsx` |
@@ -94,6 +95,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `/features`, `/how-it-works`, `/security`, `/pricing`, `/faq`, `/support`, `/changelog`, `/privacy`, `/terms`, `/signup` | Public website pages (`app/(public)/*`), one header and footer (`components/public-shell.tsx`) | None |
 | `/docs`, `/docs/<guide>` | Help center: the public guides from `docs/guide/` (concepts, admin, Teams, roles) with search; any other name is a 404 | None |
 | `/robots.txt`, `/sitemap.xml` | Generated per request (`app/robots.ts`, `app/sitemap.ts`) from `lib/site.ts`; addresses from `SIDEKICK_PUBLIC_URL` | None |
+| `/manifest.webmanifest`, `/app-icons/*` | The installable app's manifest (`app/manifest.ts`, static) and icons (`public/app-icons/`, drawn by `scripts/app-icons.mjs`); public because browsers fetch them without cookies | None |
 | `/login`, `/setup` | Portal sign-in and first-run setup (`noindex`) | None |
 | `/checkout` | Pay for the plan (test mode) | Portal |
 | `/home` and every other portal page (`app/(app)/*`) | The client portal (`noindex`); home moved here from `/` so the website can own `/` | Portal |

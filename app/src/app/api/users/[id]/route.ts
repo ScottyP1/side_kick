@@ -7,11 +7,13 @@
  * *their* workspaces a Member or Viewer is in (their other workspaces stay as they are); changing roles
  * and removing people from the organization stay with admins. Nobody changes their own role or removes
  * themselves (so an Org Admin can't lock themselves out by accident; the Org Owner or another Org Admin
- * does it). Audited.
+ * does it). Making someone Team Lead needs a plan with Team Leads (Team and up; 402 `kind: "limit"`
+ * otherwise); people who are already Team Leads stay so after a downgrade. Audited.
  */
 import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, managedWorkspaceIds, requireUser, ROLES, type Role } from "@/lib/auth";
 import { all, get, run, tx } from "@/lib/db";
+import { assertFeature } from "@/lib/limits";
 import { clearSignInFailures } from "@/lib/login-limit";
 import { forgetSecondFactors } from "@/lib/mfa";
 
@@ -45,6 +47,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   if (body.role !== undefined) {
     if (target.id === admin.id && body.role !== target.role) throw new HttpError(403, "You can't change your own role. Ask the Org Owner or another Org Admin.");
     if (!ROLES.includes(body.role as Role) || body.role === "Org Owner") throw new HttpError(400, "Pick a valid role.");
+    if (body.role === "Team Lead" && target.role !== "Team Lead") await assertFeature(admin.org_id, "teamLeads");
     await run("UPDATE users SET role = ? WHERE id = ?", body.role, target.id);
     await audit(admin, `Changed ${target.name}'s role to ${body.role}`, "Access");
   }

@@ -13,7 +13,10 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { api, Icon, Pill, ToastProvider } from "./ui";
 import { AssistantDock } from "./assistant-dock";
 import { TwoStepPanel } from "./two-step";
+// Starts listening for the browser's "can install" event early, before the Help page shows the hint.
+import "./install-app";
 import { BRAND } from "@/lib/brand";
+import type { FeatureKey } from "@/lib/plans";
 
 export type Workspace = { id: string; name: string; code: string | null; color: string };
 export type Me = {
@@ -25,8 +28,11 @@ export type Me = {
   ai: { working: boolean };
   /** This month's AI credit (Org Owners, Org Admins, Billing Admins only; null for others). */
   credit?: { level: "unlimited" | "ok" | "warn" | "essentials"; pct: number } | null;
-  /** The plan's name (null = managed by the Sidekick team) and connectors included (0, 1, null = all). */
-  plan?: { name: string | null; connectors: number | null };
+  /**
+   * The plan's name (null = managed by the Sidekick team), connectors included (0, 1, null = all) and its
+   * plan features (lib/plans.ts `FeatureKey`; see `featureNote`).
+   */
+  plan?: { name: string | null; connectors: number | null; features?: FeatureKey[] };
   branding: { logo?: string | null; accent?: string | null };
   /** What the organization's plan allows now (lib/plans.ts accessFor) and the notice to show, if any. */
   billing?: { mode: "full" | "read_only"; notice: string | null };

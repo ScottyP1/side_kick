@@ -32,6 +32,7 @@ import { audit, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, managedWorksp
 import { get, newId, now, run } from "./db";
 import { entraConfig, entraConfigured, LOGIN_BASE, OIDC_COOKIE, redirectUri } from "./entra";
 import { tenantOfOrg } from "./tenants";
+import { assertFeature } from "./limits";
 import { span } from "./trace";
 import { BRAND } from "./brand";
 
@@ -197,7 +198,7 @@ export type ImportResult = { added: { id: string; name: string; email: string; c
  * workspaces; a Team Lead only Member/Viewer and only into workspaces they lead (at least one). Each person is
  * looked up again in Graph by id, so names and emails come from Microsoft, never from the browser. People who
  * are already in Sidekick are just added to the chosen workspaces (a Team Lead only for Members/Viewers).
- * Audited per person.
+ * Importing as Team Lead needs a plan with Team Leads (Team and up; 402 `kind: "limit"`). Audited per person.
  */
 export async function importPeople(actor: User, objectIds: string[], role: Role, workspaceIds: string[]): Promise<ImportResult> {
   if (role === "Org Owner") throw new HttpError(400, "Nobody can be added as Org Owner. Pick another role.");
@@ -207,6 +208,7 @@ export async function importPeople(actor: User, objectIds: string[], role: Role,
     if (!LEAD_ASSIGNABLE_ROLES.includes(role)) throw new HttpError(403, "Team Leads can add people as Member or Viewer. Ask an Org Admin for other roles.");
     if (!workspaces.length) throw new HttpError(400, "Pick at least one of your workspaces for these people.");
   }
+  if (role === "Team Lead") await assertFeature(actor.org_id, "teamLeads");
   const ids = [...new Set(objectIds)].slice(0, 50);
   if (!ids.length) throw new HttpError(400, "Pick at least one person to import.");
   const tenant = await requireDirectoryTenant(actor);

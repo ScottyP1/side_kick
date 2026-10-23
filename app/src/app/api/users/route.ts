@@ -6,7 +6,7 @@
  * (they see the people in those workspaces and add people to them as Member or Viewer). Audited.
  */
 import crypto from "node:crypto";
-import { assertCanAdd } from "@/lib/limits";
+import { assertCanAdd, assertFeature } from "@/lib/limits";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, createUser, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, managedWorkspaceIds, requireUser, ROLES, type Role, type User } from "@/lib/auth";
 import { all, get, run } from "@/lib/db";
@@ -48,7 +48,8 @@ export const GET = handle(async () => {
  * A Team Lead must pick at least one of their workspaces and a Member or Viewer role. If the email
  * already belongs to a Member or Viewer of the same organization, a Team Lead adds that person to the
  * chosen workspaces instead (returns `{ id, existing: true }`, no password).
- * A new person counts against the plan's people limit (402 with `kind: "limit"` when it's reached).
+ * A new person counts against the plan's people limit (402 with `kind: "limit"` when it's reached), and
+ * adding someone as Team Lead needs a plan with Team Leads (Team and up, same 402).
  */
 export const POST = handle(async (req: Request) => {
   const admin = await requireManager();
@@ -73,6 +74,7 @@ export const POST = handle(async (req: Request) => {
   }
   if (existing) throw new HttpError(409, "Someone with that email already has an account.");
   await assertCanAdd(admin.org_id, "seats");
+  if (role === "Team Lead") await assertFeature(admin.org_id, "teamLeads");
   const temp = crypto.randomBytes(9).toString("base64url");
   const id = await createUser(admin.org_id, name, email, role, temp, true);
   for (const ws of workspaces) await run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING", ws, id);

@@ -25,6 +25,9 @@
  *   count). `notify` is also the **email hook**: it does nothing else today; sending email belongs there.
  * - **Audit**: customers' ticket actions go to their organization's audit log; the team's actions go to the
  *   operator log and, for tickets with an organization, to that organization's audit log too.
+ * - **Priority support**: tickets from organizations whose plan includes it (Business and up, Enterprise and
+ *   managed clients; `prioritySupport` in lib/plans.ts) are marked in the inbox (`prioritySupport: true`) and
+ *   listed first, so the team answers them first.
  * - **Client context** (`ticketContext`): for the team, the client's plan and status and its recent errors by
  *   reference code (from its own traces, joined to the error log), plus any reference code quoted in the thread.
  *
@@ -39,7 +42,7 @@ import { all, get, newId, now, run, tx } from "./db";
 import { platformLog } from "./owner";
 import { takeHit } from "./rate-limit";
 import { getSubscription } from "./billing";
-import { orgPlan } from "./limits";
+import { hasFeature, orgPlan } from "./limits";
 import { linkUsesToTicket } from "./support-articles";
 import { maskPersonalData } from "./guard-text";
 import { span } from "./trace";
@@ -342,8 +345,9 @@ export async function attachmentFile(who: { user: User } | { owner: true }, id: 
 export type InboxFilter = { status?: string; priority?: string; category?: string; client?: string; q?: string };
 
 /**
- * The Support inbox: tickets matching the filters (newest activity first, up to 300), with the client's name,
- * and counts by status plus unread (new customer activity). Operators only (the route checks).
+ * The Support inbox: tickets matching the filters (newest activity first, up to 300; tickets from clients
+ * with priority support first), with the client's name and whether it has priority support, and counts by
+ * status plus unread (new customer activity). Operators only (the route checks).
  */
 export async function inbox(filter: InboxFilter) {
   const where: string[] = [];
@@ -368,8 +372,13 @@ export async function inbox(filter: InboxFilter) {
   );
   const counts = await all<{ status: string; n: number; unread: number }>("SELECT status, COUNT(*) AS n, SUM(staff_unread) AS unread FROM support_tickets GROUP BY status");
   const clients = await all<{ id: string; name: string }>("SELECT DISTINCT o.id, o.name FROM support_tickets t JOIN orgs o ON o.id = t.org_id ORDER BY o.name");
+  const orgIds = [...new Set(rows.map((t) => t.org_id).filter((id): id is string => !!id))];
+  const priority = new Set((await Promise.all(orgIds.map(async (id) => ((await hasFeature(id, "prioritySupport")) ? id : null)))).filter(Boolean));
+  const tickets = rows.map((t) => ({ ...summary(t), client: t.org_name ?? "Website (no organization)", clientId: t.org_id, assignedTo: t.assigned_to, unread: Number(t.staff_unread) === 1, prioritySupport: !!t.org_id && priority.has(t.org_id) }));
+  // Stable: within each group the newest activity stays first.
+  tickets.sort((a, b) => Number(b.prioritySupport) - Number(a.prioritySupport));
   return {
-    tickets: rows.map((t) => ({ ...summary(t), client: t.org_name ?? "Website (no organization)", clientId: t.org_id, assignedTo: t.assigned_to, unread: Number(t.staff_unread) === 1 })),
+    tickets,
     counts: Object.fromEntries(STATUSES.map((s) => [s, Number(counts.find((c) => c.status === s)?.n ?? 0)])) as Record<Status, number>,
     unread: counts.reduce((n, c) => n + Number(c.unread ?? 0), 0),
     clients,

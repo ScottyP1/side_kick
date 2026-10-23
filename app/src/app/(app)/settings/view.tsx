@@ -16,6 +16,7 @@ import { api, Icon, Pill, Switch, useReportError, useToast } from "@/components/
 import { takeFlash } from "@/lib/flash";
 import { BACKUP_RETENTION_DAYS, ORG_GRACE_DAYS } from "@/lib/rolloff-policy";
 import { BRAND } from "@/lib/brand";
+import { featureNote } from "@/lib/plans";
 
 type MsStatus = { configured: boolean; connected: boolean; tenantId: string | null; required: boolean; linked: boolean; canManage: boolean };
 
@@ -23,9 +24,11 @@ type MsStatus = { configured: boolean; connected: boolean; tenantId: string | nu
  * Microsoft sign-in panel. Everyone sees whether it's on and whether their own account is linked; the Org
  * Owner connects the tenant (by signing in with Microsoft), requires it, or disconnects it. Results of the
  * Microsoft round trip come back as `?microsoft=connected` or `?error=1` (message in a one-time cookie,
- * lib/flash.ts) and are shown here.
+ * lib/flash.ts) and are shown here. Requiring it is a plan feature (Business and up): on smaller plans the
+ * switch shows "Not in your plan" unless it's already required (then it can still be turned off).
  */
 function MicrosoftPanel() {
+  const { me } = useApp();
   const toast = useToast();
   const reportError = useReportError();
   const [s, setS] = useState<MsStatus | null>(null);
@@ -40,6 +43,7 @@ function MicrosoftPanel() {
     load();
   }, [load, toast]);
   if (!s) return null;
+  const notInPlan = s.required ? null : featureNote(me.plan, "requireMicrosoft");
 
   const setRequired = async (required: boolean) => {
     setError("");
@@ -84,9 +88,10 @@ function MicrosoftPanel() {
         {s.canManage && s.connected && (
           <>
             <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13.5 }}>
-              <Switch on={s.required} onChange={setRequired} label="Require Microsoft sign-in" />
+              {notInPlan ? <Pill nodot>Not in your plan</Pill> : <Switch on={s.required} onChange={setRequired} label="Require Microsoft sign-in" />}
               <span><b>Require Microsoft sign-in</b><span className="muted"> · turns passwords off and signs everyone else out</span></span>
             </div>
+            {notInPlan && <span className="hint">{notInPlan}</span>}
             {!s.linked && <span className="hint">Link your own account first, so you can&apos;t get locked out.</span>}
             {!s.required && (
               <span className="callout" style={{ margin: 0, fontSize: 13 }}>

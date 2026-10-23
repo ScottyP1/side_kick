@@ -8,10 +8,12 @@
  * - **My tickets** (`#tickets`): the person's tickets (Org Owners and Org Admins: everyone's in the
  *   organization), with a dot for a team reply they haven't read.
  * - A pointer to the Help chat (bottom-left button → I need help) and the help center.
+ * - A quiet, dismissible "Install as an app" hint where the browser supports it (components/install-app.tsx).
  */
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useApp } from "@/components/shell";
+import { InstallAppHint } from "@/components/install-app";
 import { api, fmtTime, Icon, Pill, Spinner, useReportError } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 
@@ -67,6 +69,7 @@ export default function HelpView() {
   return (
     <>
       <div className="page-head"><div><h1>Help &amp; support</h1><p>Most answers are in the <Link href="/docs">help center</Link>. The Help chat (the round button, bottom left → I need help) can check your setup and fix common problems. For anything else, contact the {BRAND.name} team here.</p></div></div>
+      <InstallAppHint />
       <div className="grid g2">
         <form className="panel" onSubmit={submit}>
           <div className="panel-h"><h2>Contact support</h2></div>

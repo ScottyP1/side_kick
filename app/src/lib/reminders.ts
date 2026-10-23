@@ -4,7 +4,9 @@
  * What it does
  * - **Chat settings** (per linked Teams channel or chat; rules in reminder-rules.ts): Org Owners/Admins,
  *   and Team Leads for the workspaces they lead, choose, per chat, whether Sidekick tracks every message there, gets the meeting notes, and sends
- *   reminders (time, time zone, quiet days, kinds). Every change is audited.
+ *   reminders (time, time zone, quiet days, kinds). Every change is audited. Reminders are a plan feature
+ *   (Team and up, `assertFeature` in lib/limits.ts): turning them on in a chat is refused on Starter, but a
+ *   chat that already has them on keeps them (and its settings can still be changed) after a downgrade.
  * - **Chat tracking** (`recordChatMessage`): in a tracked channel or group chat, every message (not only
  *   @mentions) is saved in `chat_messages` and made searchable as a "chat" source, so Ask and the
  *   knowledge map can use what was said in Teams (e.g. "cutover moved to Nov 12"). Untracked chats are
@@ -48,6 +50,7 @@ import { addDays, applySettingsChanges, dailySlotDue, localTime, parseChatSettin
 import { noticeCard, reminderCard, VERBS, type ReminderPointInput, type ReminderSource } from "./teams/cards";
 import { postCard, type TeamsConversation } from "./teams/bot";
 import { BRAND } from "./brand";
+import { assertFeature } from "./limits";
 
 const PORTAL = () => process.env.SIDEKICK_PUBLIC_URL || "http://localhost:3000";
 /** At most this many points on one card; the rest wait for the next reminder. */
@@ -87,7 +90,8 @@ export async function getChatSettings(conv: Pick<TeamsConversation, "id" | "work
  * Saves a manager's changes to one linked chat's settings and audits them. The caller checks that `user`
  * may manage the chat's workspace (`managedLinkedChat`). Throws 400 with a reason if a value is wrong.
  * Message tracking can't be turned on in a 1:1 chat (everything there is a question to Sidekick).
- * Returns the new settings and whether tracking was switched (the route then tells the chat in Teams).
+ * Turning reminders on needs a plan with reminders (402 `kind: "limit"` otherwise); a chat that already has
+ * them keeps them. Returns the new settings and whether tracking was switched (the route then tells the chat in Teams).
  */
 export async function saveChatSettings(user: User, conv: TeamsConversation, changes: unknown) {
   const current = await getChatSettings(conv);
@@ -95,6 +99,7 @@ export async function saveChatSettings(user: User, conv: TeamsConversation, chan
   if ("error" in out) throw new HttpError(400, out.error);
   if (out.settings.track && conv.kind === "personal") throw new HttpError(400, `Message tracking is only for channels and group chats. In a 1:1 chat every message is already a question to ${BRAND.name}.`);
   if (!out.changed.length) return { settings: current, trackChanged: false };
+  if (out.settings.reminders && !current.reminders) await assertFeature(conv.org_id!, "reminders");
   await run(
     `INSERT INTO teams_chat_settings (conversation_id, org_id, workspace_id, json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(conversation_id) DO UPDATE SET org_id = excluded.org_id, workspace_id = excluded.workspace_id, json = excluded.json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,

@@ -8,7 +8,7 @@
  * is any member whose role is Team Lead. Creating a group can pick the lead and the first members in one
  * go; picking a Member or Viewer as lead makes them a Team Lead (audited), since only admins may do that.
  */
-import { assertCanAdd } from "@/lib/limits";
+import { assertCanAdd, assertFeature } from "@/lib/limits";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, isAdmin, requireUser, workspaceIdsFor, HttpError, type Role } from "@/lib/auth";
 import { all, newId, now, run, tx } from "@/lib/db";
@@ -57,7 +57,8 @@ export const GET = handle(async () => {
 /**
  * Creates a workspace: `{ name, code?, client?, lead?, members? }` where `lead` and `members` are user ids
  * in the same organization. The creator is always a member (so they can open it). A lead who is a Member or
- * Viewer becomes a Team Lead; Org Owners/Admins/Billing Admins can't be picked as lead.
+ * Viewer becomes a Team Lead (that needs a plan with Team Leads, Team and up: 402 `kind: "limit"`; picking
+ * someone who is already a Team Lead always works); Org Owners/Admins/Billing Admins can't be picked as lead.
  */
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
@@ -83,6 +84,7 @@ export const POST = handle(async (req: Request) => {
   if (lead && !["Team Lead", "Member", "Viewer"].includes(lead.role)) {
     throw new HttpError(400, `${lead.name} is ${lead.role === "Org Owner" || lead.role === "Org Admin" ? "an" : "a"} ${lead.role} and already manages every group. Pick someone else as Team Lead.`);
   }
+  if (lead && lead.role !== "Team Lead") await assertFeature(user.org_id, "teamLeads");
 
   const id = newId();
   await tx(async () => {

@@ -5,12 +5,15 @@
  * Settings). Org Owners and Org Admins, and Team Leads for the workspaces they lead, choose what Sidekick does in that chat: post meeting notes, keep
  * track of every message, and send reminders (time, time zone, quiet days, kinds). They can also preview
  * the next reminder or send one now. Saved with PATCH /api/teams-links/settings (audited); preview and
- * send use POST /api/reminders. Rules and defaults live in lib/reminder-rules.ts.
+ * send use POST /api/reminders. Rules and defaults live in lib/reminder-rules.ts. Reminders are a plan
+ * feature (Team and up): on Starter the switch shows "Not in your plan" unless this chat already has them.
  */
 
 import { useMemo, useState } from "react";
 import { api, fmtTime, Modal, Pill, Switch, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { featureNote } from "@/lib/plans";
+import { useApp } from "@/components/shell";
 
 /** A linked chat's settings, as returned by GET /api/teams-links. */
 export type ChatSettings = {
@@ -58,6 +61,7 @@ export function ChatSettingsModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { me } = useApp();
   const toast = useToast();
   const [s, setS] = useState<ChatSettings>(chat.settings);
   const [busy, setBusy] = useState(false);
@@ -107,13 +111,16 @@ export function ChatSettingsModal({
     }
   };
 
-  const row = (label: string, help: string, on: boolean, set: (v: boolean) => void, disabled = false) => (
+  // Reminders are a plan feature (Team and up): a chat that has them keeps them; others can't turn them on.
+  const reminderNote = chat.settings.reminders ? null : featureNote(me.plan, "reminders");
+  const row = (label: string, help: string, on: boolean, set: (v: boolean) => void, disabled = false, notInPlan: string | null = null) => (
     <div className="li" style={{ alignItems: "flex-start", gap: 12, opacity: disabled ? 0.55 : 1 }}>
       <div className="grow">
         <b>{label}</b>
         <div className="muted" style={{ fontSize: 12.5 }}>{help}</div>
+        {notInPlan && <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{notInPlan}</div>}
       </div>
-      {disabled ? <Pill nodot>Not for 1:1 chats</Pill> : <Switch on={on} onChange={set} label={label} />}
+      {disabled ? <Pill nodot>Not for 1:1 chats</Pill> : notInPlan && !on ? <Pill nodot>Not in your plan</Pill> : <Switch on={on} onChange={set} label={label} />}
     </div>
   );
 
@@ -141,7 +148,7 @@ export function ChatSettingsModal({
           (v) => setS({ ...s, track: v }),
           personal,
         )}
-        {row("Reminders", "Post a short card with what's still open: each point cites its source and has Assign, Mark done, Snooze and Not relevant buttons.", s.reminders, (v) => setS({ ...s, reminders: v }))}
+        {row("Reminders", "Post a short card with what's still open: each point cites its source and has Assign, Mark done, Snooze and Not relevant buttons.", s.reminders, (v) => setS({ ...s, reminders: v }), false, reminderNote)}
       </div>
 
       {s.reminders && (

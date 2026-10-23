@@ -419,6 +419,8 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 /* Setup wizard (get-started/view.tsx): steps on the left, one step's card on the right; plain-words permission
    rows; radio "choice" cards; the "Finish setting up" banner in the shell. */
 .callout.good{background:var(--good-soft);border-color:color-mix(in srgb,var(--good) 30%,transparent)}
+/* The "Install as an app" hint on /help (components/install-app.tsx). */
+.install-hint{margin-bottom:16px;align-items:flex-start}
 .banner.info{background:var(--accent-soft)}
 .wiz{display:grid;grid-template-columns:240px minmax(0,1fr);gap:24px;align-items:start}
 .wiz-side{display:flex;flex-direction:column;gap:16px;position:sticky;top:72px}

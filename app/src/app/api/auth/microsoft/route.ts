@@ -4,7 +4,9 @@
  *   the caller's own account is linked to Microsoft.
  * - PATCH { required: boolean } (Org Owner): turn passwords off (or back on) for everyone in the org.
  *   Turning them off needs a connected tenant and the owner's own Microsoft-linked account (so they
- *   can't lock themselves out), and signs everyone else out so they come back through Microsoft.
+ *   can't lock themselves out), and signs everyone else out so they come back through Microsoft. Requiring it
+ *   is a plan feature (Business and up: 402 `kind: "limit"` otherwise); an organization that already
+ *   requires it keeps it after a downgrade, and turning it off always works.
  * - DELETE (Org Owner): disconnect the tenant (passwords work again). Audited.
  * Connecting is done by signing in with Microsoft: GET /api/auth/microsoft/start?mode=link.
  */
@@ -14,6 +16,7 @@ import { handle, readJson } from "@/lib/api";
 import { audit, HttpError, requireUser, SESSION_COOKIE } from "@/lib/auth";
 import { get, run } from "@/lib/db";
 import { entraConfigured } from "@/lib/entra";
+import { assertFeature } from "@/lib/limits";
 
 const orgRow = (orgId: string) => get<{ entra_tenant_id: string | null; sso_required: number }>("SELECT entra_tenant_id, sso_required FROM orgs WHERE id = ?", orgId);
 
@@ -36,6 +39,7 @@ export const PATCH = handle(async (req: Request) => {
   const { required } = await readJson<{ required?: boolean }>(req);
   const org = await orgRow(user.org_id);
   if (required) {
+    if (org?.sso_required !== 1) await assertFeature(user.org_id, "requireMicrosoft");
     if (!org?.entra_tenant_id) throw new HttpError(400, "Connect Microsoft sign-in first.");
     const me = await get<{ entra_oid: string | null }>("SELECT entra_oid FROM users WHERE id = ?", user.id);
     if (!me?.entra_oid) throw new HttpError(400, "Sign in with Microsoft yourself first, so you can't get locked out.");

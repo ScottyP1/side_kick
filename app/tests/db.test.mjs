@@ -287,7 +287,7 @@ test(`[${engine}] help center Markdown: lists, nested lists, tables, quotes and 
 
 test(`[${engine}] help center: only the four customer guides, links rewritten, search finds sections`, async () => {
   const help = await import("../src/lib/help.ts");
-  assert.deepEqual(help.guides().map((g) => g.slug), ["concepts", "admin-guide", "teams-guide", "roles-and-permissions"]);
+  assert.deepEqual(help.guides().map((g) => g.slug), ["concepts", "admin-guide", "teams-guide", "roles-and-permissions", "install-app"]);
   for (const bad of ["owner-guide", "README", "../PROGRESS", "PROGRESS", "constructor", "__proto__", "hasOwnProperty", ""]) assert.equal(help.guide(bad), null, bad);
   assert.equal(help.helpLink("admin-guide.md#4-add-people"), "/docs/admin-guide#4-add-people");
   assert.equal(help.helpLink("owner-guide.md"), null);
@@ -472,6 +472,21 @@ test(`[${engine}] group pricing: per-organization prices, extra groups and the c
   assert.equal(plans.groupOptions(plans.planById("business"), 0, 21).upgrade, null, "nothing bigger to self-serve");
   assert.equal(plans.planWithExtras(plans.planById("team"), 1), "Team + 1 extra group");
   assert.equal(plans.priceText(plans.ENTERPRISE), "From $5,000 / month");
+});
+
+test(`[${engine}] plan features: each plan includes the one below, extras add none, managed organizations get all`, () => {
+  const inc = (id) => plans.planById(id).includes;
+  assert.deepEqual(inc("starter"), ["answers", "notes", "guardrails", "audit"]);
+  assert.deepEqual(inc("team").filter((k) => !inc("starter").includes(k)), ["reminders", "teamLeads", "customRules"]);
+  assert.deepEqual(inc("business").filter((k) => !inc("team").includes(k)), ["requireMicrosoft", "prioritySupport"]);
+  assert.deepEqual([...inc("enterprise")], [...plans.FEATURE_KEYS], "Enterprise has everything, live meetings and dedicated database included");
+  assert.ok(plans.ALL_PLANS.every((p, i) => i === 0 || plans.ALL_PLANS[i - 1].includes.every((k) => p.includes.includes(k))), "bigger plans never lose a feature");
+  assert.equal(plans.featuresOf(null), plans.FEATURE_KEYS, "no subscription: every feature");
+  assert.deepEqual(["reminders", "requireMicrosoft", "liveMeetings"].map((k) => plans.planWithFeature(k).id), ["team", "business", "enterprise"]);
+  assert.equal(plans.featureNote({ name: "Starter", features: inc("starter") }, "teamLeads"), "Team Leads: not in your Starter plan (Team and up include it). Anything already set up keeps working.");
+  assert.equal(plans.featureNote({ name: "Team", features: inc("team") }, "dedicatedDatabase"), "Dedicated database: not in your Team plan (Enterprise includes it). Anything already set up keeps working.");
+  assert.equal(plans.featureNote({ name: "Team", features: inc("team") }, "teamLeads"), null);
+  assert.equal(plans.featureNote(undefined, "teamLeads"), null, "nothing to say before /api/me loads");
 });
 
 test(`[${engine}] roll-off: a pending deletion makes the organization read-only from its date and says when`, () => {

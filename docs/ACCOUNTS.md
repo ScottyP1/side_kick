@@ -1,15 +1,16 @@
 # Accounts: what each one is for
 
 One page so it's clear which account does what. **No secrets here**: passwords live in Cody's password
-manager, keys in `app/.env.local` (Mac, git-ignored) and as Azure Container App secrets. The live
+manager, keys in `app/.env.local` (Mac, git-ignored) and, for the live site, in Azure Key Vault `sidekick-kv`
+(read by the app's own identity; only Cody can manage it). The live
 address isn't written here either: get it with
 `az containerapp show -g sidekick-rg -n sidekick-app --query properties.configuration.ingress.fqdn -o tsv`.
 
 ## Production (keep)
 | Account | Used for | Where details live |
 |---|---|---|
-| **Azure** subscription (signed in as the Sidekick Labs admin; resource group `sidekick-rg`) | Hosts live Sidekick: Container App, Postgres, Azure AI Search, registry, Azure Bot, Log Analytics + uptime alerts, budgets/freeze, `sidekick-deployer` identity for GitHub deploys | `docs/HOSTING.md`, `docs/RUNBOOKS.md` |
-| **GitHub** `ScottyP1/side_kick` (private) | Code, pull requests, tests on every PR, **automatic deploy on every merge to `main`**; GitGuardian (secret scanning) and CodeRabbit (reviews) apps | `.github/workflows/`, HOSTING → Automatic deploys |
+| **Azure** subscription (signed in as the Sidekick Labs admin; resource group `sidekick-rg`) | Hosts live Sidekick: Container App, Postgres, Azure AI Search, registry, Azure Bot, Key Vault `sidekick-kv` (all live secrets), Log Analytics + uptime alerts, budgets/freeze, `sidekick-deployer` identity for GitHub deploys (custom role "Sidekick Deployer": no secret reading) | `docs/HOSTING.md`, `docs/RUNBOOKS.md` |
+| **GitHub** `ScottyP1/side_kick` (private) | Code, pull requests, tests on every PR, **automatic deploy on every merge to `main`** (only merged PRs with a green `test` check; free plan, no branch protection yet); GitGuardian (secret scanning) and CodeRabbit (reviews) apps | `.github/workflows/`, HOSTING → Automatic deploys |
 | **Anthropic Console** | The Claude API key and its bill (pay per use, one account for all customers) | To do: a production and a testing workspace, and a monthly spend limit |
 | **Microsoft Entra directory "Sidekick Labs"** | Where Azure, the Teams bot identity (`Sidekick Bot`) and Microsoft sign-in live. Keep it as Sidekick's own company directory even if the Microsoft 365 trial is cancelled | `docs/TEAMS-MULTITENANT.md`, RUNBOOKS → Trial end |
 | **Sidekick Owner Console** (operator) | Cody's business view: all clients, plans, usage, errors, switches (support inbox coming) | `docs/guide/owner-guide.md`. Live account not created yet: see the owner guide (one-time `SIDEKICK_SETUP_CODE`) |

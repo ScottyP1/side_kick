@@ -534,6 +534,10 @@ function migrate(conn: DatabaseSync) {
   // Group pricing: extra groups bought on top of the plan.
   if (!has("subscriptions", "extra_groups")) conn.exec("ALTER TABLE subscriptions ADD COLUMN extra_groups INTEGER NOT NULL DEFAULT 0");
   if (!has("platform_admins", "must_change_password")) conn.exec("ALTER TABLE platform_admins ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
+  // Required two-step sign-in (lib/auth.ts): the Org Owner's switch, and how each session was started
+  // (password | microsoft; Microsoft sign-in is exempt). Older sessions have none and count as password.
+  if (!has("orgs", "mfa_required")) conn.exec("ALTER TABLE orgs ADD COLUMN mfa_required INTEGER NOT NULL DEFAULT 0");
+  if (!has("sessions", "via")) conn.exec("ALTER TABLE sessions ADD COLUMN via TEXT");
   // Answer quality: a hash of each document's text (spots the same file uploaded twice).
   if (!has("documents", "content_hash")) conn.exec("ALTER TABLE documents ADD COLUMN content_hash TEXT");
   // Follow-ups in Ask and Teams: a conversation is tied to one group, and in Teams to one thread or chat (scope_key).

@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Settings (/settings): Microsoft sign-in (connect the org's Microsoft tenant, require it), organization
+ * Settings (/settings): Microsoft sign-in (connect the org's Microsoft tenant, require it), "Require two-step
+ * sign-in for everyone" (Org Owner; Org Admins see it read-only), organization
  * branding (logo and brand color) and your own account: password, two-step sign-in (components/two-step.tsx)
  * and where you're signed in (sign out other sessions). Org Owners and Org Admins also get **Export your
  * data** (the whole organization as a zip, GET /api/export) and **Roll-offs and certificates**: groups
@@ -96,6 +97,64 @@ function MicrosoftPanel() {
             )}
             <div><button className="btn small danger" onClick={disconnect}>Disconnect</button></div>
           </>
+        )}
+        {error && <p className="err" role="alert" style={{ margin: 0 }}>{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+type TwoStepPolicy = { required: boolean; microsoftRequired: boolean; canManage: boolean; withoutTwoStep: number | null };
+
+/**
+ * "Two-step sign-in for everyone" (Org Owners and Admins see it; only the Org Owner can flip it). When on,
+ * everyone who signs in with a password and has no authenticator app or passkey is asked to set one up
+ * before using the portal (GET/PATCH /api/auth/two-step-policy; enforcement in lib/auth.ts). Microsoft
+ * sign-in is exempt, so the panel says it isn't needed when the org requires Microsoft sign-in.
+ */
+function TwoStepPolicyPanel() {
+  const toast = useToast();
+  const reportError = useReportError();
+  const [p, setP] = useState<TwoStepPolicy | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => api<TwoStepPolicy>("/api/auth/two-step-policy").then(setP).catch(reportError), [reportError]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!p) return null;
+  const set = async (required: boolean) => {
+    setError("");
+    try {
+      await api("/api/auth/two-step-policy", { method: "PATCH", json: { required } });
+      toast(required ? "Two-step sign-in is now required" : "Two-step sign-in is optional again");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't change it.");
+    }
+  };
+  return (
+    <div className="panel">
+      <div className="panel-h">
+        <h2>Two-step sign-in for everyone</h2>
+        {p.required ? <Pill kind="good">Required</Pill> : <Pill>Optional</Pill>}
+      </div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <p className="muted" style={{ margin: 0 }}>
+          When it&apos;s required, everyone who signs in with an email and password must also use an authenticator app or a passkey. People who don&apos;t have one yet are asked to set it up the next time they open {BRAND.name}. Signing in with Microsoft is exempt: Microsoft runs its own checks.
+        </p>
+        {p.microsoftRequired && <span className="callout" style={{ margin: 0, fontSize: 13 }}>Your organization requires Microsoft sign-in, so nobody signs in with a password and this switch isn&apos;t needed.</span>}
+        {p.canManage ? (
+          <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13.5 }}>
+            <Switch on={p.required} onChange={set} label="Require two-step sign-in for everyone" />
+            <span><b>Require two-step sign-in for everyone</b><span className="muted"> · password sign-ins only</span></span>
+          </div>
+        ) : (
+          <span className="hint">Only the Org Owner can change this.</span>
+        )}
+        {p.withoutTwoStep !== null && (
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            {p.withoutTwoStep === 0 ? "Everyone in your organization has set up two-step sign-in." : `${p.withoutTwoStep} ${p.withoutTwoStep === 1 ? "person hasn't" : "people haven't"} set up two-step sign-in yet${p.required ? " (they'll be asked when they next sign in with a password)" : ""}.`}
+          </span>
         )}
         {error && <p className="err" role="alert" style={{ margin: 0 }}>{error}</p>}
       </div>
@@ -229,6 +288,7 @@ export default function SettingsPage() {
       <div className="page-head"><div><div className="eyebrow">Settings</div><h1>Organization & account</h1></div></div>
       <div className="grid g2">
         <MicrosoftPanel />
+        {me.user.admin && <TwoStepPolicyPanel />}
         {me.user.admin && (
           <div className="panel">
             <div className="panel-h"><h2>Your branding</h2><span className="muted">Applies to the whole portal</span></div>

@@ -531,7 +531,9 @@ test(`[${ENGINE}] health check reports the database engine and reveals no data`,
   assert.equal(r.status, 200);
   assert.equal(r.body.ok, true);
   assert.equal(r.body.database.engine, ENGINE);
-  assert.deepEqual(Object.keys(r.body).sort(), ["claude", "database", "ok", "search", "teams"]);
+  assert.deepEqual(Object.keys(r.body).sort(), ["claude", "commit", "database", "ok", "search", "teams"]);
+  // Only the short commit the deploy set (SIDEKICK_COMMIT), never more: null when it isn't set.
+  assert.ok(r.body.commit === null || /^[0-9a-f]{1,7}$/.test(r.body.commit), String(r.body.commit));
 });
 
 test(`[${ENGINE}] every response carries the browser security headers and doesn't name the framework`, async () => {
@@ -3813,6 +3815,50 @@ test(`[${ENGINE}] reset-password --reset-2fa: removes two-step sign-in for someo
   const c = client();
   assert.deepEqual((await c("POST", "/api/auth/login", { email: "pax@test.local", password: r.password })).body, { ok: true });
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Removed Pat Password's two-step sign-in/);
+});
+
+test(`[${ENGINE}] require two-step sign-in for everyone: password users set one up first, Microsoft sign-in is exempt`, async () => {
+  const rae = await newPerson("Rae Required", "rae@test.local", "Member");
+  assert.equal((await rae.call("PATCH", "/api/auth/two-step-policy", { required: true })).status, 403, "only the Org Owner");
+  const before = (await admin("GET", "/api/auth/two-step-policy")).body;
+  assert.equal(before.required, false);
+  assert.equal(before.canManage, true);
+  assert.ok(before.withoutTwoStep >= 1, JSON.stringify(before));
+  // Connect Microsoft sign-in first (for the exemption check below); disconnected again at the end.
+  assert.equal((await microsoftSignIn(admin, { tid: TENANT, oid: "oid-admin", email: "admin@test.local", name: "Test Admin" }, { mode: "link" })).to.search, "?microsoft=connected");
+  assert.equal((await admin("PATCH", "/api/auth/two-step-policy", { required: true })).status, 200);
+  try {
+    // Rae (a password session, no second step) is held at the setup screen: only /api/me and the setup work.
+    assert.equal((await rae.call("GET", "/api/me")).body.user.needsTwoStep, true);
+    const refused = await rae.call("GET", "/api/auth/sessions");
+    assert.equal(refused.status, 403);
+    assert.match(refused.body.error, /requires two-step sign-in/);
+    const setup = (await rae.call("POST", "/api/auth/mfa/totp-start", {})).body;
+    assert.equal((await rae.call("POST", "/api/auth/mfa/totp-confirm", { id: setup.id, code: totp(setup.secret) })).status, 200);
+    assert.equal((await rae.call("GET", "/api/me")).body.user.needsTwoStep, false);
+    assert.equal((await rae.call("GET", "/api/auth/sessions")).status, 200, "everything works once it's set up");
+    // Only this organization has it on: every other organization is untouched.
+    assert.equal(await dbValue("SELECT COUNT(*) FROM orgs WHERE mfa_required = 1"), "1");
+    assert.equal(await dbValue("SELECT mfa_required FROM orgs WHERE name = 'Picker Org'"), "0");
+    // While it's required, the last method can't be removed.
+    const factor = (await rae.call("GET", "/api/auth/mfa/status")).body.factors[0];
+    assert.match((await rae.call("POST", "/api/auth/mfa/remove", { id: factor.id, password: NEW_PASSWORD })).body.error, /can't remove your last method/);
+    // Microsoft sign-in is exempt (Microsoft runs its own checks).
+    const mia = client();
+    assert.equal((await microsoftSignIn(mia, { tid: TENANT, oid: "oid-member", email: "member@test.local" })).to.pathname, "/");
+    assert.equal((await mia("GET", "/api/me")).body.user.needsTwoStep, false);
+    assert.equal((await mia("GET", "/api/auth/sessions")).status, 200);
+    // The Org Owner's own password session is held too (they have no second step), except for turning it off.
+    assert.equal((await admin("GET", "/api/auth/sessions")).status, 403);
+  } finally {
+    // The Org Owner can turn it off again even while their own setup is pending.
+    assert.equal((await admin("PATCH", "/api/auth/two-step-policy", { required: false })).status, 200);
+    assert.equal((await admin("DELETE", "/api/auth/microsoft")).status, 200);
+  }
+  assert.equal((await admin("GET", "/api/me")).body.user.needsTwoStep, false);
+  const log = JSON.stringify((await admin("GET", "/api/audit")).body);
+  assert.match(log, /Required two-step sign-in for everyone/);
+  assert.match(log, /Stopped requiring two-step sign-in/);
 });
 
 test(`[${ENGINE}] Owner Console: two-step sign-in with an authenticator app, then the temporary-password step`, async () => {

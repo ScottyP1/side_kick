@@ -47,7 +47,12 @@ export function buildInfo() {
   };
 }
 
-/** The `/api/health` checks: database (engine, reachable), AI key set, search mode, Teams bot set up. */
+/**
+ * The `/api/health` checks: database (engine, reachable), AI key set, search mode, Teams bot set up, and
+ * `commit`: the short commit the deploy set (`SIDEKICK_COMMIT`, first 7 characters), or null on a laptop.
+ * The deploy workflow waits until health answers with the new commit, so it knows the new version (not the
+ * old one) is answering. Only the short commit is shown: no branch, version numbers or release time.
+ */
 export async function healthFacts() {
   let database = false;
   try {
@@ -61,6 +66,7 @@ export async function healthFacts() {
     claude: claudeConfigured(),
     search: azureSearchConfigured() ? (embeddingsConfigured() ? "azure-hybrid" : "azure-keyword") : "local-keyword",
     teams: Boolean(process.env.CLIENT_ID && process.env.CLIENT_SECRET),
+    commit: process.env.SIDEKICK_COMMIT?.trim().slice(0, 7) || null,
   };
 }
 

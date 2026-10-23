@@ -10,7 +10,7 @@ import { get, run } from "@/lib/db";
 import { assertGoodPassword } from "@/lib/passwords";
 
 export const POST = handle(async (req: Request) => {
-  const user = await requireUser(undefined, { allowPendingPassword: true });
+  const user = await requireUser(undefined, { allowPendingPassword: true, allowPendingTwoStep: true });
   const { current, next } = await readJson<{ current?: string; next?: string }>(req);
   const row = (await get<{ password_hash: string }>("SELECT password_hash FROM users WHERE id = ?", user.id))!;
   if (!verifyPassword(String(current ?? ""), row.password_hash)) throw new HttpError(400, "Your current password is incorrect.");

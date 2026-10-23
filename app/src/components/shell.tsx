@@ -2,6 +2,9 @@
 
 /**
  * The client portal frame: sidebar menu and top bar (with the workspace label or switcher on workspace pages), around every signed-in page.
+ * On phones (under 860px) the sidebar is replaced by a floating tab bar at the bottom (`PhoneTabs`: the most-used
+ * pages plus "Ask", which opens the assistant) and a menu button at the top (`PhoneMenu`: every page the person's
+ * role may use, the group switcher, help and sign out). Which pages each role sees is in lib/portal-nav.ts.
  * It loads /api/me once and shares it through `useApp()`: the user, their role, branding, workspaces and the current workspace.
  * Until a temporary password is changed, or a second step the organization requires is set up, it shows only
  * that screen (the server refuses everything else meanwhile; lib/auth.ts).
@@ -9,14 +12,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { api, Icon, Pill, ToastProvider } from "./ui";
-import { AssistantDock } from "./assistant-dock";
+import { ASSISTANT_PANEL_ID, AssistantDock } from "./assistant-dock";
 import { TwoStepPanel } from "./two-step";
 // Starts listening for the browser's "can install" event early, before the Help page shows the hint.
 import "./install-app";
 import { BRAND } from "@/lib/brand";
 import type { FeatureKey } from "@/lib/plans";
+import { isActive, navFor, phoneTabs, type NavGroup, type NavItem } from "@/lib/portal-nav";
 
 export type Workspace = { id: string; name: string; code: string | null; color: string };
 export type Me = {
@@ -52,13 +56,6 @@ export function useApp() {
   return c;
 }
 
-const NAV: { g: string; items: [string, string, string, ((m: Me) => boolean)?][] }[] = [
-  { g: "Overview", items: [["/home", "Overview", "home"], ["/usage", "Usage & billing", "chart", (m) => ["Org Owner", "Org Admin", "Billing Admin"].includes(m.user.role)], ["/agent", "AI models & agent", "cpu"]] },
-  { g: "Manage", items: [["/workspaces", "Groups", "folder"], ["/knowledge", "Knowledge & docs", "doc"], ["/firm-library", "Firm library", "library"], ["/meetings", "Meetings", "video"], ["/memory", "Memory & gaps", "brain"], ["/connectors", "Connectors", "plug"], ["/users", "Users & access", "users", (m) => m.user.admin || Boolean(m.user.lead)]] },
-  { g: "Govern", items: [["/guardrails", "Guardrails", "shield"], ["/activity", "Activity", "activity", (m) => m.user.admin], ["/audit", "Security & audit", "lock", (m) => m.user.admin], ["/settings", "Settings", "gear"]] },
-  { g: "Help", items: [["/help", "Help & support", "chat"]] },
-];
-
 const WS_KEY = "sidekick.ws";
 
 /**
@@ -90,6 +87,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState("");
   const [ws, setWsState] = useState("");
+  // The assistant panel and phone menu are opened from more than one place (round button or tab bar; menu button).
+  const [dockOpen, setDockOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const askButton = useRef<HTMLButtonElement>(null);
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    // Back to the menu button (Safari doesn't focus a tapped button, so "where focus was" isn't enough).
+    requestAnimationFrame(() => menuButton.current?.focus());
+  }, []);
   const path = usePathname();
 
   const reload = useCallback(async () => {
@@ -140,14 +148,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (me.user.mustChangePassword) return <ChangeTemporaryPassword name={me.user.name} onDone={reload} />;
   if (me.user.needsTwoStep) return <SetUpRequiredTwoStep name={me.user.name} owner={me.user.role === "Org Owner"} onDone={reload} />;
 
-  const items = NAV.map((g) => ({ g: g.g, items: g.items.filter((i) => !i[3] || i[3](me)) })).filter((g) => g.items.length);
-  const active = (href: string) => path.startsWith(href);
+  const items = navFor(me.user);
+  const active = (href: string) => isActive(path, href);
+  const current = items.flatMap((g) => g.items).find((i) => active(i.href));
   const logout = signOut;
 
   return (
     <AppCtx.Provider value={{ me, ws, setWs, reload }}>
       <ToastProvider>
-        <div className="app has-dock">
+        <div className="app has-dock has-tabbar">
           <aside className="rail">
             {me.branding.logo ? (
               <div className="brand brand-logo">
@@ -166,11 +175,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
             <nav className="nav" aria-label="Main">
               {items.map((g) => (
-                <div key={g.g} style={{ display: "contents" }}>
-                  <div className="nav-group">{g.g}</div>
-                  {g.items.map(([href, label, ic]) => (
+                <div key={g.group} style={{ display: "contents" }}>
+                  <div className="nav-group">{g.group}</div>
+                  {g.items.map(({ href, label, icon }) => (
                     <Link key={href} href={href} aria-current={active(href) ? "page" : undefined}>
-                      <Icon n={ic} />
+                      <Icon n={icon} />
                       {label}
                     </Link>
                   ))}
@@ -224,16 +233,25 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </span>
               </div>
             )}
-            <header className="topbar">
-              <div className="mobile-nav">
-                <span className="brand-mark">S</span>
-                <select className="input" value={items.flatMap((g) => g.items).find((i) => active(i[0]))?.[0] ?? "/home"} onChange={(e) => (location.href = e.target.value)} aria-label="Page">
-                  {items.flatMap((g) => g.items).map(([href, label]) => (
-                    <option key={href} value={href}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
+            <header className="topbar portal-top">
+              <div className="phone-head">
+                <button
+                  ref={menuButton}
+                  type="button"
+                  className="menu-button"
+                  aria-label="Menu"
+                  aria-haspopup="dialog"
+                  aria-expanded={menuOpen}
+                  aria-controls={menuOpen ? "phone-menu" : undefined}
+                  onClick={() => {
+                    setDockOpen(false);
+                    setMenuOpen(true);
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+                  {unread > 0 && <span className="dock-dot" aria-hidden="true" />}
+                </button>
+                <span className="phone-title">{current?.label ?? BRAND.name}</span>
               </div>
               {WS_PAGES.some((p) => path.startsWith(p)) && <WorkspacePick workspaces={me.workspaces} ws={ws} setWs={setWs} />}
               <span className="spacer" />
@@ -246,12 +264,170 @@ export function AppShell({ children }: { children: ReactNode }) {
             {/* Workspace pages restart when the workspace changes; org-wide pages (incl. the home assistant) keep their state. */}
             <main className="content" key={WS_PAGES.some((p) => path.startsWith(p)) ? ws : "org"}>{children}</main>
           </div>
-          {/* The bottom-left assistant button on every portal page: the in-app assistant and "I need help". */}
-          <AssistantDock />
+          {/* The bottom-left assistant button on every portal page (on phones the tab bar's Ask opens it). */}
+          <AssistantDock open={dockOpen} setOpen={setDockOpen} onUnread={setUnread} returnRef={askButton} />
+          <PhoneTabs tabs={phoneTabs(me.user, me.workspaces.length > 0)} active={active} askRef={askButton} dockOpen={dockOpen} toggleDock={() => setDockOpen(!dockOpen)} unread={unread} />
+          {menuOpen && (
+            <PhoneMenu me={me} groups={items} active={active} ws={ws} setWs={setWs} unread={unread} onClose={closeMenu} onSignOut={logout} />
+          )}
         </div>
       </ToastProvider>
     </AppCtx.Provider>
   );
+}
+
+/**
+ * The floating pill bar at the bottom of the screen on phones (CSS hides it from 860px up, where the sidebar
+ * shows). `tabs` comes from lib/portal-nav.ts `phoneTabs` (already limited to the person's role); the last button,
+ * "Ask", opens the assistant and help panel in place of the round button (hidden on phones) and carries its dot.
+ */
+function PhoneTabs({ tabs, active, askRef, dockOpen, toggleDock, unread }: {
+  tabs: NavItem[];
+  active: (href: string) => boolean;
+  askRef: RefObject<HTMLButtonElement | null>;
+  dockOpen: boolean;
+  toggleDock: () => void;
+  unread: number;
+}) {
+  return (
+    <nav className="tabbar" aria-label="Quick links">
+      {tabs.map(({ href, label, short, icon }) => (
+        <Link key={href} href={href} aria-current={active(href) ? "page" : undefined}>
+          <Icon n={icon} />
+          <span>{short ?? label}</span>
+        </Link>
+      ))}
+      <button
+        ref={askRef}
+        type="button"
+        aria-expanded={dockOpen}
+        aria-controls={ASSISTANT_PANEL_ID}
+        aria-label={`Ask: assistant and help${unread > 0 ? ` (${unread} new support ${unread === 1 ? "reply" : "replies"})` : ""}`}
+        onClick={toggleDock}
+      >
+        <Icon n="sparkle" />
+        <span>Ask</span>
+        {unread > 0 && <span className="dock-dot" aria-hidden="true" />}
+      </button>
+    </nav>
+  );
+}
+
+/**
+ * The phone menu opened by the top bar's menu button: a sheet sliding in from the left over a dimmed page, with
+ * the person (name, role, organization), the group switcher (two or more groups), every page their role may use
+ * (the same list as the desktop sidebar), and Sign out. It is a modal dialog: focus moves into it and stays there
+ * (Tab wraps), Escape, the close button, a tap outside or following a link closes it, and `onClose` puts focus
+ * back on the menu button. The page behind doesn't scroll while it is open.
+ */
+function PhoneMenu({ me, groups, active, ws, setWs, unread, onClose, onSignOut }: {
+  me: Me;
+  groups: NavGroup[];
+  active: (href: string) => boolean;
+  ws: string;
+  setWs: (id: string) => void;
+  unread: number;
+  onClose: () => void;
+  onSignOut: () => void;
+}) {
+  const sheet = useRef<HTMLDivElement>(null);
+  const path = usePathname();
+  const openedOn = useRef(path);
+
+  // Following a link changes the page: close the menu.
+  useEffect(() => {
+    if (path !== openedOn.current) onClose();
+  }, [path, onClose]);
+
+  useEffect(() => {
+    sheet.current?.querySelector<HTMLElement>(".phone-menu-close")?.focus();
+    const body = document.body.style;
+    const overflow = body.overflow;
+    body.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab" || !sheet.current) return;
+      // Keep focus inside the menu while it is open.
+      const f = [...sheet.current.querySelectorAll<HTMLElement>("a[href],button:not([disabled]),select:not([disabled])")];
+      if (!f.length) return;
+      const first = f[0];
+      const last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !sheet.current.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      body.overflow = overflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div className="phone-menu-layer">
+      <div className="phone-menu-scrim" aria-hidden="true" onClick={onClose} />
+      <div id="phone-menu" className="phone-menu" role="dialog" aria-modal="true" aria-label="Menu" ref={sheet}>
+        <div className="phone-menu-head">
+          <span className="brand-mark">S</span>
+          <div>
+            <b>{BRAND.name}</b>
+            <small>{me.org.name}</small>
+          </div>
+          <button type="button" className="phone-menu-close" aria-label="Close menu" onClick={onClose}>
+            <Icon n="x" />
+          </button>
+        </div>
+        <div className="phone-menu-who">
+          <span className="avatar" aria-hidden="true">{initials(me.user.name)}</span>
+          <div>
+            <b>{me.user.name}</b>
+            <small>{me.user.role}</small>
+          </div>
+        </div>
+        {me.workspaces.length > 1 && (
+          <div className="phone-menu-group">
+            <label htmlFor="phone-menu-ws">Group</label>
+            <select id="phone-menu-ws" className="input" value={ws} onChange={(e) => setWs(e.target.value)}>
+              {me.workspaces.map((w) => (
+                <option key={w.id} value={w.id}>{w.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <nav className="phone-menu-nav" aria-label="All pages">
+          {groups.map((g) => (
+            <div key={g.group} className="phone-menu-sec">
+              <div className="nav-group">{g.group}</div>
+              {g.items.map(({ href, label, icon }) => (
+                <Link key={href} href={href} aria-current={active(href) ? "page" : undefined} onClick={onClose}>
+                  <Icon n={icon} />
+                  <span>{label}</span>
+                  {href === "/help" && unread > 0 && <span className="dock-count">{unread} new</span>}
+                </Link>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <button type="button" className="btn phone-menu-out" onClick={onSignOut}>
+          <Icon n="logout" />
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Up to two initials from a person's name, for the round avatar. */
+function initials(name: string) {
+  return name.split(" ").map((p) => p[0]).join("").slice(0, 2);
 }
 
 // Shown on workspace pages when the person has no workspace yet.
@@ -283,8 +459,9 @@ async function signOut() {
 }
 
 /**
- * The avatar in the top bar: opens a small menu with the person's name, role and Sign out. It's the only
- * way to sign out at phone width, where the sidebar is hidden. Used by the portal and the Owner Console.
+ * The avatar in the top bar: opens a small menu with the person's name, role and Sign out. Used by the portal
+ * and the Owner Console. At phone width the portal hides it (its phone menu has Sign out); in the Owner Console
+ * it stays the way to sign out on a phone, where the sidebar is hidden.
  */
 export function UserMenu({ name, detail, onSignOut }: { name: string; detail: string; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
@@ -304,7 +481,7 @@ export function UserMenu({ name, detail, onSignOut }: { name: string; detail: st
   return (
     <div className="user-menu" ref={ref}>
       <button className="avatar" title={`${name} · ${detail}`} aria-label="Account menu" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((o) => !o)}>
-        {name.split(" ").map((p) => p[0]).join("").slice(0, 2)}
+        {initials(name)}
       </button>
       {open && (
         <div className="user-menu-pop" role="menu">

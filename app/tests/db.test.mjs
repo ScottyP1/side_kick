@@ -591,3 +591,41 @@ test(`[${engine}] ranking: at most three passages per source; versions of a docu
   assert.notEqual(rank.versionKey("Wave 2 cutover runbook.md"), rank.versionKey("Wave 3 cutover runbook.md"));
   assert.equal(rank.contentHash("a  b\nc"), rank.contentHash("a b c"));
 });
+
+const pnav = await import("../src/lib/portal-nav.ts");
+
+test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar is a short subset of them`, () => {
+  const people = {
+    owner: { role: "Org Owner", admin: true },
+    orgAdmin: { role: "Org Admin", admin: true },
+    billing: { role: "Billing Admin", admin: false },
+    lead: { role: "Team Lead", admin: false, lead: true },
+    member: { role: "Member", admin: false },
+    viewer: { role: "Viewer", admin: false },
+  };
+  const hrefs = (u) => pnav.navFor(u).flatMap((g) => g.items.map((i) => i.href));
+  const all = pnav.PORTAL_NAV.flatMap((g) => g.items.map((i) => i.href));
+  assert.deepEqual(hrefs(people.owner), all);
+  assert.deepEqual(hrefs(people.orgAdmin), all);
+  for (const [who, u] of Object.entries(people)) {
+    const mine = hrefs(u);
+    assert.equal(mine.includes("/usage"), ["owner", "orgAdmin", "billing"].includes(who), `${who}: Usage`);
+    assert.equal(mine.includes("/users"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Users`);
+    assert.equal(mine.includes("/activity") || mine.includes("/audit"), u.admin, `${who}: Activity/Audit`);
+    for (const inGroup of [true, false]) {
+      const tabs = pnav.phoneTabs(u, inGroup).map((t) => t.href);
+      assert.ok(tabs.length >= 1 && tabs.length <= pnav.MAX_PHONE_TABS, `${who}: ${tabs.length} tabs`);
+      assert.ok(tabs.every((h) => mine.includes(h)), `${who}: tabs are pages the role may open`);
+      assert.equal(tabs[0], "/home");
+    }
+    assert.deepEqual(pnav.phoneTabs(u, true).map((t) => t.href), ["/home", "/workspaces", "/knowledge", "/meetings"]);
+  }
+  // Nobody in a group: no empty Knowledge/Meetings tabs; pages the role can use instead.
+  assert.deepEqual(pnav.phoneTabs(people.billing, false).map((t) => t.short ?? t.label), ["Home", "Usage", "Settings", "Help"]);
+  assert.deepEqual(pnav.phoneTabs(people.owner, false).map((t) => t.href), ["/home", "/usage", "/workspaces", "/settings"]);
+  assert.deepEqual(pnav.phoneTabs(people.viewer, false).map((t) => t.href), ["/home", "/settings", "/help"]);
+  // A page counts as active for its own address and the pages under it, not for look-alike prefixes.
+  assert.ok(pnav.isActive("/workspaces/abc", "/workspaces"));
+  assert.ok(pnav.isActive("/home", "/home"));
+  assert.ok(!pnav.isActive("/homework", "/home"));
+});

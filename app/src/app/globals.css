@@ -229,7 +229,7 @@ textarea.input{min-height:80px;resize:vertical}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 
 .mobile-nav{display:none}
-/* Avatar menu in the top bar (name, role, Sign out); the way to sign out at phone width. */
+/* Avatar menu in the top bar (name, role, Sign out); the Owner Console's way to sign out at phone width (the portal uses its phone menu). */
 .user-menu{position:relative}
 button.avatar{border:0;cursor:pointer;font-family:inherit}
 .user-menu-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:40;min-width:200px;display:flex;flex-direction:column;gap:4px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
@@ -487,6 +487,63 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
   .dock-panel{left:0;right:0;top:0;bottom:0;width:auto;max-height:none;border-radius:0;border:0}
   .dock-panel:not([hidden]) ~ .dock-button{display:none}
 }
+/* ---- Portal on phones (components/shell.tsx): top menu button + floating pill tab bar ----
+   Under 860px the sidebar is hidden. The top bar shows a 44px menu button and the page name; the menu
+   (.phone-menu) slides in from the left with every page the role may use. The tab bar floats above the
+   iPhone home indicator (safe-area insets; viewport-fit=cover in app/(app)/layout.tsx) and its "Ask" button
+   replaces the round assistant button, so the two never overlap. Pages keep room at the bottom for it. */
+.phone-head,.tabbar,.phone-menu-layer{display:none}
+.menu-button{position:relative;flex:none;width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--fg);display:grid;place-items:center;cursor:pointer}
+.menu-button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.menu-button .dock-dot{top:6px;right:6px}
+.phone-title{font-family:var(--f-display);font-weight:600;font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabbar{position:fixed;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:50;max-width:520px;margin:0 auto;gap:2px;padding:6px;background:color-mix(in srgb,var(--surface) 94%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:999px;box-shadow:0 10px 30px rgba(20,16,60,.2)}
+.tabbar a,.tabbar button{position:relative;flex:1 1 0;min-width:0;min-height:52px;padding:4px 2px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:0;border-radius:999px;background:transparent;color:var(--muted);font:inherit;font-size:11px;font-weight:500;line-height:1.2;text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.tabbar span:not(.dock-dot){max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabbar .ico{width:21px;height:21px;stroke-width:1.8}
+.tabbar a[aria-current="page"],.tabbar button[aria-expanded="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.tabbar a:focus-visible,.tabbar button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.tabbar .dock-dot{top:5px;right:calc(50% - 18px)}
+.phone-menu-layer{position:fixed;inset:0;z-index:70}
+.phone-menu-scrim{position:absolute;inset:0;background:rgba(12,10,32,.5);animation:pmFade .18s ease-out}
+.phone-menu{position:absolute;top:0;bottom:0;left:0;width:min(320px,86vw);display:flex;flex-direction:column;gap:12px;overflow-y:auto;overscroll-behavior:contain;padding:calc(10px + env(safe-area-inset-top,0px)) 12px calc(16px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px));background:var(--surface);color:var(--fg);border-right:1px solid var(--line);box-shadow:0 18px 48px rgba(20,16,60,.3);animation:pmSlide .22s ease-out}
+.phone-menu-head{display:flex;align-items:center;gap:10px;padding-left:4px}
+.phone-menu-head b{display:block;font-family:var(--f-display);font-size:16px}
+.phone-menu-head small,.phone-menu-who small{display:block;font-size:12px;color:var(--muted)}
+.phone-menu-close{margin-left:auto;flex:none;width:44px;height:44px;border:0;border-radius:12px;background:transparent;color:var(--fg);display:grid;place-items:center;cursor:pointer}
+.phone-menu-close .ico{width:20px;height:20px}
+.phone-menu-who{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--sunken);border-radius:var(--r)}
+.phone-menu-who .avatar{width:36px;height:36px}
+.phone-menu-group{display:flex;flex-direction:column;gap:4px;padding:0 4px}
+.phone-menu-group label{font-size:12px;font-weight:600;color:var(--muted)}
+.phone-menu-group select{min-height:44px}
+.phone-menu-nav{display:flex;flex-direction:column}
+.phone-menu .nav-group{opacity:1;color:var(--muted);font-weight:600;padding:12px 10px 4px}
+.phone-menu-nav a{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 12px;border-radius:10px;color:var(--fg);text-decoration:none;font-size:15px}
+.phone-menu-nav a .ico{width:19px;height:19px;color:var(--muted)}
+.phone-menu-nav a[aria-current="page"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.phone-menu-nav a[aria-current="page"] .ico{color:var(--accent)}
+.phone-menu-nav a:focus-visible,.phone-menu-close:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.phone-menu-nav .dock-count{margin-left:auto}
+.phone-menu-out{min-height:44px;justify-content:center;margin-top:auto;flex:none}
+@keyframes pmFade{from{opacity:0}}
+@keyframes pmSlide{from{transform:translateX(-100%)}}
+@media (prefers-reduced-motion: reduce){.phone-menu,.phone-menu-scrim{animation:none}}
+@media (max-width: 860px){
+  .portal-top{gap:8px 10px}
+  .phone-head{display:flex;align-items:center;gap:12px;flex:1 1 100%;min-width:0}
+  .portal-top .ws-pick,.portal-top .ws-label{flex:1 1 auto;max-width:100%}
+  .portal-top .user-menu{display:none}
+  .tabbar{display:flex}
+  .phone-menu-layer{display:block}
+  .has-tabbar .dock-button{display:none}
+  .has-tabbar .content{padding-bottom:calc(104px + env(safe-area-inset-bottom,0px))}
+  .has-tabbar .dock-panel{bottom:calc(88px + env(safe-area-inset-bottom,0px))}
+  body:has(.has-tabbar) .toasts{bottom:calc(92px + env(safe-area-inset-bottom,0px))}
+}
+@media (max-width: 600px){.has-tabbar .dock-panel{bottom:0;padding-bottom:env(safe-area-inset-bottom,0px)}}
+/* Small phones (iPhone SE, 320px): a little tighter so "Knowledge" still fits. */
+@media (max-width: 360px){.tabbar{left:8px;right:8px;padding:4px;gap:0}.tabbar a,.tabbar button{padding:4px 0;font-size:10.5px}}
 .linkish{background:none;border:0;padding:0;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer}
 .chat-followup{font-size:12px;color:var(--muted);font-style:italic}
 .chat-sources{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12.5px;max-width:85%}

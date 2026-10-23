@@ -1,6 +1,6 @@
 # Install Sidekick as an app
 
-You can install the Sidekick portal as an app on your computer or phone. It then opens in its own window with the Sidekick icon, from your dock, taskbar, Start menu or home screen, instead of in a browser tab. It's the same portal: same sign-in, same data, same pages.
+You can install the Sidekick portal as an app on your computer or phone. It then opens in its own window with the Sidekick icon, from your dock, taskbar, Start menu or home screen, instead of in a browser tab. It's the same portal: same sign-in, same data, same pages. On a phone it uses the phone layout: a tab bar at the bottom (kept clear of the iPhone home bar) and a menu button at the top for everything else.
 
 ## On a computer (Chrome or Microsoft Edge)
 1. Open the portal and sign in.

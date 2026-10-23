@@ -2139,10 +2139,11 @@ test(`[${ENGINE}] assistant button: on every portal and public page, never in th
   assert.match(site, /class="dock-button"/);
   assert.match(site, /Ask about Sidekick/);
   assert.doesNotMatch((await owner("GET", "/owner/support")).body, /dock-button/);
-  // The portal frame is drawn in the browser; the shell file includes the button.
+  // The portal frame is drawn in the browser; the shell file includes the button (and, on phones, the tab bar's Ask).
   const shell = fs.readFileSync(path.join(APP, "src/components/shell.tsx"), "utf8");
-  assert.match(shell, /<AssistantDock \/>/);
-  assert.match(shell, /"\/help", "Help & support"/);
+  assert.match(shell, /<AssistantDock open=\{dockOpen\}/);
+  assert.match(shell, /aria-controls=\{ASSISTANT_PANEL_ID\}/);
+  assert.match(fs.readFileSync(path.join(APP, "src/lib/portal-nav.ts"), "utf8"), /href: "\/help", label: "Help & support"/);
   assert.doesNotMatch(fs.readFileSync(path.join(APP, "src/components/owner-shell.tsx"), "utf8"), /Dock/);
 });
 

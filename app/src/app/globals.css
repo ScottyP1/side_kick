@@ -182,7 +182,7 @@ textarea.input{min-height:80px;resize:vertical}
 .app-tile{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:20px 12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;justify-content:flex-start;min-height:190px;min-width:0;transition:border-color .15s, transform .15s, box-shadow .15s}
 .app-tile:is(a,button):hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
 .app-tile b{font-size:14px;line-height:1.3}
-.app-tile .muted{font-size:12px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.app-tile .muted{font-size:12px;line-height:1.3}
 .app-tile > .pill{margin-top:auto}
 .app-tile:not(.on) .app-ico{filter:saturate(.35);opacity:.75}
 .app-tile:is(a,button):not(.on):hover .app-ico{filter:none;opacity:1}

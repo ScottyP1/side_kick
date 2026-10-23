@@ -621,7 +621,7 @@ test(`[${ENGINE}] website: / shows the website when signed out and sends signed-
 
 test(`[${ENGINE}] website: every public page answers without a session; the portal, Owner Console and checkout don't`, async () => {
   const pages = await sitemapPaths();
-  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/roles-and-permissions", "/docs/install-app"]) {
+  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/meetings", "/docs/roles-and-permissions", "/docs/install-app"]) {
     assert.ok(pages.includes(p), `${p} is in the sitemap`);
   }
   for (const p of pages) {

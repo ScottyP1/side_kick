@@ -78,7 +78,7 @@ A question refused by a custom rule gets a fixed reply ("Your organization has a
 On **Memory & gaps**, Sidekick groups what a workspace knows into topics. Each topic has a **coverage** score from 0 to 100: high means it's well documented and consistent, low means it's mostly been talked about but not written down.
 
 ## Meeting notes and action items
-Import a meeting transcript (a Teams `.vtt` file, a Word document or pasted text) and Sidekick writes the notes: a summary, decisions, **action items** (with owners and due dates as spoken), open questions, and lasting facts like requirements, risks and terms. Action items can be assigned and closed in the portal or straight from the card in Teams.
+After a Teams meeting of a group's people (with **automatic notes** on), or when you **add a past or outside meeting** from its transcript (a Teams `.vtt` file, a Word document or pasted text), Sidekick writes the notes: a summary, decisions, **action items** (with owners and due dates as spoken), open questions, and lasting facts like requirements, risks and terms. Action items can be assigned and closed in the portal or straight from the card in Teams. Decisions and facts worth keeping can be **saved to knowledge**, so answers keep finding them long after the meeting. See [Meetings and automatic notes](meetings.md).
 
 ## Internal and Shareable, and client guests
 Every document is tagged:

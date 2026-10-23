@@ -55,17 +55,22 @@ It's your conversation only (each person has their own), in that chat's group on
 Your organization's **guardrails** apply in Teams exactly as in the portal. A question that breaks them (abuse, trying to get Sidekick to drop its rules, asking about another client, something your Org Owner switched off, or one of your organization's or workspace's custom rules) gets a short, polite refusal card instead of an answer.
 
 ## Meeting notes
-Today, notes come from **imported meeting transcripts**: after a transcript is imported for the workspace, Sidekick posts the notes below. **Automatic notes after every meeting** (no import needed) and **Sidekick live in meetings** (Enterprise) are coming soon.
+With **automatic notes** on, Sidekick writes the notes after every Teams meeting of a group's people (from the meeting's transcript; no bot joins the call) and posts them to the group's **notes chat**. Meetings added in the portal (**Add a past or outside meeting**) are posted the same way. **Sidekick live in meetings** (Enterprise) is coming later. Details: [Meetings and automatic notes](meetings.md).
 
-After a meeting transcript is imported, Sidekick posts:
-1. a **notes card**: summary, decisions and questions still open, with **Open in Sidekick** for the full notes;
+After each meeting, Sidekick posts:
+1. a **notes card**: summary, the decisions and things to keep (each with **Save to knowledge**), and questions still open, with **Open in Sidekick** for the full notes;
 2. one **card per action item** (in a group chat they follow the notes; in a channel they're replies in the notes post's thread).
 
 On an action-item card:
 - **Assign**: type a name, click Assign. Open items move to *In progress*.
 - **Mark done**: closes it. **Reopen** brings it back.
 
+On the notes card, **Save to knowledge** keeps a decision, requirement, risk, fact or term as lasting group knowledge (answers find it first from then on); the card shows who saved it, with **Undo**. Viewers can't save.
+
 Changes show on the card for everyone, in the portal's tracker, and in the audit log under your name.
+
+## The Sidekick tab
+Open Sidekick in the Teams app bar → **Meetings**, or add it as a tab to a chat, channel or meeting (**+** at the top). It shows the group's meetings, their notes and open action items, signed in with your Microsoft account. Adding it to a meeting also brings Sidekick into the meeting chat, so its notes can go to the right group.
 
 ## Reminders
 In chats where an Org Admin turned **Reminders** on, Sidekick posts a short **reminder card** once a day (at the chosen time, not on quiet days such as weekends) and right after each meeting. It lists up to six things that are still open:

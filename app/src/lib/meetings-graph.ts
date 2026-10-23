@@ -44,6 +44,7 @@ import crypto from "node:crypto";
 import { all, get, newId, now, run, tx } from "./db";
 import { audit, auditAsSidekick, HttpError, type User } from "./auth";
 import { ConsentNeededError, graphCall } from "./directory";
+import { entraConfigured } from "./entra";
 import { enqueue } from "./jobs";
 import { span } from "./trace";
 import { tenantOfOrg, portalUrl } from "./tenants";
@@ -352,6 +353,8 @@ export function notificationBase(): string | null {
  */
 export async function ensureSubscription(orgId: string, at = new Date()): Promise<{ created: number; renewed: number; removed: number }> {
   const out = { created: 0, renewed: 0, removed: 0 };
+  // No Microsoft app on this server (a laptop or the demo world): nothing to talk to.
+  if (!entraConfigured()) return out;
   const on = await autoNotesOn(orgId);
   const tenant = await tenantOfOrg(orgId);
   const subs = await all<{ id: string; tenant_id: string; expires_at: string }>("SELECT id, tenant_id, expires_at FROM graph_subscriptions WHERE org_id = ?", orgId);
@@ -427,7 +430,7 @@ type GraphTranscript = { id?: string; meetingId?: string; createdDateTime?: stri
  * throttled run picks up where it stopped. Returns how many new transcripts it found and how many people it checked.
  */
 export async function pollOrg(orgId: string, at = new Date()): Promise<{ found: number; organizers: number }> {
-  if (!(await autoNotesOn(orgId))) return { found: 0, organizers: 0 };
+  if (!entraConfigured() || !(await autoNotesOn(orgId))) return { found: 0, organizers: 0 };
   const tenant = await tenantOfOrg(orgId);
   if (!tenant) {
     await noteCheck(orgId, `Connect ${BRAND.name} to your Microsoft 365 organization (Settings → Microsoft sign-in) so it can find your Teams meetings.`);
@@ -479,8 +482,12 @@ export async function pollOrg(orgId: string, at = new Date()): Promise<{ found: 
   return { found, organizers: checked };
 }
 
-/** Every organization with automatic notes on and not paused (the recurring poll and upkeep fan out to these). */
+/**
+ * Every organization with automatic notes on and not paused (the recurring poll and upkeep fan out to these). None
+ * when this server has no Microsoft app set up (a laptop or the demo world), so nothing tries to reach Microsoft.
+ */
 export async function autoNotesOrgs(): Promise<string[]> {
+  if (!entraConfigured()) return [];
   return (await all<{ org_id: string }>("SELECT a.org_id FROM auto_meetings a JOIN orgs o ON o.id = a.org_id WHERE a.enabled = 1 AND o.status <> 'Suspended'")).map((r) => r.org_id);
 }
 

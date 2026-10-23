@@ -78,6 +78,13 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
     assert.ok(count(`SELECT COUNT(*) FROM findings WHERE org_id = ${northwind} AND kind = ? AND status = 'open'`, kind) >= 1, `a "${kind}" finding`);
   }
   assert.equal(count("SELECT COUNT(*) FROM jobs WHERE status = 'dead'"), 0, "no job gave up");
+  // Automatic notes: meetings captured from Teams, one waiting for a group, one skipped, decisions saved to knowledge.
+  assert.ok(count("SELECT COUNT(*) FROM meetings WHERE source = 'teams'") >= 4, "meetings captured from Teams");
+  assert.equal(count(`SELECT COUNT(*) FROM auto_meetings WHERE org_id = ${northwind} AND enabled = 1`), 1);
+  assert.equal(count("SELECT COUNT(*) FROM graph_meetings WHERE status = 'waiting'"), 1);
+  assert.equal(count("SELECT COUNT(*) FROM graph_meetings WHERE status = 'skipped'"), 1);
+  assert.equal(count("SELECT COUNT(*) FROM items WHERE pinned = 1 AND saved_by IS NOT NULL"), 2, "two decisions saved to knowledge");
+  assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_id LIKE 'saved:%'") >= 2, "and searchable");
   assert.match(out, /findings for Northwind's Org Owner \(10 kinds/);
   // Starter is 15 people: Tailspin sits one below.
   assert.equal(count("SELECT COUNT(*) FROM users WHERE org_id = (SELECT id FROM orgs WHERE name = 'Tailspin Partners')"), 14);

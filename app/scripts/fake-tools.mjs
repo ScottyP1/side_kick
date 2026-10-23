@@ -21,7 +21,8 @@
  * `world` object itself (add or change items; set `changed` to now so the next sync picks them up).
  *
  * Use: `const fake = createFakeTools(); const base = await fake.listen(); env = { ...fake.env(base) }`.
- * Standalone (the demo): `node scripts/fake-tools.mjs --port 3331`.
+ * Standalone (the demo): `node scripts/fake-tools.mjs --port 3331` (or FAKE_TOOLS_PORT=3331; the demo launch config
+ * uses the variable so the preview tool only sees the app's own --port).
  */
 import http from "node:http";
 import crypto from "node:crypto";
@@ -84,7 +85,7 @@ const adf = (text) => (text ? { type: "doc", version: 1, content: [{ type: "para
  * Creates the fake tools server. `world` is the data it serves (see `defaultWorld`); `clients` the app ids and
  * secrets it accepts. Returns controls (see the file comment).
  */
-export function createFakeTools({ world = defaultWorld(), clients = { ado: { id: "fake-ado-client", secret: "fake-ado-secret" }, jira: { id: "fake-jira-client", secret: "fake-jira-secret" } } } = {}) {
+export function createFakeTools({ world = defaultWorld(), clients = { ado: { id: "fake-ado-client", secret: "fake-ado-secret" }, jira: { id: "fake-jira-client", secret: "fake-jira-secret" } }, lenient = false } = {}) {
   const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50 };
   const counts = { refresh: { ado: 0, jira: 0 }, api: { ado: 0, jira: 0 }, unauthorized: 0 };
   const codes = new Map(); // code → { kind, challenge, redirectUri }
@@ -119,7 +120,8 @@ export function createFakeTools({ world = defaultWorld(), clients = { ado: { id:
       };
       const authed = (kind) => {
         const tok = (req.headers.authorization ?? "").replace(/^Bearer /, "");
-        const t = access.get(tok);
+        // Lenient (the standalone demo fake): tokens it handed out before a restart still work.
+        const t = access.get(tok) ?? (lenient && tok.startsWith(`${kind}at_`) ? { kind, expires: Infinity } : undefined);
         if (!t || t.kind !== kind || t.expires < Date.now() || revokedKinds.has(kind)) {
           counts.unauthorized++;
           send(401, { message: "Unauthorized" });
@@ -157,7 +159,7 @@ export function createFakeTools({ world = defaultWorld(), clients = { ado: { id:
           return send(200, issue(kind));
         }
         if (f.grant_type === "refresh_token") {
-          const r = refresh.get(f.refresh_token);
+          const r = refresh.get(f.refresh_token) ?? (lenient && String(f.refresh_token).startsWith(`${kind}rt_`) ? { kind } : undefined);
           if (!r || r.kind !== kind || revokedKinds.has(kind)) return send(400, { error: "invalid_grant" });
           counts.refresh[kind]++;
           const out = issue(kind);
@@ -311,7 +313,8 @@ export function createFakeTools({ world = defaultWorld(), clients = { ado: { id:
 // Standalone: `node scripts/fake-tools.mjs --port 3331` (the demo world's tools; see docs/DEMO.md).
 if (import.meta.url === `file://${process.argv[1]}`) {
   const i = process.argv.indexOf("--port");
-  const fake = createFakeTools();
-  const b = await fake.listen(i > 0 ? Number(process.argv[i + 1]) : 3331);
+  // Lenient: the demo copy's sealed sign-ins were made by the seed's fake, before this one started.
+  const fake = createFakeTools({ lenient: true });
+  const b = await fake.listen(i > 0 ? Number(process.argv[i + 1]) : Number(process.env.FAKE_TOOLS_PORT) || 3331);
   console.log(`Fake Azure DevOps and Jira (made-up data) on ${b}`);
 }

@@ -110,6 +110,7 @@ function ToolPanel({ kind, c, configured, blocked, reload }: { kind: Kind; c: Co
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "That didn't work. Try again.");
+      await reload(); // health may have changed (e.g. a failed sync)
     } finally {
       setBusy("");
     }
@@ -183,15 +184,23 @@ function Links({ c, canLink, reload, act, busy }: { c: ConnectorHealth; canLink:
                   <td><b>{l.projectName}</b><div className="muted" style={{ fontSize: 12 }}>{l.audience === "shareable" ? "Shareable (also with client guests)" : "Internal (team only)"}</div></td>
                   <td>{l.workspaceName}</td>
                   <td>
-                    {l.syncing ? <Pill kind="info">Syncing</Pill> : l.problem ? <Pill kind="bad">Problem</Pill> : l.lastOkAt ? <Pill kind="good">OK</Pill> : <Pill>Waiting</Pill>}
-                    {l.problem && <div style={{ fontSize: 12.5, color: "var(--bad)", maxWidth: 360 }}>{l.problem}</div>}
+                    {c.status === "expired" ? <Pill>Paused</Pill> : l.syncing ? <Pill kind="info">Syncing</Pill> : l.problem ? <Pill kind="bad">Problem</Pill> : l.lastOkAt ? <Pill kind="good">OK</Pill> : <Pill>Waiting</Pill>}
+                    {/* An expired sign-in is explained once, above the table. */}
+                    {l.problem && c.status !== "expired" && <div style={{ fontSize: 12.5, color: "var(--bad)", maxWidth: 360 }}>{l.problem}</div>}
                   </td>
                   <td className="r num">{l.items}</td>
-                  <td className="muted" style={{ whiteSpace: "nowrap" }}>{ago(l.lastSyncAt)}{l.lastOkAt && l.lastOkAt !== l.lastSyncAt ? <div style={{ fontSize: 12 }}>last OK {ago(l.lastOkAt)}</div> : null}</td>
+                  <td className="muted" style={{ whiteSpace: "nowrap" }}>
+                    {/* After a reconnect the last try is cleared (so it syncs soon): show the last success instead. */}
+                    {ago(l.lastSyncAt ?? l.lastOkAt)}
+                    {l.lastSyncAt && l.lastOkAt && l.lastOkAt !== l.lastSyncAt ? <div style={{ fontSize: 12 }}>last OK {ago(l.lastOkAt)}</div> : null}
+                  </td>
                   <td className="r" style={{ whiteSpace: "nowrap" }}>
                     {canLink && me.workspaces.some((w) => w.id === l.workspaceId) && (
                       <>
-                        <button className="btn small ghost" disabled={!!busy || c.status === "expired"} onClick={() => act(`sync-${l.id}`, () => api(`/api/connectors/links/${l.id}/sync`, { method: "POST" }), `Synced ${l.projectName}`)}>
+                        <button className="btn small ghost" disabled={!!busy || c.status === "expired"} onClick={() => act(`sync-${l.id}`, async () => {
+                          const r = await api<{ link: LinkHealth }>(`/api/connectors/links/${l.id}/sync`, { method: "POST" });
+                          if (r.link.problem) throw new Error(r.link.problem); // shown above the table, not as "Synced"
+                        }, `Synced ${l.projectName}`)}>
                           {busy === `sync-${l.id}` ? <Spinner /> : "Sync now"}
                         </button>
                         <button className="btn small ghost" disabled={!!busy} onClick={() => confirm(`Unlink ${l.projectName} from ${l.workspaceName}? Its ${l.items} work items leave the group's knowledge.`) && act(`unlink-${l.id}`, () => api(`/api/connectors/links/${l.id}`, { method: "DELETE" }), `Unlinked ${l.projectName}`)}>

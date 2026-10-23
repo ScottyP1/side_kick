@@ -491,7 +491,8 @@ export async function syncLink(orgId: string, linkId: string): Promise<{ changed
         await run("UPDATE connector_links SET sync_cursor = ? WHERE id = ? AND org_id = ?", cursor, l.id, orgId);
       }
       const count = Number((await get<{ n: number | string }>("SELECT COUNT(*) AS n FROM connector_items WHERE link_id = ? AND org_id = ?", l.id, orgId))?.n ?? 0);
-      await run("UPDATE connector_links SET item_count = ?, last_sync_at = ?, last_ok_at = ?, last_error = NULL WHERE id = ? AND org_id = ?", count, now(), now(), l.id, orgId);
+      const at = now();
+      await run("UPDATE connector_links SET item_count = ?, last_sync_at = ?, last_ok_at = ?, last_error = NULL WHERE id = ? AND org_id = ?", count, at, at, l.id, orgId);
       spanAttrs({ kind: c.kind, pages, seen, changed, items: count, full: !l.sync_cursor, capped: seen >= ADO_MAX });
       return { changed, seen };
     } catch (e) {

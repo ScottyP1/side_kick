@@ -51,11 +51,11 @@ export default function ConnectorsPage() {
           <div className="eyebrow">{g}</div>
           <div className="app-grid">
             {APPS.filter((a) => a.g === g).map((a) => (
-              <div key={a.name} className={`app-tile${a.live ? " on" : ""}`} style={{ cursor: "default" }}>
+              <div key={a.name} className={`app-tile${a.live ? " on" : ""}`} style={{ cursor: "default" }} title={a.desc}>
                 <span className="app-ico" style={{ background: a.bg, color: a.fg ?? "#fff", width: 48, height: 48, fontSize: 17 }} aria-hidden="true">{a.mono}</span>
                 <b>{a.name}</b>
                 <span className="muted">{a.desc}</span>
-                {a.live ? <Pill kind="good">Ready</Pill> : <span className="app-cta" style={{ opacity: 0.8 }}>Planned</span>}
+                {a.live ? <Pill kind="good">Ready</Pill> : <Pill>Planned</Pill>}
               </div>
             ))}
           </div>

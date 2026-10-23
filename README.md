@@ -37,6 +37,7 @@ team knows and doesn't, inside guardrails each company sets.
 | `docs/HOSTING.md` | What runs where in Azure, costs, budgets, monitoring, Teams package |
 | `docs/RUNBOOKS.md` | Roll back, restore the database, rotate secrets, incidents, site down |
 | `docs/ACCOUNTS.md` | Which account is for what (production vs testing), no secrets |
+| `docs/TECH-STACK.md` | The tech stack in plain words: what runs where, front end vs back end |
 | `docs/security/` | Security & operations reviews (Oct 2026) |
 | `docs/BLUEPRINT.md` | The full product blueprint |
 | `docs/mockups/`, `docs/sidekick-dashboard*.html` | Clickable design mockups (onboarding/groups, original dashboard) |

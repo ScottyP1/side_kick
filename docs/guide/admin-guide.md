@@ -193,6 +193,7 @@ Organizations set up by the Sidekick team (or the very first one on an install) 
 | Feature | Comes with | Where it's switched on |
 |---|---|---|
 | Answers with sources, meeting notes, guardrails, audit log | Every plan | Always on |
+| Two-step sign-in, including **Two-step sign-in for everyone** | Every plan | Settings (basic account security is never a paid extra) |
 | **Reminders in Teams chats** | Team and up | A Teams chat's **Settings → Reminders**, and **Preview** / **Send now** |
 | **Team Leads** | Team and up | Users & access (role), picking a group's Team Lead, the setup wizard, Import from Microsoft 365 |
 | **Custom guardrail rules** | Team and up | Guardrails → **Add rule** (the built-in switches are in every plan) |

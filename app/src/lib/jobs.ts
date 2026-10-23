@@ -17,7 +17,8 @@
  *   statement. A job therefore runs once per attempt; if a worker dies mid-job the job runs again after its lease,
  *   so handlers must be safe to repeat (they claim their own work with unique rows, like reminders do).
  * - **Retries with backoff**: a failed attempt goes back to `queued` with `run_at` pushed out (30 s, 1 min, 2 min…
- *   up to an hour, with jitter). After `max_attempts` the job is **dead** (the dead-letter list in the Owner
+ *   up to an hour, with jitter), or later if the error says how long to wait (`retryAfterMs`, e.g. a 429 from
+ *   Microsoft Graph with Retry-After). After `max_attempts` the job is **dead** (the dead-letter list in the Owner
  *   Console, where it can be retried or canceled).
  * - **Idempotency key**: enqueueing with a key that's already in the table keeps the existing job, so the same
  *   work can be requested twice (two app copies, a double click) and still runs once.
@@ -221,11 +222,20 @@ export async function failJob(job: Pick<Job, "id" | "attempts" | "max_attempts">
   const res = await run(
     `UPDATE jobs SET status = ?, run_at = ?, locked_by = NULL, locked_until = NULL, last_error = ?, finished_at = ?, updated_at = ?
       WHERE id = ? AND status = 'running' AND locked_by = ?`,
-    dead ? "dead" : "queued", dead ? t : new Date(at.getTime() + backoffMs(job.attempts)).toISOString(), failureReason(error),
+    dead ? "dead" : "queued", dead ? t : new Date(at.getTime() + Math.max(backoffMs(job.attempts), retryAfterOf(error))).toISOString(), failureReason(error),
     dead ? t : null, t, job.id, workerId,
   );
   return res.changes === 1 ? (dead ? "dead" : "queued") : null;
 }
+
+/**
+ * How long the failing service asked us to wait (`retryAfterMs` on the error, e.g. Microsoft Graph's 429
+ * Retry-After), capped at an hour; 0 when it didn't say. A retry never comes back sooner than this.
+ */
+const retryAfterOf = (error: unknown): number => {
+  const ms = Number((error as { retryAfterMs?: unknown } | null)?.retryAfterMs ?? 0);
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, 3600_000) : 0;
+};
 
 /**
  * Runs one claimed job inside its own trace and records the outcome. Never throws: a failure is recorded on the

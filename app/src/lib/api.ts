@@ -38,13 +38,16 @@ export function routeName(req: unknown) {
  * The collections with a dynamic `[id]` segment (app/api/<collection>/[id]); the segment right after one of
  * them is always an id. Add a collection here when adding such a route.
  */
-const ID_COLLECTIONS = new Set(["meetings", "action-items", "docs", "users", "tenants", "workspaces", "rolloffs", "tickets", "attachments"]);
+const ID_COLLECTIONS = new Set(["meetings", "items", "action-items", "docs", "users", "tenants", "workspaces", "rolloffs", "tickets", "attachments"]);
+
+/** Fixed route words that sit where an id could (e.g. /api/meetings/auto), kept as they are. */
+const FIXED_WORDS = new Set(["auto"]);
 
 /** The path with dynamic segments replaced by ":id" (see `routeName`). */
 export function normalisePath(pathname: string) {
   const parts = pathname.split("/");
   return parts
-    .map((seg, i) => (seg && (ID_COLLECTIONS.has(parts[i - 1]) || /^[0-9a-f]{8}-[0-9a-f-]{27,}$|^[0-9a-f]{16,}$/i.test(seg)) ? ":id" : seg))
+    .map((seg, i) => (seg && !FIXED_WORDS.has(seg) && (ID_COLLECTIONS.has(parts[i - 1]) || /^[0-9a-f]{8}-[0-9a-f-]{27,}$|^[0-9a-f]{16,}$/i.test(seg)) ? ":id" : seg))
     .join("/");
 }
 

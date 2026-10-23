@@ -57,6 +57,8 @@ import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
 import { getChatSettings, recordChatMessage, reminderAction } from "../reminders";
 import { BRAND } from "../brand";
+import { cleanOutput, getGuardPolicy } from "../guardrails";
+import { SAVABLE_KINDS, setItemSaved } from "../saved-items";
 
 /* ------------------------------------------------------------------ */
 /* Security mode                                                       */
@@ -574,6 +576,23 @@ function registerHandlers(app: App) {
       }
       return fail(verb === VERBS.feedbackUp ? "Thanks, glad it helped." : "Thanks for telling us. Your admins can see which answers weren't helpful.");
     }
+    // "Save to knowledge" / "Undo" on a meeting-notes card: only items of this chat's own group (and, in a chat
+    // with client guests, only from meetings that had guests); the card comes back rebuilt for everyone.
+    if (verb === VERBS.saveKnowledge || verb === VERBS.unsaveKnowledge) {
+      const actor = await teamsActor(conv, activity);
+      try {
+        await span("teams", "Save to knowledge from Teams", () =>
+          setItemSaved(actor, conv.workspace_id!, data?.itemId, verb === VERBS.saveKnowledge, { guestsOnly: conv.guests === 1, where: "Teams" }),
+        );
+      } catch (e) {
+        if (e instanceof HttpError) return fail(e.message);
+        throw e;
+      }
+      const meeting = await get<{ id: string }>("SELECT meeting_id AS id FROM items WHERE id = ? AND org_id = ?", String(data?.itemId ?? ""), conv.org_id);
+      const updated = meeting?.id ? await notesCardFor(conv.org_id, meeting.id) : null;
+      if (!updated) return fail(verb === VERBS.saveKnowledge ? "Saved to knowledge." : "Removed from knowledge.");
+      return { statusCode: 200 as const, type: "application/vnd.microsoft.card.adaptive" as const, value: updated };
+    }
     if (typeof verb === "string" && verb.startsWith(REMIND_PREFIX)) {
       const out = await span("remind", "Reminder card button", async () => reminderAction(conv, await teamsActor(conv, activity), verb, { ...(data ?? {}) }));
       if ("error" in out) return fail(out.error);
@@ -655,6 +674,39 @@ export async function notePostFailed(conversationId: string, what: string, e: un
   }
 }
 
+/**
+ * The meeting-notes card for one processed meeting, as posted and as rebuilt after a "Save to knowledge" click:
+ * summary, decisions and things to keep (with their saved state), open questions and the action-item count.
+ * Text goes through the organization's output guardrails (`cleanOutput`: contact details masked when that switch
+ * is on, swearing masked, slurs replaced). Null when the meeting isn't in this org or isn't Ready.
+ */
+export async function notesCardFor(orgId: string, meetingId: string): Promise<IAdaptiveCard | null> {
+  const m = await get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; source: string | null; ws: string }>(
+    "SELECT m.id, m.workspace_id, m.title, m.held_at, m.summary, m.status, m.source, w.name AS ws FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.id = ? AND m.org_id = ?",
+    meetingId, orgId,
+  );
+  if (!m || m.status !== "Ready") return null;
+  const items = await all<{ id: string; kind: string; text: string; answered: number | null; pinned: number; saved_by: string | null }>(
+    "SELECT id, kind, text, answered, pinned, saved_by FROM items WHERE meeting_id = ? AND org_id = ? ORDER BY rowid", m.id, orgId,
+  );
+  const actions = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM action_items WHERE meeting_id = ? AND org_id = ?", m.id, orgId))?.n ?? 0);
+  const settings = (await getGuardPolicy(orgId, m.workspace_id)).switches;
+  const clean = (t: string) => cleanOutput(t, settings).text;
+  return meetingNotesCard({
+    workspace: m.ws,
+    title: m.title,
+    heldAt: m.held_at,
+    summary: clean(m.summary ?? ""),
+    decisions: items.filter((i) => i.kind === "decision").map((i) => clean(i.text)),
+    openQuestions: items.filter((i) => i.kind === "question" && !i.answered).map((i) => clean(i.text)),
+    actionCount: actions,
+    portalUrl: portalUrl("/meetings"),
+    meetingId: m.id,
+    keep: items.filter((i) => (SAVABLE_KINDS as readonly string[]).includes(i.kind)).map((i) => ({ id: i.id, kind: i.kind, text: clean(i.text), savedBy: i.pinned ? (i.saved_by ?? "someone") : null })),
+    source: m.source === "teams" ? "Captured from Microsoft Teams" : undefined,
+  });
+}
+
 // Cap so one long meeting can't flood a channel; the full list is always in the portal.
 const MAX_ACTION_CARDS = 15;
 
@@ -699,18 +751,8 @@ async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<
   const settings = await Promise.all(convs.map((c) => getChatSettings(c)));
   const targets = convs.filter((_, i) => settings[i].notes);
   if (!targets.length) return 0;
-  const items = await all<{ kind: string; text: string; answered: number | null }>("SELECT kind, text, answered FROM items WHERE meeting_id = ? ORDER BY rowid", m.id);
-  const actions = await all<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE meeting_id = ? ORDER BY rowid", m.id);
-  const notes = meetingNotesCard({
-    workspace: m.ws,
-    title: m.title,
-    heldAt: m.held_at,
-    summary: m.summary ?? "",
-    decisions: items.filter((i) => i.kind === "decision").map((i) => i.text),
-    openQuestions: items.filter((i) => i.kind === "question" && !i.answered).map((i) => i.text),
-    actionCount: actions.length,
-    portalUrl: portalUrl("/meetings"),
-  });
+  const actions = await all<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE meeting_id = ? AND org_id = ? ORDER BY rowid", m.id, orgId);
+  const notes = (await notesCardFor(orgId, m.id))!;
 
   let posted = 0;
   for (const conv of targets) {

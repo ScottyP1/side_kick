@@ -73,6 +73,9 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
     ]) {
       await run(`DELETE FROM ${table} WHERE workspace_id = ? AND org_id = ?`, ...ws);
     }
+    // Teams meetings captured for this group: forget the title and the link, keep the transcript id so a late or
+    // repeated notification can't capture it again into another group.
+    await run("UPDATE graph_meetings SET workspace_id = NULL, meeting_id = NULL, title = NULL, candidates = NULL, status = 'skipped', reason = 'The group was deleted.' WHERE workspace_id = ? AND org_id = ?", ...ws);
     // These tables have no org_id; the workspace id was checked against the org above.
     for (const table of ["insights", "gap_status", "reminder_state", "workspace_members"]) {
       await run(`DELETE FROM ${table} WHERE workspace_id = ?`, workspaceId);

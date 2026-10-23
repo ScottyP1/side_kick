@@ -328,7 +328,7 @@ export async function deleteGroupWithCertificate(orgId: string, workspaceId: str
  */
 export const ORG_TABLES = [
   "support_attachments", "support_messages", "support_article_uses", "support_tickets", "conversation_turns", "conversations",
-  "answer_feedback", "firm_docs", "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
+  "answer_feedback", "firm_docs", "graph_meetings", "graph_poll_cursors", "graph_subscriptions", "auto_meetings", "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
   "guard_rule_versions", "guard_custom_rules", "guard_workspace_rules", "guard_events", "guard_rules",
   "chat_messages", "teams_chat_settings", "reminder_runs", "action_items", "items", "meetings", "documents",
   "questions", "passages", "usage_events", "audit_log", "settings", "org_flags", "traces", "org_setup",

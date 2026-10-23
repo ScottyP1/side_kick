@@ -287,7 +287,7 @@ test(`[${engine}] help center Markdown: lists, nested lists, tables, quotes and 
 
 test(`[${engine}] help center: only the four customer guides, links rewritten, search finds sections`, async () => {
   const help = await import("../src/lib/help.ts");
-  assert.deepEqual(help.guides().map((g) => g.slug), ["concepts", "admin-guide", "teams-guide", "roles-and-permissions", "install-app"]);
+  assert.deepEqual(help.guides().map((g) => g.slug), ["concepts", "admin-guide", "teams-guide", "roles-and-permissions", "connect-devops-jira", "install-app"]);
   for (const bad of ["owner-guide", "README", "../PROGRESS", "PROGRESS", "constructor", "__proto__", "hasOwnProperty", ""]) assert.equal(help.guide(bad), null, bad);
   assert.equal(help.helpLink("admin-guide.md#4-add-people"), "/docs/admin-guide#4-add-people");
   assert.equal(help.helpLink("owner-guide.md"), null);
@@ -628,4 +628,37 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
   assert.ok(pnav.isActive("/workspaces/abc", "/workspaces"));
   assert.ok(pnav.isActive("/home", "/home"));
   assert.ok(!pnav.isActive("/homework", "/home"));
+});
+
+test("connectors: work items become plain text cards; ADO HTML and Jira's document format are read as text", async () => {
+  const t = await import("../src/lib/connector-text.ts");
+  const { jqlSince } = await import("../src/lib/connector-jira.ts");
+  assert.equal(t.htmlToText("<p>Open <b>port 8443</b>&nbsp;now&amp;then</p><div>Next</div><script>alert(1)</script>"), "Open port 8443 now&then\nNext");
+  const adf = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Ask " }, { type: "mention", attrs: { text: "@Lena" } }, { type: "text", text: " first." }] }, { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "one" }] }] }] }] };
+  assert.equal(t.adfToText(adf), "Ask @Lena first.\none");
+  assert.equal(t.adfToText("plain"), "plain");
+  assert.equal(t.adfToText(null), "");
+  const item = {
+    externalId: "4821", type: "Bug", title: "Gateway blocked", state: "Active", assignee: null, dueOn: "2026-11-01", url: "https://dev.azure.com/x/P/_workitems/edit/4821",
+    changedAt: "2026-10-20T10:00:00.000Z", description: "Needs the firewall rule.", blockedBy: ["#4810 Firewall (New)"], parent: "#4800 Wave 2", tags: ["Blocked"],
+    commentCount: 5, comments: [{ author: "Priya", at: "2026-10-20T09:00:00Z", text: "x".repeat(400) }],
+  };
+  const text = t.workItemText("ado", "Wave 2", item);
+  assert.match(text, /^Azure DevOps Bug #4821: Gateway blocked\nState: Active · Assigned to: nobody · Due: 2026-11-01 · Type: Bug\nProject: Wave 2 \(Azure DevOps\)/);
+  assert.match(text, /Blocked by: #4810 Firewall \(New\)/);
+  assert.match(text, /Comments \(5, latest first\): Priya \(2026-10-20\): x+…$/);
+  assert.ok(text.length < 1200, "one passage");
+  assert.equal(t.workItemTitle("jira", { externalId: "CUT-12", title: "Price feed", type: "Task" }), "Jira Task CUT-12: Price feed");
+  assert.equal(t.commentsSummary({ commentCount: 0, comments: [] }), null);
+  assert.equal(t.dayOf("2026-11-01T00:00:00Z"), "2026-11-01");
+  assert.equal(t.isoOf("2026-10-20T10:00:00.000+0000", "x"), "2026-10-20T10:00:00.000Z");
+  assert.equal(t.isoOf("garbage", "fallback"), "fallback");
+  assert.ok(t.isDoneState("Closed") && t.isDoneState("done") && !t.isDoneState("Active") && !t.isDoneState(null));
+  assert.equal(t.adoOrgName("https://dev.azure.com/northwind/Wave%202"), "northwind");
+  assert.equal(t.adoOrgName("contoso.visualstudio.com"), null);
+  assert.equal(t.adoOrgName("https://contoso.visualstudio.com/x"), "contoso");
+  assert.equal(t.adoOrgName("bad name; DROP"), null);
+  // JQL is in the person's time zone and to the minute: go back a day from the cursor.
+  assert.equal(jqlSince("2026-10-20T10:05:30.000Z"), "2026/10/19 10:05");
+  assert.equal(jqlSince(null), null);
 });

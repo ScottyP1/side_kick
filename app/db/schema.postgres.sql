@@ -433,3 +433,33 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS scope_key TEXT;
 CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key);
+-- Connectors to outside tools (lib/connectors.ts, Azure DevOps Boards and Jira): see the SQLite schema in lib/db.ts
+-- for what each column means.
+CREATE TABLE IF NOT EXISTS connectors (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, status TEXT NOT NULL,
+  account TEXT NOT NULL, account_name TEXT, api_base TEXT NOT NULL, web_base TEXT NOT NULL,
+  access_token TEXT, refresh_token TEXT, token_expires_at TEXT,
+  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
+  UNIQUE (org_id, kind)
+);
+CREATE TABLE IF NOT EXISTS connector_links (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL, project TEXT NOT NULL, project_name TEXT NOT NULL, audience TEXT NOT NULL DEFAULT 'internal',
+  sync_cursor TEXT, item_count INTEGER NOT NULL DEFAULT 0, last_sync_at TEXT, last_ok_at TEXT, last_error TEXT,
+  sync_started_at TEXT, created_by TEXT, created_at TEXT NOT NULL,
+  UNIQUE (connector_id, workspace_id, project)
+);
+CREATE INDEX IF NOT EXISTS connector_links_ws ON connector_links(org_id, workspace_id);
+CREATE TABLE IF NOT EXISTS connector_items (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+  link_id TEXT NOT NULL REFERENCES connector_links(id) ON DELETE CASCADE, external_id TEXT NOT NULL,
+  item_type TEXT, title TEXT NOT NULL, state TEXT, assignee TEXT, due_on TEXT, url TEXT NOT NULL, changed_at TEXT,
+  blocked_by TEXT, comment_count INTEGER NOT NULL DEFAULT 0, text_hash TEXT, synced_at TEXT NOT NULL,
+  UNIQUE (link_id, external_id)
+);
+CREATE INDEX IF NOT EXISTS connector_items_ws ON connector_items(org_id, workspace_id);
+CREATE TABLE IF NOT EXISTS connector_states (
+  state TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, verifier TEXT NOT NULL,
+  site TEXT, expires_at TEXT NOT NULL
+);
+

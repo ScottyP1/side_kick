@@ -69,6 +69,8 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
     for (const table of [
       "guard_custom_rules", "guard_workspace_rules", "chat_messages", "teams_chat_settings", "reminder_runs",
       "action_items", "items", "meetings", "documents", "questions", "passages", "answer_feedback", "conversations",
+      // Connector links and their imported work items (lib/connectors.ts); the tool stays connected for other groups.
+      "connector_items", "connector_links",
     ]) {
       await run(`DELETE FROM ${table} WHERE workspace_id = ? AND org_id = ?`, ...ws);
     }

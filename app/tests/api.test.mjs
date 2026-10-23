@@ -5,7 +5,8 @@
  * - fake Claude (SIDEKICK_FAKE_CLAUDE=1: canned answers, never in production),
  * - Azure search switched off, Teams in local Playground mode with a fake Teams connector,
  * - a fake Microsoft sign-in service (Entra ID) that signs ID tokens with a key made up for the run,
- * - a fake breached-password list (Have I Been Pwned's range API) that knows a few test passwords.
+ * - a fake breached-password list (Have I Been Pwned's range API) that knows a few test passwords,
+ * - a fake Azure DevOps and a fake Jira (scripts/fake-tools.mjs) for the connectors, with made-up projects.
  *
  * Run with `npm test` (both engines), or one engine:
  *   TEST_DB=sqlite node --test tests/api.test.mjs
@@ -21,6 +22,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { EVERYONE, MATRIX } from "./permissions-matrix.mjs";
+import { createFakeTools } from "../scripts/fake-tools.mjs";
 
 const APP = path.resolve(import.meta.dirname, "..");
 const ENGINE = process.env.TEST_DB === "postgres" ? "postgres" : "sqlite";
@@ -136,6 +138,24 @@ async function microsoftSignIn(call, claims, { mode, cheat = {}, replay } = {}) 
   return { start, back, to: back.location ? new URL(back.location) : null };
 }
 
+/* ---------- fake Azure DevOps + Jira (connectors): sign-in, REST APIs, test controls ---------- */
+const tools = createFakeTools();
+let TOOLS_BASE;
+
+/**
+ * Connects a tool like the Connect button does: starts the round trip, lets the fake tool approve the sign-in,
+ * and follows its redirect back to the callback. Returns the start response, the callback's response and where
+ * the browser lands (`to`). When the start is refused, only `start` is set (it redirects to /connectors?error=1).
+ */
+async function connectTool(call, kind, site) {
+  const start = await call("GET", `/api/connectors/start?kind=${kind}${site ? `&site=${encodeURIComponent(site)}` : ""}`);
+  if (start.status !== 307 || !start.location?.startsWith(TOOLS_BASE)) return { start };
+  const approve = await fetch(start.location, { redirect: "manual" });
+  const back = new URL(approve.headers.get("location"));
+  const done = await call("GET", back.pathname + back.search);
+  return { start, done, to: done.location ? new URL(done.location) : null };
+}
+
 /* ---------- a tiny HTTP client with its own cookie jar per user ---------- */
 function client() {
   const jar = new Map();
@@ -202,6 +222,7 @@ before(async () => {
   await new Promise((r) => microsoft.listen(0, "127.0.0.1", r));
   MS_BASE = `http://127.0.0.1:${microsoft.address().port}`;
   await new Promise((r) => pwned.listen(0, "127.0.0.1", r));
+  TOOLS_BASE = await tools.listen();
   tsconfigBefore = fs.readFileSync(path.join(APP, "tsconfig.json"), "utf8");
   const env = {
     ...process.env,
@@ -235,6 +256,8 @@ before(async () => {
     SIDEKICK_ENCRYPTION_KEY: crypto.randomBytes(32).toString("base64"),
   };
   env.PWNED_PASSWORDS_URL = `http://127.0.0.1:${pwned.address().port}`;
+  // Connectors (Azure DevOps, Jira) against the fake tools (these overrides are ignored in production).
+  Object.assign(env, tools.env(TOOLS_BASE));
   env.ENTRA_LOGIN_BASE = MS_BASE;
   if (ENGINE === "postgres") {
     const dbName = new URL(PG_URL.replace("postgres:///", "postgres://localhost/")).pathname.slice(1);
@@ -268,6 +291,7 @@ after(async () => {
   connector.close();
   microsoft.close();
   pwned.close();
+  await tools.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
   fs.rmSync(path.join(APP, `.next-test-${ENGINE}`), { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   if (tsconfigBefore) fs.writeFileSync(path.join(APP, "tsconfig.json"), tsconfigBefore); // next dev edits it
@@ -615,7 +639,7 @@ test(`[${ENGINE}] website: / shows the website when signed out and sends signed-
 
 test(`[${ENGINE}] website: every public page answers without a session; the portal, Owner Console and checkout don't`, async () => {
   const pages = await sitemapPaths();
-  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/roles-and-permissions", "/docs/install-app"]) {
+  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/roles-and-permissions", "/docs/connect-devops-jira", "/docs/install-app"]) {
     assert.ok(pages.includes(p), `${p} is in the sitemap`);
   }
   for (const p of pages) {
@@ -1564,6 +1588,37 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await admin("DELETE", `/api/firm/${firmId}`)).status, 200);
   // The website's help bot never sees any organization's material.
   assert.ok(!leaks(await client()("POST", "/api/help-bot", { message: "vault code ZEBRA-7731 Fabrikam merger" })));
+  // Connectors: a work item linked to workspace B (Azure DevOps) never reaches workspace A, another organization or
+  // its connectors, and nobody outside can see, sync, unlink or disconnect this organization's tools.
+  tools.world.ado.orgs.northwind.projects.find((p) => p.name === "Internal Tools").items.push({
+    id: 7731, type: "Task", title: "Rotate the ZEBRA vault key for the Fabrikam merger", state: "Active", assignedTo: "Bea B", due: null,
+    changed: new Date().toISOString(), description: "<p>Workspace B only: the vault code is ZEBRA-7731.</p>", tags: [], comments: [], blockedBy: [], parent: null,
+  });
+  const conn = await connectTool(admin, "ado", "northwind");
+  assert.equal(conn.to?.pathname + conn.to?.search, "/connectors?connected=ado", flashOf(conn.done ?? conn.start));
+  s.ado = (await admin("GET", "/api/connectors")).body.connectors.find((c) => c.kind === "ado").id;
+  const zl = await admin("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsB, project: "Internal Tools" });
+  assert.equal(zl.status, 200, JSON.stringify(zl.body));
+  assert.equal(zl.body.link.items, 1);
+  assert.ok((await admin("POST", "/api/ask", { ws: s.wsB, question: "ZEBRA vault key Fabrikam merger" })).body.sources.some((x) => x.type === "workitem"), "findable in B");
+  assert.ok(!leaks(await askA(member, "ZEBRA vault key Fabrikam merger")));
+  assert.ok(!leaks(await askA(admin, "ZEBRA vault key Fabrikam merger")), "an admin asking in A only gets A");
+  assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "ZEBRA vault key Fabrikam merger" })));
+  assert.deepEqual((await other("GET", "/api/connectors")).body.connectors, [], "another organization sees none of this org's tools");
+  assert.ok(!(await member("GET", "/api/connectors")).body.connectors[0].links.some((l) => l.workspaceId === s.wsB), "a member of A doesn't see B's linked projects");
+  assert.equal((await other("GET", `/api/connectors/${s.ado}/projects`)).status, 404);
+  assert.equal((await other("DELETE", `/api/connectors/${s.ado}`)).status, 404);
+  assert.equal((await other("POST", `/api/connectors/links/${zl.body.link.id}/sync`)).status, 404);
+  assert.equal((await other("DELETE", `/api/connectors/links/${zl.body.link.id}`)).status, 404);
+  assert.equal((await other("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsB, project: "Internal Tools" })).status, 404);
+  assert.equal((await other("POST", "/api/connectors/links", { connector: s.ado, ws: theirWs, project: "Internal Tools" })).status, 404, "can't feed its own group from this org's tool");
+  assert.equal((await member("POST", `/api/connectors/links/${zl.body.link.id}/sync`)).status, 403, "Members can't sync");
+  assert.equal((await member("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Internal Tools" })).status, 403, "Members can't link projects");
+  assert.equal((await member("DELETE", `/api/connectors/${s.ado}`)).status, 403);
+  assert.equal((await member("GET", "/api/connectors/start?kind=ado&site=northwind")).status, 403, "only Org Owners/Admins connect tools");
+  assert.ok(!/ZEBRA/.test(JSON.stringify((await other("GET", "/api/audit")).body)));
+  assert.equal((await admin("DELETE", `/api/connectors/links/${zl.body.link.id}`)).body.items, 1);
+  assert.ok(!(await admin("POST", "/api/ask", { ws: s.wsB, question: "ZEBRA vault key Fabrikam merger" })).body.sources.some((x) => x.type === "workitem"), "unlinking removes the items");
 });
 
 /* ---------- Support: tickets, Owner Console inbox, articles, Help chat, help bot, follow-ups ---------- */
@@ -4014,4 +4069,205 @@ test(`[${ENGINE}] Owner Console: two-step sign-in with an authenticator app, the
   const v = await c("POST", "/api/owner/auth/mfa/verify", { code: on.body.backupCodes[0] });
   assert.deepEqual(v.body, { ok: true, mustChange: true });
   assert.equal((await c("GET", "/api/owner/overview")).status, 403);
+});
+
+/* ---------- Connectors: Azure DevOps Boards and Jira (lib/connectors.ts) against the fake tools ---------- */
+
+/** A linked project's health from GET /api/connectors, by project name. */
+async function linkNamed(call, kind, project) {
+  const r = await call("GET", "/api/connectors");
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return r.body.connectors.find((c) => c.kind === kind)?.links.find((l) => l.projectName === project);
+}
+
+test(`[${ENGINE}] connectors: Azure DevOps connects with a sealed sign-in, lists projects in pages, links a board and answers cite its items with links`, async () => {
+  // A fresh person asks the questions here (the suite has used up others' 60 questions an hour).
+  const asker = client();
+  const nu = await admin("POST", "/api/users", { name: "Cora Connect", email: "cora@test.local", role: "Member", workspaces: [s.wsA] });
+  assert.equal((await firstSignIn(asker, "cora@test.local", nu.body.tempPassword)).status, 200);
+  s.asker = asker;
+  // Connecting needs the organization name, and refusals land back on Connectors with the reason (never in the address).
+  const noSite = await connectTool(admin, "ado", "");
+  assert.equal(noSite.start.location, `${BASE}/connectors?error=1`);
+  assert.match(flashOf(noSite.start), /Type your Azure DevOps organization/);
+  // Already connected in the isolation test: reconnecting the same organization keeps it (and counts once).
+  const again = await connectTool(admin, "ado", "northwind");
+  assert.equal(again.to.search, "?connected=ado");
+  const other = await connectTool(admin, "ado", "contoso");
+  assert.match(flashOf(other.done ?? other.start), /couldn't find the Azure DevOps organization|already connected/);
+  // Tokens are sealed at rest and never returned.
+  const sealed = await dbValue(`SELECT access_token FROM connectors WHERE id = '${s.ado}'`);
+  assert.match(sealed, /^enc1\./, "the access token is encrypted at rest");
+  assert.match(await dbValue(`SELECT refresh_token FROM connectors WHERE id = '${s.ado}'`), /^enc1\./);
+  const list = await admin("GET", "/api/connectors");
+  assert.deepEqual(list.body.configured, { ado: true, jira: true });
+  assert.doesNotMatch(JSON.stringify(list.body), /adoat_|adort_|enc1\./, "no token in any response");
+  // Projects come in pages (two per page here).
+  tools.state.adoProjectPage = 2;
+  const projects = await admin("GET", `/api/connectors/${s.ado}/projects`);
+  assert.deepEqual(projects.body.projects.map((p) => p.name), ["Data Platform", "Internal Tools", "Wave 2 Cutover"]);
+  tools.state.adoProjectPage = 100;
+  assert.equal((await admin("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Made Up" })).status, 404, "only projects the account can read");
+  const link = await admin("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Wave 2 Cutover" });
+  assert.equal(link.status, 200, JSON.stringify(link.body));
+  assert.deepEqual([link.body.link.items, link.body.link.problem, Boolean(link.body.link.lastOkAt)], [5, null, true]);
+  s.adoLink = link.body.link.id;
+  assert.equal((await admin("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Wave 2 Cutover" })).status, 409, "linked once per group");
+  // Ask cites the work item, with what blocks it and a link back to Azure DevOps.
+  const a = await askA(asker, "What's blocking the payment gateway cutover? firewall rule");
+  const wi = a.body.sources.find((x) => x.type === "workitem");
+  assert.ok(wi, JSON.stringify(a.body.sources));
+  assert.match(wi.title, /^Azure DevOps (Bug|Task) #48(21|10):/);
+  assert.match(wi.url, new RegExp(`^${TOOLS_BASE}/ado-web/northwind/Wave%202%20Cutover/_workitems/edit/48(21|10)$`));
+  const text = await dbValue(`SELECT text FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE external_id = '4821' AND link_id = '${s.adoLink}')`);
+  for (const bit of ["State: Active", "Assigned to: Priya Shah", "Blocked by: #4810 Firewall change request for the payment gateway (New)", "Tags: Blocked, cutover", "Comments (2, latest first): Priya Shah"]) assert.ok(text.includes(bit), `${bit} in: ${text}`);
+  assert.ok(!/<p>|<b>/.test(text), "HTML is turned into plain text");
+  // Teams answer cards get an "Open #…" button to the tool.
+  assert.match(fs.readFileSync(path.join(APP, "src/lib/teams/cards.ts"), "utf8"), /Action\.OpenUrl", title: `Open /);
+  // The filter "Work items" keeps only connector sources.
+  const only = await askA(asker, "payment gateway cutover", { types: ["work"] });
+  assert.ok(only.body.sources.length && only.body.sources.every((x) => x.type === "workitem"));
+  // Every sync is a trace step with counts only.
+  assert.ok(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE kind = 'connector'")) > 0);
+  assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%adoat_%' OR attrs LIKE '%Priya%'")), 0, "no tokens or item text in traces");
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Connected Azure DevOps \(northwind\), read-only.*|Linked Azure DevOps project Wave 2 Cutover/);
+  // The knowledge map and meeting notes run with the group's open work items in their inventory.
+  assert.equal((await admin("POST", "/api/memory/refresh", { ws: s.wsA })).status, 200);
+});
+
+test(`[${ENGINE}] connectors: syncs are incremental, refresh expired tokens, record a refused project, and run from the scheduler`, async () => {
+  const project = tools.world.ado.orgs.northwind.projects.find((p) => p.name === "Wave 2 Cutover");
+  // A change in Azure DevOps: one item updated, one new. Only those are asked for (the cursor).
+  const it = project.items.find((x) => x.id === 4821);
+  it.state = "Closed";
+  it.changed = new Date().toISOString();
+  project.items.push({ id: 4850, type: "Task", title: "Book the cutover war room", state: "New", assignedTo: "Ana Ruiz", due: null, changed: new Date().toISOString(), description: "", tags: [], comments: [], blockedBy: [], parent: 4800 });
+  // The access token has run out: the next call refreshes it once and carries on.
+  tools.expireAccessTokens();
+  const refreshes = tools.counts.refresh.ado;
+  const r = await admin("POST", `/api/connectors/links/${s.adoLink}/sync`);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual([r.body.link.items, r.body.link.problem], [6, null]);
+  assert.equal(tools.counts.refresh.ado, refreshes + 1, "one refresh");
+  assert.match(await dbValue(`SELECT text FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE external_id = '4821' AND link_id = '${s.adoLink}')`), /State: Closed/);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE external_id = '4821' AND link_id = '${s.adoLink}')`)), 1, "re-indexed, not duplicated");
+  // The account loses access to the project: the link says why, nothing is deleted, the connector stays connected.
+  tools.deny("ado", "Wave 2 Cutover");
+  const denied = (await admin("POST", `/api/connectors/links/${s.adoLink}/sync`)).body.link;
+  assert.match(denied.problem, /Azure DevOps refused access to the project “Wave 2 Cutover”/);
+  assert.equal(denied.items, 6, "nothing deleted");
+  const health = (await admin("GET", "/api/connectors")).body.connectors.find((c) => c.kind === "ado");
+  assert.equal(health.status, "error");
+  assert.match(health.problem, /1 linked project has a problem/);
+  tools.allow("ado", "Wave 2 Cutover");
+  // The scheduler (the reminder tick today) syncs what's due, each as its own trace for the organization.
+  await dbExec(`UPDATE connector_links SET last_sync_at = '2026-01-01T00:00:00.000Z' WHERE id = '${s.adoLink}'`);
+  const tick = await fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET } }).then((x) => x.json());
+  assert.ok(tick.synced >= 1, JSON.stringify(tick));
+  assert.equal((await linkNamed(admin, "ado", "Wave 2 Cutover")).problem, null, "healthy again after the scheduled sync");
+  assert.ok(Number(await dbValue("SELECT COUNT(*) FROM traces WHERE name = 'Sync Azure DevOps project' AND channel = 'system'")) >= 1);
+  // A Member of the group sees the health; only managers act.
+  assert.ok(await linkNamed(s.asker, "ado", "Wave 2 Cutover"));
+  assert.equal((await s.asker("DELETE", `/api/connectors/links/${s.adoLink}`)).status, 403);
+});
+
+test(`[${ENGINE}] connectors: Jira connects (rotating refresh tokens), pages through projects and issues, and a revoked sign-in shows as expired until reconnected`, async () => {
+  tools.state.jiraProjectPage = 1;
+  tools.state.jiraIssuePage = 2;
+  const c = await connectTool(admin, "jira");
+  assert.equal(c.to.search, "?connected=jira", flashOf(c.done ?? c.start));
+  const jira = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "jira");
+  assert.equal(jira.accountName, "northwind");
+  const projects = (await admin("GET", `/api/connectors/${jira.id}/projects`)).body.projects;
+  assert.deepEqual(projects.map((p) => p.key), ["OPS", "STORE"], "both pages of projects");
+  const link = (await admin("POST", "/api/connectors/links", { connector: jira.id, ws: s.wsA, project: "STORE", audience: "shareable" })).body.link;
+  assert.deepEqual([link.items, link.problem, link.audience], [4, null, "shareable"], "all issues over two pages");
+  const text = await dbValue(`SELECT text FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE external_id = 'STORE-15')`);
+  assert.match(text, /Blocked by: STORE-16 Vendor patch for the receipt printer driver \(Waiting for vendor\)/);
+  assert.match(text, /Assigned to: nobody/);
+  const g = await askA(s.asker, "receipt printer driver crash vendor patch", { guests: true });
+  const src = g.body.sources.find((x) => x.type === "workitem");
+  assert.ok(src, "shareable items are used with client guests");
+  assert.match(src.url, new RegExp(`^${TOOLS_BASE}/jira-web/northwind/browse/STORE-1[56]$`));
+  // Refresh tokens rotate: two refreshes in a row both work (the new one was saved each time).
+  for (let i = 0; i < 2; i++) {
+    tools.expireAccessTokens();
+    assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null, `refresh ${i + 1}`);
+  }
+  assert.equal(tools.counts.refresh.jira, 2);
+  // Revoked in Atlassian: the refresh is refused, the connector turns expired, syncing pauses, nothing is deleted.
+  tools.revoke("jira");
+  tools.expireAccessTokens();
+  const expired = (await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link;
+  assert.match(expired.problem, /Jira sign-in has expired or was revoked/);
+  const h = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "jira");
+  assert.deepEqual([h.status, h.links[0].items], ["expired", 4]);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /The Jira sign-in expired or was revoked/);
+  assert.equal((await admin("POST", "/api/connectors/links", { connector: jira.id, ws: s.wsB, project: "OPS" })).status, 409, "no new links while expired");
+  await dbExec(`UPDATE connector_links SET last_sync_at = '2026-01-01T00:00:00.000Z' WHERE id = '${link.id}'`);
+  const calls = tools.counts.api.jira;
+  await fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET } });
+  assert.equal(tools.counts.api.jira, calls, "the scheduler skips an expired connector");
+  // Reconnecting brings it back and the next sync works.
+  assert.equal((await connectTool(admin, "jira")).to.search, "?connected=jira");
+  assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
+  assert.equal((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "jira").status, "ok");
+  s.jira = jira.id;
+  tools.state.jiraProjectPage = 50;
+  tools.state.jiraIssuePage = 50;
+});
+
+test(`[${ENGINE}] connectors: plans limit how many tools (none, one, all) with an upgrade message; a Team Lead links only their own groups`, async () => {
+  // Starter (no connectors): refused before the tool's sign-in, with the plan's message.
+  const st = client();
+  assert.equal((await signUpAs(st, { org: "Connector Starter Co", name: "Sid Starter", email: "sid@connstarter.test", password: "correct horse battery", plan: "starter" })).status, 200);
+  const starter = await connectTool(st, "ado", "northwind");
+  assert.equal(starter.start.location, `${BASE}/connectors?error=1`);
+  assert.match(flashOf(starter.start), /Your Starter plan doesn't include connectors\. An Org Owner or Billing Admin can move to a bigger plan on Usage & billing/);
+  // Team (one tool): the first connects, a second tool is refused; reconnecting the first still works.
+  const t = client();
+  assert.equal((await signUpAs(t, { org: "Connector Team Co", name: "Tia Team", email: "tia@connteam.test", password: "correct horse battery", plan: "team" })).status, 200);
+  assert.equal((await connectTool(t, "ado", "northwind")).to.search, "?connected=ado");
+  const second = await connectTool(t, "jira");
+  assert.match(flashOf(second.start), /Your Team plan allows 1 connector and you have 1\./);
+  assert.equal((await connectTool(t, "ado", "northwind")).to.search, "?connected=ado", "reconnecting doesn't count again");
+  const line = (await t("GET", "/api/billing")).body.limits.find((l) => l.key === "connectors");
+  assert.deepEqual([line.used, line.limit], [1, 1]);
+  // Its tool is its own: the main org's links and items never show up there.
+  const theirs = (await t("GET", "/api/connectors")).body.connectors;
+  assert.deepEqual(theirs.map((c) => [c.kind, c.links.length]), [["ado", 0]]);
+  // A Team Lead links projects only to groups they belong to.
+  const lead = (await t("POST", "/api/users", { name: "Lars Lead", email: "lars@connteam.test", role: "Team Lead", workspaces: [] })).body;
+  const ws1 = (await t("POST", "/api/workspaces", { name: "Lead's group", lead: lead.id })).body.id;
+  const ws2 = (await t("POST", "/api/workspaces", { name: "Not the lead's group" })).body.id;
+  const l = client();
+  await firstSignIn(l, "lars@connteam.test", lead.tempPassword);
+  const ado = theirs[0].id;
+  assert.equal((await l("POST", "/api/connectors/links", { connector: ado, ws: ws2, project: "Data Platform" })).status, 404);
+  const ok = await l("POST", "/api/connectors/links", { connector: ado, ws: ws1, project: "Data Platform" });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal((await l("DELETE", `/api/connectors/${ado}`)).status, 403, "only Org Owners/Admins disconnect");
+  assert.equal((await l("GET", "/api/connectors/start?kind=jira")).status, 403);
+  // Deleting the group removes its linked projects and their items; the tool stays connected.
+  assert.equal((await t("DELETE", `/api/workspaces/${ws1}`, { confirm: "Lead's group" })).status, 200);
+  assert.equal(await rows("connector_links", "workspace_id", ws1), 0);
+  assert.equal(await rows("connector_items", "workspace_id", ws1), 0);
+  assert.equal((await t("GET", "/api/connectors")).body.connectors.length, 1);
+});
+
+test(`[${ENGINE}] connectors: disconnecting removes the sign-in, every link and every imported item from answers`, async () => {
+  const before = Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_type = 'workitem' AND workspace_id = '${s.wsA}'`));
+  assert.ok(before >= 10, `items indexed: ${before}`);
+  assert.equal((await s.asker("DELETE", `/api/connectors/${s.jira}`)).status, 403);
+  const off = await admin("DELETE", `/api/connectors/${s.jira}`);
+  assert.equal(off.status, 200);
+  assert.deepEqual(off.body, { links: 1, items: 4 });
+  const offAdo = await admin("DELETE", `/api/connectors/${s.ado}`);
+  assert.deepEqual(offAdo.body, { links: 1, items: 6 });
+  const org = await dbValue("SELECT id FROM orgs WHERE name = 'Test Org'");
+  for (const table of ["connectors", "connector_links", "connector_items"]) assert.equal(await rows(table, "org_id", org), 0, table);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_type = 'workitem' AND org_id = '${org}'`)), 0, "search entries gone");
+  assert.ok(!(await askA(s.asker, "payment gateway cutover firewall rule")).body.sources.some((x) => x.type === "workitem"));
+  assert.deepEqual((await admin("GET", "/api/connectors")).body.connectors, []);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Azure DevOps \(northwind\): removed its sign-in, 1 linked project and 6 imported items/);
 });

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, CitedText, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 
-type Source = { id: string; title: string; loc: string; type: string; excerpt?: string; origin?: "group" | "firm"; date?: string | null; outdated?: string | null };
+type Source = { id: string; title: string; loc: string; type: string; excerpt?: string; origin?: "group" | "firm"; date?: string | null; outdated?: string | null; url?: string | null };
 type Answer = {
   found: boolean;
   answer: string;
@@ -28,7 +28,7 @@ type Turn = { role: "user" | "assistant"; text: string; followUp?: string | null
 type Quality = { total: { up: number; down: number; helpful: number | null }; answers: { total: number; dontKnow: number }; groups: { id: string; name: string; up: number; down: number; helpful: number | null }[] };
 
 /** The type filters Ask offers (keys match FILTER_TYPES in lib/search.ts). */
-const FILTERS: [string, string][] = [["documents", "Documents"], ["meetings", "Meetings"], ["chats", "Teams chats"], ["decisions", "Decisions & notes"], ["firm", "Firm library"]];
+const FILTERS: [string, string][] = [["documents", "Documents"], ["meetings", "Meetings"], ["chats", "Teams chats"], ["decisions", "Decisions & notes"], ["firm", "Firm library"], ["work", "Work items"]];
 
 const storeKey = (ws: string, guests: boolean) => `sk_ask:${ws}:${guests ? "guests" : "team"}`;
 const readStore = (k: string) => {
@@ -57,7 +57,13 @@ function fromTurns(turns: Turn[]): Exchange[] {
   return out;
 }
 
-/** One cited source line: "Firm policy ·" for the firm library, its location, and an outdated flag. */
+/** Which tool a cited work item came from, for its "Open in …" link (source type "workitem"). */
+const toolName = (s: Source) => (s.title.startsWith("Jira") ? "Jira" : "Azure DevOps");
+
+/**
+ * One cited source line: "Firm policy ·" for the firm library, its location, an outdated flag, and for a work item
+ * from a connector (Azure DevOps, Jira) a link that opens it in the tool.
+ */
 function SourceLine({ s }: { s: Source }) {
   return (
     <div className="li" style={{ padding: "8px 12px" }}>
@@ -67,6 +73,7 @@ function SourceLine({ s }: { s: Source }) {
         <b style={{ fontSize: 13 }}>{s.title}</b>
         {s.loc && <span className="muted" style={{ fontSize: 12 }}> · {s.loc}</span>}
         {s.date && <span className="muted" style={{ fontSize: 12 }}> · {s.date}</span>}
+        {s.url && <> · <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>Open in {toolName(s)}</a></>}
         {s.outdated && <div style={{ fontSize: 12, color: "var(--warn)" }}>May be out of date: {s.outdated}</div>}
         {s.excerpt && <div className="muted" style={{ fontSize: 12.5 }}>{s.excerpt}…</div>}
       </div>

@@ -54,7 +54,7 @@ const header = (eyebrow: string, title: string): Block[] => [
 const plain = (s: string) => s.replace(/[#*_`>|]+/g, " ").replace(/\s+/g, " ").trim();
 
 /** One cited source, as returned by `ask()` in sidekick.ts. `origin` "firm" = the org's firm library. */
-export type CardSource = { id: string; title: string; loc: string | null; type: string; excerpt: string; origin?: "group" | "firm"; outdated?: string | null };
+export type CardSource = { id: string; title: string; loc: string | null; type: string; excerpt: string; origin?: "group" | "firm"; outdated?: string | null; url?: string | null };
 
 /** What the answer card shows besides the answer itself. */
 export type AnswerExtras = { blocked?: string | null; conflict?: boolean; followUp?: string | null; questionId?: string | null };
@@ -62,7 +62,8 @@ export type AnswerExtras = { blocked?: string | null; conflict?: boolean; follow
 /**
  * The reply to a question: the question as the title (with a short "Following up on …" line when it built on the
  * conversation), the answer (with [S1]-style citations), a note when sources disagree, and each cited source with
- * its origin ("Firm policy · …" for the firm library), location, an "may be out of date" flag, and a short excerpt.
+ * its origin ("Firm policy · …" for the firm library), location, an "may be out of date" flag, and a short excerpt;
+ * a work item from a connector (Azure DevOps, Jira) also gets an "Open #4821" button to the tool.
  * Unanswered questions say they were logged as a gap; questions refused by the guardrails (`blocked`) say the
  * organization's guardrails apply instead. Answered (and "I don't know") replies get 👍/👎 buttons and a hint
  * about "new question".
@@ -84,6 +85,10 @@ export function answerCard(question: string, answer: { found: boolean; answer: s
         items: [
           text(`**[${s.id}]** ${origin}${s.title}${s.loc ? ` · ${s.loc}` : ""}${s.outdated ? ` · may be out of date (${s.outdated})` : ""}`, { size: "Small" }),
           text(`“${plain(s.excerpt)}…”`, { size: "Small", isSubtle: true, spacing: "None", maxLines: 3 }),
+          // A work item from Azure DevOps or Jira opens in the tool (a button, never a Markdown link).
+          ...(s.url && /^https?:\/\//.test(s.url)
+            ? [{ type: "ActionSet", spacing: "None", actions: [{ type: "Action.OpenUrl", title: `Open ${s.title.split(":")[0].replace(/^(Azure DevOps|Jira)\s.*?([#\w-]+)$/, "$2")}`, url: s.url }] }]
+            : []),
         ],
       });
     }

@@ -35,6 +35,7 @@ export const MATRIX = [
   { what: "Ask Sidekick questions", method: "POST", url: (s) => "/api/ask", body: (s) => ({ ws: s.wsA, question: "" }), allow: EVERYONE },
   { what: "Rate answers 👍/👎", method: "POST", url: () => "/api/feedback", body: (s) => ({ ws: s.wsA, questionId: NOPE, vote: "up" }), allow: EVERYONE },
   { what: "See the firm library", method: "GET", url: () => "/api/firm", allow: EVERYONE },
+  { what: "See connected tools (Azure DevOps, Jira) and their groups' linked projects", method: "GET", url: () => "/api/connectors", allow: EVERYONE },
   // Change workspace content
   { what: "Upload documents", method: "POST", url: () => "/api/docs", form: (s) => ({ ws: s.wsA }), allow: EDITORS },
   { what: "Change or delete a document", method: "DELETE", url: () => `/api/docs/${NOPE}`, allow: EDITORS },
@@ -58,6 +59,9 @@ export const MATRIX = [
   { what: "Export the whole organization's data (zip)", method: "GET", url: () => "/api/export", allow: ADMINS },
   { what: "See roll-offs and deletion certificates", method: "GET", url: () => "/api/rolloffs", allow: ADMINS },
   { what: "Add to the firm library", method: "POST", url: () => "/api/firm", form: () => ({}), allow: ADMINS },
+  { what: "Connect, reconnect or disconnect a tool (Azure DevOps, Jira)", method: "DELETE", url: () => `/api/connectors/${NOPE}`, allow: ADMINS },
+  { what: "Link a tool's project to their groups, sync or unlink it", method: "POST", url: () => "/api/connectors/links", body: {}, allow: MANAGERS },
+  { what: "List a connected tool's projects (to link one)", method: "GET", url: () => `/api/connectors/${NOPE}/projects`, allow: MANAGERS },
   { what: "Change or delete a firm library document", method: "DELETE", url: () => `/api/firm/${NOPE}`, allow: ADMINS },
   { what: "See answer quality (👍/👎 counts)", method: "GET", url: () => "/api/feedback", allow: ADMINS },
   { what: "Download a deletion certificate", method: "GET", url: () => `/api/rolloffs/${NOPE}/certificate`, allow: ADMINS },

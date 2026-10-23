@@ -9,7 +9,8 @@
  *      connector (Teams is simulated through the app's local Teams test path) and a fake breached-password list.
  *      It then loads the world through the app's own API, like people and Teams would: first-run setup, the Owner
  *      Console account, plans (test mode), ~135 people, groups with Team Leads, documents, the firm library,
- *      meeting imports, linked and tracked Teams chats with messages, guardrails, questions with 👍/👎, support
+ *      meeting imports, linked and tracked Teams chats with messages, a connected Azure DevOps board and Jira project
+ *      (against the fake tools in scripts/fake-tools.mjs on --tools-port), guardrails, questions with 👍/👎, support
  *      tickets with replies, and the smaller client organizations. So audit entries and traces exist too.
  *   B. Stops the copy and finishes what has no API, through lib/db.ts: with fake Claude, the meeting notes, answers
  *      and knowledge maps are replaced by the realistic ones from demo-world.mjs (fake Claude only writes "Test
@@ -26,6 +27,8 @@
  *   --postgres [url]      use a local Postgres database (default postgres:///sidekick_demo) instead of SQLite
  *   --data-dir <dir>      the SQLite data folder (default app/.demo-data; never app/data)
  *   --port <n>            the port the seeding copy runs on (default 3329)
+ *   --tools-port <n>      the port of the fake Azure DevOps + Jira (default 3331: the demo copy's launch config starts
+ *                         the same fake there, so "Sync now" and the work item links keep working in the demo)
  *   --secrets <file>      where the passwords are kept between runs (default app/.demo-logins.json)
  *   --logins-out <file>   also write the logins guide here (e.g. "~/Desktop/Sidekick Pitch/demo-logins (LOCAL ONLY).md")
  *   --with-real-claude    write notes, answers and knowledge maps with the real Claude (key from app/.env.local);
@@ -47,6 +50,7 @@ import {
   LOGIN_KEYS, NORTHWIND, OPERATOR, OTHER_ORGS, PROFILES, WORLD_TODAY, addDays, emailAt, firmLibrary, groupContent, northwindPeople, smallOrgContent, supportTickets,
 } from "./demo-world.mjs";
 import { loginsGuide } from "./demo-logins.mjs";
+import { createFakeTools } from "./fake-tools.mjs";
 
 const APP = path.resolve(import.meta.dirname, "..");
 
@@ -62,6 +66,9 @@ const opt = (name, fallback) => {
 const POSTGRES = flag("--postgres") ? opt("--postgres", "postgres:///sidekick_demo") : null;
 const DATA_DIR = path.resolve(APP, opt("--data-dir", ".demo-data"));
 const PORT = Number(opt("--port", "3329"));
+const TOOLS_PORT = Number(opt("--tools-port", "3331"));
+/** The demo copy's encryption key ("demo-only-key-for-made-up-data!!"): local made-up data only, also in .claude/launch.json. */
+const DEMO_ENCRYPTION_KEY = "ZGVtby1vbmx5LWtleS1mb3ItbWFkZS11cC1kYXRhISE=";
 const SECRETS = path.resolve(APP, opt("--secrets", ".demo-logins.json"));
 const LOGINS_OUT = opt("--logins-out", null);
 const REAL = flag("--with-real-claude");
@@ -146,6 +153,8 @@ const pwned = http.createServer((_req, res) => {
   res.end("0000000000000000000000000000000000A:0");
 });
 const listen = (srv) => new Promise((r) => srv.listen(0, "127.0.0.1", r));
+// Fake Azure DevOps + Jira (made-up Northwind projects) for the connectors, on a fixed port the demo copy uses too.
+const tools = createFakeTools();
 
 /* ---------- the app copy ---------- */
 let server = null;
@@ -171,7 +180,10 @@ function appEnv() {
     TENANT_ID: TENANT, TEAMS_LOCAL_PLAYGROUND: "true", SIDEKICK_MULTI_TENANT: "",
     SIDEKICK_PUBLIC_URL: "", SIDEKICK_SCHEDULER: "off", SIDEKICK_SIGNUP_OPEN: "",
     PWNED_PASSWORDS_URL: `http://127.0.0.1:${pwned.address().port}`,
-    SIDEKICK_ENCRYPTION_KEY: process.env.SIDEKICK_ENCRYPTION_KEY || crypto.randomBytes(32).toString("base64"),
+    // A fixed, made-up key for the demo copy only (its launch config sets the same one), so the connector sign-ins
+    // sealed while seeding still open when the demo runs. Never used for real data.
+    SIDEKICK_ENCRYPTION_KEY: DEMO_ENCRYPTION_KEY,
+    ...tools.env(`http://127.0.0.1:${TOOLS_PORT}`),
   };
 }
 
@@ -218,7 +230,7 @@ function freshData() {
 /* ---------- a tiny HTTP client with its own cookie jar per person ---------- */
 function client(label) {
   const jar = new Map();
-  const call = async (method, url, body, { form, headers: extra = {}, ok = true } = {}) => {
+  const call = async (method, url, body, { form, headers: extra = {}, ok = true, raw = false } = {}) => {
     const headers = { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "), ...extra };
     let payload = form;
     if (!form && body !== undefined) {
@@ -238,11 +250,24 @@ function client(label) {
     } catch {
       json = text;
     }
+    if (raw) return { status: res.status, location: res.headers.get("location"), body: json };
     if (ok && res.status >= 400) throw new Error(`${label}: ${method} ${url} → ${res.status} ${typeof json === "string" ? json.slice(0, 300) : JSON.stringify(json).slice(0, 300)}`);
     return json;
   };
   call.label = label;
   return call;
+}
+
+/**
+ * Connects a tool like the Connect button: the app sends the browser to the fake tool's sign-in, which approves at
+ * once and sends it back to the callback. Fails loudly if it doesn't land on "connected".
+ */
+async function connectDemoTool(call, kind, site) {
+  const start = await call("GET", `/api/connectors/start?kind=${kind}${site ? `&site=${site}` : ""}`, undefined, { raw: true });
+  const approve = await fetch(start.location ?? "", { redirect: "manual" }).catch(() => null);
+  const back = approve?.headers.get("location") ? new URL(approve.headers.get("location")) : null;
+  const done = back ? await call("GET", back.pathname + back.search, undefined, { raw: true }) : null;
+  if (!done?.location?.includes(`connected=${kind}`)) throw new Error(`Connecting ${kind} to the fake tools didn't work (${start.status} → ${done?.location ?? start.location}).`);
 }
 
 /** A multipart form from fields; `files` = [{ field, name, text, type }]. */
@@ -357,6 +382,16 @@ async function phaseA() {
     const creator = i % 2 ? admin : owner; // the Org Owner and an Org Admin share the setup, as in real life
     const r = await creator("POST", "/api/workspaces", { name: p.name, client: p.client, code: p.code, lead: idOf(p.lead), members });
     world.groups[p.key] = { id: r.id, profile: p, lead: world.users[people.find((x) => x.name === p.lead).email].session };
+  }
+
+  log("• Connectors: an Azure DevOps board and a Jira project (fake tools on this Mac), linked to groups");
+  await connectDemoTool(owner, "ado", "northwind");
+  await connectDemoTool(owner, "jira");
+  const connected = (await owner("GET", "/api/connectors")).connectors;
+  const toolId = (kind) => connected.find((t) => t.kind === kind).id;
+  for (const [kind, project, key] of [["ado", "Wave 2 Cutover", "contoso"], ["jira", "STORE", "contoso"], ["ado", "Data Platform", "litware"]]) {
+    const r = await world.groups[key].lead("POST", "/api/connectors/links", { connector: toolId(kind), ws: world.groups[key].id, project });
+    if (r.link.problem) throw new Error(`Linking ${project} didn't sync: ${r.link.problem}`);
   }
 
   log("• Firm library (policies, standards, templates)");
@@ -668,6 +703,8 @@ async function main() {
   if (!(await portFree(3330)) && !POSTGRES && DATA_DIR === path.join(APP, ".demo-data")) fail("The demo copy seems to be running (port 3330). Stop it first, then seed again.");
   await listen(connector);
   await listen(pwned);
+  if (!(await portFree(TOOLS_PORT))) fail(`Port ${TOOLS_PORT} (the fake Azure DevOps + Jira) is busy: stop the demo copy first, or pass --tools-port.`);
+  await tools.listen(TOOLS_PORT);
   freshData();
   const saved = ["tsconfig.json", "next-env.d.ts"].map((f) => [path.join(APP, f), fs.existsSync(path.join(APP, f)) ? fs.readFileSync(path.join(APP, f), "utf8") : null]);
   try {
@@ -681,6 +718,7 @@ async function main() {
     await stopApp();
     connector.close();
     pwned.close();
+    await tools.close();
     fs.rmSync(path.join(APP, ".next-demo-seed"), { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
     for (const [file, text] of saved) if (text !== null && fs.readFileSync(file, "utf8") !== text) fs.writeFileSync(file, text); // next dev edits these
   }

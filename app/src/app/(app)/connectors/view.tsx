@@ -4,11 +4,13 @@
  * Connectors (/connectors): the tools Sidekick will read from (Outlook, SharePoint, Jira, ...).
  * Uploads, transcript import and Teams (chats and channels assigned on each group's page) work today; the
  * other tools are planned and will each connect with their own sign-in. Says how many connectors the
- * organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me.
+ * organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me. Tile icons:
+ * components/connector-icons.tsx.
  */
 
 import { useApp } from "@/components/shell";
 import { Pill } from "@/components/ui";
+import { CONNECTOR_ICONS } from "@/components/connector-icons";
 import { BRAND } from "@/lib/brand";
 
 const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; desc: string; live?: boolean }[] = [
@@ -52,10 +54,10 @@ export default function ConnectorsPage() {
           <div className="app-grid">
             {APPS.filter((a) => a.g === g).map((a) => (
               <div key={a.name} className={`app-tile${a.live ? " on" : ""}`} style={{ cursor: "default" }}>
-                <span className="app-ico" style={{ background: a.bg, color: a.fg ?? "#fff", width: 48, height: 48, fontSize: 17 }} aria-hidden="true">{a.mono}</span>
+                <span className="app-ico" style={{ background: a.bg, color: a.fg ?? "#fff", width: 48, height: 48, fontSize: 17 }} aria-hidden="true">{CONNECTOR_ICONS[a.name] ?? a.mono}</span>
                 <b>{a.name}</b>
                 <span className="muted">{a.desc}</span>
-                {a.live ? <Pill kind="good">Ready</Pill> : <span className="app-cta" style={{ opacity: 0.8 }}>Planned</span>}
+                {a.live ? <Pill kind="good">Ready</Pill> : <Pill>Planned</Pill>}
               </div>
             ))}
           </div>

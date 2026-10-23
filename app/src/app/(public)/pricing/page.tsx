@@ -71,7 +71,7 @@ export default function PricingPage() {
           <div className="site-card"><h3 style={{ marginTop: 0 }}>Extra groups</h3><p>Need one more engagement? Add an extra group to any plan for {usd(EXTRA_GROUP.priceUsd)} a month. Each brings {EXTRA_GROUP.adds.seats} more people, {EXTRA_GROUP.adds.meetingHours} meeting hours and {usd(EXTRA_GROUP.adds.aiCreditUsd)} of AI credit. When you add a group past your plan, {BRAND.name} shows the cheaper way: extra groups or the next plan.</p></div>
           <div className="site-card"><h3 style={{ marginTop: 0 }}>When an engagement ends</h3><p>Set its group to end: it turns read-only, stops counting toward your plan, and you can download everything. On the date you pick (30 days by default) it&apos;s deleted and you get a deletion certificate.</p></div>
           <div className="site-card"><h3 style={{ marginTop: 0 }}>Change or cancel any time</h3><p>From Usage &amp; billing. After canceling, {BRAND.name} stays usable until the end of what you paid for, then read-only for {ORG_GRACE_DAYS} days so you can export; then everything is deleted (backups age out within {BACKUP_RETENTION_DAYS} days).</p></div>
-          <div className="site-card"><h3 style={{ marginTop: 0 }}>Meeting notes</h3><p>Notes from imported transcripts on every plan today. Automatic notes after every meeting are coming soon.</p></div>
+          <div className="site-card"><h3 style={{ marginTop: 0 }}>Meeting notes</h3><p>Automatic notes after every Teams meeting on every plan, within the plan&apos;s meeting hours. Past or outside meetings can be added from their transcript.</p></div>
         </div>
       </div>
       <div className="site-wrap site-narrow site-stack" style={{ paddingTop: 0 }}>

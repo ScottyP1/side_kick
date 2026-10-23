@@ -35,7 +35,7 @@ The single list of what's done, in flight and next. A coordinating session revie
 4. **Meetings wave**: automatic notes via Graph after every Teams meeting (within meeting hours), notes chat per group, "save to knowledge" cards, Sidekick as a Teams tab/personal app (also unlocks meeting chats), rename import to "Add a past or outside meeting".
 5. **Connectors**: Azure DevOps Boards, then Jira.
 6. **Scale readiness**: load test (100 companies / 10,000 groups), auto-scaling, per-company fairness, paid search tier, bigger DB + pooling, chat archiving.
-7. Later: live meetings (Enterprise), Teams Store, real brand + domain, Stripe, optional staging site in Azure (~$10–15/month).
+7. Later: official logos on the Connectors page for Microsoft 365, Salesforce and ServiceNow once we have their permission (partner programs; today plain icons, `components/connector-icons.tsx`); live meetings (Enterprise), Teams Store, real brand + domain, Stripe, optional staging site in Azure (~$10–15/month).
 
 **Cody's to-dos** (only he can do these)
 - Teams cleanup: remove the old Sidekick apps (Manage your apps, the Project team, Wave 2 cutover chat, Teams admin center), check the tenant's **chat** resource-specific consent setting, then upload `teams/build/sidekick-teams-live.zip` once to the org catalog.

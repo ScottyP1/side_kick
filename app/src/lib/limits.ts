@@ -18,13 +18,21 @@
  * - **Meeting hours**: the length of meetings imported this calendar month (UTC), worked out from the
  *   transcript's timestamps (`transcriptMinutes` in lib/plans.ts).
  * The monthly AI credit is a limit too, but it's checked before each Claude call in lib/credit.ts.
+ * - **Plan features** (`FeatureKey` in lib/plans.ts: reminders, Team Leads, custom guardrail rules, Require
+ *   Microsoft sign-in, …) are checked with `assertFeature` where each is switched on: reminder settings and
+ *   sending a reminder by hand (lib/reminders.ts, POST /api/reminders), making someone Team Lead (POST/PATCH
+ *   /api/users, POST /api/workspaces, directory import), adding a custom rule (POST /api/guardrails/rules) and
+ *   requiring Microsoft sign-in (PATCH /api/auth/microsoft). Same 402 `kind: "limit"` refusal, with `feature`.
+ *   Like limits, a smaller plan never switches off what is already in use: existing Team Leads, rules,
+ *   reminders and required sign-in keep working (Usage & billing shows "Not in your plan, still in use"),
+ *   and only new use is refused. Managed organizations (no subscription) and Enterprise have every feature.
  */
 import "server-only";
 import { audit, HttpError } from "./auth";
 import { get, now, run } from "./db";
 import { activeGroupCount, getSubscription } from "./billing";
 import { withErrorDetails } from "./api";
-import { ENTERPRISE, groupOptions, LIMIT_KEYS, LIMIT_LABEL, limitsWithExtras, limitState, parseCustomLimits, planById, planWithExtras, UNLIMITED, usd, type GroupOption, type LimitKey, type Plan, type PlanLimits } from "./plans";
+import { ENTERPRISE, FEATURE_KEYS, FEATURE_LABEL, featuresOf, groupOptions, LIMIT_KEYS, LIMIT_LABEL, limitsWithExtras, limitState, parseCustomLimits, planById, planWithExtras, planWithFeature, priceText, UNLIMITED, usd, type FeatureKey, type GroupOption, type LimitKey, type Plan, type PlanLimits } from "./plans";
 import { BRAND } from "./brand";
 
 /** The custom terms the Sidekick team set for one organization (Owner Console). */
@@ -173,6 +181,67 @@ export async function assertCanAdd(orgId: string, key: Exclude<LimitKey, "aiCred
     throw new LimitError(key, `${planLabel} ${allows}${now}. ${groupOptionsText(options, extras)} Groups that are ending don't count.`, { options, need });
   }
   throw new LimitError(key, `${planName} ${allows}${now}. ${how}${keep}`);
+}
+
+/** The plan features this organization has (every feature when it's managed or on Enterprise). */
+export async function orgFeatures(orgId: string): Promise<readonly FeatureKey[]> {
+  return featuresOf((await orgPlan(orgId)).plan);
+}
+
+/** Whether this organization's plan includes feature `key`. */
+export async function hasFeature(orgId: string, key: FeatureKey): Promise<boolean> {
+  return (await orgFeatures(orgId)).includes(key);
+}
+
+/**
+ * A plan feature isn't included: 402 with `kind: "limit"`, `feature` (the key) and `plan` (the id of the
+ * cheapest plan that has it), so the page can show the same upgrade note as for limits.
+ */
+export class FeatureError extends HttpError {
+  constructor(public feature: FeatureKey, message: string, plan: string) {
+    super(402, message);
+    withErrorDetails(this, { kind: "limit", feature, plan });
+  }
+}
+
+/**
+ * Refuses (FeatureError, 402) switching on feature `key` when the organization's plan doesn't include it.
+ * Call it only where the feature is *newly* used (turning reminders on for a chat, making someone Team
+ * Lead, …), never for what already exists, so a smaller plan switches nothing off. The message names the
+ * plan that includes it and who can move to it, e.g. "Your Starter plan doesn't include Team Leads. Team
+ * ($699 / month) and up include it: an Org Owner or Billing Admin can move to Team on Usage & billing."
+ */
+export async function assertFeature(orgId: string, key: FeatureKey) {
+  const { plan } = await orgPlan(orgId);
+  if (featuresOf(plan).includes(key)) return;
+  const needed = planWithFeature(key);
+  const label = FEATURE_LABEL[key];
+  const how = needed.selfService && plan?.selfService
+    ? `${needed.name} (${priceText(needed)}) and up include it: an Org Owner or Billing Admin can move to ${needed.name} on Usage & billing.`
+    : `${needed.name} includes it: contact the ${BRAND.name} team.`;
+  throw new FeatureError(key, `Your ${plan!.name} plan doesn't include ${label}. ${how} Anything already set up keeps working.`, needed.id);
+}
+
+/** One line of the features report: whether the plan includes it, and how much of it is in use (null = not counted). */
+export type FeatureLine = { key: FeatureKey; label: string; included: boolean; inUse: number | null; plan: string };
+
+/**
+ * Every plan feature for Usage & billing: included or not, the plan that has it, and what's in use for the
+ * ones that can be switched on (chats with reminders on, Team Leads, active custom rules, Microsoft sign-in
+ * required = 1), so the page can say "Not in your plan, still in use" after moving to a smaller plan.
+ */
+export async function featureReport(orgId: string): Promise<FeatureLine[]> {
+  const has = await orgFeatures(orgId);
+  const [reminders, teamLeads, customRules, requireMicrosoft] = await Promise.all([
+    // Settings are JSON text; the saved form always writes "reminders":true without spaces (JSON.stringify).
+    count(`SELECT COUNT(*) AS n FROM teams_chat_settings s JOIN teams_conversations c ON c.id = s.conversation_id AND c.workspace_id = s.workspace_id
+      WHERE s.org_id = ? AND s.json LIKE '%"reminders":true%'`, orgId),
+    count("SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND role = 'Team Lead'", orgId),
+    count("SELECT COUNT(*) AS n FROM guard_custom_rules WHERE org_id = ? AND active = 1", orgId),
+    count("SELECT COUNT(*) AS n FROM orgs WHERE id = ? AND sso_required = 1", orgId),
+  ]);
+  const inUse: Partial<Record<FeatureKey, number>> = { reminders, teamLeads, customRules, requireMicrosoft };
+  return FEATURE_KEYS.map((key) => ({ key, label: FEATURE_LABEL[key], included: has.includes(key), inUse: inUse[key] ?? null, plan: planWithFeature(key).name }));
 }
 
 /**

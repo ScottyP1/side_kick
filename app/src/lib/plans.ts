@@ -62,6 +62,42 @@ export const LIMIT_LABEL: Record<LimitKey, { one: string; many: string }> = {
   aiCreditUsd: { one: "AI credit this month", many: "AI credit this month" },
 };
 
+/**
+ * The **plan features**: things a plan either includes or not (unlike limits, which are numbers). Each one
+ * is switched on somewhere, and that place calls `assertFeature` (lib/limits.ts) first:
+ * - `answers`, `notes`, `guardrails`, `audit`: every plan (answers with sources, meeting notes, the
+ *   guardrails and the audit log). Listed so the portal can show them; nothing refuses them.
+ * - `reminders`: reminders in Teams chats (turning them on for a chat, or sending one by hand).
+ * - `teamLeads`: making someone a Team Lead (people, groups, directory import).
+ * - `customRules`: adding custom guardrail rules (the built-in switches are in every plan).
+ * - `requireMicrosoft`: "Require Microsoft sign-in" (passwords off for everyone).
+ * - `prioritySupport`: the organization's support tickets are marked priority in the Owner Console inbox.
+ * - `liveMeetings`, `dedicatedDatabase`: Enterprise only; Sidekick joining calls live (not built yet, also
+ *   the `liveMeetingHours` limit) and a database of the organization's own (set up by the Sidekick team).
+ * Connectors aren't a feature: the `connectors` limit already says none, one or all.
+ */
+export const FEATURE_KEYS = ["answers", "notes", "guardrails", "audit", "reminders", "teamLeads", "customRules", "requireMicrosoft", "prioritySupport", "liveMeetings", "dedicatedDatabase"] as const;
+export type FeatureKey = (typeof FEATURE_KEYS)[number];
+
+/** Plain names for the features, as shown to people ("Reminders in Teams chats aren't in your Starter plan"). */
+export const FEATURE_LABEL: Record<FeatureKey, string> = {
+  answers: "Answers with sources",
+  notes: "Meeting notes and action items",
+  guardrails: "Guardrails",
+  audit: "Audit log",
+  reminders: "Reminders in Teams chats",
+  teamLeads: "Team Leads",
+  customRules: "Custom guardrail rules",
+  requireMicrosoft: "Require Microsoft sign-in",
+  prioritySupport: "Priority support",
+  liveMeetings: "Live in meetings",
+  dedicatedDatabase: "Dedicated database",
+};
+
+const STARTER_FEATURES: FeatureKey[] = ["answers", "notes", "guardrails", "audit"];
+const TEAM_FEATURES: FeatureKey[] = [...STARTER_FEATURES, "reminders", "teamLeads", "customRules"];
+const BUSINESS_FEATURES: FeatureKey[] = [...TEAM_FEATURES, "requireMicrosoft", "prioritySupport"];
+
 /** One plan as shown to buyers. `seats`/`workspaces` (and the other limits) are `null` for no limit. */
 export type Plan = PlanLimits & {
   id: PlanId;
@@ -78,6 +114,11 @@ export type Plan = PlanLimits & {
   blurb: string;
   /** What's included, in plain words, for the pricing card. */
   features: string[];
+  /**
+   * The plan features it includes (`FeatureKey`), enforced by `assertFeature` in lib/limits.ts. Extra
+   * groups never change these: only a bigger plan does.
+   */
+  includes: readonly FeatureKey[];
 };
 
 /**
@@ -102,6 +143,7 @@ export const PLANS: readonly Plan[] = [
     aiCreditUsd: 40,
     blurb: "One client engagement with its whole team.",
     features: ["1 group, up to 15 people", "30 meeting hours a month", "Answers with sources in Teams and the portal", "Meeting notes and action items", "Guardrails and audit log"],
+    includes: STARTER_FEATURES,
   },
   {
     id: "team",
@@ -118,6 +160,7 @@ export const PLANS: readonly Plan[] = [
     aiCreditUsd: 200,
     blurb: "A delivery team running several client engagements.",
     features: ["5 groups, up to 75 people", "150 meeting hours a month", "Everything in Starter", "Reminders in Teams chats", "Team Leads and custom guardrail rules", "1 connector"],
+    includes: TEAM_FEATURES,
   },
   {
     id: "business",
@@ -134,6 +177,7 @@ export const PLANS: readonly Plan[] = [
     aiCreditUsd: 800,
     blurb: "A whole practice, with Microsoft sign-in for everyone.",
     features: ["20 groups, up to 300 people", "600 meeting hours a month", "Everything in Team", "Require Microsoft sign-in", "All connectors", "Priority support"],
+    includes: BUSINESS_FEATURES,
   },
 ];
 
@@ -157,6 +201,7 @@ export const ENTERPRISE: Plan = {
   aiCreditUsd: 3200,
   blurb: `Custom limits and price, set up with the ${BRAND.name} team.`,
   features: ["Unlimited groups, custom limits", "Live in meetings (when available)", "Dedicated database option", "Everything in Business"],
+  includes: FEATURE_KEYS,
 };
 
 /**
@@ -219,6 +264,27 @@ export const ALL_PLANS: readonly Plan[] = [...PLANS, ENTERPRISE];
 
 /** No limits at all: organizations managed by the Sidekick team with no plan and no custom terms. */
 export const UNLIMITED: PlanLimits = { seats: null, workspaces: null, chats: null, meetingHours: null, liveMeetingHours: null, documents: null, connectors: null, aiCreditUsd: null };
+
+/**
+ * The features an organization on plan `p` has: the plan's `includes`, or every feature when there's no
+ * plan (organizations managed by the Sidekick team keep everything).
+ */
+export const featuresOf = (p: Plan | null | undefined): readonly FeatureKey[] => (p ? p.includes : FEATURE_KEYS);
+
+/** The cheapest plan (Enterprise last) that includes `key`, for "comes with Team and up". */
+export const planWithFeature = (key: FeatureKey): Plan => ALL_PLANS.find((p) => p.includes.includes(key)) ?? ENTERPRISE;
+
+/**
+ * The short note shown next to a switch the organization's plan doesn't include, or null when it does (or
+ * when the plan isn't known yet). `plan` is `me.plan` from GET /api/me. Example: "Team Leads: not in your
+ * Starter plan (Team and up include it). Anything already set up keeps working."
+ */
+export function featureNote(plan: { name: string | null; features?: readonly FeatureKey[] } | undefined, key: FeatureKey): string | null {
+  if (!plan?.features || plan.features.includes(key)) return null;
+  const needed = planWithFeature(key);
+  const yours = plan.name ? `your ${plan.name} plan` : "your plan";
+  return `${FEATURE_LABEL[key]}: not in ${yours} (${needed.selfService ? `${needed.name} and up include it` : `${needed.name} includes it`}). Anything already set up keeps working.`;
+}
 
 /** Just the limits of a plan (drops price and wording). */
 export const limitsOf = (p: Plan): PlanLimits => Object.fromEntries(LIMIT_KEYS.map((k) => [k, p[k]])) as PlanLimits;

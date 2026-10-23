@@ -16,6 +16,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, Modal, Pill, Spinner, Switch, fmtTime, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { featureNote } from "@/lib/plans";
+import { useApp } from "@/components/shell";
 
 type Rule = { id: string; workspaceId: string | null; text: string; version: number; updatedBy: string | null; updatedAt: string };
 type Rules = {
@@ -225,7 +227,9 @@ export default function GuardrailsPage() {
 
 /**
  * One list of custom rules (org-wide when `scope` is null, else one workspace's), with add, edit, remove
- * and history for Org Owners/Admins. A refused rule shows the server's reason under the box.
+ * and history for Org Owners/Admins. A refused rule shows the server's reason under the box. Custom rules
+ * are a plan feature (Team and up): on Starter, rules already there keep working and can be edited or
+ * removed, but the add box is replaced by a "Not in your plan" note.
  */
 function RulesPanel({ title, hint, rules, scope, canManage, limits, onChange }: {
   title: string;
@@ -236,6 +240,8 @@ function RulesPanel({ title, hint, rules, scope, canManage, limits, onChange }: 
   limits: { rules: number; length: number };
   onChange: () => Promise<void> | void;
 }) {
+  const { me } = useApp();
+  const notInPlan = featureNote(me.plan, "customRules");
   const toast = useToast();
   const reportError = useReportError();
   const [text, setText] = useState("");
@@ -331,7 +337,8 @@ function RulesPanel({ title, hint, rules, scope, canManage, limits, onChange }: 
         ))}
         {!rules.length && <div className="li muted">No custom rules yet.</div>}
       </div>
-      {canManage && rules.length < limits.rules && (
+      {canManage && notInPlan && <div className="panel-b muted" style={{ fontSize: 13 }}>{notInPlan}</div>}
+      {canManage && !notInPlan && rules.length < limits.rules && (
         <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <form style={{ display: "flex", gap: 8 }} onSubmit={add}>
             <input className="input" placeholder="e.g. Never quote day rates" value={text} maxLength={limits.length} onChange={(e) => { setText(e.target.value); setErr(""); }} aria-label="New rule" />

@@ -4,7 +4,8 @@
  * The Plan section at the top of Usage & billing (/usage): the organization's plan (priced per organization
  * by groups, lib/plans.ts), its extra groups and monthly price, subscription status, every plan limit with
  * its use (people, groups, tracked chats, meeting hours, documents, connectors, AI credit; "Over limit" when
- * a plan shrank below what's used, nothing is ever deleted), and (Org Owners and Billing Admins) pay, change
+ * a plan shrank below what's used, nothing is ever deleted), every plan feature (included, or "Not in your
+ * plan" with "still in use" when a smaller plan kept what was already set up), and (Org Owners and Billing Admins) pay, change
  * plan, add or remove extra groups, cancel, and the test-mode "simulate a failed payment". Org Admins see it
  * read-only. Organizations managed by the Sidekick team (no self-service subscription) and Enterprise see
  * their limits and a note to contact the team.
@@ -18,10 +19,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, Modal, Pill, useReportError, useToast } from "@/components/ui";
 import { TestModeBanner } from "@/components/public-shell";
-import { groupOptions, limitsWithExtras, limitText, monthlyPrice, planById, planWithExtras, STATUS_LABEL, usd, type Access, type GroupOption, type LimitKey, type Plan, type PlanId, type SubStatus } from "@/lib/plans";
+import { FEATURE_LABEL, groupOptions, limitsWithExtras, limitText, monthlyPrice, planById, planWithExtras, STATUS_LABEL, usd, type Access, type FeatureKey, type GroupOption, type LimitKey, type Plan, type PlanId, type SubStatus } from "@/lib/plans";
 import { BRAND } from "@/lib/brand";
 
 type LimitLine = { key: LimitKey; label: string; used: number; limit: number | null; pct: number; over: boolean; full: boolean; near: boolean };
+type FeatureLine = { key: FeatureKey; label: string; included: boolean; inUse: number | null; plan: string };
 
 type Billing = {
   subscription: { plan: PlanId; status: SubStatus; trial_ends_at: string | null; current_period_end: string | null; past_due_since: string | null; access_until: string | null; extra_groups: number } | null;
@@ -31,6 +33,7 @@ type Billing = {
   extraGroup: { priceUsd: number; adds: Record<string, number> };
   maxExtraGroups: number;
   limits: LimitLine[];
+  features: FeatureLine[];
   plans: Plan[];
   canManage: boolean;
   testMode: boolean;
@@ -88,6 +91,7 @@ export function PlanSection() {
           <span className="muted">Your organization&apos;s plan is managed by the {BRAND.name} team. Contact them to change it or raise a limit.</span>
           {b.access.notice && <div className={`callout ${b.access.mode === "read_only" ? "bad" : "warn"}`}><span>{b.access.notice}</span></div>}
           <Limits lines={b.limits} />
+          <Features lines={b.features} />
         </div>
       </div>
     );
@@ -104,6 +108,8 @@ export function PlanSection() {
   const offer = need > (lim.workspaces ?? Infinity) ? groupOptions(plan, extraNow, need) : null;
   const wantExtras = extras ?? extraNow;
   const choose = (o: GroupOption) => setOption(o);
+  // Features the current plan has that plan `p` doesn't (for the "switch plan" warning).
+  const lost = (p: Plan) => plan.includes.filter((k) => !p.includes.includes(k));
 
   return (
     <div className="panel">
@@ -145,6 +151,7 @@ export function PlanSection() {
           </div>
         </div>
         <Limits lines={b.limits} />
+        <Features lines={b.features} />
         {err && <p className="err" role="alert" style={{ margin: 0 }}>{err}</p>}
         {b.canManage ? (
           <>
@@ -172,6 +179,7 @@ export function PlanSection() {
       {confirm === "change" && next && (
         <Modal title={`Switch to ${next.name}?`} onClose={() => setConfirm(null)} footer={<><button className="btn" onClick={() => setConfirm(null)}>Back</button><button className="btn primary" onClick={() => act("change", `You're on the ${next.name} plan now`)}>Switch plan</button></>}>
           <p style={{ margin: 0 }}>{planWithExtras(next, extraNow)} is {usd(monthlyPrice(next, extraNow))} a month for the organization, for {limitText(limitsWithExtras(next, extraNow).workspaces)} groups, up to {limitText(limitsWithExtras(next, extraNow).seats)} people, {limitText(next.chats)} tracked chats, {limitText(next.meetingHours)} meeting hours a month, {limitText(next.documents)} documents and {usd(next.aiCreditUsd ?? 0)} of AI credit a month{extraNow ? `, plus what your ${extraNow} extra group${extraNow === 1 ? "" : "s"} add` : ""}. It applies straight away; the paid-until date stays the same. If you use more than a smaller plan allows, nothing is deleted: you just can&apos;t add more until you&apos;re under the limit.</p>
+          {lost(next).length > 0 && <p style={{ margin: "10px 0 0" }}>{next.name} doesn&apos;t include {lost(next).map((k) => FEATURE_LABEL[k]).join(", ")}. What&apos;s already set up keeps working (Team Leads stay Team Leads, rules and reminders stay on), but nothing new can be added.</p>}
         </Modal>
       )}
       {confirm === "extras" && (
@@ -219,6 +227,39 @@ export function Limits({ lines }: { lines: LimitLine[] }) {
               <td className="r num">{l.limit === null ? (l.key === "connectors" ? "All" : "Unlimited") : l.limit === 0 ? "Not included" : shown(l.key, l.limit)}</td>
               <td>
                 {l.over ? <Pill kind="bad">Over limit</Pill> : l.full && l.limit !== 0 ? <Pill kind="warn">At limit</Pill> : l.near ? <Pill kind="warn">Near limit</Pill> : l.limit !== null && l.limit > 0 ? <div className="meter"><span style={{ width: `${Math.min(100, l.pct)}%` }} /></div> : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Every plan feature: "Included", or "Not in your plan" with the plan that includes it. After moving to a
+ * smaller plan, what's already set up keeps working and shows "Still in use" (e.g. "2 Team Leads"); only new
+ * use is refused (`assertFeature` in lib/limits.ts).
+ */
+export function Features({ lines }: { lines: FeatureLine[] }) {
+  const used: Partial<Record<FeatureKey, (n: number) => string>> = {
+    reminders: (n) => `${n} chat${n === 1 ? "" : "s"} with reminders`,
+    teamLeads: (n) => `${n} Team Lead${n === 1 ? "" : "s"}`,
+    customRules: (n) => `${n} custom rule${n === 1 ? "" : "s"}`,
+    requireMicrosoft: () => "Required now",
+  };
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th>Feature</th><th>In your plan</th><th>In use</th></tr></thead>
+        <tbody>
+          {lines.map((f) => (
+            <tr key={f.key}>
+              <td>{f.label}</td>
+              <td>{f.included ? <Pill kind="good">Included</Pill> : <><Pill nodot>Not in your plan</Pill> <span className="muted" style={{ fontSize: 12.5 }}>{f.plan === "Enterprise" ? "Enterprise" : `${f.plan} and up`}</span></>}</td>
+              <td className="muted">
+                {f.inUse ? used[f.key]?.(f.inUse) : "—"}
+                {!f.included && !!f.inUse && <> · <Pill kind="warn">Still in use</Pill></>}
               </td>
             </tr>
           ))}

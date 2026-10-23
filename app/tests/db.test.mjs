@@ -474,6 +474,21 @@ test(`[${engine}] group pricing: per-organization prices, extra groups and the c
   assert.equal(plans.priceText(plans.ENTERPRISE), "From $5,000 / month");
 });
 
+test(`[${engine}] plan features: each plan includes the one below, extras add none, managed organizations get all`, () => {
+  const inc = (id) => plans.planById(id).includes;
+  assert.deepEqual(inc("starter"), ["answers", "notes", "guardrails", "audit"]);
+  assert.deepEqual(inc("team").filter((k) => !inc("starter").includes(k)), ["reminders", "teamLeads", "customRules"]);
+  assert.deepEqual(inc("business").filter((k) => !inc("team").includes(k)), ["requireMicrosoft", "prioritySupport"]);
+  assert.deepEqual([...inc("enterprise")], [...plans.FEATURE_KEYS], "Enterprise has everything, live meetings and dedicated database included");
+  assert.ok(plans.ALL_PLANS.every((p, i) => i === 0 || plans.ALL_PLANS[i - 1].includes.every((k) => p.includes.includes(k))), "bigger plans never lose a feature");
+  assert.equal(plans.featuresOf(null), plans.FEATURE_KEYS, "no subscription: every feature");
+  assert.deepEqual(["reminders", "requireMicrosoft", "liveMeetings"].map((k) => plans.planWithFeature(k).id), ["team", "business", "enterprise"]);
+  assert.equal(plans.featureNote({ name: "Starter", features: inc("starter") }, "teamLeads"), "Team Leads: not in your Starter plan (Team and up include it). Anything already set up keeps working.");
+  assert.equal(plans.featureNote({ name: "Team", features: inc("team") }, "dedicatedDatabase"), "Dedicated database: not in your Team plan (Enterprise includes it). Anything already set up keeps working.");
+  assert.equal(plans.featureNote({ name: "Team", features: inc("team") }, "teamLeads"), null);
+  assert.equal(plans.featureNote(undefined, "teamLeads"), null, "nothing to say before /api/me loads");
+});
+
 test(`[${engine}] roll-off: a pending deletion makes the organization read-only from its date and says when`, () => {
   const now = Date.parse("2026-10-21T12:00:00Z");
   const full = { mode: "full", notice: null, reason: null };

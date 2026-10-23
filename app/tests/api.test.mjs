@@ -1591,6 +1591,7 @@ test(`[${ENGINE}] Owner Console support inbox: filters, client context, replies,
   const inbox = (await owner("GET", "/api/owner/support?status=open")).body;
   const row = inbox.tickets.find((t) => t.id === s.ticketM);
   assert.ok(row && row.unread && row.client === "Test Org", JSON.stringify(row));
+  assert.equal(row.prioritySupport, true, "a managed client has every plan feature, priority support included");
   assert.ok(inbox.unread >= 1 && inbox.counts.open >= 1);
   const has = async (qs) => (await owner("GET", `/api/owner/support?${qs}`)).body.tickets.some((t) => t.id === s.ticketM);
   assert.ok(await has("category=bug&priority=high"));
@@ -3023,6 +3024,87 @@ test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meet
   assert.equal((await c("GET", "/api/billing")).body.limits.find((l) => l.key === "seats").limit, 15, "back to the plan's numbers");
   // Customers can't pick Enterprise themselves; the operator can set it.
   assert.match((await c("POST", "/api/billing", { action: "change", plan: "enterprise" })).body.error, /Enterprise is set up with the Sidekick team/);
+});
+
+test(`[${ENGINE}] plan features: Starter refuses Team Leads, custom rules, reminders and required Microsoft sign-in; a downgrade keeps what's in use`, async () => {
+  const c = client();
+  assert.equal((await signUpAs(c, { org: "Feature Co", name: "Fern Feature", email: "fern@featureco.test", password: "correct horse battery", plan: "starter" })).status, 200);
+  const featureOrg = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Feature Co").id;
+  const me = (await c("GET", "/api/me")).body;
+  assert.deepEqual(me.plan.features, ["answers", "notes", "guardrails", "audit"], "Starter's features");
+  const feat = async (k) => (await c("GET", "/api/billing")).body.features.find((f) => f.key === k);
+  assert.deepEqual(await feat("teamLeads"), { key: "teamLeads", label: "Team Leads", included: false, inUse: 0, plan: "Team" });
+  assert.equal((await feat("answers")).included, true);
+  const refused = (r, feature, plan) => {
+    assert.equal(r.status, 402, JSON.stringify(r.body));
+    assert.deepEqual([r.body.kind, r.body.feature, r.body.plan], ["limit", feature, plan]);
+  };
+
+  // Team Leads: not when adding someone, changing a role, or picking a Member as a new group's lead.
+  const lead = await c("POST", "/api/users", { name: "Lea Lead", email: "lea@featureco.test", role: "Team Lead", workspaces: [] });
+  refused(lead, "teamLeads", "team");
+  assert.match(lead.body.error, /^Your Starter plan doesn't include Team Leads\. Team \(\$699 \/ month\) and up include it: an Org Owner or Billing Admin can move to Team on Usage & billing\. Anything already set up keeps working\.$/);
+  const m = await c("POST", "/api/users", { name: "Lea Lead", email: "lea@featureco.test", role: "Member", workspaces: [] });
+  assert.equal(m.status, 200);
+  refused(await c("POST", "/api/workspaces", { name: "Feature Group", lead: m.body.id }), "teamLeads", "team");
+  const ws = await c("POST", "/api/workspaces", { name: "Feature Group", members: [m.body.id] });
+  assert.equal(ws.status, 200, "a group without a Team Lead is fine on Starter");
+  refused(await c("PATCH", `/api/users/${m.body.id}`, { role: "Team Lead" }), "teamLeads", "team");
+  assert.equal((await c("PATCH", `/api/users/${m.body.id}`, { role: "Viewer" })).status, 200, "other roles still work");
+  assert.equal((await c("PATCH", `/api/users/${m.body.id}`, { role: "Member" })).status, 200);
+
+  // Custom guardrail rules, and requiring Microsoft sign-in (refused before any other check; allowing passwords always works).
+  refused(await c("POST", "/api/guardrails/rules", { text: "Never quote day rates" }), "customRules", "team");
+  const sso = await c("PATCH", "/api/auth/microsoft", { required: true });
+  refused(sso, "requireMicrosoft", "business");
+  assert.match(sso.body.error, /Business \(\$1,999 \/ month\) and up include it/);
+  assert.equal((await c("PATCH", "/api/auth/microsoft", { required: false })).status, 200);
+
+  // Reminders in a linked Teams chat: tracking is fine, reminders aren't.
+  const CONV = "conv-feature-co";
+  const before = sent.length;
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: CONV, conversationType: "groupChat", tenantId: "tenant-1", name: "Feature chat" } }));
+  const card = await waitForSent((x) => sent.indexOf(x) >= before && x.url.includes(CONV) && /Link this chat/.test(cardText(cardsOf(x)[0] ?? {})));
+  const code = cardText(cardsOf(card)[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+  assert.equal((await c("POST", "/api/teams-links", { code, ws: ws.body.id })).status, 200);
+  refused(await c("PATCH", "/api/teams-links/settings", { id: CONV, changes: { reminders: true } }), "reminders", "team");
+  refused(await c("POST", "/api/reminders", { id: CONV, action: "preview" }), "reminders", "team");
+  assert.equal((await c("PATCH", "/api/teams-links/settings", { id: CONV, changes: { time: "08:30" } })).status, 200, "other chat settings still save");
+  assert.ok(!JSON.stringify((await c("GET", "/api/audit")).body).includes("Team Lead"), "nothing refused was done");
+
+  // Support: Starter tickets aren't priority support.
+  const tk = await c("POST", "/api/support/tickets", undefined, { form: ticketForm({ subject: "Plan question", category: "billing", priority: "normal", description: "Which plan has Team Leads?" }) });
+  assert.equal(tk.status, 200, JSON.stringify(tk.body));
+  const inboxRow = async () => (await owner("GET", "/api/owner/support")).body.tickets.find((t) => t.id === tk.body.ticket.id);
+  assert.equal((await inboxRow()).prioritySupport, false);
+
+  // On Team everything but required Microsoft sign-in works.
+  assert.equal((await c("POST", "/api/billing", { action: "change", plan: "team" })).status, 200);
+  assert.ok((await c("GET", "/api/me")).body.plan.features.includes("teamLeads"));
+  assert.equal((await c("PATCH", `/api/users/${m.body.id}`, { role: "Team Lead" })).status, 200);
+  const rule = await c("POST", "/api/guardrails/rules", { text: "Never quote day rates" });
+  assert.equal(rule.status, 200, JSON.stringify(rule.body));
+  assert.equal((await c("PATCH", "/api/teams-links/settings", { id: CONV, changes: { reminders: true } })).status, 200);
+  refused(await c("PATCH", "/api/auth/microsoft", { required: true }), "requireMicrosoft", "business");
+
+  // Back to Starter: nothing is switched off or removed, Usage & billing shows it's still in use, only new use is refused.
+  assert.equal((await c("POST", "/api/billing", { action: "change", plan: "starter" })).status, 200);
+  assert.equal((await c("GET", "/api/users")).body.users.find((u) => u.id === m.body.id).role, "Team Lead", "the Team Lead stays one");
+  assert.deepEqual(await feat("teamLeads"), { key: "teamLeads", label: "Team Leads", included: false, inUse: 1, plan: "Team" });
+  assert.deepEqual([(await feat("customRules")).inUse, (await feat("reminders")).inUse], [1, 1]);
+  assert.equal((await c("PUT", "/api/guardrails/rules", { id: rule.body.rule.id, text: "Never quote day rates or discounts" })).status, 200, "an existing rule can still be edited");
+  refused(await c("POST", "/api/guardrails/rules", { text: "Never name other clients" }), "customRules", "team");
+  assert.equal((await c("PATCH", "/api/teams-links/settings", { id: CONV, changes: { time: "10:00" } })).status, 200, "a chat with reminders keeps them and its settings");
+  assert.ok((await c("GET", "/api/teams-links")).body.links.find((l) => l.id === CONV).settings.reminders);
+  assert.equal((await c("PATCH", "/api/teams-links/settings", { id: CONV, changes: { reminders: false } })).status, 200, "switching off always works");
+  refused(await c("PATCH", "/api/teams-links/settings", { id: CONV, changes: { reminders: true } }), "reminders", "team");
+  const other = await c("POST", "/api/users", { name: "Otto Other", email: "otto@featureco.test", role: "Member", workspaces: [] });
+  refused(await c("PATCH", `/api/users/${other.body.id}`, { role: "Team Lead" }), "teamLeads", "team");
+
+  // Business: priority support. Managed organizations (no subscription) have every feature.
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${featureOrg}/billing`, { plan: "business" })).status, 200);
+  assert.equal((await inboxRow()).prioritySupport, true, "Business tickets are marked priority support");
+  assert.deepEqual((await admin("GET", "/api/me")).body.plan.features.length, 11, "a managed organization keeps every feature");
 });
 
 test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answers on a cheaper model and pauses the extras`, async () => {

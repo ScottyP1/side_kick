@@ -19,6 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { api, fmtDate, Icon, Pill, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { featureNote } from "@/lib/plans";
 
 type Step = "welcome" | "microsoft" | "teams" | "rules" | "groups";
 type Preset = "standard" | "strict";
@@ -250,14 +251,20 @@ function Rules({ s, reload, onNext, onSkip, onBack }: { s: Setup; reload: () => 
   );
 }
 
+/**
+ * Step 5: create the first groups, each with a Team Lead (an existing person or someone new). On plans
+ * without Team Leads (Starter) there's no lead to pick: the Org Owner and Org Admins manage the group.
+ */
 function Groups({ s, reload, onNext, onSkip, onBack }: { s: Setup; reload: () => Promise<void>; onNext: () => void; onSkip: () => void; onBack: () => void }) {
+  const { me } = useApp();
+  const leads = !featureNote(me.plan, "teamLeads");
   const [rows, setRows] = useState<GroupRow[]>([emptyRow()]);
   const [created, setCreated] = useState<Created[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (i: number, patch: Partial<GroupRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const ready = rows.filter((r) => r.name.trim());
-  const valid = ready.length > 0 && ready.every((r) => r.lead && (r.lead !== NEW || (r.newName.trim() && r.newEmail.trim())));
+  const valid = ready.length > 0 && (!leads || ready.every((r) => r.lead && (r.lead !== NEW || (r.newName.trim() && r.newEmail.trim()))));
 
   const create = async () => {
     setError("");
@@ -266,14 +273,14 @@ function Groups({ s, reload, onNext, onSkip, onBack }: { s: Setup; reload: () =>
     let failed = false;
     try {
       for (const r of ready) {
-        let lead = r.lead;
+        let lead = leads ? r.lead : "";
         let extra: Partial<Created> = {};
         if (lead === NEW) {
           const u = await api<{ id: string; tempPassword?: string }>("/api/users", { method: "POST", json: { name: r.newName.trim(), email: r.newEmail.trim(), role: "Member", workspaces: [] } });
           lead = u.id;
           extra = { tempPassword: u.tempPassword, email: r.newEmail.trim() };
         }
-        await api("/api/workspaces", { method: "POST", json: { name: r.name.trim(), client: r.client.trim(), lead } });
+        await api("/api/workspaces", { method: "POST", json: { name: r.name.trim(), client: r.client.trim(), lead: lead || undefined } });
         done.push({ group: r.client.trim() ? `${r.client.trim()} – ${r.name.trim()}` : r.name.trim(), lead: lead === r.lead ? s.people.find((p) => p.id === lead)?.name ?? "" : r.newName.trim(), ...extra });
         setRows((cur) => cur.filter((x) => x !== r));
       }
@@ -291,12 +298,12 @@ function Groups({ s, reload, onNext, onSkip, onBack }: { s: Setup; reload: () =>
   return (
     <>
       <header><span className="eyebrow">Step 5 of 5</span><h1>Create your first groups</h1>
-        <p>A group is one client team: its people, its Teams chats and its documents. Add one for each client team you work with now. Each needs a name and a Team Lead; the lead adds their own people later.</p></header>
+        <p>A group is one client team: its people, its Teams chats and its documents. Add one for each client team you work with now. {leads ? "Each needs a name and a Team Lead; the lead adds their own people later." : `Each needs a name; you add its people afterwards (Team Leads, who manage a group's people themselves, come with the Team plan).`}</p></header>
       {created.length > 0 && (
         <div className="callout good"><Icon n="check" /><div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <b>Created {created.length} group{created.length === 1 ? "" : "s"}.</b>
           {created.map((c) => (
-            <span key={c.group}>{c.group}, led by {c.lead}{c.tempPassword && <> · temporary password for {c.email}: <span className="mono">{c.tempPassword}</span> (shown once; share it privately)</>}</span>
+            <span key={c.group}>{c.group}{c.lead && <>, led by {c.lead}</>}{c.tempPassword && <> · temporary password for {c.email}: <span className="mono">{c.tempPassword}</span> (shown once; share it privately)</>}</span>
           ))}
         </div></div>
       )}
@@ -306,15 +313,15 @@ function Groups({ s, reload, onNext, onSkip, onBack }: { s: Setup; reload: () =>
             <div className="wiz-row">
               <div className="field"><label htmlFor={`g-name-${i}`}>Group name</label><input id={`g-name-${i}`} className="input" value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="e.g. Payments Platform" /></div>
               <div className="field"><label htmlFor={`g-client-${i}`}>Client</label><input id={`g-client-${i}`} className="input" value={r.client} onChange={(e) => set(i, { client: e.target.value })} placeholder="e.g. Northwind Bank" /></div>
-              <div className="field"><label htmlFor={`g-lead-${i}`}>Team Lead</label>
+              {leads && <div className="field"><label htmlFor={`g-lead-${i}`}>Team Lead</label>
                 <select id={`g-lead-${i}`} className="input" value={r.lead} onChange={(e) => set(i, { lead: e.target.value })}>
                   <option value="">Pick someone…</option>
                   {s.people.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
                   <option value={NEW}>Someone new…</option>
-                </select></div>
+                </select></div>}
               {rows.length > 1 && <button className="btn small ghost" aria-label="Remove this group" onClick={() => setRows(rows.filter((_, j) => j !== i))}><Icon n="x" /></button>}
             </div>
-            {r.lead === NEW && (
+            {leads && r.lead === NEW && (
               <div className="ng-two">
                 <div className="field"><label htmlFor={`g-nn-${i}`}>Their name</label><input id={`g-nn-${i}`} className="input" value={r.newName} onChange={(e) => set(i, { newName: e.target.value })} /></div>
                 <div className="field"><label htmlFor={`g-ne-${i}`}>Their work email</label><input id={`g-ne-${i}`} className="input" type="email" value={r.newEmail} onChange={(e) => set(i, { newEmail: e.target.value })} /><span className="hint">They become a Team Lead. If you connected Microsoft 365 they can sign in with Microsoft; otherwise you&apos;ll get a temporary password to share.</span></div>

@@ -8,10 +8,12 @@
  * The dot shows when one of the person's tickets has a reply they haven't read (GET /api/support/unread,
  * checked on load, on every page change and every two minutes); a reply opens the panel on "I need help".
  * The chosen tab is remembered for the session, so the conversation stays where it was across pages.
+ * The shell owns whether the panel is open (`open`/`setOpen`), because on phones the tab bar's "Ask" button opens
+ * it instead of the round button, and it hears about unread replies (`onUnread`) to show the same dot there.
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Assistant } from "./assistant";
 import { Dock } from "./dock";
 import { SupportChat } from "./support-chat";
@@ -20,9 +22,15 @@ import { BRAND } from "@/lib/brand";
 
 const TAB_KEY = "sidekick.dock.tab";
 
-/** The portal's assistant button and panel. */
-export function AssistantDock() {
-  const [open, setOpen] = useState(false);
+/** The id of the assistant panel, for the phone tab bar's Ask button (`aria-controls`). */
+export const ASSISTANT_PANEL_ID = "assistant-panel";
+
+/**
+ * The portal's assistant button and panel. `open`/`setOpen` come from the shell (components/shell.tsx);
+ * `onUnread` is told the number of unread support replies whenever it is checked; `returnRef` is the tab bar's
+ * Ask button, which gets focus back when the panel closes on a phone.
+ */
+export function AssistantDock({ open, setOpen, onUnread, returnRef }: { open: boolean; setOpen: (v: boolean) => void; onUnread?: (n: number) => void; returnRef?: RefObject<HTMLElement | null> }) {
   const [tab, setTabState] = useState<"assist" | "help">("assist");
   const [unread, setUnread] = useState(0);
   const path = usePathname();
@@ -46,8 +54,13 @@ export function AssistantDock() {
   };
 
   const check = useCallback(() => {
-    api<{ unread: number }>("/api/support/unread").then((r) => setUnread(r.unread)).catch(report);
-  }, [report]);
+    api<{ unread: number }>("/api/support/unread")
+      .then((r) => {
+        setUnread(r.unread);
+        onUnread?.(r.unread);
+      })
+      .catch(report);
+  }, [report, onUnread]);
   useEffect(() => {
     check();
     const t = setInterval(check, 120_000);
@@ -56,6 +69,8 @@ export function AssistantDock() {
 
   return (
     <Dock
+      id={ASSISTANT_PANEL_ID}
+      returnRef={returnRef}
       open={open}
       setOpen={setOpen}
       label="Assistant and help"

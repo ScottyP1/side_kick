@@ -239,6 +239,7 @@ const ICONS: Record<string, string> = {
   check: "M5 12.5l4.5 4.5L19 7.5",
   chat: "M4 5h16v11H9l-5 4z",
   library: "M4 4h4v16H4zM10 4h4v16h-4zM16.5 4.5l3.5-.9 3 15.5-3.5.9z",
+  sparkle: "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z",
 };
 export const Icon = ({ n }: { n: string }) => (
   <svg className="ico" viewBox="0 0 24 24" aria-hidden="true">

@@ -4,6 +4,7 @@
  *   2. End-to-end API tests (tests/api.test.mjs, single-tenant Teams) on SQLite, then Postgres.
  *   2b. Multi-tenant Microsoft/Teams tests (tests/teams-multitenant.test.mjs, a second app copy on ports
  *       3210/3211) on SQLite, then Postgres.
+ *   2c. Demo world seed (tests/seed-demo.test.mjs: `npm run seed:demo` on a fresh SQLite copy, twice) on SQLite.
  *   3. Production build (`next build`), the same step the Docker image and the Azure deploy run. The tests
  *      above use `next dev`, which lets through some errors only a production build reports (for example a
  *      page that needs a <Suspense> boundary under cacheComponents), so this catches them before a deploy does.
@@ -59,6 +60,7 @@ step("End-to-end API · SQLite", ["--test", "--test-timeout=300000", "tests/api.
 if (pgOk) step("End-to-end API · Postgres", ["--test", "--test-timeout=300000", "tests/api.test.mjs"], { TEST_DB: "postgres", TEST_DATABASE_URL: PG_URL });
 step("Multi-tenant Teams · SQLite", ["--test", "--test-timeout=300000", "tests/teams-multitenant.test.mjs"], { TEST_DB: "sqlite" });
 if (pgOk) step("Multi-tenant Teams · Postgres", ["--test", "--test-timeout=300000", "tests/teams-multitenant.test.mjs"], { TEST_DB: "postgres", TEST_DATABASE_URL: PG_URL });
+step("Demo world seed · SQLite", ["--test", "--test-timeout=600000", "tests/seed-demo.test.mjs"], {});
 
 /**
  * Runs `next build` like the Docker image does, in a throwaway build folder (NEXT_DIST_DIR) so it never

@@ -17,7 +17,8 @@
     "db:copy-to-postgres": "node scripts/copy-to-postgres.mjs",
     "reset-password": "node --no-warnings scripts/reset-password.mjs",
     "helpbot:check": "node scripts/helpbot-check.mjs",
-    "eval:answers": "node --no-warnings scripts/answer-eval.mjs"
+    "eval:answers": "node --no-warnings scripts/answer-eval.mjs",
+    "seed:demo": "node --no-warnings --conditions=react-server --import ./tests/register-ts.mjs scripts/seed-demo.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

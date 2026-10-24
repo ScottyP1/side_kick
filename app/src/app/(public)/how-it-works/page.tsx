@@ -39,7 +39,7 @@ export default function HowItWorksPage() {
           <div className="site-page-head">
             <span className="site-eyebrow">How it works</span>
             <h1>From sign-up to the first answer in Teams</h1>
-            <p>Five setup steps, most of them one click, and then your team just asks. After you pay, a setup wizard walks you through them and remembers where you stopped.</p>
+            <p>Five setup steps, most of them one click, and then your team just asks. When you sign up, a setup wizard walks you through them and remembers where you stopped.</p>
           </div>
           <JourneyArt />
         </div>

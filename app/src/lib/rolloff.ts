@@ -393,6 +393,9 @@ export async function deleteOrganization(orgId: string, actor: string, rolloff?:
       for (const table of ORG_TABLES) await run(`DELETE FROM ${table} WHERE org_id = ?`, orgId);
       await run("DELETE FROM orgs WHERE id = ?", orgId);
     });
+    // The job queue's heartbeat may have queued work for this organization (e.g. its watcher run) while the
+    // deletion was in progress: it still saw the organization until the transaction committed. Clear that too.
+    await run("DELETE FROM jobs WHERE org_id = ?", orgId);
     const cert: Certificate = {
       id: certificateId(), scope: "org", organization: org.name, group: null,
       requestedBy: rolloff?.requested_by ?? actor, requestedAt: rolloff?.created_at ?? now(), reason: rolloff?.reason ?? null,

@@ -274,3 +274,34 @@ Off on every new deploy: `/signup` refuses with "Sign-up isn't open yet" until y
 create organizations (and spend Claude credit) on the live site by surprise. To open it, either flip
 **Owner Console → Releases & switches → Self-service sign-up**, or set `SIDEKICK_SIGNUP_OPEN=true` on the
 Container App. The console switch, once flipped, wins over the setting. Payments are test mode only.
+
+## Scaling up: the plan for 100 companies / 10,000 groups (October 23, 2026; NOT done yet)
+Measured on a local copy with the load test (`docs/SCALE.md`). Nothing here has been changed in Azure: each step
+needs Cody's go-ahead because it costs money. Step-by-step instructions: `docs/RUNBOOKS.md` → Scaling up.
+Prices are approximate pay-as-you-go list prices (US regions, October 2026); check the Azure pricing calculator
+or the portal's estimate before buying.
+
+| Step | When | Change | Extra cost / month |
+|---|---|---|---|
+| 1. Search: Free → **Basic** | Before the first real customer. Free holds only 50 MB / 10,000 passages; one busy group fills it | AI Search `Basic` (15 GB per partition) | ~$75 |
+| 2. Database: B1ms → **B2s** | ~10 companies or 1,000 groups, or CPU over 70% for an hour | Burstable B2s (2 vCores, 4 GiB, ~430 connections) | ~+$35 (≈$50 total) |
+| 3. App: **2–4 copies** with auto-scaling | When one copy's CPU is over 60% at busy hours, or before a launch | Container App min 2 / max 4 copies, scale rule "50 requests at once per copy"; 1 vCPU / 2 GiB each | ~+$30–100 (≈$35 per busy copy) |
+| 4. Database: **General Purpose D2ds_v5** | ~50 companies / 5,000 groups, or B2s CPU credits running out | 2 vCores, 8 GiB, ~860 connections, no CPU credits; zone-redundant HA optional (doubles it) | ≈$130 total (≈$78 with a 1-year reservation) |
+| 5. Search: Basic → **Standard S1** | Past ~1 million passages (about 1,000 busy groups) or Basic's vector quota | S1 (one partition; add a replica for 99.9% uptime) | ≈$245 per unit (+$245 per replica) |
+| 6. Scheduled heartbeat as a **Container Apps job** | Only if the app may scale to zero copies | cron `* * * * *` calling `/api/jobs/tick` (see "Scheduled work" above) | ~$0 (inside the free grant) |
+
+Rough totals: today ~$45/month. At ~10 companies (steps 1–2) ~$140. At 100 companies / 10,000 groups (steps 1–5,
+3 app copies) **~$500–600/month** before Claude, which is billed by Anthropic per use and is by far the biggest
+cost at that size (see the Owner Console's business view).
+
+What the app already does for this (no Azure change needed):
+- **Several copies are safe**: the job queue's leases run each job once; every copy beats the queue
+  (`app/src/instrumentation.ts`); Postgres schema setup takes an advisory lock.
+- **Connections**: each copy opens at most `DATABASE_POOL_MAX` connections (default 10) and waits at most
+  `DATABASE_POOL_WAIT_MS` (15 s) for one. Keep copies × pool under the database's user connections: B1ms 35 (so
+  at most 3 copies at 10), B2s ~410, D2ds_v5 ~840. With a bigger database, raise the pool to 20.
+- **Claude turns**: each copy runs at most `SIDEKICK_CLAUDE_CONCURRENCY` (24) Claude calls at once, at most
+  `SIDEKICK_CLAUDE_ORG_CONCURRENCY` (6) for one company. With N copies the account sees up to 24 × N at once:
+  keep that under the Anthropic tier's limits (Anthropic Console → Limits), or lower the setting per copy.
+- **Background work**: `SIDEKICK_JOB_CONCURRENCY` (4) jobs at once per copy, at most `SIDEKICK_JOB_ORG_CONCURRENCY`
+  (2) per company. Each extra copy adds 4 more lanes.

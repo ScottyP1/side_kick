@@ -102,3 +102,18 @@ A paused organization can't use the portal or any feature, and Sidekick stops an
 
 ## What owners can't do
 Owners see usage, health, counts and who belongs to each client, but the console has no way to sign in as a client user or read a client's documents.
+
+## When Sidekick grows (scale)
+The numbers behind these are in `docs/SCALE.md`; the costed Azure steps in `docs/HOSTING.md` → Scaling up.
+- **Fair shares.** Each app copy runs at most 24 Claude calls at once and at most 6 for one client
+  (`SIDEKICK_CLAUDE_CONCURRENCY`, `SIDEKICK_CLAUDE_ORG_CONCURRENCY`); a client asking hundreds of questions at
+  once waits its turn instead of slowing everyone. Background jobs: 4 at once per copy, at most 2 per client.
+  Time spent waiting for a turn shows on the AI steps of a trace (`queued_ms`).
+- **Job queue page.** The oldest wait should stay under 15 minutes. Longer: add an app copy (step 3 of
+  Scaling up) or raise `SIDEKICK_JOB_CONCURRENCY`.
+- **Clean-up.** An hourly job (`data.retention`) deletes old traces (30 days), AI usage details and audit
+  entries (13 months), guardrail counts (6 months), errors (90 days) and expired sign-in rows. Client content
+  is never touched by it.
+- **Slow queries.** Set `SIDEKICK_SLOW_QUERY_MS=300` on the Container App for a day to log slow queries (SQL
+  only, no values). Runbook: "Slow pages or AI is very busy".
+

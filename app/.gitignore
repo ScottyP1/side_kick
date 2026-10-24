@@ -66,3 +66,6 @@ next-env.d.ts
 /.demo-logins.md
 # a copy of the logins guide, wherever it is put
 *demo-logins (LOCAL ONLY)*
+# load test (scripts/load-world.mjs, scripts/load-test.mjs, docs/SCALE.md): results, server logs and its build folder
+/.load-results/
+/.next-load/

@@ -264,6 +264,20 @@ export async function workspaceIdsFor(user: User): Promise<string[]> {
 }
 
 /**
+ * True if `user` may see this one workspace: the same rule as `workspaceIdsFor` (admins: any workspace of their
+ * org; everyone else: the ones they belong to), checked with one indexed lookup instead of listing every workspace
+ * (a big organization has over a thousand; docs/SCALE.md).
+ */
+export async function canSeeWorkspace(user: User, workspaceId: string): Promise<boolean> {
+  if (isAdmin(user)) return Boolean(await get("SELECT id FROM workspaces WHERE id = ? AND org_id = ?", workspaceId, user.org_id));
+  return Boolean(await get(
+    `SELECT wm.workspace_id FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id
+      WHERE wm.user_id = ? AND wm.workspace_id = ? AND w.org_id = ?`,
+    user.id, workspaceId, user.org_id,
+  ));
+}
+
+/**
  * The workspace wall. Returns the workspace id if this user may use it; otherwise throws 404 (not 403,
  * so people can't tell whether a workspace they don't belong to exists). Call it before any query that
  * reads or writes workspace data, and use the returned id in that query.
@@ -273,7 +287,7 @@ export async function workspaceIdsFor(user: User): Promise<string[]> {
  * themselves (cancel, delete now) pass `allowEnding`.
  */
 export async function requireWorkspace(user: User, workspaceId: string | null | undefined, opts: { allowEnding?: boolean } = {}): Promise<string> {
-  if (!workspaceId || !(await workspaceIdsFor(user)).includes(workspaceId)) {
+  if (!workspaceId || !(await canSeeWorkspace(user, workspaceId))) {
     throw new HttpError(404, "Workspace not found, or you're not a member of it.");
   }
   traceScope({ workspaceId });

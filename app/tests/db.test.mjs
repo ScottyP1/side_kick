@@ -699,7 +699,7 @@ test(`[${engine}] job queue: workers in one process share the work too, never tw
   const reports = await Promise.all(["a", "b", "c"].map((w) => jobs.runWorker({ workerId: w, kinds: ["test.inproc"] })));
   assert.equal(seen.length, 30);
   assert.equal(new Set(seen).size, 30);
-  assert.equal(reports.reduce((s, r) => s + r.counts.n, 0), 30);
+  assert.equal(reports.reduce((s, r) => s + (r.counts.n ?? 0), 0), 30); // a worker may get none (each runs 4 lanes)
 });
 
 test(`[${engine}] job queue: the same idempotency key keeps one job`, async () => {
@@ -799,6 +799,157 @@ test(`[${engine}] job queue: old finished jobs are pruned; health counts per com
   await db.run("UPDATE jobs SET updated_at = ? WHERE org_id = ?", new Date(Date.now() - 8 * 86400_000).toISOString(), org);
   assert.ok((await jobs.pruneJobs()) >= 1);
   assert.equal((await db.get("SELECT COUNT(*) AS n FROM jobs WHERE org_id = ?", org)).n, 0);
+});
+
+/* ---------- Scale readiness (docs/SCALE.md): fair queue, fair Claude turns, retention, indexes ---------- */
+
+test(`[${engine}] job queue: fair between companies (a flood from one doesn't hold up the others; at most 2 running each)`, async () => {
+  jobs.defineJob("test.fair", { label: "Test: fair", run: async () => ({}) });
+  const [big, small1, small2] = [db.newId(), db.newId(), db.newId()];
+  for (const o of [big, small1, small2]) await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", o, `Fair ${o.slice(0, 4)}`, db.now());
+  const t0 = Date.now();
+  // The big company queued 40 jobs first (older), the small ones one each, later.
+  for (let i = 0; i < 40; i++) await jobs.enqueue("test.fair", { orgId: big, runAt: new Date(t0 - 60_000 + i) });
+  await jobs.enqueue("test.fair", { orgId: small1, runAt: new Date(t0 - 1000) });
+  await jobs.enqueue("test.fair", { orgId: small2, runAt: new Date(t0 - 500) });
+  const at = new Date(t0);
+  const claimed = [];
+  for (let i = 0; i < 4; i++) claimed.push(await jobs.claimNext(`fair-${i}`, at, { kinds: ["test.fair"] }));
+  const orgs = claimed.map((j) => j?.org_id);
+  assert.equal(orgs.filter((o) => o === big).length, 2, `the big company gets its 2 turns, not all 4: ${orgs}`);
+  assert.ok(orgs.includes(small1) && orgs.includes(small2), "both small companies got a turn straight away");
+  assert.equal(await jobs.claimNext("fair-x", at, { kinds: ["test.fair"] }), null, "the big company is at its cap while 2 of its jobs run");
+  await jobs.completeJob(claimed[0], "fair-0", {});
+  const next = await jobs.claimNext("fair-y", at, { kinds: ["test.fair"] });
+  assert.equal(next?.org_id, big, "a finished job frees the big company's next turn");
+  await db.run("UPDATE jobs SET status = 'canceled' WHERE kind = 'test.fair'");
+});
+
+test(`[${engine}] job queue: one heartbeat runs several jobs at once, and waits for jobs that queue more`, async () => {
+  jobs.defineJob("test.slow", { label: "Test: slow", run: async () => (await new Promise((r) => setTimeout(r, 300)), { slow: 1 }) });
+  jobs.defineJob("test.fanout", { label: "Test: fan out", run: async () => {
+    await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 4; i++) await jobs.enqueue("test.slow", { orgId: null });
+    return { fanned: 1 };
+  } });
+  await jobs.enqueue("test.fanout");
+  const t0 = Date.now();
+  const r = await jobs.runWorker({ kinds: ["test.fanout", "test.slow"], concurrency: 4 });
+  const ms = Date.now() - t0;
+  assert.equal(r.counts.fanned, 1);
+  assert.equal(r.counts.slow, 4, "the jobs the first one queued ran in the same heartbeat");
+  assert.ok(ms < 1100, `4 slow jobs ran side by side (${ms} ms, one after another would be 1,300+)`);
+});
+
+const { FairLimiter, LimiterBusyError } = await import("../src/lib/fair-limiter.ts");
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test("fair limiter: one key can't take every turn; waiting keys are served in turn", async () => {
+  const lim = new FairLimiter({ max: 3, perKey: 2, maxWaitMs: 2000 });
+  const order = [];
+  const gates = [];
+  const task = (key, label) => lim.run(key, () => new Promise((r) => gates.push(() => (order.push(label), r()))));
+  const all = [task("big", "b1"), task("big", "b2"), task("big", "b3"), task("big", "b4"), task("small", "s1"), task("other", "o1")];
+  await tick();
+  // Running: b1, b2 (big's cap) and s1 (the third turn); waiting: b3, b4, o1.
+  assert.deepEqual(lim.stats().byKey.big, { running: 2, waiting: 2 });
+  assert.deepEqual(lim.stats().byKey.small, { running: 1, waiting: 0 });
+  assert.equal(lim.stats().byKey.other.waiting, 1);
+  gates.shift()(); // b1 done: big is under its cap, but round-robin starts after the last key served
+  await tick();
+  gates.shift()(); // b2 done
+  await tick();
+  assert.equal(lim.stats().running, 3);
+  assert.ok(lim.stats().byKey.other?.running === 1, "the other company got a turn before big's third task ran twice");
+  while (gates.length) (gates.shift()(), await tick());
+  await Promise.all(all);
+  assert.equal(order.length, 6);
+});
+
+test("fair limiter: people-facing work goes first; a task that waits too long is refused", async () => {
+  const lim = new FairLimiter({ max: 1, perKey: 1, maxWaitMs: 150 });
+  let release;
+  const first = lim.run("a", () => new Promise((r) => (release = r)));
+  const ran = [];
+  const background = lim.run("b", async () => ran.push("background"), { priority: 1 });
+  const person = lim.run("c", async () => ran.push("person"), { priority: 0 });
+  await tick();
+  release();
+  await Promise.all([first, background, person]);
+  assert.deepEqual(ran, ["person", "background"]);
+  let hold;
+  const busy = lim.run("a", () => new Promise((r) => (hold = r)));
+  let waited = -1;
+  await assert.rejects(lim.run("z", async () => {}, { onWait: (ms) => (waited = ms) }), LimiterBusyError);
+  assert.equal(waited, -1, "the refused task never started");
+  hold();
+  await busy;
+  assert.equal(lim.stats().waiting, 0);
+  assert.equal(lim.stats().running, 0);
+});
+
+test(`[${engine}] retention: old traces, usage, audit and expired rows go in batches; recent ones and client content stay`, async () => {
+  const { pruneOldData } = await import("../src/lib/retention.ts");
+  const org = db.newId();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Retention Co", db.now());
+  const old = new Date(Date.now() - 500 * 86400_000).toISOString();
+  const recent = new Date(Date.now() - 2 * 86400_000).toISOString();
+  const traceAt = (days) => new Date(Date.now() - days * 86400_000).toISOString();
+  const ids = { oldTraces: [], newTraces: [] };
+  for (let i = 0; i < 12; i++) {
+    const id = db.newId();
+    const isOld = i < 9;
+    (isOld ? ids.oldTraces : ids.newTraces).push(id);
+    await db.run("INSERT INTO traces (id, org_id, channel, name, status, duration_ms, span_count, started_at) VALUES (?, ?, 'portal', 'GET /x', 'ok', 1, 2, ?)", id, org, traceAt(isOld ? 40 : 3));
+    for (const sp of ["a", "b"]) await db.run("INSERT INTO trace_spans (trace_id, span_id, kind, name, start_ms, duration_ms, status, attrs) VALUES (?, ?, 'request', 'x', 0, 1, 'ok', '{}')", id, sp);
+  }
+  for (const at of [old, old, old, recent]) {
+    await db.run("INSERT INTO usage_events (org_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, created_at) VALUES (?, 'ask', 'm', 1, 1, 0, 1, 1, ?)", org, at);
+    await db.run("INSERT INTO audit_log (org_id, actor, action, kind, created_at) VALUES (?, 'x', 'Did a thing', 'Data', ?)", org, at);
+  }
+  const user = db.newId();
+  await db.run("INSERT INTO users (id, org_id, name, email, role, password_hash, created_at) VALUES (?, ?, 'R', ?, 'Member', 'x', ?)", user, org, `${user}@retention.test`, db.now());
+  await db.run("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)", `gone-${user}`, user, traceAt(1));
+  await db.run("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)", `kept-${user}`, user, new Date(Date.now() + 86400_000).toISOString());
+  const ws = db.newId();
+  await db.run("INSERT INTO workspaces (id, org_id, name, color, created_at) VALUES (?, ?, 'R', '#000', ?)", ws, org, old);
+  await db.run("INSERT INTO questions (id, org_id, workspace_id, question, found, created_at) VALUES (?, ?, ?, 'Old question', 0, ?)", db.newId(), org, ws, old);
+
+  const report = await pruneOldData(new Date(), { batch: 5 }); // small batches: several rounds per table
+  assert.ok(report.traces >= 9 && report.trace_spans >= 18, JSON.stringify(report));
+  const count = async (sql, ...p) => (await db.get(sql, ...p)).n;
+  const marks = (a) => a.map(() => "?").join(",");
+  assert.equal(await count(`SELECT COUNT(*) AS n FROM traces WHERE id IN (${marks(ids.oldTraces)})`, ...ids.oldTraces), 0);
+  assert.equal(await count(`SELECT COUNT(*) AS n FROM trace_spans WHERE trace_id IN (${marks(ids.oldTraces)})`, ...ids.oldTraces), 0);
+  assert.equal(await count(`SELECT COUNT(*) AS n FROM traces WHERE id IN (${marks(ids.newTraces)})`, ...ids.newTraces), 3, "recent traces stay");
+  assert.equal(await count(`SELECT COUNT(*) AS n FROM trace_spans WHERE trace_id IN (${marks(ids.newTraces)})`, ...ids.newTraces), 6);
+  assert.equal(await count("SELECT COUNT(*) AS n FROM usage_events WHERE org_id = ?", org), 1, "13 months of usage stay");
+  assert.equal(await count("SELECT COUNT(*) AS n FROM audit_log WHERE org_id = ?", org), 1);
+  assert.equal(await count("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?", user), 1, "only the expired session went");
+  assert.equal(await count("SELECT COUNT(*) AS n FROM questions WHERE org_id = ?", org), 1, "client content isn't touched by retention");
+  const conv = db.newId();
+  await db.run("INSERT INTO conversations (id, kind, org_id, created_at, last_at) VALUES (?, 'ask', ?, ?, ?)", conv, org, old, traceAt(2));
+  await db.run("INSERT INTO conversation_turns (id, conversation_id, org_id, role, text, created_at) VALUES (?, ?, ?, 'user', 'hi', ?)", db.newId(), conv, org, traceAt(2));
+  const conversations = await import("../src/lib/conversations.ts").catch(() => null); // needs Next.js; checked when it loads
+  if (conversations) assert.equal(conversations.EXPIRE_HOURS, 24, "retention.ts uses the same 24 hours");
+  const again = await pruneOldData(new Date(), { batch: 5 });
+  assert.equal(await count("SELECT COUNT(*) AS n FROM conversations WHERE id = ?", conv), 0, "expired conversations go");
+  assert.equal(await count("SELECT COUNT(*) AS n FROM conversation_turns WHERE conversation_id = ?", conv), 0);
+  assert.equal(again.traces, 0, "nothing left to do the second time");
+});
+
+test("scale indexes: the SQLite and Postgres schemas create the same ones", async () => {
+  const fsm = await import("node:fs");
+  const src = fsm.readFileSync(new URL("../src/lib/db.ts", import.meta.url), "utf8");
+  const pg = fsm.readFileSync(new URL("../db/schema.postgres.sql", import.meta.url), "utf8");
+  const names = (text) => new Set([...text.matchAll(/CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)/g)].map((m) => m[1]));
+  const sqlite = names(src);
+  const postgres = names(pg);
+  for (const n of ["documents_ws", "meetings_ws", "items_meeting", "action_items_meeting", "workspace_members_user", "traces_time", "sessions_user"]) {
+    assert.ok(sqlite.has(n) && postgres.has(n), `${n} on both engines`);
+  }
+  // Postgres has a few more (its passages table is a normal table with its own indexes); never fewer.
+  assert.deepEqual([...sqlite].filter((n) => !postgres.has(n)), [], "every SQLite index exists on Postgres too");
 });
 
 test(`[${engine}] connector health: broken keeps its first date until it works again; removing forgets it`, async () => {

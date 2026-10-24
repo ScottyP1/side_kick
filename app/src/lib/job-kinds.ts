@@ -11,6 +11,8 @@
  * - `watch.all` (15 min): enqueues one `watch.org` job per active organization (key `watch:<org>:<slot>`; a forced
  *   sweep enqueues fresh ones).
  * - `jobs.prune` (6 h): clears finished jobs (7 days), dead ones (30 days) and old failed-post records (30 days).
+ * - `data.retention` (1 h): deletes traces, AI usage rows, audit entries, logs and expired sign-in rows past their
+ *   retention, in batches (lib/retention.ts `RETENTION`). Counts: `retained` (rows deleted).
  *
  * Per organization:
  * - `watch.org` (payload `{}`; the job's org): runs every watcher for that organization (lib/watchers.ts). Counts:
@@ -42,6 +44,7 @@ import { runDueRolloffs } from "./rolloff";
 import { runWatchers } from "./watchers";
 import { dueConnectorLinks, syncDueLink } from "./connectors";
 import { HttpError } from "./auth";
+import { pruneOldData } from "./retention";
 import { autoNotesOrgs, ensureSubscription, fetchTranscript, markFetchFailed, pollOrg, writeNotes } from "./meetings-graph";
 
 const MIN = 60_000;
@@ -77,6 +80,12 @@ defineJob("jobs.prune", {
     const failures = await run("DELETE FROM teams_post_failures WHERE created_at < ?", new Date(Date.now() - 30 * 86400_000).toISOString());
     return { pruned: (await pruneJobs()) + failures.changes };
   },
+});
+defineJob("data.retention", {
+  label: "Delete records past their retention",
+  everyMs: 60 * MIN,
+  maxAttempts: 3,
+  run: async () => ({ retained: Object.values(await pruneOldData()).reduce((a, b) => a + b, 0) }),
 });
 defineJob("watch.all", {
   label: "Schedule the watchers",

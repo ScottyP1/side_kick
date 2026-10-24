@@ -1,9 +1,14 @@
 "use client";
 
 /**
- * Meetings (/meetings): import a transcript (Teams .vtt, Word or pasted text) and read the notes Sidekick wrote:
- * summary, decisions, action items (editable here: owner, due date, status), open questions and facts. Notes also go
- * to the workspace's linked Teams chats. A failed import is still saved; the page then opens it with **Try again**.
+ * Meetings (/meetings): the group's meetings and the notes Sidekick wrote: summary, decisions, action items (editable
+ * here: owner, due date, status), open questions and facts. Two ways in:
+ * - **Automatic notes** after Teams meetings (panel at the top, components/auto-notes.tsx; lib/meetings-graph.ts),
+ *   shown with a "Teams" tag;
+ * - **Add a past or outside meeting**: upload a transcript (Teams .vtt, Word or pasted text), for meetings held before
+ *   automatic notes were on or outside Teams. A failed one is still saved; the page then opens it with **Try again**.
+ * Decisions, requirements, risks, facts and terms can be **saved to knowledge** (PATCH /api/items/:id), like the
+ * button on the notes card in Teams. Notes also go to the group's notes chats in Teams.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -11,16 +16,18 @@ import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, ApiError, fmtDate, Icon, Modal, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { ActionItemsTable, useUpdateAction, type ActionItem } from "@/components/action-items";
 import { BRAND } from "@/lib/brand";
+import { AutoNotesPanel } from "@/components/auto-notes";
 
 /** Same limit as the server (lib/extract.ts MAX_TRANSCRIPT_CHARS), so the dialog can say so before sending. */
 const MAX_TRANSCRIPT_CHARS = 300_000;
 /** The Transcript tab shows a long transcript in pieces of this many characters, so the page stays quick. */
 const TRANSCRIPT_PAGE = 40_000;
 
-type M = { id: string; title: string; held_at: string; external_guests: number; status: string; error: string | null; decisions: number; actions: number; open_questions: number };
+type M = { id: string; title: string; held_at: string; external_guests: number; status: string; error: string | null; decisions: number; actions: number; open_questions: number; source: string | null };
+type Item = { id: string; kind: string; text: string; who: string | null; answered: number | null; pinned?: number; saved_by?: string | null };
 type Detail = {
-  meeting: { id: string; title: string; held_at: string; summary: string | null; transcript: string; status: string; error: string | null; external_guests: number };
-  items: { id: string; kind: string; text: string; who: string | null; answered: number | null }[];
+  meeting: { id: string; title: string; held_at: string; summary: string | null; transcript: string; status: string; error: string | null; external_guests: number; source: string | null };
+  items: Item[];
   actions: ActionItem[];
 };
 
@@ -121,6 +128,11 @@ export default function MeetingsPage() {
       setBusy(false);
     }
   };
+  const setSaved = async (item: Item, saved: boolean) => {
+    await api(`/api/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ saved }) });
+    toast(saved ? "Saved to the group's knowledge" : "Removed from knowledge");
+    await loadDetail();
+  };
   const remove = async (id: string, title: string) => {
     if (!confirm(`Delete “${title}”? Its notes, action items and transcript are deleted too. This can't be undone.`)) return;
     await api(`/api/meetings/${id}`, { method: "DELETE" });
@@ -147,7 +159,7 @@ export default function MeetingsPage() {
             <div className="page-head">
               <div>
                 <div className="eyebrow">
-                  {fmtDate(m!.held_at)}{m!.external_guests ? " · client guests present" : " · internal"}{" "}
+                  {fmtDate(m!.held_at)}{m!.source === "teams" ? " · captured from Microsoft Teams" : ""}{m!.external_guests ? " · client guests present" : " · internal"}{" "}
                   <Pill kind={m!.status === "Ready" ? "good" : m!.status === "Failed" ? "bad" : "info"}>{m!.status}</Pill>
                 </div>
                 <h1>{m!.title}</h1>
@@ -181,7 +193,7 @@ export default function MeetingsPage() {
                       <h3>Summary</h3>
                       <p style={{ margin: "4px 0 0" }}>{m!.summary ?? "—"}</p>
                     </div>
-                    <Section title="Decisions" items={of("decision").map((d) => `${d.text}${d.who ? ` (${d.who})` : ""}`)} />
+                    <KeepSection title="Decisions" items={of("decision")} canEdit={canEdit} onSave={(i, v) => setSaved(i, v).catch(reportError)} label={(d) => `${d.text}${d.who ? ` (${d.who})` : ""}`} />
                     {of("pending").length > 0 && <Section title="Decisions still to make" items={of("pending").map((d) => `${d.text}${d.answered ? " (made)" : ""}`)} />}
                     <div>
                       <h3>Action items</h3>
@@ -199,7 +211,7 @@ export default function MeetingsPage() {
                         </ul>
                       ) : <p className="muted" style={{ margin: "4px 0 0" }}>None</p>}
                     </div>
-                    <Section title="Requirements, facts & risks" items={[...of("requirement"), ...of("fact"), ...of("risk"), ...of("glossary")].map((f) => `${f.kind[0].toUpperCase() + f.kind.slice(1)}: ${f.text}`)} />
+                    <KeepSection title="Requirements, facts & risks" items={[...of("requirement"), ...of("fact"), ...of("risk"), ...of("glossary")]} canEdit={canEdit} onSave={(i, v) => setSaved(i, v).catch(reportError)} label={(f) => `${f.kind[0].toUpperCase() + f.kind.slice(1)}: ${f.text}`} />
                   </div>
                 )}
                 {tab === "Transcript" && (
@@ -227,23 +239,24 @@ export default function MeetingsPage() {
         <div>
           <div className="eyebrow">Meetings</div>
           <h1>{list ? `${list.length} meeting${list.length === 1 ? "" : "s"}` : "Meetings"}</h1>
-          <p>Import a Teams transcript and {BRAND.name} writes the notes: summary, decisions, action items, open questions and facts to remember.</p>
+          <p>{BRAND.name} writes the notes after your Teams meetings: summary, decisions, action items, open questions and facts to remember. For a meeting held earlier or outside Teams, add its transcript.</p>
         </div>
         {canEdit && (
           <div className="actions">
             <button className="btn primary" onClick={() => setImporting(true)}>
               <Icon n="upload" />
-              Import transcript
+              Add a past or outside meeting
             </button>
           </div>
         )}
       </div>
+      <AutoNotesPanel role={me.user.role} onOpen={(id) => openMeeting(id)} />
       <div className="panel">
         {list && !list.length ? (
           <div className="empty">
             <h2>No meetings yet</h2>
-            <span>In Teams, open a meeting&apos;s Recap → Transcript → Download (.vtt or .docx), then import it here.</span>
-            {canEdit && <button className="btn primary" onClick={() => setImporting(true)}>Import transcript</button>}
+            <span>With automatic notes on, Teams meetings of this group&apos;s people show up here by themselves. For a past or outside meeting, download its transcript (in Teams: Recap → Transcript → Download) and add it here.</span>
+            {canEdit && <button className="btn primary" onClick={() => setImporting(true)}>Add a past or outside meeting</button>}
           </div>
         ) : (
           <div className="table-wrap">
@@ -269,7 +282,7 @@ export default function MeetingsPage() {
                     <td className="r num">{x.decisions}</td>
                     <td className="r num">{x.actions}</td>
                     <td className="r num">{x.open_questions}</td>
-                    <td className="r">{x.external_guests ? <span className="tag">Client guests</span> : <span className="tag">Internal</span>}</td>
+                    <td className="r">{x.source === "teams" && <span className="tag">Teams</span>} {x.external_guests ? <span className="tag">Client guests</span> : <span className="tag">Internal</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -279,17 +292,18 @@ export default function MeetingsPage() {
       </div>
       {importing && (
         <Modal
-          title="Import a meeting transcript"
+          title="Add a past or outside meeting"
           onClose={() => !busy && setImporting(false)}
           footer={
             <>
               <button className="btn" disabled={busy} onClick={() => setImporting(false)}>Cancel</button>
               <button className="btn primary" disabled={busy || (!file && !form.text.trim()) || (!file && !form.title.trim()) || (!file && form.text.length > MAX_TRANSCRIPT_CHARS)} onClick={submit}>
-                {busy ? <><Spinner /> {BRAND.name} is writing notes…</> : "Import & write notes"}
+                {busy ? <><Spinner /> {BRAND.name} is writing notes…</> : "Add & write notes"}
               </button>
             </>
           }
         >
+          <p className="muted" style={{ margin: 0 }}>For a meeting held before automatic notes were on, or outside Teams (another tool, in person with a recording). Teams meetings are added by themselves when automatic notes are on.</p>
           <div className="field">
             <label htmlFor="mfile">Transcript file</label>
             <input id="mfile" type="file" accept=".vtt,.docx,.txt,.md" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -335,6 +349,33 @@ function Section({ title, items }: { title: string; items: string[] }) {
       {items.length ? (
         <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
           {items.map((t, i) => <li key={i}>{t}</li>)}
+        </ul>
+      ) : <p className="muted" style={{ margin: "4px 0 0" }}>None</p>}
+    </div>
+  );
+}
+
+/**
+ * A list of meeting items (decisions, or requirements/facts/risks/terms) with **Save to knowledge** per item for
+ * people who can edit. A saved item shows who saved it and can be removed again.
+ */
+function KeepSection({ title, items, canEdit, onSave, label }: { title: string; items: Item[]; canEdit: boolean; onSave: (i: Item, saved: boolean) => void; label: (i: Item) => string }) {
+  return (
+    <div>
+      <h3>{title}</h3>
+      {items.length ? (
+        <ul style={{ margin: "4px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+          {items.map((i) => (
+            <li key={i.id}>
+              {label(i)}{" "}
+              {i.pinned ? <Pill kind="good">Saved{i.saved_by ? ` by ${i.saved_by}` : ""}</Pill> : null}{" "}
+              {canEdit && (
+                <button type="button" className="btn small ghost" onClick={() => onSave(i, !i.pinned)}>
+                  {i.pinned ? "Remove from knowledge" : "Save to knowledge"}
+                </button>
+              )}
+            </li>
+          ))}
         </ul>
       ) : <p className="muted" style={{ margin: "4px 0 0" }}>None</p>}
     </div>

@@ -47,6 +47,8 @@ export const PERMISSIONS_EXPLAINED = [
   { name: "Sign in and read user profile (User.Read, delegated)", what: `Lets people sign in to ${BRAND.name} with their work account. ${BRAND.name} sees their name, email and account id.` },
   { name: "Read all users' full profiles (User.Read.All, application)", what: `Lets ${BRAND.name} search your directory when an admin imports people or someone types @${BRAND.name} add in Teams. ${BRAND.name} reads names, work emails, job titles and account ids only, and never changes anything in Microsoft 365.` },
   { name: "Manage its own installation in chats and teams (TeamsAppInstallation.ReadWriteSelfForChat.All and ReadWriteSelfForTeam.All, application)", what: `Lets ${BRAND.name} remove itself from a chat or team: when someone other than a Team Lead or admin adds it, when nobody assigns a chat to a group within 7 days, or when you press Remove ${BRAND.name} from this chat. It can only add or remove ${BRAND.name}, never other apps.` },
+  { name: "Read all meeting transcripts and online meetings (OnlineMeetingTranscript.Read.All and OnlineMeetings.Read.All, application)", what: `Only used when an admin turns on automatic notes on the Meetings page. When a Teams meeting ends, ${BRAND.name} reads its subject, times and invitees to find the right group, and its transcript to write the notes. Meetings that aren't any group's are skipped and nothing about them is kept. ${BRAND.name} never joins or records a call.` },
+  { name: `Sign in to the ${BRAND.name} tab in Teams (access_as_user, delegated)`, what: `Lets the ${BRAND.name} tab in Teams sign people in with their work account, without a password.` },
   { name: "Teams chat and channel messages (resource-specific, per chat)", what: `Not part of this approval: granted per chat or team when ${BRAND.name} is added there. ${BRAND.name} reads a chat's messages only once it's assigned to a group.` },
 ] as const;
 
@@ -91,22 +93,66 @@ async function graphToken(tenantId: string): Promise<string> {
 }
 
 /**
- * One call to Microsoft Graph for this tenant with Sidekick's app token. 401/403 become `ConsentNeededError`
- * (with `deniedMessage` when given), 404 returns null, other failures 502. Returns the JSON body (null when empty).
- * Used here for the directory and by lib/teams/install.ts to remove Sidekick from a chat or team.
+ * Microsoft Graph said "too many requests" (429) or "busy" (503) and asked to wait longer than we wait in place.
+ * `retryAfterMs` is its Retry-After; the job queue never retries sooner than that (lib/jobs.ts).
  */
-export async function graphCall<T>(tenantId: string, method: "GET" | "DELETE", path: string, opts: { headers?: Record<string, string>; deniedMessage?: string } = {}): Promise<T | null> {
-  const token = await graphToken(tenantId);
-  const res = await fetch(`${GRAPH_BASE}${path}`, { method, headers: { Authorization: `Bearer ${token}`, ...(opts.headers ?? {}) } }).catch(() => null);
-  if (!res) throw new HttpError(502, "Couldn't reach Microsoft Graph. Try again in a minute.");
-  if (res.status === 401 || res.status === 403) {
-    tokens.delete(tenantId);
-    throw new ConsentNeededError(opts.deniedMessage);
+export class GraphThrottledError extends HttpError {
+  retryAfterMs: number;
+  constructor(retryAfterMs: number) {
+    super(503, `Microsoft Graph is busy and asked ${BRAND.name} to wait ${Math.ceil(retryAfterMs / 1000)} seconds. It will try again by itself.`);
+    this.retryAfterMs = retryAfterMs;
   }
-  if (res.status === 404) return null;
-  if (!res.ok) throw new HttpError(502, `Microsoft Graph answered ${res.status}. Try again in a minute.`);
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T | null;
+}
+
+/** Waits this short a Retry-After in place (and tries again, at most twice) instead of failing the job. */
+const WAIT_IN_PLACE_MS = 5_000;
+
+/** Graph's Retry-After header (seconds, or an HTTP date) in milliseconds; 30 s when it's missing or unreadable. */
+export function retryAfterMs(header: string | null, at = Date.now()): number {
+  if (!header) return 30_000;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs >= 0) return secs * 1000;
+  const when = Date.parse(header);
+  return Number.isNaN(when) ? 30_000 : Math.max(0, when - at);
+}
+
+/**
+ * One call to Microsoft Graph for this tenant with Sidekick's app token. 401/403 become `ConsentNeededError`
+ * (with `deniedMessage` when given), 404 returns null, 429/503 wait up to 5 s in place (twice at most) and
+ * otherwise throw `GraphThrottledError` with Graph's Retry-After, other failures 502. Returns the JSON body (null
+ * when empty), or the body as text with `raw` (a transcript download). `body` is sent as JSON (POST/PATCH).
+ * Used here for the directory, by lib/teams/install.ts to remove Sidekick from a chat or team, and by
+ * lib/meetings-graph.ts for meeting transcripts and change-notification subscriptions.
+ */
+export async function graphCall<T>(
+  tenantId: string,
+  method: "GET" | "DELETE" | "POST" | "PATCH",
+  path: string,
+  opts: { headers?: Record<string, string>; deniedMessage?: string; body?: unknown; raw?: boolean } = {},
+): Promise<T | null> {
+  for (let attempt = 0; ; attempt++) {
+    const token = await graphToken(tenantId);
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}), ...(opts.headers ?? {}) };
+    const res = await fetch(`${GRAPH_BASE}${path}`, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }).catch(() => null);
+    if (!res) throw new HttpError(502, "Couldn't reach Microsoft Graph. Try again in a minute.");
+    if (res.status === 401 || res.status === 403) {
+      tokens.delete(tenantId);
+      throw new ConsentNeededError(opts.deniedMessage);
+    }
+    if (res.status === 404) return null;
+    if (res.status === 429 || res.status === 503) {
+      const wait = retryAfterMs(res.headers.get("retry-after"));
+      if (wait <= WAIT_IN_PLACE_MS && attempt < 2) {
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      throw new GraphThrottledError(wait);
+    }
+    if (!res.ok) throw new HttpError(502, `Microsoft Graph answered ${res.status}. Try again in a minute.`);
+    const text = await res.text();
+    if (opts.raw) return text as T;
+    return (text ? JSON.parse(text) : null) as T | null;
+  }
 }
 
 const graphGet = <T>(tenantId: string, path: string, headers: Record<string, string> = {}) =>

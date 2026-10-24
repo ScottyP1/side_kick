@@ -21,7 +21,7 @@ export const metadata: Metadata = pageMetadata("/");
 
 const HIGHLIGHTS: [string, string, string][] = [
   ["answer", "Answers with sources", `Ask in the chat. ${BRAND.name} answers from that client's documents, meetings and chat, and shows where each answer came from. If it doesn't know, it says so.`],
-  ["notes", "Meeting notes, done", `Add a meeting's transcript and ${BRAND.name} writes the summary, decisions, open questions and action items with owners and due dates, and posts them to the team's chat. Automatic notes after every Teams meeting are coming soon.`],
+  ["notes", "Meeting notes, done", `After every Teams meeting ${BRAND.name} writes the summary, decisions, open questions and action items with owners and due dates, and posts them to the team's chat. No bot in the call; past or outside meetings can be added from their transcript.`],
   ["bell", "Reminders that matter", "Overdue and unowned action items, decisions still waiting, and documents that look out of date, raised in the chat before they slip."],
   ["groups", "One group per client", "Each engagement gets its own walled-off group with its own Team Lead, chats and documents. One client's material never shows up in another's answers."],
   ["shield", "Guardrails on every answer", `Company-wide and per-group rules, checked before ${BRAND.name} answers and again after. Client guests only ever see what's marked shareable.`],
@@ -40,8 +40,8 @@ export default function HomePage() {
               {BRAND.name} turns your Teams meetings into notes, decisions and action items, posted straight to your team&apos;s chat, then keeps everyone on track.
             </p>
             <p className="site-hero-sub">A fast, reliable teammate in Teams chats, channels and 1:1. Answers with sources. A wall around every client.</p>
-            <ul className="site-hero-badges" aria-label="Coming soon">
-              <li><span className="site-badge">Coming soon</span> Automatic notes after every Teams meeting</li>
+            <ul className="site-hero-badges" aria-label="What's new and coming">
+              <li><span className="site-badge">New</span> Automatic notes after every Teams meeting</li>
               <li><span className="site-badge">Enterprise · coming soon</span> {BRAND.name} live in your meetings</li>
             </ul>
             <div className="site-hero-cta">
@@ -63,8 +63,8 @@ export default function HomePage() {
             <h2 id="mem-title">Decisions don&apos;t get lost between meetings</h2>
             <p className="site-lead" style={{ marginBottom: 14 }}>Each meeting adds to what the group knows, so the answer to &quot;what did we decide?&quot; is one question away, with the meeting it came from.</p>
             <ul className="site-checks">
-              <li><span><span className="site-badge-now">Today</span> Notes, decisions and action items from your meeting transcripts</span></li>
-              <li><span><span className="site-badge-soon">Coming soon</span> Automatic notes after every Teams meeting</span></li>
+              <li><span><span className="site-badge-now">Today</span> Automatic notes, decisions and action items after every Teams meeting</span></li>
+              <li><span><span className="site-badge-now">Today</span> Save decisions to the group&apos;s knowledge, right from the notes card</span></li>
               <li><span><span className="site-badge-soon">Enterprise · coming soon</span> {BRAND.name} live in your meetings</span></li>
             </ul>
           </div>

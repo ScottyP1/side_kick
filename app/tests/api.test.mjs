@@ -645,7 +645,7 @@ test(`[${ENGINE}] website: / shows the website when signed out and sends signed-
 
 test(`[${ENGINE}] website: every public page answers without a session; the portal, Owner Console and checkout don't`, async () => {
   const pages = await sitemapPaths();
-  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/roles-and-permissions", "/docs/connect-devops-jira", "/docs/install-app"]) {
+  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/meetings", "/docs/roles-and-permissions", "/docs/connect-devops-jira", "/docs/install-app"]) {
     assert.ok(pages.includes(p), `${p} is in the sitemap`);
   }
   for (const p of pages) {
@@ -1597,6 +1597,25 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await member("GET", `/api/findings?ws=${s.wsB}`)).status, 404, "a member of A can't read B's findings");
   assert.ok(!leaks(await other("GET", "/api/findings")));
   assert.ok(!(await member("GET", "/api/findings")).body.findings.some((f) => f.workspaceId === s.wsB));
+  // Meetings wave: saved knowledge, automatic Teams notes and the Teams tab. An item of workspace B can't be saved
+  // (or probed) from another organization or by a member of A; the automatic-notes status only ever shows the
+  // asker's own organization; the Teams tab needs a Teams sign-in token, never a portal cookie.
+  const bm = new FormData();
+  bm.append("ws", s.wsB);
+  bm.append("title", "ZEBRA vault meeting");
+  bm.append("text", "Workspace B only: we decided the vault code ZEBRA-7731 stays.");
+  const bMeeting = (await admin("POST", "/api/meetings", undefined, { form: bm })).body.id;
+  const bDecision = (await admin("GET", `/api/meetings/${bMeeting}`)).body.items.find((i) => i.kind === "decision").id;
+  assert.equal((await other("PATCH", `/api/items/${bDecision}`, { saved: true })).status, 404);
+  assert.equal((await member("PATCH", `/api/items/${bDecision}`, { saved: true })).status, 404, "a member of A can't save B's item");
+  assert.equal((await admin("PATCH", `/api/items/${bDecision}`, { saved: true })).status, 200);
+  assert.ok(!leaks(await askA(member, "vault code ZEBRA-7731 decided")), "a saved item of B never reaches A");
+  assert.ok(!leaks(await other("GET", "/api/meetings/auto")));
+  assert.deepEqual((await other("GET", "/api/meetings/auto")).body.recent, []);
+  assert.equal((await other("POST", "/api/meetings/auto", { action: "assign", id: "x", ws: s.wsB })).status, 404);
+  assert.equal((await other("PUT", "/api/meetings/auto", { enabled: true })).status, 409, "no automatic notes without its own Microsoft tenant");
+  assert.equal((await member("GET", "/api/teams-tab")).status, 401, "the Teams tab never accepts a portal cookie");
+  await admin("DELETE", `/api/meetings/${bMeeting}`);
   // The website's help bot never sees any organization's material.
   assert.ok(!leaks(await client()("POST", "/api/help-bot", { message: "vault code ZEBRA-7731 Fabrikam merger" })));
   // Connectors: a work item linked to workspace B (Azure DevOps) never reaches workspace A, another organization or

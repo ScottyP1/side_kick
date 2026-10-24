@@ -287,7 +287,7 @@ test(`[${engine}] help center Markdown: lists, nested lists, tables, quotes and 
 
 test(`[${engine}] help center: only the four customer guides, links rewritten, search finds sections`, async () => {
   const help = await import("../src/lib/help.ts");
-  assert.deepEqual(help.guides().map((g) => g.slug), ["concepts", "admin-guide", "teams-guide", "roles-and-permissions", "connect-devops-jira", "install-app"]);
+  assert.deepEqual(help.guides().map((g) => g.slug), ["concepts", "admin-guide", "teams-guide", "meetings", "roles-and-permissions", "connect-devops-jira", "install-app"]);
   for (const bad of ["owner-guide", "README", "../PROGRESS", "PROGRESS", "constructor", "__proto__", "hasOwnProperty", ""]) assert.equal(help.guide(bad), null, bad);
   assert.equal(help.helpLink("admin-guide.md#4-add-people"), "/docs/admin-guide#4-add-people");
   assert.equal(help.helpLink("owner-guide.md"), null);

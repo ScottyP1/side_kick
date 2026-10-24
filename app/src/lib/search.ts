@@ -365,6 +365,16 @@ export async function sourceInfo(orgId: string, passages: Pick<Passage, "source_
       out.set(`${m.id}:notes`, facts);
     }
   }
+  // Items saved to knowledge (lib/saved-items.ts, source id "saved:<item id>"): dated by their meeting.
+  const savedIds = ids("notes").filter((x) => x.startsWith("saved:")).map((x) => x.slice(6));
+  for (const part of pieces(savedIds)) {
+    for (const r of await all<{ id: string; held_at: string | null; saved_at: string | null }>(
+      `SELECT i.id, m.held_at, i.saved_at FROM items i LEFT JOIN meetings m ON m.id = i.meeting_id AND m.org_id = i.org_id WHERE i.org_id = ? AND i.id IN (${q(part.length)})`, orgId, ...part,
+    )) {
+      const day = r.held_at ?? r.saved_at;
+      if (day) out.set(`saved:${r.id}`, { date: day.slice(0, 10), hash: null, outdated: null, name: null });
+    }
+  }
   for (const part of pieces(ids("chat"))) {
     for (const c of await all<{ id: string; sent_at: string }>(`SELECT id, sent_at FROM chat_messages WHERE org_id = ? AND id IN (${q(part.length)})`, orgId, ...part)) {
       out.set(c.id, { date: c.sent_at.slice(0, 10), hash: null, outdated: null, name: null });

@@ -30,7 +30,10 @@ capacity in East US / East US 2 when set up, hence Container Apps and Central US
 Container App environment variables: `ANTHROPIC_API_KEY`, `CLIENT_SECRET`, `AZURE_SEARCH_API_KEY`,
 `AZURE_OPENAI_API_KEY`, `DATABASE_URL` and `SIDEKICK_ENCRYPTION_KEY` come from Container App **secrets**
 (referenced with `secretref:`); the rest are plain settings, plus `SIDEKICK_PUBLIC_URL` (the live address)
-and `AZURE_SEARCH_INDEX=sidekick-cloud`. The database admin password was generated at random and only exists
+and `AZURE_SEARCH_INDEX=sidekick-cloud`. `SIDEKICK_PUBLIC_URL` also decides where Microsoft Graph sends meeting-transcript
+notifications (`/api/graph/notifications`, must be https) and the Teams tab's sign-in audience
+(`api://<host>/<Entra app id>`); optional `SIDEKICK_TEAMS_SSO_URL` accepts a second address's audience during a domain
+move (docs/RUNBOOKS.md → Automatic meeting notes). The database admin password was generated at random and only exists
 inside `DATABASE_URL`.
 
 **Secrets live in Azure Key Vault `sidekick-kv`** (since Oct 21, 2026). Each of the six Container App secrets
@@ -137,7 +140,8 @@ the bot's messaging endpoint (the live address above). Build the package with:
 npm --prefix app run teams:package
 ```
 
-That writes `teams/build/sidekick-teams-live.zip` (version from `teams/manifest.template.json`, now 1.3.0),
+That writes `teams/build/sidekick-teams-live.zip` (version from `teams/manifest.template.json`, now 1.4.0: adds the **Meetings** tab in the app bar and the tab for
+chats, channels and meetings, served from `/teams/tab` and `/teams/config`),
 with the live address as its web address. It asks Azure for the address (`az login` needed), or uses
 `SIDEKICK_LIVE_URL` if set; the address is never written into the repo. The store listing's website,
 privacy (`/privacy`) and terms (`/terms`) links use `SIDEKICK_WEBSITE_URL` if set (e.g. a custom domain),

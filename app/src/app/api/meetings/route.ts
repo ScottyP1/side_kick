@@ -1,5 +1,6 @@
 /**
- * GET/POST /api/meetings: list a workspace's meetings, or import a transcript and have Sidekick write the notes.
+ * GET/POST /api/meetings: list a workspace's meetings (imported ones and those captured from Teams, `source`
+ * "teams"), or add a past or outside meeting from its transcript and have Sidekick write the notes.
  * After a successful import the notes are posted to the workspace's linked Teams chats that take meeting notes,
  * followed by a reminder in the chats that want one after meetings (lib/reminders.ts).
  */
@@ -27,7 +28,7 @@ export const GET = handle(async (req: Request) => {
   const user = await requireUser();
   const ws = await requireWorkspace(user, new URL(req.url).searchParams.get("ws"));
   const meetings = await all(
-    `SELECT m.id, m.title, m.held_at, m.external_guests, m.status, m.error, m.created_at,
+    `SELECT m.id, m.title, m.held_at, m.external_guests, m.status, m.error, m.created_at, m.source,
        (SELECT COUNT(*) FROM items i WHERE i.meeting_id = m.id AND i.kind = 'decision') AS decisions,
        (SELECT COUNT(*) FROM action_items a WHERE a.meeting_id = m.id) AS actions,
        (SELECT COUNT(*) FROM items i WHERE i.meeting_id = m.id AND i.kind = 'question' AND i.answered = 0) AS open_questions
@@ -38,7 +39,8 @@ export const GET = handle(async (req: Request) => {
 });
 
 /**
- * Import a meeting transcript (Teams .vtt or .docx, or pasted text) and let Sidekick write the notes.
+ * "Add a past or outside meeting": import a meeting transcript (Teams .vtt or .docx, or pasted text) and let
+ * Sidekick write the notes. Teams meetings arrive by themselves when automatic notes are on (lib/meetings-graph.ts).
  * Who: people who can edit content in the workspace. Limits: files up to 25 MB, and the transcript text
  * (pasted or from the file) up to `MAX_TRANSCRIPT_CHARS`; the date must be YYYY-MM-DD. Plan limits: the
  * meeting's length counts toward this month's meeting hours (402 past the limit), and once the AI credit is

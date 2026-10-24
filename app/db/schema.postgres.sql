@@ -500,3 +500,30 @@ CREATE INDEX IF NOT EXISTS teams_post_failures_conv ON teams_post_failures(conve
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS removed_at TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS removed_by TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS last_post_ok_at TEXT;
+-- Meetings wave (lib/meetings-graph.ts): automatic meeting notes from Microsoft Graph, its subscriptions, the
+-- meetings it heard about and the polling cursors (see the SQLite schema in lib/db.ts for the columns); where a
+-- meeting came from, its notes post, and items saved to knowledge.
+CREATE TABLE IF NOT EXISTS auto_meetings (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), enabled INTEGER NOT NULL DEFAULT 0, changed_by TEXT, changed_at TEXT,
+  last_poll_at TEXT, last_ok_at TEXT, last_error TEXT, last_error_at TEXT
+);
+CREATE TABLE IF NOT EXISTS graph_subscriptions (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), tenant_id TEXT NOT NULL, resource TEXT NOT NULL,
+  client_state TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, renewed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS graph_meetings (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), online_meeting_id TEXT NOT NULL, transcript_id TEXT NOT NULL,
+  organizer_oid TEXT NOT NULL, via TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, title TEXT, started_at TEXT,
+  ended_at TEXT, workspace_id TEXT, candidates TEXT, meeting_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (org_id, transcript_id)
+);
+CREATE INDEX IF NOT EXISTS graph_meetings_org ON graph_meetings(org_id, status, created_at);
+CREATE TABLE IF NOT EXISTS graph_poll_cursors (
+  org_id TEXT NOT NULL REFERENCES orgs(id), organizer_oid TEXT NOT NULL, polled_until TEXT NOT NULL,
+  PRIMARY KEY (org_id, organizer_oid)
+);
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS source TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS graph_meeting_id TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_posted_at TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS saved_by TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS saved_at TEXT;

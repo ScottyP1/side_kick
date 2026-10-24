@@ -33,11 +33,21 @@ export const FAQ: readonly FaqItem[] = [
     id: "what-can-it-see",
     q: `What can ${BRAND.name} see?`,
     a: [
-      "Only what your organization gives it: the documents and meeting transcripts people add to a group, and the Teams chats a Team Lead or admin assigns to that group.",
+      "Only what your organization gives it: the documents and meeting transcripts people add to a group, the Teams chats a Team Lead or admin assigns to that group, and, if an admin turns on automatic notes, the transcripts of Teams meetings of a group's people.",
       "It answers from one group at a time, so it never uses another group's or another client's material. It can't see the rest of your Microsoft 365: no mailboxes, files or other chats.",
     ],
     topics: ["security"],
     guide: "/docs/teams-guide",
+  },
+  {
+    id: "automatic-notes",
+    q: `How do automatic meeting notes work?`,
+    a: [
+      `When a Teams meeting of a group's people ends, ${BRAND.name} reads the transcript Teams made, writes the summary, decisions, action items and open questions into that group, and posts them to the group's notes chat. No bot joins the call, and nothing is recorded by ${BRAND.name} itself: Teams transcription must be on.`,
+      `An Org Owner or Org Admin turns it on in the portal, and your Microsoft admin approves meeting transcripts once. Meetings that aren't any group's are skipped and nothing about them is kept. Each meeting counts toward your plan's meeting hours.`,
+    ],
+    topics: ["how-it-works", "security"],
+    guide: "/docs/meetings",
   },
   {
     id: "every-chat",
@@ -146,7 +156,7 @@ export const FAQ: readonly FaqItem[] = [
     id: "teams-install",
     q: `How do we install ${BRAND.name} in Teams?`,
     a: [
-      `Your Teams admin makes the ${BRAND.name} app available to the people who should have it (we recommend Team Leads and admins only). They then add it to a group chat or a channel from Teams' Manage apps (meeting chats come with automatic meeting notes, coming soon), and assign the chat to a group in the ${BRAND.name} portal. The setup wizard after sign-up walks you through it.`,
+      `Your Teams admin makes the ${BRAND.name} app available to the people who should have it (we recommend Team Leads and admins only). They then add it to a group chat or a channel from Teams' Manage apps (or as a tab in a meeting, which brings it into the meeting chat), and assign the chat to a group in the ${BRAND.name} portal. The setup wizard after sign-up walks you through it.`,
     ],
     topics: ["how-it-works"],
     guide: "/docs/teams-guide#getting-started",

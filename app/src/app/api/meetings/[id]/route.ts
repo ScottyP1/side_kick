@@ -7,6 +7,7 @@ import { handle } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { all, get, run } from "@/lib/db";
 import { removeIndexed } from "@/lib/search";
+import { removeSavedForMeeting } from "@/lib/saved-items";
 import { processMeeting } from "@/lib/sidekick";
 import { postMeetingNotes } from "@/lib/teams/bot";
 import { remindAfterMeeting } from "@/lib/reminders";
@@ -26,7 +27,7 @@ async function load(id: string, edit?: string) {
 
 export const GET = handle(async (_req: Request, { params }: Ctx) => {
   const { m } = await load((await params).id);
-  const items = await all("SELECT id, kind, text, who, answered FROM items WHERE meeting_id = ? ORDER BY rowid", m.id);
+  const items = await all("SELECT id, kind, text, who, answered, pinned, saved_by FROM items WHERE meeting_id = ? ORDER BY rowid", m.id);
   const actions = await all("SELECT id, text, owner, due, due_on, status, ticket FROM action_items WHERE meeting_id = ? ORDER BY rowid", m.id);
   return { meeting: m, items, actions };
 });
@@ -34,6 +35,7 @@ export const GET = handle(async (_req: Request, { params }: Ctx) => {
 // Retry processing after a failure (for example, before the API key was added).
 export const POST = handle(async (_req: Request, { params }: Ctx) => {
   const { user, m } = await load((await params).id, "Your role can't reprocess meetings.");
+  await removeSavedForMeeting(user.org_id, m.id);
   await run("DELETE FROM items WHERE meeting_id = ?", m.id);
   await run("DELETE FROM action_items WHERE meeting_id = ?", m.id);
   await removeIndexed(m.id);
@@ -49,6 +51,7 @@ export const POST = handle(async (_req: Request, { params }: Ctx) => {
 
 export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
   const { user, m } = await load((await params).id, "Your role can't delete meetings.");
+  await removeSavedForMeeting(user.org_id, m.id);
   await removeIndexed(m.id);
   await run("DELETE FROM meetings WHERE id = ?", m.id);
   await audit(user, `Deleted meeting “${m.title}”, its notes and transcript`, "Data", m.workspace_id);

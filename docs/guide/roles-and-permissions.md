@@ -16,7 +16,7 @@ every row below against the real app for every role, so the page and the code ca
 | **Org Admin** | Runs people, workspaces and Teams links day to day. | All |
 | **Team Lead** | A Member who also runs the people side of the workspaces they lead: adds Members and Viewers, takes them off, links Teams chats. Made by Org Owners/Admins. | Only ones they're added to (the ones they lead) |
 | **Billing Admin** | Watches usage and AI spend, and pays for, changes or cancels the plan. Changes no content. | Only ones they're added to (usually none) |
-| **Member** | Does the client work: uploads, imports meetings, asks, updates action items. | Only ones they're added to |
+| **Member** | Does the client work: uploads, adds meetings, asks, updates action items, saves decisions to knowledge. | Only ones they're added to |
 | **Viewer** | Reads and asks, never changes anything. | Only ones they're added to |
 
 Separately, the **Sidekick team** uses the **Owner Console** (its own accounts, not a role in any
@@ -45,7 +45,10 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See connected tools (Azure DevOps, Jira), their health and the projects feeding their groups | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Inside their workspaces: change** | | | | | | |
 | Upload, rename or delete documents | ✓ | ✓ | ✓ | | ✓ | |
-| Import, reprocess or delete meetings | ✓ | ✓ | ✓ | | ✓ | |
+| Add a past or outside meeting, reprocess or delete meetings | ✓ | ✓ | ✓ | | ✓ | |
+| Save a meeting's decisions, requirements, risks and facts to knowledge (portal, Teams card and tab) | ✓ | ✓ | ✓ | | ✓ | |
+| See the automatic-notes panel and their groups' captured Teams meetings | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See skipped Teams meetings and pick the group for one several groups were in | ✓ | ✓ | ✓ (own groups) | | | |
 | Update action items (portal and Teams card buttons) | ✓ | ✓ | ✓ | | ✓ | |
 | Refresh the knowledge map, resolve or dismiss gaps | ✓ | ✓ | ✓ | | ✓ | |
 | See Needs attention for their groups: action items, unanswered questions, out-of-date documents | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -66,6 +69,7 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | Export a group, or the whole organization's data, as a zip | ✓ | ✓ | | | | |
 | See roll-offs and download deletion certificates | ✓ | ✓ | | | | |
 | Add, change or delete firm library documents | ✓ | ✓ | | | | |
+| Turn automatic notes after Teams meetings on or off, check now, try a skipped meeting again | ✓ | ✓ | | | | |
 | Connect, reconnect or disconnect Azure DevOps or Jira (read-only; within the plan's connectors) | ✓ | ✓ | | | | |
 | Link a connected tool's project to their groups, sync it now or unlink it | ✓ | ✓ | ✓ | | | |
 | See answer quality (👍/👎 and "I don't know" counts, no text) | ✓ | ✓ | | | | |

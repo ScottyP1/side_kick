@@ -520,6 +520,34 @@ CREATE TABLE IF NOT EXISTS teams_post_failures (
   error TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS teams_post_failures_conv ON teams_post_failures(conversation_id, created_at);
+-- Automatic meeting notes from Microsoft Graph (lib/meetings-graph.ts). One row per organization: the switch an
+-- Org Owner/Admin turns on (enabled), who changed it, and how the last check went (no meeting content).
+CREATE TABLE IF NOT EXISTS auto_meetings (
+  org_id TEXT PRIMARY KEY REFERENCES orgs(id), enabled INTEGER NOT NULL DEFAULT 0, changed_by TEXT, changed_at TEXT,
+  last_poll_at TEXT, last_ok_at TEXT, last_error TEXT, last_error_at TEXT
+);
+-- Microsoft Graph change-notification subscriptions for an organization's meeting transcripts. id = Graph's
+-- subscription id; client_state = the random secret Graph sends back with every notification (checked).
+CREATE TABLE IF NOT EXISTS graph_subscriptions (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), tenant_id TEXT NOT NULL, resource TEXT NOT NULL,
+  client_state TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, renewed_at TEXT
+);
+-- Teams meetings Sidekick heard about (a transcript became available), one row per transcript: Graph ids,
+-- how it was found (via: notification | poll), status queued | captured | done | skipped | waiting | failed,
+-- the plain reason for skipped/waiting, the group it went to and the meetings row it became. candidates = JSON
+-- list of group ids when several groups match (status waiting, an admin picks one).
+CREATE TABLE IF NOT EXISTS graph_meetings (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), online_meeting_id TEXT NOT NULL, transcript_id TEXT NOT NULL,
+  organizer_oid TEXT NOT NULL, via TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, title TEXT, started_at TEXT,
+  ended_at TEXT, workspace_id TEXT, candidates TEXT, meeting_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (org_id, transcript_id)
+);
+CREATE INDEX IF NOT EXISTS graph_meetings_org ON graph_meetings(org_id, status, created_at);
+-- The polling fallback's position per meeting organizer: transcripts created before polled_until were checked.
+CREATE TABLE IF NOT EXISTS graph_poll_cursors (
+  org_id TEXT NOT NULL REFERENCES orgs(id), organizer_oid TEXT NOT NULL, polled_until TEXT NOT NULL,
+  PRIMARY KEY (org_id, organizer_oid)
+);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -635,6 +663,10 @@ function migrate(conn: DatabaseSync) {
   conn.exec("CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key)");
   // Watchers: when someone removed Sidekick from a chat in Teams (and who), and the last post that reached it.
   for (const col of ["removed_at", "removed_by", "last_post_ok_at"]) if (!has("teams_conversations", col)) conn.exec(`ALTER TABLE teams_conversations ADD COLUMN ${col} TEXT`);
+  // Meetings wave: where a meeting came from (source "teams" = captured from Microsoft Graph, else imported), its
+  // graph_meetings row, when its notes went to Teams (posted once), and who saved an item to knowledge.
+  for (const col of ["source", "graph_meeting_id", "notes_posted_at"]) if (!has("meetings", col)) conn.exec(`ALTER TABLE meetings ADD COLUMN ${col} TEXT`);
+  for (const col of ["saved_by", "saved_at"]) if (!has("items", col)) conn.exec(`ALTER TABLE items ADD COLUMN ${col} TEXT`);
 }
 
 /**

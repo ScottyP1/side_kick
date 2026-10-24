@@ -206,3 +206,59 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
   if (!oid) throw new HttpError(400, "Microsoft's reply didn't include your account id.");
   return { who: { tenantId: tid, objectId: oid, email, name: String(claims.name ?? email) }, saved };
 }
+
+/**
+ * The audiences a Teams single-sign-on token may be issued for: the Entra app's id and its Application ID URI
+ * `api://<public host>/<app id>` (what the Teams manifest's `webApplicationInfo.resource` says). Empty when
+ * Microsoft sign-in isn't set up.
+ */
+export function teamsSsoAudiences(): string[] {
+  const { clientId } = config();
+  if (!clientId) return [];
+  const hosts = [process.env.SIDEKICK_PUBLIC_URL, process.env.SIDEKICK_TEAMS_SSO_URL].filter((u): u is string => Boolean(u)).map((u) => {
+    try {
+      return new URL(u).host;
+    } catch {
+      return "";
+    }
+  });
+  return [clientId, ...hosts.filter(Boolean).map((h) => `api://${h}/${clientId}`)];
+}
+
+/**
+ * Verifies a Teams single-sign-on token (the access token Teams gives a Sidekick tab with
+ * `authentication.getAuthToken()`): signature with the person's tenant keys, issuer = that tenant (v2 tokens),
+ * audience = our app (`teamsSsoAudiences`), not expired, and the `access_as_user` scope. Personal Microsoft
+ * accounts are refused, and in single-tenant mode only the one tenant passes. Returns who it is.
+ *
+ * @throws HttpError 401 with a plain message when anything doesn't check out
+ */
+export async function verifyTeamsSsoToken(token: string): Promise<MicrosoftIdentity> {
+  const fail = (why: string) => new HttpError(401, `Teams didn't sign you in to ${BRAND.name} (${why}). Close the tab and open it again.`);
+  const audiences = teamsSsoAudiences();
+  if (!audiences.length) throw new HttpError(503, `Microsoft sign-in isn't set up on this ${BRAND.name} yet.`);
+  if (!token || token.length > 8000 || token.split(".").length !== 3) throw fail("no token");
+  let unverified: JWTPayload & { tid?: string };
+  try {
+    unverified = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString() || "{}");
+  } catch {
+    throw fail("unreadable token");
+  }
+  const tid = String(unverified.tid ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(tid)) throw fail("no organization");
+  let claims: JWTPayload & Record<string, unknown>;
+  try {
+    ({ payload: claims } = await jwtVerify(token, keysFor(tid), { issuer: `${LOGIN_BASE}/${tid}/v2.0`, audience: audiences, clockTolerance: 60 }));
+  } catch (e) {
+    console.error("Teams SSO token rejected", e instanceof Error ? e.message : e);
+    throw fail("token not accepted");
+  }
+  if (!String(claims.scp ?? "").split(" ").includes("access_as_user")) throw fail("wrong permission");
+  if (tid === PERSONAL_TENANT) throw new HttpError(403, `Personal Microsoft accounts can't use ${BRAND.name}. Use your work account.`);
+  const single = config().singleTenant;
+  if (single && tid.toLowerCase() !== single.toLowerCase()) throw new HttpError(403, `Your Microsoft organization can't use this ${BRAND.name}.`);
+  const oid = String(claims.oid ?? "");
+  if (!oid) throw fail("no account id");
+  const email = String(claims.preferred_username ?? claims.upn ?? claims.email ?? "").trim().toLowerCase();
+  return { tenantId: tid, objectId: oid, email, name: String(claims.name ?? email) };
+}

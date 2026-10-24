@@ -11,10 +11,11 @@ const production = process.env.NODE_ENV === "production";
  * Sidekick uses is its own (fonts are self-hosted by next/font, the logo is a data: URL), so the rules are
  * "only from this site". Next.js puts small inline scripts in each page, hence 'unsafe-inline' for scripts
  * (tighten with nonces later); `next dev` also needs eval and a websocket for hot reload. `frame-ancestors
- * 'none'` stops other sites showing Sidekick in a frame (clickjacking); Sidekick has no Teams tab, so nothing
- * needs to frame it. Security review M5, Oct 2026.
+ * 'none'` stops other sites showing Sidekick in a frame (clickjacking). Security review M5, Oct 2026.
+ * The only exception is the Teams tab (/teams/tab, /teams/config; lib/teams/tab.ts): Microsoft Teams shows it in a
+ * frame, so those two pages allow Teams' own addresses (`TEAMS_FRAME_ANCESTORS`) and nothing else.
  */
-const csp = [
+const directives = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${production ? "" : " 'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
@@ -25,19 +26,26 @@ const csp = [
   "base-uri 'self'",
   // The sign-in form's Microsoft round trip goes to Microsoft's sign-in page.
   "form-action 'self' https://login.microsoftonline.com",
-  "frame-ancestors 'none'",
-].join("; ");
+];
+const csp = [...directives, "frame-ancestors 'none'"].join("; ");
+
+/** Where Microsoft Teams (desktop, web, mobile, and Teams inside Outlook and Microsoft 365) frames a tab from. */
+const TEAMS_FRAME_ANCESTORS = [
+  "https://teams.microsoft.com", "https://*.teams.microsoft.com", "https://teams.cloud.microsoft", "https://*.cloud.microsoft",
+  "https://*.office.com", "https://outlook.office.com", "https://outlook.office365.com", "https://*.office365.com", "https://*.skype.com",
+];
+// The Teams JavaScript SDK also downloads Microsoft's list of Teams addresses from its CDN.
+const tabCsp = [...directives.map((d) => (d.startsWith("connect-src") ? `${d} https://res.cdn.office.net` : d)), `frame-ancestors ${TEAMS_FRAME_ANCESTORS.join(" ")}`].join("; ");
 
 /**
  * Security headers on every response (pages and API; security review Oct 2026, docs/HOSTING.md → Security):
  * HSTS (always HTTPS; browsers ignore it on plain-http localhost), no framing by other sites (clickjacking), no
  * MIME sniffing, a short referrer. The content policy is enforced (the ops review started it as report-only;
- * the app review checked the portal under it with no violations). If Sidekick ever gets a Teams tab,
- * `frame-ancestors` and X-Frame-Options must allow Teams.
+ * the app review checked the portal under it with no violations). The content policy and X-Frame-Options DENY go on
+ * every page except the two Teams tab pages, which get the same policy with Teams as the only allowed frame parent
+ * (X-Frame-Options can't name a site, so it's left off there; browsers use frame-ancestors).
  */
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: csp },
-  { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
@@ -52,6 +60,10 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
+      // Everything but the Teams tab pages: no framing at all.
+      { source: "/", headers: [{ key: "Content-Security-Policy", value: csp }, { key: "X-Frame-Options", value: "DENY" }] },
+      { source: "/:path((?!teams/tab$|teams/config$).*)", headers: [{ key: "Content-Security-Policy", value: csp }, { key: "X-Frame-Options", value: "DENY" }] },
+      { source: "/teams/(tab|config)", headers: [{ key: "Content-Security-Policy", value: tabCsp }] },
       // Support ticket attachments (customer files) are always downloads; a sandbox policy means even a file a
       // browser tried to open could run nothing. Later entries win for the same header.
       { source: "/api/support/attachments/:path*", headers: [{ key: "Content-Security-Policy", value: "sandbox; default-src 'none'" }] },

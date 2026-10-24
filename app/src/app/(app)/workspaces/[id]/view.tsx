@@ -186,11 +186,11 @@ function People({ group, members, canManage, reload }: { group: Group; members: 
     setQ("");
     setError("");
     setAdding(true);
-    api<{ users: OrgPerson[] }>("/api/users").then((r) => setOrg(r.users)).catch(reportError);
+    // The server lists only people not in the group that the caller may add (Members and Viewers for a Team Lead).
+    api<{ candidates: OrgPerson[] }>(`/api/workspaces/${encodeURIComponent(group.id)}/members?candidates=1`).then((r) => setOrg(r.candidates)).catch(reportError);
   };
   const inGroup = new Set(members.map((m) => m.id));
-  // A Team Lead can add Members and Viewers only (the server checks this too).
-  const candidates = (org ?? []).filter((p) => !inGroup.has(p.id) && (!lead || p.role === "Member" || p.role === "Viewer"));
+  const candidates = (org ?? []).filter((p) => !inGroup.has(p.id));
 
   const add = async () => {
     setError("");

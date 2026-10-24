@@ -181,6 +181,8 @@ textarea.input{min-height:80px;resize:vertical}
 .app-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));grid-auto-rows:1fr;gap:12px}
 .app-tile{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:20px 12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;justify-content:flex-start;min-height:190px;min-width:0;transition:border-color .15s, transform .15s, box-shadow .15s}
 .app-tile:is(a,button):hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
+/* connected-tool tiles are links (they jump to the tool's settings): no link underline or link colour */
+a.app-tile{text-decoration:none;color:inherit}
 .app-tile b{font-size:14px;line-height:1.3}
 .app-tile .muted{font-size:12px;line-height:1.3}
 .app-tile > .pill{margin-top:auto}
@@ -460,7 +462,10 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .perm.no .ico{color:var(--bad)}
 @media (max-width:860px){.wiz{grid-template-columns:minmax(0,1fr)}.wiz-side{position:static}.wiz-steps{flex-direction:row;overflow-x:auto;gap:6px}.wiz-steps li{flex-direction:column;align-items:center;min-width:72px;text-align:center}.wiz-steps li::after{display:none}.wiz-steps small{display:none}.wiz-card{padding:18px}.wiz-row{grid-template-columns:minmax(0,1fr)}}
 
-.site-hero-badges{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:6px;font-size:14px;color:var(--muted)}
+.site-hero-badges{list-style:none;padding:0;margin:16px 0 26px;display:grid;gap:8px;font-size:14px;color:var(--muted)}
+/* pill and its text on one line, lined up; the gap below keeps the pills off the buttons */
+.site-hero-badges li{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.site-hero-badges .site-badge{margin-right:0;line-height:1.5}
 .site-badge{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
 .site-hero-sub{margin:10px 0 0;font-size:15px;color:var(--muted)}
 

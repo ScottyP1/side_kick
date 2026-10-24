@@ -671,7 +671,7 @@ test(`[${ENGINE}] website: every public page answers without a session; the port
   }
   assert.doesNotMatch(home, /<(img|script|link)[^>]+(src|href)="https?:\/\//, "nothing loads from other sites");
   assert.match(home, /class="site-art"/, "the hero illustration is inline SVG");
-  for (const f of ["chat-answer", "chat-answer-dark", "chat-notes", "phone-reminder", "portal-groups", "portal-groups-dark", "portal-ask"]) {
+  for (const f of ["chat-answer", "chat-answer-dark", "chat-notes", "phone-reminder", "portal-groups", "portal-groups-dark", "portal-ask", "portal-meeting", "portal-meeting-dark", "portal-meetings-auto", "portal-meetings-auto-dark", "portal-attention", "portal-attention-dark", "portal-connectors", "portal-connectors-dark", "phone-meeting", "phone-meeting-dark"]) {
     const r = await fetch(`${BASE}/site/${f}.webp`, { redirect: "manual" });
     assert.equal(r.status, 200, f);
     assert.equal(r.headers.get("content-type"), "image/webp", f);
@@ -680,6 +680,9 @@ test(`[${ENGINE}] website: every public page answers without a session; the port
   const how = (await client()("GET", "/how-it-works")).body;
   assert.equal((how.match(/class="site-journey-step"/g) ?? []).length, 6, "How it works shows the six-step journey");
   assert.match(how, /class="site-stepper"/, "and the setup wizard stepper");
+  assert.match(how, /src="\/site\/portal-meetings-auto\.webp"/, "and meetings captured from Teams");
+  const features = (await client()("GET", "/features")).body;
+  for (const f of ["portal-meeting", "portal-attention", "portal-connectors"]) assert.match(features, new RegExp(`src="/site/${f}\\.webp"`), `Features shows ${f}`);
   const sec = (await client()("GET", "/security")).body;
   assert.match(sec, /class="site-walls"/, "Security shows the walls diagram");
   assert.match(sec, /pending legal review/, "the AI-training pillar is marked for legal review");

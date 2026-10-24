@@ -1,7 +1,8 @@
 /**
  * Real product pictures on the website, in a frame: a chat-app window, a laptop (the portal) or a phone.
  * The pictures are 2x WebP files in public/site/ (served by the app itself, so the Content-Security-Policy
- * holds), captured from a throwaway local copy with made-up Contoso/Lakeside data. Each has a dark-mode version
+ * holds), captured from a throwaway local copy with made-up Contoso/Lakeside data (scripts/site-shots/render.cjs)
+ * or from the local demo world (scripts/site-shots/demo-shots.cjs, docs/DEMO.md). Each has a dark-mode version
  * where one exists, chosen by the browser (<picture> with prefers-color-scheme), so a page downloads only one.
  * Width and height are set so the page doesn't jump while they load; below-the-fold shots load lazily.
  *
@@ -16,6 +17,11 @@ export const SHOTS = {
   "phone-reminder": { w: 640, h: 1132, dark: true, fade: true },
   "portal-groups": { w: 1600, h: 1000, dark: true, fade: false },
   "portal-ask": { w: 1600, h: 1000, dark: false, fade: false },
+  "portal-meeting": { w: 1600, h: 1000, dark: true, fade: false },
+  "portal-meetings-auto": { w: 1600, h: 1000, dark: true, fade: false },
+  "portal-attention": { w: 1600, h: 1000, dark: true, fade: false },
+  "portal-connectors": { w: 1600, h: 1000, dark: true, fade: false },
+  "phone-meeting": { w: 640, h: 1132, dark: true, fade: true },
 } as const;
 
 export type ShotName = keyof typeof SHOTS;

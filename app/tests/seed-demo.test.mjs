@@ -65,7 +65,7 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE owner IS NULL AND status != 'Done'") >= 5, "unowned action items");
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE status != 'Done' AND due_on < '2026-10-22'") >= 5, "overdue action items");
   assert.ok(count("SELECT COUNT(*) FROM answer_feedback WHERE vote < 0") >= 1 && count("SELECT COUNT(*) FROM answer_feedback WHERE vote > 0") >= 10, "👍 and 👎");
-  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 4, "Azure DevOps, Jira, Confluence and Microsoft 365 on (GitHub is requested)");
+  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 5, "Contoso's Azure DevOps, Jira, Confluence and Microsoft 365, and Litware's own Azure DevOps");
   assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 5, "five linked projects, spaces and folders, synced");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'page' AND title LIKE 'SharePoint file:%'") >= 5, "the SharePoint folder's files are searchable like documents");
   assert.equal(count("SELECT COUNT(*) FROM connector_items WHERE state = 'Skipped'"), 1, "one file too large to read, kept as a note");
@@ -86,10 +86,13 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
     assert.ok(count(`SELECT COUNT(*) FROM findings WHERE org_id = ${northwind} AND kind = ? AND status = 'open'`, kind) >= 1, `a "${kind}" finding`);
   }
   assert.equal(count("SELECT COUNT(*) FROM jobs WHERE status = 'dead'"), 0, "no job gave up");
-  // Approve → link → request: three tools on plus Microsoft 365 (approved through a request), GitHub off with one
-  // request declined (with a note) and one waiting for the Org Owner.
-  assert.equal(count(`SELECT COUNT(*) FROM connectors WHERE org_id = ${northwind}`), 4);
-  assert.equal(count(`SELECT COUNT(*) FROM connectors WHERE org_id = ${northwind} AND kind = 'github'`), 0, "GitHub is off");
+  // Allow → connect per group → request: four tool types allowed (Microsoft 365 through a request), connections per
+  // group (Azure DevOps in Contoso and, separately, Litware), GitHub not allowed with one request declined (with a
+  // note) and one waiting for the Org Owner.
+  assert.equal(count(`SELECT COUNT(*) FROM connector_kinds WHERE org_id = ${northwind}`), 4);
+  assert.equal(count(`SELECT COUNT(*) FROM connectors WHERE org_id = ${northwind} AND kind = 'ado'`), 2, "two groups, two Azure DevOps connections");
+  assert.equal(count(`SELECT COUNT(*) FROM connector_links l JOIN connectors c ON c.id = l.connector_id WHERE l.workspace_id <> c.workspace_id`), 0, "every link is read through its own group's connection");
+  assert.equal(count(`SELECT COUNT(*) FROM connector_kinds WHERE org_id = ${northwind} AND kind = 'github'`), 0, "GitHub isn't allowed");
   for (const [kind, status] of [["m365", "approved"], ["github", "declined"], ["github", "pending"]]) {
     assert.equal(count(`SELECT COUNT(*) FROM connector_requests WHERE org_id = ${northwind} AND kind = ? AND status = ?`, kind, status), 1, `${kind} ${status}`);
   }

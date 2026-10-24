@@ -415,7 +415,7 @@ const brokenConnector: Watcher = {
         kind: "broken_connector", workspaceId: c.workspace_id || null, subject: c.connector, audience: c.workspace_id ? "managers" : "admins", severity: "bad",
         title: `${c.label} isn't working`,
         detail: `${c.message ?? "It stopped working."} (since ${fmtDay(c.broken_since ?? c.checked_at)})`,
-        nextStep: `Reconnect it on the Connectors page (an admin of the other tool may need to approve ${BRAND.name} again).`,
+        nextStep: `Reconnect it on the Connectors page: the group's Team Lead signs in again with the client's account (an admin of the other tool may need to approve ${BRAND.name} again).`,
         actionHref: c.fix_href ?? "/connectors", actionLabel: "Fix connector", data: { connector: c.connector },
       } satisfies Fresh));
   },
@@ -426,8 +426,8 @@ const DECIDED_REQUEST_DAYS = 7;
 
 /**
  * Requests to turn a tool on (lib/connector-requests.ts). A pending one is for the Org Owner (who approves);
- * once decided, the group's managers hear how it went for a week: approved until a project of that tool is
- * linked to the group, declined with the Org Owner's note.
+ * once decided, the group's managers hear how it went for a week: approved until the group connects that tool,
+ * declined with the Org Owner's note.
  */
 const connectorRequests: Watcher = {
   kind: "connector_request",
@@ -436,8 +436,7 @@ const connectorRequests: Watcher = {
     const groups = new Map(o.groups.map((g) => [g.id, g.name]));
     const rows = await all<{ id: string; kind: ConnectorKind; workspace_id: string; requester_name: string; reason: string | null; status: string; note: string | null; decided_by: string | null; created_at: string; linked: number | string }>(
       `SELECT r.id, r.kind, r.workspace_id, r.requester_name, r.reason, r.status, r.note, r.decided_by, r.created_at,
-              (SELECT COUNT(*) FROM connector_links l JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
-                WHERE l.org_id = r.org_id AND l.workspace_id = r.workspace_id AND c.kind = r.kind) AS linked
+              (SELECT COUNT(*) FROM connectors c WHERE c.org_id = r.org_id AND c.workspace_id = r.workspace_id AND c.kind = r.kind) AS linked
          FROM connector_requests r
         WHERE r.org_id = ? AND (r.status = 'pending' OR (r.status IN ('approved', 'declined') AND r.decided_at >= ?))`,
       o.orgId, daysAgo(o.at, DECIDED_REQUEST_DAYS),
@@ -452,16 +451,16 @@ const connectorRequests: Watcher = {
           kind: "connector_request", workspaceId: r.workspace_id, subject: r.id, audience: "owners", severity: "warn",
           title: `${r.requester_name} asks to use ${tool} in ${quote(group, 60)}`,
           detail: r.reason ? `Why: ${quote(r.reason, 200)} (asked ${fmtDay(r.created_at)})` : `No reason given (asked ${fmtDay(r.created_at)}).`,
-          nextStep: `Approve it to turn ${tool} on for your organization (you sign in to ${tool} once, read-only), or decline it with a note.`,
+          nextStep: `Approve it to allow ${tool} in your organization (the group then connects it with its client's account, read-only), or decline it with a note.`,
           actionHref: "/connectors#requests", actionLabel: "Review request",
         });
       } else if (r.status === "approved" && !Number(r.linked)) {
         out.push({
           kind: "connector_request", workspaceId: r.workspace_id, subject: r.id, audience: "managers", severity: "info",
-          title: `${tool} is approved for ${quote(group, 60)}: link a ${PROJECT_WORD[r.kind]}`,
+          title: `${tool} is allowed now: connect it for ${quote(group, 60)}`,
           detail: `${r.decided_by ?? "The Org Owner"} approved ${r.requester_name}'s request.`,
-          nextStep: `Pick which ${PROJECT_WORD[r.kind]} feeds this group on the Connectors page.`,
-          actionHref: `/connectors#tool-${r.kind}`, actionLabel: "Link it",
+          nextStep: `Connect it on the Connectors page with the account the client gave you for ${BRAND.name}, then pick which ${PROJECT_WORD[r.kind]} feeds this group.`,
+          actionHref: `/connectors#tool-${r.kind}`, actionLabel: "Connect it",
         });
       } else if (r.status === "declined") {
         out.push({

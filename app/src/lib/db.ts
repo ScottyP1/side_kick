@@ -34,6 +34,38 @@ export const DIALECT: "postgres" | "sqlite" = process.env.DATABASE_URL ? "postgr
 const DATA_DIR = process.env.SIDEKICK_DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "sidekick.db");
 
+/** The per-group `connectors` table (also used by `migrate` to rebuild the old per-organization one). */
+const CONNECTORS_TABLE = `CREATE TABLE IF NOT EXISTS connectors (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, kind TEXT NOT NULL, status TEXT NOT NULL,
+  account TEXT NOT NULL, account_name TEXT, api_base TEXT NOT NULL, web_base TEXT NOT NULL,
+  access_token TEXT, refresh_token TEXT, token_expires_at TEXT,
+  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL
+);`;
+
+/**
+ * Moves connectors from one per organization (before Oct 24, 2026) into groups, on both engines (the same SQL runs
+ * from `migrate` and db/schema.postgres.sql; each statement is harmless to run again):
+ * every tool an organization had connected becomes an **allowed** tool type (connector_kinds); the connector goes to
+ * the group of its first linked project, keeping its sign-in; every other group with linked projects gets its own
+ * connection marked expired (so its Team Lead signs in for that group; its items stay until then), and its links
+ * move to it; a connector with no linked project is removed (the type stays allowed); organization-wide health rows go.
+ */
+export const CONNECTOR_GROUP_MIGRATION = [
+  `INSERT INTO connector_kinds (org_id, kind, allowed_by, allowed_at)
+     SELECT org_id, kind, by_name, at_time FROM (SELECT org_id, kind, MAX(connected_by) AS by_name, MIN(connected_at) AS at_time FROM connectors WHERE workspace_id IS NULL GROUP BY org_id, kind) m
+     WHERE true ON CONFLICT (org_id, kind) DO NOTHING`,
+  `UPDATE connectors SET workspace_id = (SELECT l.workspace_id FROM connector_links l WHERE l.connector_id = connectors.id ORDER BY l.created_at, l.id LIMIT 1) WHERE workspace_id IS NULL`,
+  `INSERT INTO connectors (id, org_id, workspace_id, kind, status, account, account_name, api_base, web_base, connected_by, connected_at, last_error, last_error_at, updated_at)
+     SELECT DISTINCT c.id || '-' || l.workspace_id, c.org_id, l.workspace_id, c.kind, 'expired', c.account, c.account_name, c.api_base, c.web_base, c.connected_by, c.connected_at,
+            'Connections are per group now: sign in again for this group on Connectors.', c.updated_at, c.updated_at
+       FROM connector_links l JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
+      WHERE l.workspace_id <> c.workspace_id ON CONFLICT (id) DO NOTHING`,
+  `UPDATE connector_links SET connector_id = connector_id || '-' || workspace_id WHERE workspace_id <> (SELECT c.workspace_id FROM connectors c WHERE c.id = connector_links.connector_id)`,
+  `DELETE FROM connectors WHERE workspace_id IS NULL`,
+  `DELETE FROM connector_health WHERE workspace_id = '' AND connector IN ('azure-devops', 'jira', 'github', 'confluence', 'microsoft-365-files')`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS connectors_group_kind ON connectors(org_id, workspace_id, kind)`,
+];
+
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -432,18 +464,20 @@ CREATE TABLE IF NOT EXISTS answer_feedback (
 );
 CREATE INDEX IF NOT EXISTS answer_feedback_org ON answer_feedback(org_id, created_at);
 -- Connectors to outside tools (lib/connectors.ts): Azure DevOps Boards, Jira, GitHub Issues, Confluence and Microsoft 365 files, read-only.
--- connectors: one per organization and tool (kind = ado | jira | github | confluence | m365), connected once by an Org Owner/Admin with the
+-- connector_kinds: the tool types an organization allows (kind = ado | jira | github | confluence | m365), switched on
+-- and off by the Org Owner; no sign-in at this level. The plan's connectors limit counts these rows.
+CREATE TABLE IF NOT EXISTS connector_kinds (
+  org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, allowed_by TEXT, allowed_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, kind)
+);
+-- connectors: one per group and allowed tool (unique org + workspace + kind: connectors_group_kind, made in
+-- migrate), connected by the group's Team Lead (or an admin) with the account the client gave them, through the
 -- tool's own sign-in (OAuth; no passwords). access_token / refresh_token are sealed (lib/secret-box.ts, context
 -- "connectors.<column>:<id>") and refreshed before they run out. status = connected | expired (the sign-in ran
 -- out or was revoked: someone must reconnect). account = the ADO organization, the Atlassian site (cloud id), the GitHub user id or the Microsoft tenant id;
 -- api_base / web_base = where its API and its web pages are. last_error = the last connector-wide problem.
-CREATE TABLE IF NOT EXISTS connectors (
-  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, status TEXT NOT NULL,
-  account TEXT NOT NULL, account_name TEXT, api_base TEXT NOT NULL, web_base TEXT NOT NULL,
-  access_token TEXT, refresh_token TEXT, token_expires_at TEXT,
-  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
-  UNIQUE (org_id, kind)
-);
+-- (Before Oct 24, 2026 connectors were one per organization: migrate moves them into groups, CONNECTOR_GROUP_MIGRATION.)
+${CONNECTORS_TABLE}
 -- One project (ADO), project key (Jira), repository (GitHub, "owner/name"), space key (Confluence) or SharePoint library / folder (Microsoft 365, "<drive id>[/<folder id>]") feeding one group's knowledge, set by an Org Owner/Admin or the
 -- group's Team Lead. audience = internal | shareable (like documents). sync_cursor = the latest "changed" time
 -- seen (Microsoft 365: the Graph delta link), so each sync only fetches what changed since. Health: last_sync_at (last try), last_ok_at (last
@@ -469,7 +503,7 @@ CREATE INDEX IF NOT EXISTS connector_items_ws ON connector_items(org_id, workspa
 -- A connector sign-in in progress (OAuth state + PKCE verifier), used once, kept 10 minutes.
 CREATE TABLE IF NOT EXISTS connector_states (
   state TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, verifier TEXT NOT NULL,
-  site TEXT, expires_at TEXT NOT NULL
+  site TEXT, expires_at TEXT NOT NULL, workspace_id TEXT
 );
 -- A request to turn a tool on for the organization (lib/connector-requests.ts): a Team Lead or Org Admin asks for
 -- one of their groups, the Org Owner approves (turning the tool on) or declines with a note. status = pending |
@@ -708,6 +742,28 @@ function migrate(conn: DatabaseSync) {
     "CREATE INDEX IF NOT EXISTS teams_conversations_org ON teams_conversations(org_id, workspace_id)",
     "CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at)",
   ]) conn.exec(sql);
+  // Connectors per group (Oct 24, 2026): the old table had UNIQUE (org_id, kind), which SQLite can only drop by
+  // rebuilding the table (foreign keys off meanwhile, so the linked projects aren't deleted with it).
+  const connSql = (conn.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'connectors'").get() as { sql?: string } | undefined)?.sql ?? "";
+  if (/UNIQUE \(org_id, kind\)/.test(connSql)) {
+    conn.exec("PRAGMA foreign_keys = OFF");
+    try {
+      conn.exec("BEGIN");
+      conn.exec(CONNECTORS_TABLE.replace("CREATE TABLE IF NOT EXISTS connectors", "CREATE TABLE connectors_v2"));
+      conn.exec(`INSERT INTO connectors_v2 (id, org_id, workspace_id, kind, status, account, account_name, api_base, web_base, access_token, refresh_token, token_expires_at, connected_by, connected_at, last_error, last_error_at, updated_at)
+                 SELECT id, org_id, NULL, kind, status, account, account_name, api_base, web_base, access_token, refresh_token, token_expires_at, connected_by, connected_at, last_error, last_error_at, updated_at FROM connectors`);
+      conn.exec("DROP TABLE connectors");
+      conn.exec("ALTER TABLE connectors_v2 RENAME TO connectors");
+      conn.exec("COMMIT");
+    } catch (e) {
+      conn.exec("ROLLBACK");
+      throw e;
+    } finally {
+      conn.exec("PRAGMA foreign_keys = ON");
+    }
+  }
+  if (!has("connector_states", "workspace_id")) conn.exec("ALTER TABLE connector_states ADD COLUMN workspace_id TEXT");
+  for (const sql of CONNECTOR_GROUP_MIGRATION) conn.exec(sql);
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
- * POST /api/connectors/requests { kind, ws, reason? }: asks the Org Owner to turn a tool (Azure DevOps, Jira,
- * GitHub, Confluence, Microsoft 365 files) on for one group. Team Leads for groups they belong to, Org Admins for
- * any group (`requireManage`). 409 when the tool is already on or the group already has a pending request for it;
+ * POST /api/connectors/requests { kind, ws, reason? }: asks the Org Owner to allow a tool type (Azure DevOps,
+ * Jira, GitHub, Confluence, Microsoft 365 files) for one group. Team Leads for groups they belong to, Org Admins for
+ * any group (`requireManage`). 409 when the type is already allowed or the group already has a pending request for it;
  * 402 on a plan without connectors. The Org Owner sees it on Home and Connectors (and in Teams). Audited.
  * Returns the request. See lib/connector-requests.ts (`createRequest`).
  */

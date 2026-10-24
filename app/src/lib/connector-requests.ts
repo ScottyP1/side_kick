@@ -2,19 +2,20 @@
  * @file Asking for a tool: the request side of connector permissions (approve → link → request).
  *
  * Concepts
- * - **Approved tool**: a tool the Org Owner turned on for the organization on the Connectors page (its one-time
- *   sign-in done, lib/connectors.ts `startConnect`/`finishConnect`). Only the **Org Owner** turns tools on or off;
- *   Org Admins do everything else (reconnect an expired sign-in, link projects to any group, see requests).
+ * - **Allowed tool type** (`connector_kinds`): a tool the Org Owner allows for the organization on the Connectors
+ *   page (`allowKind`; no sign-in at this level). Only the **Org Owner** allows or stops tool types; Org Admins do
+ *   everything else. Each group then connects an allowed tool with its client's account (lib/connectors.ts).
  * - **Request** (`connector_requests`): a Team Lead (for a group they belong to) or an Org Admin (for any group)
- *   asks the Org Owner to turn a tool on, with an optional reason. At most one **pending** request per tool and
- *   group (a unique index backs the check). Statuses: pending → approved (the tool was turned on: by approving
- *   it, or by the Org Owner turning the tool on directly) | declined (with an optional note) | cancelled (by the
- *   person who asked, or by the Org Owner). Requests for a tool already on are refused ("link it instead").
- * - **Plan limits**: a plan without connectors (Starter) can't ask (the plan's upgrade message); a plan that is
- *   full may ask, and approving shows the upgrade message when turning the tool on (lib/limits.ts).
+ *   asks the Org Owner to allow a tool type, with an optional reason. At most one **pending** request per tool and
+ *   group (a unique index backs the check). Statuses: pending → approved (the type was allowed: by approving the
+ *   request, or by the Org Owner switching the type on directly) | declined (with an optional note) | cancelled (by
+ *   the person who asked, or by the Org Owner). Requests for a type already allowed are refused ("connect it instead").
+ * - **Plan limits**: the plan's connectors limit counts allowed tool types. A plan without connectors (Starter)
+ *   can't ask (the plan's upgrade message); a plan that is full may ask, and approving shows the upgrade message
+ *   (lib/limits.ts).
  * - **Telling people**: every change refreshes the "connector_request" watcher at once (lib/watchers.ts
  *   `runWatcherNow`), so a pending request is a "Needs attention" finding on the Org Owner's Home, and the group's
- *   managers see an approval ("link it") or a decline (with the note) there for a week. When Teams is set up and the
+ *   managers see an approval ("connect it") or a decline (with the note) there for a week. When Teams is set up and the
  *   person has a 1:1 chat with Sidekick, they also get a short Teams message (best effort; a failed post is
  *   recorded for the failed-posts watcher, never thrown).
  *
@@ -94,8 +95,8 @@ export async function createRequest(user: User, body: { kind?: unknown; ws?: unk
   const kind = kindOf(body.kind);
   const label = KIND_LABEL[kind];
   return span("connector", "Request a connector", async () => {
-    if (await get("SELECT id FROM connectors WHERE org_id = ? AND kind = ?", user.org_id, kind)) {
-      throw new HttpError(409, `${label} is already on for your organization: link a project to your group instead.`);
+    if (await get("SELECT kind FROM connector_kinds WHERE org_id = ? AND kind = ?", user.org_id, kind)) {
+      throw new HttpError(409, `${label} is already allowed in your organization: connect it for your group instead.`);
     }
     if ((await orgPlan(user.org_id)).limits.connectors === 0) await assertCanAdd(user.org_id, "connectors"); // throws the plan's message
     if (await get("SELECT id FROM connector_requests WHERE org_id = ? AND kind = ? AND workspace_id = ? AND status = 'pending'", user.org_id, kind, ws)) {
@@ -117,41 +118,47 @@ export async function createRequest(user: User, body: { kind?: unknown; ws?: unk
     }
     spanAttrs({ kind, reason: Boolean(clean(body.reason)) });
     const r = await ownRequest(user, id);
-    await audit(user, `Asked the Org Owner to turn on ${label} for this group`, "Connectors", ws);
+    await audit(user, `Asked the Org Owner to allow ${label} for this group`, "Connectors", ws);
     await runWatcherNow(user.org_id, "connector_request");
     await tellInTeams(user.org_id, await ownerIds(user.org_id), `${user.name} asks to use ${label}`,
-      `${user.name} asked to turn on ${label} (read-only) for “${r.workspace_name}”.${r.reason ? ` Why: “${r.reason}”` : ""} Approve or decline it on the Connectors page in ${BRAND.name}.`);
+      `${user.name} asked to allow ${label} (read-only) for “${r.workspace_name}”.${r.reason ? ` Why: “${r.reason}”` : ""} Approve or decline it on the Connectors page in ${BRAND.name}.`);
     return toView(r, user);
   });
 }
 
 /**
- * Org Owner: approves a pending request. When the tool is already on, the request (and any other pending one for
- * the same tool) is approved at once. Otherwise nothing changes yet: the answer is the address of the tool's
- * one-time sign-in (`signIn`, with `site` for Azure DevOps or an Atlassian site), and the request is approved
- * when that sign-in finishes (lib/connectors.ts `finishConnect` → `approveOpenRequests`). The plan's connector
- * limit is checked first (402 with the upgrade message).
+ * Org Owner: approves a pending request, which allows the tool type for the organization (`allowKind`: within the
+ * plan's connectors limit, 402 with the upgrade message) and so approves every other pending request for it too.
+ * The group then connects it with its own client's account. 409 when it was already decided.
  */
-export async function approveRequest(user: User, id: unknown, site: unknown): Promise<{ approved: boolean; signIn?: string }> {
+export async function approveRequest(user: User, id: unknown): Promise<{ approved: true }> {
   if (!isOwner(user)) throw new HttpError(403, "Only the Org Owner approves tools for the organization.");
   const r = await ownRequest(user, id);
   if (r.status !== "pending") throw new HttpError(409, `This request was already ${r.status}.`);
-  const on = await get<{ id: string }>("SELECT id FROM connectors WHERE org_id = ? AND kind = ?", user.org_id, r.kind);
-  if (on) {
-    await approveOpenRequests(user.org_id, r.kind, user.name);
-    return { approved: true };
-  }
-  await assertCanAdd(user.org_id, "connectors");
-  const q = new URLSearchParams({ kind: r.kind });
-  const s = typeof site === "string" ? site.trim().slice(0, 200) : "";
-  if (s) q.set("site", s);
-  return { approved: false, signIn: `/api/connectors/start?${q}` };
+  await allowKind(user, r.kind);
+  return { approved: true };
 }
 
 /**
- * Marks every pending request for a tool approved (the tool was just turned on: by approving a request, or by the
- * Org Owner turning it on directly), tells the people who asked (Home and Teams), and audits each. Called by
- * lib/connectors.ts after a new connection. System use: the caller already checked who may turn tools on.
+ * Allows a tool type for the organization (the Org Owner's switch, or approving a request; the callers check the
+ * role): checks the plan's connectors limit for a type not yet allowed (402 with the upgrade message), saves it,
+ * audits it, and approves every pending request for it (`approveOpenRequests`). Already allowed: only the requests.
+ */
+export async function allowKind(user: User, kind: ConnectorKind): Promise<void> {
+  await span("connector", `Allow ${KIND_LABEL[kind]}`, async () => {
+    if (!(await get("SELECT kind FROM connector_kinds WHERE org_id = ? AND kind = ?", user.org_id, kind))) {
+      await assertCanAdd(user.org_id, "connectors");
+      const r = await run("INSERT INTO connector_kinds (org_id, kind, allowed_by, allowed_at) VALUES (?, ?, ?, ?) ON CONFLICT (org_id, kind) DO NOTHING", user.org_id, kind, user.name, now());
+      if (r.changes) await audit(user, `Allowed ${KIND_LABEL[kind]} in the organization (each group connects it with its own account, read-only)`, "Connectors");
+    }
+    spanAttrs({ kind, approved: await approveOpenRequests(user.org_id, kind, user.name) });
+  });
+}
+
+/**
+ * Marks every pending request for a tool approved (the type was just allowed: by approving a request, or by the
+ * Org Owner switching it on directly), tells the people who asked (Home and Teams), and audits each. Called by
+ * `allowKind`. System use: the caller already checked who may allow tools.
  * @returns how many requests were approved
  */
 export async function approveOpenRequests(orgId: string, kind: ConnectorKind, by: string): Promise<number> {
@@ -164,7 +171,7 @@ export async function approveOpenRequests(orgId: string, kind: ConnectorKind, by
   for (const r of open) {
     await audit({ org_id: orgId, name: by }, `Approved ${r.requester_name}'s request to use ${KIND_LABEL[kind]}`, "Connectors", r.workspace_id);
     await tellInTeams(orgId, [r.requested_by], `${KIND_LABEL[kind]} was approved`,
-      `${by} approved your request: ${KIND_LABEL[kind]} is on for your organization. Link a project to “${r.workspace_name}” on the Connectors page in ${BRAND.name}.`);
+      `${by} approved your request: ${KIND_LABEL[kind]} is allowed now. Connect it for “${r.workspace_name}” on the Connectors page in ${BRAND.name}, signing in with the account your client gave you for ${BRAND.name}.`);
   }
   await runWatcherNow(orgId, "connector_request");
   return open.length;
@@ -186,7 +193,7 @@ export async function declineRequest(user: User, id: unknown, note: unknown): Pr
     await audit(user, `Declined ${r.requester_name}'s request to use ${KIND_LABEL[r.kind]}${text ? " (with a note)" : ""}`, "Connectors", r.workspace_id);
     await runWatcherNow(user.org_id, "connector_request");
     await tellInTeams(user.org_id, [r.requested_by], `Your ${KIND_LABEL[r.kind]} request was declined`,
-      `${user.name} declined turning on ${KIND_LABEL[r.kind]} for “${r.workspace_name}”.${text ? ` Note: “${text}”` : ""}`);
+      `${user.name} declined allowing ${KIND_LABEL[r.kind]} for “${r.workspace_name}”.${text ? ` Note: “${text}”` : ""}`);
     return toView((await ownRequest(user, r.id)), user);
   });
 }

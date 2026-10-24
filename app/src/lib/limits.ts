@@ -102,7 +102,7 @@ export async function usageCounts(orgId: string): Promise<Record<LimitKey, numbe
     count("SELECT COALESCE(SUM(duration_min), 0) AS n FROM meetings WHERE org_id = ? AND created_at >= ?", orgId, monthStart()),
     // Group documents plus the firm library (lib/firm.ts): both count toward the plan's document limit.
     count("SELECT (SELECT COUNT(*) FROM documents WHERE org_id = ?) + (SELECT COUNT(*) FROM firm_docs WHERE org_id = ?) AS n", orgId, orgId),
-    // Connected tools (Azure DevOps, Jira, GitHub, Confluence: lib/connectors.ts), one row per tool, expired ones included.
+    // Connected tools (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365: lib/connectors.ts), one row per tool, expired ones included.
     count("SELECT COUNT(*) AS n FROM connectors WHERE org_id = ?", orgId),
   ]);
   // Live meetings (Sidekick joining calls, product step 3) aren't built yet: nothing used so far.

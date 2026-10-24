@@ -2,8 +2,9 @@
 
 /**
  * Connectors (/connectors): the tools Sidekick reads from. Uploads, transcript import and Teams (chats and channels
- * assigned on each group's page) work today, and so do **Azure DevOps Boards, Jira, GitHub Issues and Confluence**
- * (read-only, each with its own sign-in): their tiles show Connected / Needs attention / Sign-in expired / Ready to
+ * assigned on each group's page) work today, and so do **Azure DevOps Boards, Jira, GitHub Issues, Confluence and
+ * Microsoft 365 files** (read-only, each with its own sign-in; the SharePoint and OneDrive tiles are the same
+ * Microsoft 365 connector): their tiles show Connected / Needs attention / Sign-in expired / Ready to
  * connect and jump to their panel below (./tools.tsx: connect, health, linked projects). The other tools are planned. Says how many connectors
  * the organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me. Tile icons:
  * components/connector-icons.tsx.
@@ -16,12 +17,12 @@ import { BRAND } from "@/lib/brand";
 import { KINDS, toolPill, ToolPanels, useConnectors } from "./tools";
 
 const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; desc: string; live?: boolean; tool?: (typeof KINDS)[number] }[] = [
-  { name: "Document upload", g: "Available now", mono: "⇪", bg: "var(--accent)", desc: "PDF, Word, text, Teams transcripts", live: true },
+  { name: "Document upload", g: "Available now", mono: "⇪", bg: "var(--accent)", desc: "PDF, Word, PowerPoint, text, Teams transcripts", live: true },
   { name: "Teams transcripts", g: "Available now", mono: "T", bg: "#5B5FC7", desc: "Import .vtt or .docx from meeting recaps", live: true },
   { name: "Outlook", g: "Microsoft 365", mono: "O", bg: "#0F6CBD", desc: "Calendar and email" },
   { name: "Teams chats and channels", g: "Available now", mono: "T", bg: "#5B5FC7", desc: "Assign them on each group's page", live: true },
-  { name: "SharePoint", g: "Microsoft 365", mono: "S", bg: "#038387", desc: "Sites and document libraries" },
-  { name: "OneDrive", g: "Microsoft 365", mono: "OD", bg: "#0364B8", desc: "Shared files and folders" },
+  { name: "SharePoint", g: "Microsoft 365", mono: "S", bg: "#038387", desc: "Document libraries and folders, read-only", tool: "m365" },
+  { name: "OneDrive", g: "Microsoft 365", mono: "OD", bg: "#0364B8", desc: "Shared folders, read-only", tool: "m365" },
   { name: "Planner", g: "Microsoft 365", mono: "P", bg: "#31752F", desc: "Tasks and plans" },
   { name: "Azure DevOps", g: "Engineering", mono: "DO", bg: "#0078D4", desc: "Boards: work items, read-only", tool: "ado" },
   { name: "GitHub", g: "Engineering", mono: "GH", bg: "#24292F", desc: "Issues and pull requests, read-only", tool: "github" },
@@ -40,14 +41,14 @@ export default function ConnectorsPage() {
   const planText = included === undefined ? null
     : included === null ? `${yours} includes every connector.`
     : included === 0 ? `${yours} doesn't include connectors to other tools; Team includes one and Business all of them.`
-    : `${yours} includes ${included} connector${included === 1 ? "" : "s"} to another tool (Azure DevOps, Jira, GitHub or Confluence); Business includes all of them.`;
+    : `${yours} includes ${included} connector${included === 1 ? "" : "s"} to another tool (Azure DevOps, Jira, GitHub, Confluence or Microsoft 365 files: SharePoint and OneDrive count as one); Business includes all of them.`;
   return (
     <>
       <div className="page-head">
         <div>
           <div className="eyebrow">Connectors</div>
           <h1>Give {BRAND.name} access to your tools</h1>
-          <p>Uploads, transcript import, Teams chats and channels, Azure DevOps Boards, Jira, GitHub Issues and Confluence work today. Each tool connects with its own sign-in, read-only, and no passwords are stored. The other tools are planned.</p>
+          <p>Uploads, transcript import, Teams chats and channels, SharePoint and OneDrive files, Azure DevOps Boards, Jira, GitHub Issues and Confluence work today. Each tool connects with its own sign-in, read-only, and no passwords are stored. The other tools are planned.</p>
           {planText && <p className="muted">{planText}</p>}
         </div>
       </div>

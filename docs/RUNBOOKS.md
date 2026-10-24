@@ -91,6 +91,7 @@ picks it up within about 30 minutes; restart (step at the end) to use it straigh
 | `ado-client-secret` (`ADO_CLIENT_SECRET`) | Entra admin center → App registrations → **Sidekick Connectors (Azure DevOps)** → Certificates & secrets | Note its expiry date here when you create it. New secret, set it, restart, connect once from a test org, delete the old one. Customers' connections keep working (their sign-ins aren't tied to the app secret). |
 | `jira-client-secret` (`JIRA_CLIENT_SECRET`) | developer.atlassian.com → My apps → **Sidekick** → Settings → Rotate secret | Atlassian keeps the old secret working for a short overlap; set the new one and restart within it. Confluence uses this app too (unless it has its own `confluence-client-secret`). |
 | `github-client-secret` (`GITHUB_CLIENT_SECRET`) | github.com → Settings → Developer settings → GitHub Apps → **Sidekick connector** → Client secrets | GitHub allows two secrets at once: generate the new one, set it, restart, connect once from a test org, then delete the old one. |
+| `m365-client-secret` (`M365_CLIENT_SECRET`) | Entra admin center → App registrations → **Sidekick Connectors (Microsoft 365)** → Certificates & secrets | Note its expiry date here when you create it (24 months). Create a new one, set it, restart, check a sync, then delete the old one. |
 | `database-url` | `az postgres flexible-server update -g sidekick-rg -n sidekick-labs-db --admin-password "<new>"` | Then rebuild the connection string with the new password. |
 
 Set a new value without it showing on screen. Either type it at a hidden prompt:
@@ -347,7 +348,7 @@ says which case it was:
 **Deploy by hand:** GitHub → Actions → Deploy → **Run workflow** (branch `main`). Or from the Mac:
 `./infra/azure/deploy.sh`. Both deploy the current `main`.
 
-## Connector apps (Azure DevOps, Jira, GitHub, Confluence)
+## Connector apps (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365)
 
 Sidekick's connectors (docs/guide/connect-devops-jira.md, code in `app/src/lib/connectors.ts`) need one app
 registration per tool (Jira and Confluence share one Atlassian app). **Only Cody creates these** (with his own personal accounts, never a client's), and the
@@ -441,6 +442,37 @@ permissions; Sidekick only uses the signed-in person's user token, never the app
 4. Check: a made-up private repository on your personal account with two issues and a pull request, install the app
    on it, then Connect on the live Connectors page, link the repository and ask about an issue.
 
+**Microsoft 365 files (SharePoint libraries, OneDrive shared folders; Microsoft Entra ID, delegated, read-only)**
+One Entra app with **delegated** Microsoft Graph permissions only (Sidekick reads as the person who connected, so it
+can never see more than they can, and never writes). Do these steps yourself in the Entra admin center; nothing in
+Azure or Entra is changed by Claude or by the app.
+1. entra.microsoft.com (the Sidekick Labs tenant) → **App registrations → New registration**.
+   - Name: `Sidekick Connectors (Microsoft 365)`. (Reusing the Microsoft sign-in app also works, but a separate app
+     keeps the portal sign-in's consent screen short.)
+   - Supported account types: **Accounts in any organizational directory (Multitenant)**.
+   - Redirect URI: **Web**, `https://<site>/api/connectors/callback`; then add `http://localhost:3000/api/connectors/callback`.
+2. **API permissions → Add a permission → Microsoft Graph → Delegated permissions** → tick **Sites.Read.All**,
+   **Files.Read.All** and **User.Read** (User.Read is usually there already). `offline_access` is asked for at
+   sign-in. Nothing with "Write" or "Manage", no Application permissions.
+3. **Admin consent**: `Sites.Read.All` needs a Microsoft admin's approval once per customer organization. For the
+   Sidekick Labs tenant, press **Grant admin consent for Sidekick Labs** here (you are its admin). A customer's
+   admin approves when they first connect (Microsoft shows them the consent screen), or ahead of time with
+   `https://login.microsoftonline.com/<their tenant id>/adminconsent?client_id=<application id>`. The guide
+   (docs/guide/connect-devops-jira.md → Microsoft 365) tells them; Sidekick never asks for an admin's password.
+4. **Certificates & secrets → New client secret** (24 months). Store the **Value** at the hidden prompt:
+   ```bash
+   read -rs "V?m365-client-secret: " && az keyvault secret set --vault-name sidekick-kv -n m365-client-secret --value "$V" -o none; unset V
+   az containerapp secret set -g sidekick-rg -n sidekick-app --secrets m365-client-secret=keyvaultref:https://sidekick-kv.vault.azure.net/secrets/m365-client-secret,identityref:system
+   az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars M365_CLIENT_ID=<application id> M365_CLIENT_SECRET=secretref:m365-client-secret -o none
+   ```
+   Write the expiry date into the Rotate secrets table above. For the laptop, the same two lines in `app/.env.local`.
+   Until both are set, the SharePoint and OneDrive tiles say "Not set up yet".
+5. Check (made-up data only): in the Sidekick Labs Microsoft 365 trial, make a SharePoint site "Sidekick test" with
+   a folder holding a made-up Word file and PDF, then on the live portal **Connectors → Microsoft 365 files**,
+   Connect with your Sidekick Labs account, link the folder to a test group and ask about a file (the answer cites
+   "SharePoint file: …" with an Open in SharePoint link). If the Sidekick organization linked its Microsoft tenant
+   (Settings → Microsoft sign-in), only accounts from that tenant can connect.
+
 Costs: none from Microsoft, Atlassian or GitHub for these apps. Each sync is a few API calls per linked project every 15
 minutes (no AI calls; items only cost AI when someone asks).
 
@@ -455,8 +487,16 @@ help):
   account that can open it, or unlink the project.
 - **"couldn't find …"**: the project or organization was renamed or deleted. Unlink it and link the new one.
 - **"busy or unavailable"**, **"asked Sidekick to slow down (rate limit)"** or **"couldn't reach"**: the tool was
-  down or rate limiting (GitHub allows 5,000 calls an hour per signed-in person); it carries on from where it stopped
-  on the next sync by itself. If every customer shows it, check the tool's status page.
+  down or rate limiting (GitHub allows 5,000 calls an hour per signed-in person; Microsoft Graph throttles per
+  tenant and app); it carries on from where it stopped on the next sync by itself. If every customer shows it,
+  check the tool's status page.
+- **Microsoft 365: "need admin approval" when connecting** (`consent_required` / `access_denied`): their Microsoft
+  admin hasn't approved Sidekick reading SharePoint (Sites.Read.All). The admin connects once themselves, or uses
+  the admin consent link above. **"belongs to …, not the Microsoft organization linked"**: they signed in with an
+  account from a different Microsoft tenant than the one their Sidekick organization linked.
+- **Microsoft 365: "N not read"** on a linked folder: files over 25 MB (or password-protected / damaged ones) are
+  kept as a note with a link, not read. Expected; they can save a smaller copy. Spreadsheets, images and videos are
+  ignored on purpose.
 - **GitHub: no repositories to pick**: the GitHub App isn't installed on their organization (or not on that
   repository). Someone who owns their GitHub organization installs it (github.com/apps/<app name>).
 - **Every connection of one tool fails right after a change on our side**: the app secret expired or was rotated

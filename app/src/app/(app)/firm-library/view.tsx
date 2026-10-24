@@ -159,7 +159,7 @@ export default function FirmLibraryPage() {
               </button>
               <span className="muted" style={{ fontSize: 12.5 }}>PDF, Word (.docx), text, Markdown, CSV or JSON · up to 25 MB each · counts toward your plan&apos;s document limit</span>
             </div>
-            <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.csv,.json" onChange={(e) => e.target.files && upload(e.target.files)} />
+            <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.pptx,.txt,.md,.csv,.json" onChange={(e) => e.target.files && upload(e.target.files)} />
           </div>
         </div>
       ) : (

@@ -13,6 +13,16 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-23",
     label: "October 23, 2026",
+    title: "SharePoint and OneDrive files",
+    changes: [
+      `Connect Microsoft 365 (read-only, with your Microsoft work account) and link a SharePoint document library, one of its folders, or a OneDrive folder shared with you to a group: its Word, PDF, PowerPoint and text files become part of the group's documents, kept up to date as people edit them, and answers cite them with an Open in SharePoint link.`,
+      "Files larger than 25 MB aren't read; Connectors shows how many, and answers can still point to them by name.",
+      "You can now upload PowerPoint (.pptx) files too; answers say which slide a fact came from.",
+    ],
+  },
+  {
+    date: "2026-10-23",
+    label: "October 23, 2026",
     title: "GitHub and Confluence connectors",
     changes: [
       `Connect GitHub (read-only, through the ${BRAND.name} GitHub App) and link a repository to a group: its issues and pull requests, with state, assignees, labels, milestones and the latest comments, become part of the group's knowledge, cited with a link.`,

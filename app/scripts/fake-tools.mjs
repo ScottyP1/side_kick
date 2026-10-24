@@ -1,9 +1,10 @@
 /**
- * A fake Azure DevOps, Jira Cloud, GitHub and Confluence Cloud on one small local HTTP server, for the automated
- * tests (tests/api.test.mjs) and the demo world (scripts/seed-demo.mjs). No real accounts, nothing leaves this Mac.
+ * A fake Azure DevOps, Jira Cloud, GitHub, Confluence Cloud and Microsoft Graph (SharePoint, OneDrive) on one small
+ * local HTTP server, for the automated tests (tests/api.test.mjs) and the demo world (scripts/seed-demo.mjs). No
+ * real accounts, nothing leaves this Mac.
  *
  * It speaks just enough of each real API for Sidekick's connectors (lib/connector-ado.ts, lib/connector-jira.ts,
- * lib/connector-github.ts, lib/connector-confluence.ts):
+ * lib/connector-github.ts, lib/connector-confluence.ts, lib/connector-m365.ts):
  * - **Microsoft sign-in for ADO** (`/ado-login/<tenant>/oauth2/v2.0/authorize|token`): the authorize page approves
  *   at once and redirects back with a code; the token endpoint checks the client secret and PKCE, and issues
  *   access tokens (lifetime `state.ttl` seconds) and refresh tokens.
@@ -25,15 +26,25 @@
  *   rotating refresh tokens), accessible resources with Confluence scopes, v2 spaces (`_links.next`,
  *   `state.confluenceSpacePage`) and CQL content search (`space = "KEY" AND type = page AND lastmodified >= …`,
  *   `state.confluencePage` per page).
- * - **Web pages** (`/ado-web/...`, `/jira-web/...`, `/gh-web/...`, `/confluence-web/...`): a plain page per item, so
- *   links in the demo open something.
+ * - **Microsoft sign-in for Microsoft 365** (`/m365-login/<tenant>/oauth2/v2.0/authorize|token`): like ADO's (PKCE,
+ *   the refresh token stays the same), its own app ids.
+ * - **Microsoft Graph** (`/graph/...`): `/organization` (the tenant, `world.m365.tenantId`), `/sites?search=*` in pages
+ *   (`state.graphSitePage`), each site's `/drives`, a drive's `root/children`, one item (with `parentReference.path`),
+ *   `/me/drive/sharedWithMe`, and **delta queries** (`/drives/<id>/root/delta`): every item has a change number
+ *   (`seq`), a delta link carries the last one seen, pages of `state.graphDeltaPage` follow `@odata.nextLink`, and
+ *   deleted items come back as `deleted` (no paths in delta, like the real one). `/content` answers 302 to a
+ *   pre-authenticated `/m365-download/...` address (`counts.downloads`; `counts.downloadAuth` counts downloads that
+ *   wrongly carried the token). Files are real Word, PDF and PowerPoint files built here (`office`).
+ * - **Web pages** (`/ado-web/...`, `/jira-web/...`, `/gh-web/...`, `/confluence-web/...`, `/m365-web/...`): a plain
+ *   page per item, so links in the demo open something.
  *
  * Test controls: `revoke(kind)` (sign-in revoked: API calls 401, refreshes fail), `deny(kind, project)` (403 for one
  * project, repository or space), `rateLimit(kind, { times, retryAfter, status })` (the next `times` API calls answer
  * "slow down" with `Retry-After`), `state.githubEvilNext` (the issues list's next link points off the API: it must
  * never be followed; `counts.evil` counts tries), `state.ttl` (make tokens run out), `counts` (token refreshes, API
  * calls), and the `world` object itself (add or change items; set `changed`/`updated` to now so the next sync picks
- * them up).
+ * them up; Microsoft 365 files: `m365File(driveId, …)`, `m365Touch(item)`, `m365Delete(item)`, and
+ * `state.graphDeltaGone` for one 410 "delta token expired").
  *
  * Use: `const fake = createFakeTools(); const base = await fake.listen(); env = { ...fake.env(base) }`.
  * Standalone (the demo): `node scripts/fake-tools.mjs --port 3331` (or FAKE_TOOLS_PORT=3331; the demo launch config
@@ -41,13 +52,66 @@
  */
 import http from "node:http";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 
 const day = 86400_000;
 const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
 const dueIn = (days) => new Date(Date.now() + days * day).toISOString().slice(0, 10);
 
-/** The made-up world: Northwind's ADO organization, Jira site, GitHub repositories and Confluence spaces (shared by the tests and the demo). */
+/* ---------- real (tiny) Office files, so Sidekick's own extraction reads them ---------- */
+
+/** A zip of `files` (name → text), deflated, with a central directory (what Word and PowerPoint files are). */
+function zipOf(files) {
+  const parts = [], dir = [];
+  let off = 0;
+  for (const [name, text] of Object.entries(files)) {
+    const data = Buffer.from(text), comp = zlib.deflateRawSync(data), crc = zlib.crc32(data), n = Buffer.from(name);
+    const h = Buffer.alloc(30);
+    h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(8, 8); h.writeUInt32LE(crc, 14);
+    h.writeUInt32LE(comp.length, 18); h.writeUInt32LE(data.length, 22); h.writeUInt16LE(n.length, 26);
+    parts.push(h, n, comp);
+    const c = Buffer.alloc(46);
+    c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(8, 10); c.writeUInt32LE(crc, 16);
+    c.writeUInt32LE(comp.length, 20); c.writeUInt32LE(data.length, 24); c.writeUInt16LE(n.length, 28); c.writeUInt32LE(off, 42);
+    dir.push(c, n);
+    off += 30 + n.length + comp.length;
+  }
+  const d = Buffer.concat(dir), e = Buffer.alloc(22), count = Object.keys(files).length;
+  e.writeUInt32LE(0x06054b50, 0); e.writeUInt16LE(count, 8); e.writeUInt16LE(count, 10); e.writeUInt32LE(d.length, 12); e.writeUInt32LE(off, 16);
+  return Buffer.concat([...parts, d, e]);
+}
+const xml = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Builders for made-up files: `office.docx(paragraphs)`, `office.pdf(lines)` (one page), `office.pptx(slides)` (each a list of text boxes). */
+export const office = {
+  docx: (paras) => zipOf({
+    "[Content_Types].xml": `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    "_rels/.rels": `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    "word/document.xml": `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paras.map((p) => `<w:p><w:r><w:t>${xml(p)}</w:t></w:r></w:p>`).join("")}</w:body></w:document>`,
+  }),
+  pdf: (lines) => {
+    const esc = (t) => t.replace(/[\\()]/g, (m) => `\\${m}`);
+    const stream = `BT /F1 12 Tf 72 720 Td 14 TL ${lines.map((l) => `(${esc(l)}) '`).join(" ")} ET`;
+    const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
+    let out = "%PDF-1.4\n";
+    const offs = [];
+    objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+    const x = out.length;
+    out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`;
+    return Buffer.from(out, "latin1");
+  },
+  pptx: (slides) => zipOf(Object.fromEntries(slides.map((boxes, i) => [
+    `ppt/slides/slide${i + 1}.xml`,
+    `<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree>${boxes.map((t) => `<p:sp><p:txBody><a:p><a:r><a:t>${xml(t)}</a:t></a:r></a:p></p:txBody></p:sp>`).join("")}</p:spTree></p:cSld></p:sld>`,
+  ]))),
+};
+
+/** The made-up world: Northwind's ADO organization, Jira site, GitHub repositories, Confluence spaces and SharePoint (shared by the tests and the demo). */
 export function defaultWorld() {
+  // Microsoft 365: one drive item. `content` is a function so big files are only built when downloaded.
+  let seq = 0;
+  const f = (id, name, parent, modified, by, content, size) => ({ id, name, parent, modified, by, content, size, seq: ++seq });
+  const dir = (id, name, parent) => ({ id, name, parent, folder: true, modified: iso(9 * day), by: "Ana Ruiz", seq: ++seq });
   return {
     ado: {
       orgs: {
@@ -131,6 +195,40 @@ export function defaultWorld() {
         },
       ],
     },
+    m365: {
+      // The demo world's made-up Microsoft tenant (scripts/seed-demo.mjs links Northwind to it), so reconnecting in the demo works.
+      tenantId: "00000000-demo-4000-8000-000000000001",
+      tenantName: "Northwind Traders",
+      seq: () => ++seq,
+      sites: [
+        {
+          id: "northwind.sharepoint.example,site-ops", displayName: "Store Operations",
+          drives: [
+            {
+              id: "b!ops-documents", name: "Documents", driveType: "documentLibrary",
+              items: [
+                dir("cut-folder", "Wave 2 Cutover", null),
+                f("cut-plan", "Cutover plan.docx", "cut-folder", iso(2 * day), "Ana Ruiz", () => office.docx(["Wave 2 cutover plan", "Stores switch in batches of 12 on Saturday from 06:00.", "The payment gateway check must pass before a batch goes live; otherwise roll the store back within 30 minutes."])),
+                f("cut-checklist", "Go-live checklist.pdf", "cut-folder", iso(3 * day), "Marcus Lee", () => office.pdf(["Go-live checklist", "1. Price files frozen at 22:00 Friday.", "2. Store managers trained on the new tills."])),
+                f("cut-deck", "Steering committee deck.pptx", "cut-folder", iso(4 * day), "Priya Shah", () => office.pptx([["Wave 2 steering committee"], ["Budget: 1.2M approved", "Risk: firewall change for the payment gateway"]])),
+                f("cut-notes", "Open questions.txt", "cut-folder", iso(5 * day), "Priya Shah", () => Buffer.from("Do the airport stores move in wave 2? Decision due Thursday.")),
+                f("cut-budget", "Budget.xlsx", "cut-folder", iso(5 * day), "Priya Shah", () => Buffer.from("not a spreadsheet Sidekick reads")),
+                // Metadata says 80 MB: never downloaded, kept as a "not read" note.
+                f("cut-photos", "Store survey photos.pdf", "cut-folder", iso(6 * day), "Dev Patel", () => Buffer.from("never downloaded"), 80 * 1024 * 1024),
+                f("ops-handbook", "Store operations handbook.docx", null, iso(8 * day), "Ana Ruiz", () => office.docx(["Store operations handbook", "Every store opens at 08:00 and runs the till check before the doors open."])),
+              ],
+            },
+          ],
+        },
+        { id: "northwind.sharepoint.example,site-empty", displayName: "Internal Wiki", drives: [{ id: "b!wiki-documents", name: "Documents", driveType: "documentLibrary", items: [] }] },
+      ],
+      onedrive: {
+        id: "b!priya-onedrive", name: "OneDrive", driveType: "business",
+        items: [dir("handover", "Priya handover", null), f("handover-notes", "Handover notes.md", "handover", iso(1 * day), "Priya Shah", () => Buffer.from("# Handover\nThe vendor patch for the receipt printer lands next week."))],
+      },
+      // Folders shared with the connecting account: [drive id, folder id, shared by].
+      shared: [["b!priya-onedrive", "handover", "Priya Shah"]],
+    },
   };
 }
 
@@ -147,11 +245,12 @@ export function createFakeTools({
     ado: { id: "fake-ado-client", secret: "fake-ado-secret" }, jira: { id: "fake-jira-client", secret: "fake-jira-secret" }, github: { id: "fake-github-client", secret: "fake-github-secret" },
     // Confluence uses the same Atlassian app as Jira (lib/connector-confluence.ts falls back to the Jira app ids).
     confluence: { id: "fake-jira-client", secret: "fake-jira-secret" },
+    m365: { id: "fake-m365-client", secret: "fake-m365-secret" },
   },
   lenient = false,
 } = {}) {
-  const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false };
-  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0 }, unauthorized: 0, limited: 0, evil: 0 };
+  const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false, graphSitePage: 100, graphDeltaPage: 200, graphDeltaGone: false };
+  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0 };
   const limits = new Map(); // kind → { times, retryAfter, status }
   const codes = new Map(); // code → { kind, challenge, redirectUri }
   const access = new Map(); // token → { kind, expires }
@@ -208,8 +307,8 @@ export function createFakeTools({
 
       // ---- sign-in pages (approve at once) ----
       let m;
-      const kindOfPath = (p) => (p.startsWith("/ado") ? "ado" : p.startsWith("/gh") ? "github" : p.startsWith("/confluence") ? "confluence" : "jira");
-      if (req.method === "GET" && ((m = path.match(/^\/ado-login\/[^/]+\/oauth2\/v2\.0\/authorize$/)) || path === "/jira-auth/authorize" || path === "/gh-login/login/oauth/authorize" || path === "/confluence-auth/authorize")) {
+      const kindOfPath = (p) => (p.startsWith("/ado") ? "ado" : p.startsWith("/m365") ? "m365" : p.startsWith("/gh") ? "github" : p.startsWith("/confluence") ? "confluence" : "jira");
+      if (req.method === "GET" && ((m = path.match(/^\/(ado|m365)-login\/[^/]+\/oauth2\/v2\.0\/authorize$/)) || path === "/jira-auth/authorize" || path === "/gh-login/login/oauth/authorize" || path === "/confluence-auth/authorize")) {
         const kind = kindOfPath(path);
         const q = url.searchParams;
         if (q.get("client_id") !== clients[kind].id) return send(400, { error: "invalid_client" });
@@ -222,9 +321,10 @@ export function createFakeTools({
         return res.end();
       }
       // ---- token endpoints ----
-      if (req.method === "POST" && (/^\/ado-login\/[^/]+\/oauth2\/v2\.0\/token$/.test(path) || path === "/jira-auth/oauth/token" || path === "/gh-login/login/oauth/access_token" || path === "/confluence-auth/oauth/token")) {
+      if (req.method === "POST" && (/^\/(ado|m365)-login\/[^/]+\/oauth2\/v2\.0\/token$/.test(path) || path === "/jira-auth/oauth/token" || path === "/gh-login/login/oauth/access_token" || path === "/confluence-auth/oauth/token")) {
         const kind = kindOfPath(path);
-        const f = kind === "ado" || kind === "github" ? Object.fromEntries(new URLSearchParams(body)) : JSON.parse(body || "{}");
+        const entra = kind === "ado" || kind === "m365";
+        const f = entra || kind === "github" ? Object.fromEntries(new URLSearchParams(body)) : JSON.parse(body || "{}");
         // GitHub answers token errors with 200 and an `error` field, like the real one.
         const fail = (status, error) => send(kind === "github" ? 200 : status, { error });
         if (f.client_id !== clients[kind].id || f.client_secret !== clients[kind].secret) return fail(401, kind === "github" ? "incorrect_client_credentials" : "invalid_client");
@@ -234,7 +334,7 @@ export function createFakeTools({
           const c = codes.get(f.code);
           codes.delete(f.code);
           if (!c || c.kind !== kind || c.redirectUri !== f.redirect_uri) return fail(400, kind === "github" ? "bad_verification_code" : "invalid_grant");
-          if ((kind === "ado" || kind === "github") && crypto.createHash("sha256").update(f.code_verifier ?? "").digest("base64url") !== c.challenge) return fail(400, "invalid_grant");
+          if ((entra || kind === "github") && crypto.createHash("sha256").update(f.code_verifier ?? "").digest("base64url") !== c.challenge) return fail(400, "invalid_grant");
           revokedKinds.delete(kind);
           return send(200, issue(kind));
         }
@@ -243,7 +343,7 @@ export function createFakeTools({
           if (!r || r.kind !== kind || revokedKinds.has(kind)) return fail(400, kind === "github" ? "bad_refresh_token" : "invalid_grant");
           counts.refresh[kind]++;
           const out = issue(kind);
-          if (kind !== "ado") {
+          if (!entra) {
             refresh.delete(f.refresh_token); // rotating refresh tokens: the old one stops working
           } else {
             refresh.delete(out.refresh_token); // Entra here keeps the same refresh token
@@ -453,14 +553,102 @@ export function createFakeTools({
         return send(404, { message: "Not found" });
       }
 
+      // ---- Microsoft Graph (SharePoint, OneDrive) ----
+      if ((m = path.match(/^\/m365-download\/([^/]+)\/([^/]+)$/))) {
+        // The pre-authenticated download address: no token needed, and none should be sent.
+        if (req.headers.authorization) counts.downloadAuth++;
+        const it = m365Drive(m[1])?.items.find((x) => x.id === m[2]);
+        if (!it || it.deleted || url.searchParams.get("tempauth") !== `ok-${m[2]}`) return send(404, { error: { code: "itemNotFound" } });
+        counts.downloads++;
+        const bytes = it.content();
+        res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(bytes.length) });
+        return res.end(bytes);
+      }
+      if ((m = path.match(/^\/graph\/(.+)$/))) {
+        if (!authed("m365")) return;
+        const rest = m[1];
+        const w = world.m365;
+        const graph = `${base}/graph`;
+        if (rest === "organization") return send(200, { value: [{ id: w.tenantId, displayName: w.tenantName }] });
+        if (rest === "sites") {
+          const start = Number(url.searchParams.get("skip") ?? 0);
+          const part = w.sites.slice(start, start + state.graphSitePage);
+          const more = start + part.length < w.sites.length;
+          return send(200, { value: part.map((x) => ({ id: x.id, displayName: x.displayName, name: x.displayName })), ...(more ? { "@odata.nextLink": `${graph}/sites?search=*&skip=${start + part.length}` } : {}) });
+        }
+        if ((m = rest.match(/^sites\/([^/]+)\/drives$/))) {
+          const site = w.sites.find((x) => x.id === m[1]);
+          if (!site) return send(404, { error: { code: "itemNotFound" } });
+          return send(200, { value: site.drives.filter((d) => !denied.has(`m365:${d.id}`)).map((d) => ({ id: d.id, name: d.name, driveType: d.driveType })) });
+        }
+        if (rest === "me/drive/sharedWithMe") {
+          return send(200, { value: w.shared.map(([d, id, by]) => {
+            const it = m365Drive(d)?.items.find((x) => x.id === id);
+            return { id: `shared-${id}`, name: it?.name, remoteItem: { id, name: it?.name, folder: { childCount: 1 }, parentReference: { driveId: d }, shared: { sharedBy: { user: { displayName: by } } } } };
+          }) });
+        }
+        if ((m = rest.match(/^drives\/([^/]+)(?:\/(.+))?$/))) {
+          const drive = m365Drive(m[1]);
+          if (!drive) return send(404, { error: { code: "itemNotFound", message: "The drive was not found." } });
+          if (denied.has(`m365:${drive.id}`)) return send(403, { error: { code: "accessDenied", message: "Access denied" } });
+          const sub = m[2] ?? "";
+          const pathOf = (id) => {
+            const names = [];
+            for (let cur = drive.items.find((x) => x.id === id); cur; cur = drive.items.find((x) => x.id === cur.parent)) names.unshift(cur.name);
+            return `/drives/${drive.id}/root:${names.length ? `/${names.join("/")}` : ""}`;
+          };
+          const shape = (it, withPath) => it.deleted ? { id: it.id, deleted: { state: "deleted" }, parentReference: { driveId: drive.id } } : {
+            id: it.id, name: it.name, lastModifiedDateTime: it.modified, lastModifiedBy: { user: { displayName: it.by } },
+            webUrl: `${base}/m365-web/${encodeURIComponent(drive.id)}/${encodeURIComponent(it.name)}`,
+            ...(it.folder ? { folder: { childCount: drive.items.filter((x) => x.parent === it.id).length } } : { file: { mimeType: "application/octet-stream" }, size: it.size ?? 1024 }),
+            parentReference: { driveId: drive.id, id: it.parent ?? `root-${drive.id}`, ...(withPath ? { path: pathOf(it.parent) } : {}) },
+          };
+          if (!sub) return send(200, { id: drive.id, name: drive.name, driveType: drive.driveType });
+          if (sub === "root/children") return send(200, { value: drive.items.filter((x) => !x.parent && !x.deleted).map((x) => shape(x, true)) });
+          if (sub === "root/delta") {
+            if (state.graphDeltaGone && url.searchParams.get("token")) {
+              state.graphDeltaGone = false;
+              return send(410, { error: { code: "resyncRequired", message: "Resync required. Replace any local items with the server's version." } });
+            }
+            const since = Number(url.searchParams.get("token") ?? 0);
+            const skip = Number(url.searchParams.get("skip") ?? 0);
+            const list = drive.items.filter((x) => x.seq > since && !(since === 0 && x.deleted)).sort((a, b) => a.seq - b.seq);
+            const part = list.slice(skip, skip + state.graphDeltaPage);
+            const more = skip + part.length < list.length;
+            // The delta token is the newest change number this listing covers (taken when it started).
+            const upTo = url.searchParams.get("upto") ?? String(Math.max(since, ...drive.items.map((x) => x.seq)));
+            const value = [...(since === 0 && skip === 0 ? [{ id: `root-${drive.id}`, name: "root", root: {}, folder: {} }] : []), ...part.filter((x) => x.seq <= Number(upTo)).map((x) => shape(x, false))];
+            const link = more ? { "@odata.nextLink": `${graph}/drives/${encodeURIComponent(drive.id)}/root/delta?token=${since}&skip=${skip + part.length}&upto=${upTo}` } : { "@odata.deltaLink": `${graph}/drives/${encodeURIComponent(drive.id)}/root/delta?token=${upTo}` };
+            return send(200, { value, ...link });
+          }
+          if ((m = sub.match(/^items\/([^/]+)(\/content)?$/))) {
+            if (m[1] === `root-${drive.id}`) return send(200, { id: m[1], name: "root", root: {}, folder: {} });
+            const it = drive.items.find((x) => x.id === m[1]);
+            if (!it || it.deleted) return send(404, { error: { code: "itemNotFound", message: "The resource could not be found." } });
+            if (m[2]) {
+              res.writeHead(302, { location: `${base}/m365-download/${encodeURIComponent(drive.id)}/${encodeURIComponent(it.id)}?tempauth=ok-${encodeURIComponent(it.id)}` });
+              return res.end();
+            }
+            return send(200, shape(it, true));
+          }
+        }
+        return send(404, { error: { code: "itemNotFound" } });
+      }
+
       // ---- web pages for links ----
       if ((m = path.match(/^\/ado-web\/([^/]+)\/([^/]+)\/_workitems\/edit\/(\d+)$/))) return html(`Azure DevOps · ${m[2]} · work item #${m[3]}`);
       if ((m = path.match(/^\/jira-web\/([^/]+)\/browse\/([\w-]+)$/))) return html(`Jira · ${m[1]} · ${m[2]}`);
       if ((m = path.match(/^\/gh-web\/([^/]+\/[^/]+)\/(issues|pull)\/(\d+)$/))) return html(`GitHub · ${m[1]} · ${m[2] === "pull" ? "pull request" : "issue"} #${m[3]}`);
       if ((m = path.match(/^\/confluence-web\/([^/]+)\/wiki\/spaces\/([^/]+)\/pages\/(\d+)/))) return html(`Confluence · ${m[1]} · ${m[2]} · page ${m[3]}`);
+      if ((m = path.match(/^\/m365-web\/([^/]+)\/(.+)$/))) return html(`SharePoint · ${m[2]}`);
       send(404, { message: "Not found" });
     });
   });
+
+  /** A Microsoft 365 drive by id: a SharePoint library or the OneDrive. */
+  function m365Drive(id) {
+    return world.m365.sites.flatMap((x) => x.drives).find((d) => d.id === id) ?? (world.m365.onedrive.id === id ? world.m365.onedrive : undefined);
+  }
 
   return {
     server,
@@ -486,7 +674,24 @@ export function createFakeTools({
         GITHUB_LOGIN_BASE: `${b}/gh-login`, GITHUB_API_BASE: `${b}/gh-api`, GITHUB_WEB_BASE: `${b}/gh-web`,
         // No CONFLUENCE_CLIENT_ID/SECRET: Confluence uses the Jira app (as in production when Cody adds Confluence to it).
         CONFLUENCE_AUTH_BASE: `${b}/confluence-auth`, CONFLUENCE_API_BASE: `${b}/confluence-api`,
+        M365_CLIENT_ID: clients.m365.id, M365_CLIENT_SECRET: clients.m365.secret, M365_LOGIN_BASE: `${b}/m365-login`, M365_GRAPH_BASE: `${b}/graph`,
       };
+    },
+    /** Adds a file (or folder: `folder: true`) to a Microsoft 365 drive as a new change; returns it. `content()` gives its bytes. */
+    m365File(driveId, it) {
+      const item = { modified: new Date().toISOString(), by: "Bea B", parent: null, ...it, seq: world.m365.seq() };
+      m365Drive(driveId).items.push(item);
+      return item;
+    },
+    /** Marks a Microsoft 365 item changed (edited, renamed, moved): the next delta returns it. */
+    m365Touch(item) {
+      item.modified = new Date().toISOString();
+      item.seq = world.m365.seq();
+    },
+    /** Deletes a Microsoft 365 item: the next delta returns it as `deleted`. */
+    m365Delete(item) {
+      item.deleted = true;
+      item.seq = world.m365.seq();
     },
     /** The sign-in was revoked (or expired): API calls answer 401 and refreshes fail, until someone connects again. */
     revoke: (kind) => revokedKinds.add(kind),
@@ -509,5 +714,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // Lenient: the demo copy's sealed sign-ins were made by the seed's fake, before this one started.
   const fake = createFakeTools({ lenient: true });
   const b = await fake.listen(i > 0 ? Number(process.argv[i + 1]) : Number(process.env.FAKE_TOOLS_PORT) || 3331);
-  console.log(`Fake Azure DevOps, Jira, GitHub and Confluence (made-up data) on ${b}`);
+  console.log(`Fake Azure DevOps, Jira, GitHub, Confluence and Microsoft 365 (made-up data) on ${b}`);
 }

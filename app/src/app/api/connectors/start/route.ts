@@ -1,6 +1,7 @@
 /**
  * GET /api/connectors/start?kind=ado&site=<ADO organization> | ?kind=jira|confluence[&site=<Atlassian site>] |
- * ?kind=github (no site: repositories come from the GitHub App's installations): sends the browser to
+ * ?kind=github (no site: repositories come from the GitHub App's installations) | ?kind=m365 (no site: the
+ * organization's own Microsoft tenant, when it linked one, is the only one allowed): sends the browser to
  * the tool's sign-in to connect it for the organization, read-only (Org Owners and Org Admins). Refused with the
  * plan's upgrade message when a new tool would go past the plan's connectors limit. Problems land back on
  * /connectors with the reason (a short-lived message cookie, lib/flash.ts), never in the address.

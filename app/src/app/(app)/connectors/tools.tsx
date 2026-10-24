@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * The connected-tools part of the Connectors page: Azure DevOps Boards, Jira, GitHub Issues and Confluence. For
- * each tool it shows whether it's connected and healthy (last sync, last success, the problem in plain words, an
- * expired sign-in), the projects (GitHub: repositories, Confluence: spaces) linked to groups, and the actions the
- * person's role allows:
+ * The connected-tools part of the Connectors page: Azure DevOps Boards, Jira, GitHub Issues, Confluence and
+ * Microsoft 365 files (SharePoint libraries, OneDrive shared folders). For each tool it shows whether it's
+ * connected and healthy (last sync, last success, the problem in plain words, an expired sign-in), the projects
+ * (GitHub: repositories, Confluence: spaces, Microsoft 365: libraries or folders) linked to groups, how many files
+ * weren't read (too large), and the actions the person's role allows:
  * - Org Owners/Admins connect (the tool's own sign-in; ADO first asks for the organization name, Jira and
- *   Confluence optionally for the Atlassian site, GitHub for nothing), reconnect and disconnect (which removes
- *   the sign-in and every imported item);
+ *   Confluence optionally for the Atlassian site, GitHub and Microsoft 365 for nothing), reconnect and disconnect
+ *   (which removes the sign-in and every imported item);
  * - Org Owners/Admins and Team Leads link a project to one of their groups (internal or shareable), sync it now,
  *   or unlink it;
  * - everyone else sees the status of their own groups' projects.
@@ -23,11 +24,11 @@ import { takeFlash } from "@/lib/flash";
 import { BRAND } from "@/lib/brand";
 
 /** The tools (lib/connector-text.ts `ConnectorKind`), in the order their panels show. */
-export const KINDS = ["ado", "jira", "github", "confluence"] as const;
+export const KINDS = ["ado", "jira", "github", "confluence", "m365"] as const;
 type Kind = (typeof KINDS)[number];
 type LinkHealth = {
   id: string; connectorId: string; kind: Kind; workspaceId: string; workspaceName: string; project: string; projectName: string;
-  audience: "internal" | "shareable"; items: number; lastSyncAt: string | null; lastOkAt: string | null; syncing: boolean; problem: string | null;
+  audience: "internal" | "shareable"; items: number; skipped: number; lastSyncAt: string | null; lastOkAt: string | null; syncing: boolean; problem: string | null;
 };
 type ConnectorHealth = {
   id: string; kind: Kind; label: string; account: string; accountName: string | null; status: "ok" | "expired" | "error" | "waiting";
@@ -37,24 +38,29 @@ type Data = { connectors: ConnectorHealth[]; configured: Record<Kind, boolean> }
 
 /**
  * Each tool's tile facts and connect wording: `site` is what to type before connecting (null: nothing), `signIn`
- * whose sign-in opens, `project`/`items` what a linked project and its items are called.
+ * whose sign-in opens, `project`/`projects`/`items` what a linked project (one, several) and its items are called,
+ * `icon` which tile icon its panel shows (default: its name).
  */
-export const TOOLS: Record<Kind, { name: string; bg: string; what: string; signIn: string; project: string; items: string; site: { label: string; placeholder: string; hint: string; optional?: boolean } | null }> = {
+export const TOOLS: Record<Kind, { name: string; bg: string; what: string; signIn: string; project: string; projects: string; items: string; icon?: string; site: { label: string; placeholder: string; hint: string; optional?: boolean } | null }> = {
   ado: {
-    name: "Azure DevOps", bg: "#0078D4", what: "Boards: work items, their state, owners, due dates and what blocks them", signIn: "your Microsoft work account", project: "project", items: "work items",
+    name: "Azure DevOps", bg: "#0078D4", what: "Boards: work items, their state, owners, due dates and what blocks them", signIn: "your Microsoft work account", project: "project", projects: "projects", items: "work items",
     site: { label: "Azure DevOps organization", placeholder: "northwind", hint: "The name after dev.azure.com/" },
   },
   jira: {
-    name: "Jira", bg: "#0052CC", what: "Issues: status, assignee, due dates, links and comments", signIn: "your Atlassian account", project: "project", items: "work items",
+    name: "Jira", bg: "#0052CC", what: "Issues: status, assignee, due dates, links and comments", signIn: "your Atlassian account", project: "project", projects: "projects", items: "work items",
     site: { label: "Jira site (optional)", placeholder: "northwind", hint: "The name before .atlassian.net; leave it empty if you use one site", optional: true },
   },
   github: {
-    name: "GitHub", bg: "#24292F", what: "Issues and pull requests: state, assignees, labels, milestones and comments", signIn: "your GitHub account", project: "repository", items: "issues and pull requests",
+    name: "GitHub", bg: "#24292F", what: "Issues and pull requests: state, assignees, labels, milestones and comments", signIn: "your GitHub account", project: "repository", projects: "repositories", items: "issues and pull requests",
     site: null,
   },
   confluence: {
-    name: "Confluence", bg: "#1868DB", what: "Spaces and pages, kept up to date as group documents", signIn: "your Atlassian account", project: "space", items: "pages",
+    name: "Confluence", bg: "#1868DB", what: "Spaces and pages, kept up to date as group documents", signIn: "your Atlassian account", project: "space", projects: "spaces", items: "pages",
     site: { label: "Confluence site (optional)", placeholder: "northwind", hint: "The name before .atlassian.net; leave it empty if you use one site", optional: true },
+  },
+  m365: {
+    name: "Microsoft 365 files", bg: "#038387", icon: "SharePoint", what: "SharePoint document libraries and OneDrive shared folders: Word, PDF, PowerPoint and text files, kept up to date as group documents",
+    signIn: "your Microsoft work account", project: "library or folder", projects: "libraries or folders", items: "files", site: null,
   },
 };
 
@@ -137,7 +143,7 @@ function ToolPanel({ kind, c, configured, blocked, reload }: { kind: Kind; c: Co
   return (
     <div className="panel" id={`tool-${kind}`}>
       <div className="panel-h" style={{ gap: 12, flexWrap: "wrap" }}>
-        <span className="app-ico" style={{ background: t.bg, color: "#fff", width: 36, height: 36 }} aria-hidden="true">{CONNECTOR_ICONS[t.name]}</span>
+        <span className="app-ico" style={{ background: t.bg, color: "#fff", width: 36, height: 36 }} aria-hidden="true">{CONNECTOR_ICONS[t.icon ?? t.name]}</span>
         <div className="grow" style={{ minWidth: 200 }}>
           <h2 style={{ margin: 0 }}>{t.name}</h2>
           <span className="muted" style={{ fontSize: 12.5 }}>{c ? `${c.accountName ?? c.account} · connected by ${c.connectedBy ?? "someone"} on ${fmtTime(c.connectedAt)}` : t.what}</span>
@@ -179,6 +185,7 @@ function ToolPanel({ kind, c, configured, blocked, reload }: { kind: Kind; c: Co
             <span className="muted" style={{ fontSize: 12.5 }}>
               You sign in with {t.signIn}; {BRAND.name} only reads, and stores no password.
               {kind === "github" && " Only repositories your GitHub owner installed the Sidekick app on can be linked."}
+              {kind === "m365" && ` The first time, Microsoft asks an admin of your organization to approve ${BRAND.name} reading SharePoint and OneDrive files.`}
             </span>
           </form>
         ) : <div className="muted">An Org Owner or Org Admin can connect {t.name}.</div>)}
@@ -210,7 +217,7 @@ function Links({ c, canLink, reload, act, busy }: { c: ConnectorHealth; canLink:
                     {/* An expired sign-in is explained once, above the table. */}
                     {l.problem && c.status !== "expired" && <div style={{ fontSize: 12.5, color: "var(--bad)", maxWidth: 360 }}>{l.problem}</div>}
                   </td>
-                  <td className="r num">{l.items}</td>
+                  <td className="r num">{l.items}{l.skipped ? <div className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }} title="Too large (over 25 MB) or couldn't be opened: answers can name them with a link, but their contents weren't read">{l.skipped} not read</div> : null}</td>
                   <td className="muted" style={{ whiteSpace: "nowrap" }}>
                     {/* After a reconnect the last try is cleared (so it syncs soon): show the last success instead. */}
                     {ago(l.lastSyncAt ?? l.lastOkAt)}
@@ -237,7 +244,7 @@ function Links({ c, canLink, reload, act, busy }: { c: ConnectorHealth; canLink:
           </table>
         </div>
       ) : (
-        <div className="muted">No {t.project === "repository" ? "repositories" : `${t.project}s`} linked to your groups yet.{canLink ? ` Link one so its ${t.items} become part of a group's knowledge.` : ""}</div>
+        <div className="muted">No {t.projects} linked to your groups yet.{canLink ? ` Link one so its ${t.items} become part of a group's knowledge.` : ""}</div>
       )}
       {canLink && c.status !== "expired" && (adding
         ? <LinkForm c={c} onDone={async () => { setAdding(false); await reload(); }} onCancel={() => setAdding(false)} />
@@ -259,8 +266,8 @@ function LinkForm({ c, onDone, onCancel }: { c: ConnectorHealth; onDone: () => P
   useEffect(() => {
     api<{ projects: { key: string; name: string }[] }>(`/api/connectors/${c.id}/projects`)
       .then((r) => { setProjects(r.projects); setProject(r.projects[0]?.key ?? ""); })
-      .catch((e) => setError(e instanceof Error ? e.message : `Couldn't load the ${t.project === "repository" ? "repositories" : `${t.project}s`}.`));
-  }, [c.id, t.project]);
+      .catch((e) => setError(e instanceof Error ? e.message : `Couldn't load the ${t.projects}.`));
+  }, [c.id, t.projects]);
   const save = async () => {
     setSaving(true);
     setError("");
@@ -282,8 +289,9 @@ function LinkForm({ c, onDone, onCancel }: { c: ConnectorHealth; onDone: () => P
           <span>{t.project[0].toUpperCase() + t.project.slice(1)} in {c.label}</span>
           {projects ? (
             <select className="input" value={project} onChange={(e) => setProject(e.target.value)}>
-              {!projects.length && <option value="">{c.kind === "github" ? "No repositories: install the app on one first" : `No ${t.project}s this account can read`}</option>}
-              {projects.map((p) => <option key={p.key} value={p.key}>{p.name}{p.name !== p.key ? ` (${p.key})` : ""}</option>)}
+              {!projects.length && <option value="">{c.kind === "github" ? "No repositories: install the app on one first" : `No ${t.projects} this account can read`}</option>}
+              {/* Microsoft 365 keys are Graph drive ids: meaningless to people, so only the name shows. */}
+              {projects.map((p) => <option key={p.key} value={p.key}>{p.name}{p.name !== p.key && c.kind !== "m365" ? ` (${p.key})` : ""}</option>)}
             </select>
           ) : <span className="muted"><Spinner /> Loading…</span>}
         </label>

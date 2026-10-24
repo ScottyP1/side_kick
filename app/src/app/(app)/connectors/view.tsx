@@ -4,8 +4,9 @@
  * Connectors (/connectors): the tools Sidekick reads from. Uploads, transcript import and Teams (chats and channels
  * assigned on each group's page) work today, and so do **Azure DevOps Boards, Jira, GitHub Issues, Confluence and
  * Microsoft 365 files** (read-only, each with its own sign-in; the SharePoint and OneDrive tiles are the same
- * Microsoft 365 connector): their tiles show Connected / Needs attention / Sign-in expired / Ready to
- * connect and jump to their panel below (./tools.tsx: connect, health, linked projects). The other tools are planned. Says how many connectors
+ * Microsoft 365 connector): their tiles show On / Needs attention / Sign-in expired / Requested / Off (Not
+ * approved) and jump to their panel below (./tools.tsx: the Org Owner's on/off toggle, requests from Team Leads,
+ * health, linked projects). The other tools are planned. Says how many connectors
  * the organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me. Tile icons:
  * components/connector-icons.tsx.
  */
@@ -48,7 +49,7 @@ export default function ConnectorsPage() {
         <div>
           <div className="eyebrow">Connectors</div>
           <h1>Give {BRAND.name} access to your tools</h1>
-          <p>Uploads, transcript import, Teams chats and channels, SharePoint and OneDrive files, Azure DevOps Boards, Jira, GitHub Issues and Confluence work today. Each tool connects with its own sign-in, read-only, and no passwords are stored. The other tools are planned.</p>
+          <p>Uploads, transcript import, Teams chats and channels, SharePoint and OneDrive files, Azure DevOps Boards, Jira, GitHub Issues and Confluence work today. The Org Owner turns each tool on for the organization (one sign-in, read-only, no passwords stored); Team Leads then link it to their groups, or ask for a tool that&apos;s off. The other tools are planned.</p>
           {planText && <p className="muted">{planText}</p>}
         </div>
       </div>

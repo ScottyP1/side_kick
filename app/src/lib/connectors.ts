@@ -7,7 +7,11 @@
  * (`Provider`); the text Sidekick indexes for each item is in lib/connector-text.ts.
  *
  * Concepts
- * - **Connector** (`connectors` table): one per organization and tool. An Org Owner or Org Admin connects it
+ * - **Connector** (`connectors` table): one per organization and tool. It exists while the tool is **on** (approved
+ *   for the organization): only the **Org Owner** turns a tool on (the toggle on Connectors, which starts the tool's
+ *   one-time sign-in) or off (`disconnect`); Org Admins may reconnect an expired sign-in. Team Leads and Org Admins
+ *   who need a tool that is off **ask** for it (lib/connector-requests.ts); a new connection approves every pending
+ *   request for that tool (`approveOpenRequests`). It connects
  *   with the tool's own sign-in (OAuth authorization code flow; Microsoft Entra ID for Azure DevOps and Microsoft
  *   365, Atlassian for Jira and Confluence, a GitHub App for GitHub). No passwords are ever stored. The access and refresh tokens are **sealed** (encrypted at rest with
  *   the `SIDEKICK_ENCRYPTION_KEY` envelope setup, lib/secret-box.ts) and refreshed shortly before they run out.
@@ -62,6 +66,7 @@ import { jira } from "./connector-jira";
 import { github } from "./connector-github";
 import { confluence } from "./connector-confluence";
 import { m365 } from "./connector-m365";
+import { approveOpenRequests, requestsFor } from "./connector-requests";
 import { adoOrgName, ConnectorError, CONNECTOR_KINDS, fileText, isDoneState, isPageKind, KIND_LABEL, pageText, PROJECT_WORD, rateLimitWait, workItemText, workItemTitle, type ConnectorKind, type WorkItem } from "./connector-text";
 
 export { CONNECTOR_KINDS, KIND_LABEL, type ConnectorKind } from "./connector-text";
@@ -151,6 +156,9 @@ const HEALTH: Record<ConnectorKind, { id: string; label: string }> = {
 
 const expiredMessage = (kind: ConnectorKind) =>
   `The ${KIND_LABEL[kind]} sign-in has expired or was revoked. An Org Owner or Org Admin needs to reconnect it on Connectors.`;
+
+/** Why an Org Admin can't turn a new tool on. */
+const ONLY_OWNER_TURNS_ON = "Only the Org Owner turns tools on for the organization. Ask for it on Connectors and they'll get your request.";
 
 /** Seal-context per column and connector, so a sealed token copied onto another row won't open. */
 const ctx = (id: string, col: "access_token" | "refresh_token") => `connectors.${col}:${id}`;
@@ -340,8 +348,9 @@ function asHttp(e: unknown): never {
 const b64url = (b: Buffer) => b.toString("base64url");
 
 /**
- * Starts connecting a tool for the person's organization (Org Owner/Admin; the route checks the role). Refuses
- * when the tool's app isn't set up here (503), when a new tool would go past the plan's `connectors` limit
+ * Starts connecting a tool for the person's organization (Org Owner/Admin; the route checks the role). Only the
+ * Org Owner turns a **new** tool on (403 for an Org Admin: they ask instead); either may reconnect a tool that is
+ * already on. Refuses when the tool's app isn't set up here (503), when a new tool would go past the plan's `connectors` limit
  * (402 with the upgrade message), and for ADO without a valid organization name. Saves a one-time state with
  * a PKCE verifier and returns the tool's sign-in address plus the state for the browser cookie.
  */
@@ -358,6 +367,7 @@ export async function startConnect(req: Request, user: User, kindRaw: unknown, s
   // Microsoft 365: nothing to type; the organization's own Microsoft tenant (when it linked one) is the only one allowed.
   if (kind === "m365") site = (await get<{ t: string | null }>("SELECT entra_tenant_id AS t FROM orgs WHERE id = ?", user.org_id))?.t ?? null;
   const existing = await get<{ id: string }>("SELECT id FROM connectors WHERE org_id = ? AND kind = ?", user.org_id, kind);
+  if (!existing && user.role !== "Org Owner") throw new HttpError(403, ONLY_OWNER_TURNS_ON);
   if (!existing) await assertCanAdd(user.org_id, "connectors");
   const state = b64url(crypto.randomBytes(24));
   const verifier = b64url(crypto.randomBytes(32));
@@ -375,7 +385,8 @@ export async function startConnect(req: Request, user: User, kindRaw: unknown, s
  * tokens, checks which account/site they open, and saves the connector with the tokens sealed. Reconnecting the
  * same account replaces the tokens and resumes syncing; a different account is refused (disconnect first, so
  * the old account's items don't mix with the new). Only the person who started may finish, and only while
- * they're still an Org Owner/Admin. Audited.
+ * they're still an Org Owner/Admin (an Org Owner for a new tool). A new tool approves every pending request for it
+ * (lib/connector-requests.ts `approveOpenRequests`: the people who asked are told). Audited.
  * @returns the tool that was connected
  */
 export async function finishConnect(req: Request, cookieState: string | undefined): Promise<ConnectorKind> {
@@ -407,6 +418,7 @@ export async function finishConnect(req: Request, cookieState: string | undefine
     if (existing && existing.account !== acct.account) {
       throw new HttpError(409, `${KIND_LABEL[kind]} is already connected to ${existing.account_name ?? existing.account}. Disconnect it first to switch to ${acct.accountName}.`);
     }
+    if (!existing && user.role !== "Org Owner") throw new HttpError(403, ONLY_OWNER_TURNS_ON);
     if (!existing) await assertCanAdd(saved.org_id, "connectors");
     const id = existing?.id ?? newId();
     const sealedAccess = sealSecret(tokens.access, ctx(id, "access_token"));
@@ -429,6 +441,7 @@ export async function finishConnect(req: Request, cookieState: string | undefine
     spanAttrs({ kind, reconnect: Boolean(existing) });
     await reportConnectorHealth({ orgId: saved.org_id, connector: HEALTH[kind].id, label: HEALTH[kind].label, ok: true, fixHref: "/connectors" });
     await audit(user, `${existing ? "Reconnected" : "Connected"} ${KIND_LABEL[kind]} (${acct.accountName}), read-only`, "Connectors");
+    if (!existing) await approveOpenRequests(saved.org_id, kind, user.name);
     return kind;
   });
 }
@@ -441,8 +454,9 @@ async function ownConnector(orgId: string, id: unknown): Promise<ConnectorRow> {
 }
 
 /**
- * Disconnects a tool (Org Owner/Admin; the route checks the role): removes its tokens, every link and every
- * imported item with its search entries (local and Azure). Audited with the counts.
+ * Turns a tool off (disconnects it; Org Owner only, the route checks the role): removes its tokens, every link
+ * and every imported item with its search entries (local and Azure). Past requests stay as history. Audited with
+ * the counts.
  */
 export async function disconnect(user: User, id: unknown): Promise<{ links: number; items: number }> {
   const c = await ownConnector(user.org_id, id);
@@ -759,10 +773,18 @@ export async function connectorHealth(orgId: string, workspaceIds: string[] | nu
   });
 }
 
-/** The Connectors page's view for one person: tools (health), their visible links, and what this server and plan allow. */
+/**
+ * The Connectors page's view for one person: tools that are on (health), their visible links, what this server
+ * allows (`configured`), the requests they may see (lib/connector-requests.ts `requestsFor`), and what they may
+ * do: `canToggle` (Org Owner: turn tools on/off, approve requests), `canReconnect` (Org Owners/Admins),
+ * `canRequest` (Org Admins and Team Leads ask for a tool that's off).
+ */
 export async function connectorsFor(user: User) {
   const ids = isAdmin(user) ? null : await workspaceIdsFor(user);
-  return { connectors: await connectorHealth(user.org_id, ids), configured: configuredKinds() };
+  return {
+    connectors: await connectorHealth(user.org_id, ids), configured: configuredKinds(), requests: await requestsFor(user),
+    canToggle: user.role === "Org Owner", canReconnect: isAdmin(user), canRequest: user.role === "Org Admin" || user.role === "Team Lead",
+  };
 }
 
 /** One broken connector or linked project, across all organizations (see `connectorProblems`). */

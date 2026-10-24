@@ -2,7 +2,8 @@
  * GET /api/connectors/start?kind=ado&site=<ADO organization> | ?kind=jira|confluence[&site=<Atlassian site>] |
  * ?kind=github (no site: repositories come from the GitHub App's installations) | ?kind=m365 (no site: the
  * organization's own Microsoft tenant, when it linked one, is the only one allowed): sends the browser to
- * the tool's sign-in to connect it for the organization, read-only (Org Owners and Org Admins). Refused with the
+ * the tool's sign-in to connect it for the organization, read-only. Turning a new tool on is the Org Owner's (the
+ * toggle on Connectors, or approving a request); Org Admins may only reconnect a tool that is already on. Refused with the
  * plan's upgrade message when a new tool would go past the plan's connectors limit. Problems land back on
  * /connectors with the reason (a short-lived message cookie, lib/flash.ts), never in the address.
  * See lib/connectors.ts (`startConnect`) for how the round trip is protected.

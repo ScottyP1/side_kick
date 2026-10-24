@@ -67,8 +67,8 @@ export const MATRIX = [
   { what: "Turn automatic notes after Teams meetings on or off", method: "PUT", url: () => "/api/meetings/auto", body: {}, allow: ADMINS },
   { what: "Look for new Teams meetings now", method: "POST", url: () => "/api/meetings/auto", body: { action: "check" }, allow: ADMINS, skipAllowed: true },
   { what: "Try a skipped Teams meeting again", method: "POST", url: () => "/api/meetings/auto", body: { action: "retry", id: NOPE }, allow: ADMINS },
-  { what: "Connect, reconnect or disconnect a tool (Azure DevOps, Jira)", method: "DELETE", url: () => `/api/connectors/${NOPE}`, allow: ADMINS },
   { what: "Link a tool's project to their groups, sync or unlink it", method: "POST", url: () => "/api/connectors/links", body: {}, allow: MANAGERS },
+  { what: "Ask the Org Owner to turn a tool on for their group (Team Leads: their groups)", method: "POST", url: () => "/api/connectors/requests", body: {}, allow: MANAGERS },
   { what: "List a connected tool's projects (to link one)", method: "GET", url: () => `/api/connectors/${NOPE}/projects`, allow: MANAGERS },
   { what: "Change or delete a firm library document", method: "DELETE", url: () => `/api/firm/${NOPE}`, allow: ADMINS },
   { what: "See answer quality (👍/👎 counts)", method: "GET", url: () => "/api/feedback", allow: ADMINS },
@@ -91,4 +91,6 @@ export const MATRIX = [
   { what: "Connect Microsoft sign-in", method: "GET", url: () => "/api/auth/microsoft/start?mode=link", allow: ["owner"] },
   { what: "Require Microsoft sign-in for everyone", method: "PATCH", url: () => "/api/auth/microsoft", body: {}, allow: ["owner"], skipAllowed: true },
   { what: "Disconnect Microsoft sign-in", method: "DELETE", url: () => "/api/auth/microsoft", allow: ["owner"], skipAllowed: true },
+  { what: "Turn a tool on or off for the organization (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365)", method: "DELETE", url: () => `/api/connectors/${NOPE}`, allow: ["owner"] },
+  { what: "Approve or decline a request to turn a tool on", method: "POST", url: () => `/api/connectors/requests/${NOPE}`, body: { action: "approve" }, allow: ["owner"] },
 ];

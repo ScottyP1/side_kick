@@ -1664,6 +1664,18 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await member("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Internal Tools" })).status, 403, "Members can't link projects");
   assert.equal((await member("DELETE", `/api/connectors/${s.ado}`)).status, 403);
   assert.equal((await member("GET", "/api/connectors/start?kind=ado&site=northwind")).status, 403, "only Org Owners/Admins connect tools");
+  // Requests to turn a tool on: another organization never sees, decides, cancels or adds to this org's requests,
+  // and a Team Lead of A never sees B's.
+  const zreq = await orgAdmin("POST", "/api/connectors/requests", { kind: "jira", ws: s.wsB, reason: "The ZEBRA-7731 board for the Fabrikam merger" });
+  assert.equal(zreq.status, 200, JSON.stringify(zreq.body));
+  assert.deepEqual((await other("GET", "/api/connectors")).body.requests, [], "another organization sees none of this org's requests");
+  for (const action of ["approve", "decline", "cancel"]) assert.equal((await other("POST", `/api/connectors/requests/${zreq.body.request.id}`, { action })).status, 404, action);
+  assert.equal((await other("POST", "/api/connectors/requests", { kind: "jira", ws: s.wsB })).status, 404, "can't ask for another org's group");
+  assert.ok(!leaks(await other("GET", "/api/findings")));
+  assert.ok(!(await lead("GET", "/api/connectors")).body.requests.some((x) => x.workspaceId === s.wsB), "a Team Lead of A doesn't see B's requests");
+  assert.ok(!leaks(await lead("GET", "/api/findings")));
+  assert.deepEqual((await member("GET", "/api/connectors")).body.requests, [], "Members see no requests");
+  assert.equal((await orgAdmin("POST", `/api/connectors/requests/${zreq.body.request.id}`, { action: "cancel" })).body.request.status, "cancelled");
   assert.ok(!/ZEBRA/.test(JSON.stringify((await other("GET", "/api/audit")).body)));
   assert.equal((await admin("DELETE", `/api/connectors/links/${zl.body.link.id}`)).body.items, 1);
   assert.ok(!(await admin("POST", "/api/ask", { ws: s.wsB, question: "ZEBRA vault key Fabrikam merger" })).body.sources.some((x) => x.type === "workitem"), "unlinking removes the items");
@@ -4769,4 +4781,141 @@ test(`[${ENGINE}] connectors: Microsoft 365 connects (own tenant only, sealed), 
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Microsoft 365 \(Northwind Traders\): removed its sign-in, 1 linked project and 1 imported item/);
   tools.state.graphDeltaPage = 200;
   if (!own) await dbExec(`UPDATE orgs SET entra_tenant_id = NULL WHERE id = '${org}'`);
+});
+
+/* ---------- Connector permissions: the Org Owner approves, Team Leads link or ask (lib/connector-requests.ts) ---------- */
+
+test(`[${ENGINE}] connector requests: each role's part; a Team Lead asks, the Org Owner sees it on Home and approves by turning the tool on, declines carry a note, cancels and duplicates`, async () => {
+  // Fresh people for each role (earlier tests sign some of the shared ones out or change them).
+  const fresh = async (name, role, workspaces) => {
+    const email = `${name.split(" ")[0].toLowerCase()}.req@test.local`;
+    const u = await admin("POST", "/api/users", { name, email, role, workspaces });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    const c = client();
+    assert.equal((await firstSignIn(c, email, u.body.tempPassword)).status, 200);
+    return c;
+  };
+  const orgAdmin = await fresh("Oda Admin", "Org Admin", []);
+  const lead = await fresh("Tess Lead", "Team Lead", [s.wsA]);
+  const member = await fresh("Mo Member", "Member", [s.wsA]);
+  const viewer = await fresh("Val Viewer", "Viewer", [s.wsA]);
+  const billing = await fresh("Bo Billing", "Billing Admin", []);
+  // Start with Azure DevOps, Jira and Confluence off.
+  for (const c of (await admin("GET", "/api/connectors")).body.connectors.filter((x) => ["ado", "jira", "confluence"].includes(x.kind))) {
+    assert.equal((await admin("DELETE", `/api/connectors/${c.id}`)).status, 200);
+  }
+  // What each role may do on the page.
+  const may = async (call) => (({ canToggle, canReconnect, canRequest }) => [canToggle, canReconnect, canRequest])((await call("GET", "/api/connectors")).body);
+  assert.deepEqual(await may(admin), [true, true, false], "Org Owner: turns tools on/off");
+  assert.deepEqual(await may(orgAdmin), [false, true, true], "Org Admin: reconnects and asks, never turns on/off");
+  assert.deepEqual(await may(lead), [false, false, true], "Team Lead: asks");
+  for (const [name, call] of [["member", member], ["viewer", viewer], ["billing", billing]]) assert.deepEqual(await may(call), [false, false, false], name);
+  // An Org Admin can't turn a new tool on (back on Connectors with the reason), or a tool off.
+  const adminOn = await connectTool(orgAdmin, "ado", "northwind");
+  assert.equal(adminOn.start.location, `${BASE}/connectors?error=1`);
+  assert.match(flashOf(adminOn.start), /Only the Org Owner turns tools on for the organization/);
+  // Members, Viewers and Billing Admins can't ask; a Team Lead asks only for their own groups.
+  for (const call of [member, viewer, billing]) assert.equal((await call("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA })).status, 403);
+  assert.equal((await lead("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsB })).status, 404);
+  assert.equal((await lead("POST", "/api/connectors/requests", { kind: "slack", ws: s.wsA })).status, 400);
+  const asked = await lead("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA, reason: "The cutover board lives in Azure DevOps." });
+  assert.equal(asked.status, 200, JSON.stringify(asked.body));
+  const req = asked.body.request;
+  assert.deepEqual([req.status, req.mine, req.canDecide, req.workspaceName, req.reason], ["pending", true, false, "Workspace A", "The cutover board lives in Azure DevOps."]);
+  assert.equal((await lead("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA })).status, 409, "no duplicate open request");
+  assert.equal((await orgAdmin("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA })).status, 409, "one open request per tool and group, whoever asks");
+  // The Org Owner sees it on Home at once ("Needs attention", Org Owners only) and on Connectors with Approve/Decline.
+  const ownerFinding = async () => (await admin("GET", "/api/findings")).body.findings.find((f) => f.kind === "connector_request" && /asks to use Azure DevOps/.test(f.title));
+  const f = await ownerFinding();
+  assert.ok(f, "a finding for the Org Owner");
+  assert.match(f.title, /Tess Lead asks to use Azure DevOps in “Workspace A”/);
+  assert.match(f.detail, /The cutover board lives in Azure DevOps/);
+  assert.equal(f.actionHref, "/connectors#requests");
+  assert.ok(f.canAct, "the Org Owner can snooze it");
+  for (const call of [orgAdmin, lead, member]) assert.ok(!(await call("GET", "/api/findings")).body.findings.some((x) => x.kind === "connector_request"), "only Org Owners see pending requests on Home");
+  assert.equal((await admin("GET", "/api/connectors")).body.requests.find((x) => x.id === req.id).canDecide, true);
+  assert.equal((await orgAdmin("GET", "/api/connectors")).body.requests.find((x) => x.id === req.id).canDecide, false, "Org Admins see requests but don't decide");
+  // Only the Org Owner decides.
+  for (const call of [orgAdmin, lead, member]) {
+    assert.equal((await call("POST", `/api/connectors/requests/${req.id}`, { action: "approve" })).status, 403);
+    assert.equal((await call("POST", `/api/connectors/requests/${req.id}`, { action: "decline" })).status, 403);
+  }
+  assert.equal((await admin("POST", `/api/connectors/requests/${req.id}`, { action: "maybe" })).status, 400);
+  // Approving a tool that's off hands back its one-time sign-in; finishing it approves the request.
+  const ap = await admin("POST", `/api/connectors/requests/${req.id}`, { action: "approve", site: "northwind" });
+  assert.deepEqual(ap.body, { approved: false, signIn: "/api/connectors/start?kind=ado&site=northwind" });
+  assert.equal((await admin("GET", "/api/connectors")).body.requests.find((x) => x.id === req.id).status, "pending", "not approved until the tool is on");
+  assert.equal((await connectTool(admin, "ado", "northwind")).to.search, "?connected=ado");
+  const done = (await lead("GET", "/api/connectors")).body.requests.find((x) => x.id === req.id);
+  assert.deepEqual([done.status, done.decidedBy], ["approved", "Test Admin"]);
+  assert.equal((await admin("POST", `/api/connectors/requests/${req.id}`, { action: "decline" })).status, 409, "already decided");
+  assert.equal(await ownerFinding(), undefined, "the Org Owner's request finding is resolved");
+  const leadSees = (await lead("GET", "/api/findings")).body.findings.find((x) => x.kind === "connector_request");
+  assert.match(leadSees?.title ?? "", /Azure DevOps is approved for “Workspace A”: link a project/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Asked the Org Owner to turn on Azure DevOps.*|Approved Tess Lead's request to use Azure DevOps/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Approved Tess Lead's request to use Azure DevOps/);
+  // A tool that's on can't be asked for: link it. The Team Lead links it, and the "link it" finding clears.
+  assert.match((await lead("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA })).body.error, /already on for your organization/);
+  const ado = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "ado");
+  const linked = await lead("POST", "/api/connectors/links", { connector: ado.id, ws: s.wsA, project: "Wave 2 Cutover" });
+  assert.equal(linked.status, 200, JSON.stringify(linked.body));
+  await jobTick({ sweep: true, kinds: ["watch.all", "watch.org"] });
+  assert.ok(!(await lead("GET", "/api/findings")).body.findings.some((x) => x.kind === "connector_request" && /approved/.test(x.title)), "cleared once linked");
+  // An Org Admin may reconnect a tool that's on, but not turn it off.
+  assert.equal((await connectTool(orgAdmin, "ado", "northwind")).to.search, "?connected=ado");
+  assert.equal((await orgAdmin("DELETE", `/api/connectors/${ado.id}`)).status, 403);
+  // Declined with a note: the person who asked sees it on Connectors and Home.
+  const j = (await lead("POST", "/api/connectors/requests", { kind: "jira", ws: s.wsA })).body.request;
+  const declined = await admin("POST", `/api/connectors/requests/${j.id}`, { action: "decline", note: "We're moving off Jira this quarter." });
+  assert.deepEqual([declined.body.request.status, declined.body.request.note], ["declined", "We're moving off Jira this quarter."]);
+  const mine = (await lead("GET", "/api/connectors")).body.requests.find((x) => x.id === j.id);
+  assert.deepEqual([mine.status, mine.note, mine.decidedBy], ["declined", "We're moving off Jira this quarter.", "Test Admin"]);
+  const leadDecline = (await lead("GET", "/api/findings")).body.findings.find((x) => x.kind === "connector_request" && /Jira/.test(x.title));
+  assert.match(leadDecline?.title ?? "", /The request to use Jira in “Workspace A” was declined/);
+  assert.match(leadDecline?.detail ?? "", /moving off Jira this quarter/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Declined Tess Lead's request to use Jira \(with a note\)/);
+  // After a decline the group may ask again; the person who asked (or the Org Owner) may cancel, nobody else.
+  const again = (await lead("POST", "/api/connectors/requests", { kind: "jira", ws: s.wsA, reason: "The client changed their mind." })).body.request;
+  assert.equal(again.status, "pending");
+  assert.equal((await orgAdmin("POST", `/api/connectors/requests/${again.id}`, { action: "cancel" })).status, 403);
+  assert.equal((await member("POST", `/api/connectors/requests/${again.id}`, { action: "cancel" })).status, 403);
+  assert.equal((await lead("POST", `/api/connectors/requests/${again.id}`, { action: "cancel" })).body.request.status, "cancelled");
+  assert.ok(!(await admin("GET", "/api/findings")).body.findings.some((x) => x.kind === "connector_request" && /Jira/.test(x.title) && /asks/.test(x.title)), "a cancelled request leaves Home");
+  // An Org Admin asks for any group; turning the tool on directly approves every pending request for it.
+  const forB = (await orgAdmin("POST", "/api/connectors/requests", { kind: "confluence", ws: s.wsB })).body.request;
+  const forA = (await lead("POST", "/api/connectors/requests", { kind: "confluence", ws: s.wsA })).body.request;
+  assert.equal((await connectTool(admin, "confluence")).to.search, "?connected=confluence");
+  const after = (await admin("GET", "/api/connectors")).body.requests;
+  assert.deepEqual([forB.id, forA.id].map((id) => after.find((x) => x.id === id).status), ["approved", "approved"]);
+  // Traced (counts only, never the reason), and turning a tool off keeps the requests as history.
+  assert.ok(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE name = 'Request a connector'")) >= 4);
+  assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%cutover board%' OR attrs LIKE '%moving off Jira%'")), 0);
+  for (const c of (await admin("GET", "/api/connectors")).body.connectors.filter((x) => ["ado", "confluence"].includes(x.kind))) await admin("DELETE", `/api/connectors/${c.id}`);
+  assert.ok(Number(await dbValue("SELECT COUNT(*) FROM connector_requests WHERE status = 'approved'")) >= 3, "history kept");
+});
+
+test(`[${ENGINE}] connector requests: plans without connectors can't ask (upgrade message); a full plan can ask, and approving shows the upgrade message`, async () => {
+  // A small org with someone who may ask: an Org Admin on Starter (no Team Leads there), the group's Team Lead on Team.
+  const orgWith = async (plan, role) => {
+    const o = client();
+    assert.equal((await signUpAs(o, { org: `Request ${plan} Co`, name: `Rae ${plan}`, email: `rae@req${plan}.test`, password: "correct horse battery", plan })).status, 200);
+    const u = (await o("POST", "/api/users", { name: `Lou ${plan}`, email: `lou@req${plan}.test`, role, workspaces: [] })).body;
+    assert.ok(u.id, JSON.stringify(u));
+    const ws = (await o("POST", "/api/workspaces", { name: `Group ${plan}`, ...(role === "Team Lead" ? { lead: u.id } : {}) })).body.id;
+    const l = client();
+    assert.equal((await firstSignIn(l, `lou@req${plan}.test`, u.tempPassword)).status, 200);
+    return { o, l, ws };
+  };
+  const st = await orgWith("starter", "Org Admin");
+  const no = await st.l("POST", "/api/connectors/requests", { kind: "jira", ws: st.ws });
+  assert.equal(no.status, 402);
+  assert.match(no.body.error, /Your Starter plan doesn't include connectors\. An Org Owner or Billing Admin can move to a bigger plan/);
+  const team = await orgWith("team", "Team Lead");
+  assert.equal((await connectTool(team.o, "ado", "northwind")).to.search, "?connected=ado");
+  const ask = await team.l("POST", "/api/connectors/requests", { kind: "jira", ws: team.ws, reason: "Second tool" });
+  assert.equal(ask.status, 200, "a full plan may still ask: the Org Owner may upgrade");
+  const ap = await team.o("POST", `/api/connectors/requests/${ask.body.request.id}`, { action: "approve" });
+  assert.equal(ap.status, 402);
+  assert.match(ap.body.error, /Your Team plan allows 1 connector and you have 1\./);
+  assert.equal((await team.o("GET", "/api/connectors")).body.requests[0].status, "pending", "still waiting");
 });

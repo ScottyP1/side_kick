@@ -395,18 +395,24 @@ async function phaseA() {
     world.groups[p.key] = { id: r.id, profile: p, lead: world.users[people.find((x) => x.name === p.lead).email].session };
   }
 
-  log("• Connectors: an Azure DevOps board, a Jira project, a GitHub repository, a Confluence space and a SharePoint folder (fake tools on this Mac), linked to groups");
+  log("• Connectors: Azure DevOps, Jira, Confluence and Microsoft 365 on (an Azure DevOps board, a Jira project, a Confluence space and a SharePoint folder from the fake tools on this Mac, linked to groups); GitHub off, with one request declined and one waiting");
   await connectDemoTool(owner, "ado", "northwind");
   await connectDemoTool(owner, "jira");
-  await connectDemoTool(owner, "github");
   await connectDemoTool(owner, "confluence");
+  // Approve → link → request (lib/connector-requests.ts): Contoso's Team Lead asked for Microsoft 365 files while it
+  // was off, and the Org Owner approved by turning it on (its sign-in approves the request).
+  await world.groups.contoso.lead("POST", "/api/connectors/requests", { kind: "m365", ws: world.groups.contoso.id, reason: "The client keeps the cutover runbooks and sign-off decks in their SharePoint." });
   await connectDemoTool(owner, "m365");
+  // GitHub stays off: Fabrikam's lead was declined with a note; Contoso's lead is waiting for the Org Owner.
+  const ghAsk = await world.groups.fabrikam.lead("POST", "/api/connectors/requests", { kind: "github", ws: world.groups.fabrikam.id, reason: "To see the payment API's open pull requests." });
+  await owner("POST", `/api/connectors/requests/${ghAsk.request.id}`, { action: "decline", note: "Fabrikam's code stays in their own GitHub; ask their team for a weekly summary instead." });
+  await world.groups.contoso.lead("POST", "/api/connectors/requests", { kind: "github", ws: world.groups.contoso.id, reason: "The tills' code and bug reports live in northwind/store-pos; the team asks about open pull requests every stand-up." });
   const connected = (await owner("GET", "/api/connectors")).connectors;
   const toolId = (kind) => connected.find((t) => t.kind === kind).id;
   const links = [
     ["ado", "Wave 2 Cutover", "contoso"], ["jira", "STORE", "contoso"], ["ado", "Data Platform", "litware"],
-    // The tills' code (issues and pull requests) and the cutover wiki (pages, searched like documents) for Contoso.
-    ["github", "northwind/store-pos", "contoso"], ["confluence", "CUT", "contoso"],
+    // The cutover wiki (pages, searched like documents) for Contoso. (GitHub's store-pos is linked once the request is approved.)
+    ["confluence", "CUT", "contoso"],
     // Contoso's SharePoint cutover folder: Word, PDF, PowerPoint and text files, plus one too large to read.
     ["m365", "b!ops-documents/cut-folder", "contoso"],
   ];

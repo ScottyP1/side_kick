@@ -463,6 +463,15 @@ CREATE TABLE IF NOT EXISTS connector_states (
   site TEXT, expires_at TEXT NOT NULL
 );
 
+-- Requests to turn a tool on (lib/connector-requests.ts): see the SQLite schema in lib/db.ts for the columns.
+CREATE TABLE IF NOT EXISTS connector_requests (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, workspace_id TEXT NOT NULL,
+  requested_by TEXT NOT NULL, requester_name TEXT NOT NULL, reason TEXT, status TEXT NOT NULL,
+  decided_by TEXT, decided_at TEXT, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS connector_requests_org ON connector_requests(org_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS connector_requests_open ON connector_requests(org_id, kind, workspace_id) WHERE status = 'pending';
+
 -- Background jobs (lib/jobs.ts), watcher findings (lib/watchers.ts), the stale-document AI checks, connector
 -- health (lib/connector-health.ts) and failed Teams posts: see the SQLite schema in lib/db.ts for the columns.
 CREATE TABLE IF NOT EXISTS jobs (

@@ -471,6 +471,17 @@ CREATE TABLE IF NOT EXISTS connector_states (
   state TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, verifier TEXT NOT NULL,
   site TEXT, expires_at TEXT NOT NULL
 );
+-- A request to turn a tool on for the organization (lib/connector-requests.ts): a Team Lead or Org Admin asks for
+-- one of their groups, the Org Owner approves (turning the tool on) or declines with a note. status = pending |
+-- approved | declined | cancelled; at most one pending request per tool and group (connector_requests_open).
+-- requested_by = the person's id (requester_name kept for the page after they leave); decided_by = a name.
+CREATE TABLE IF NOT EXISTS connector_requests (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, workspace_id TEXT NOT NULL,
+  requested_by TEXT NOT NULL, requester_name TEXT NOT NULL, reason TEXT, status TEXT NOT NULL,
+  decided_by TEXT, decided_at TEXT, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS connector_requests_org ON connector_requests(org_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS connector_requests_open ON connector_requests(org_id, kind, workspace_id) WHERE status = 'pending';
 -- Background jobs (lib/jobs.ts): the database-backed job queue (every background task runs on it). kind = what to run
 -- (registered in lib/job-kinds.ts); payload = small JSON of ids (never document text); org_id/workspace_id = whose
 -- work it is (NULL for system sweeps). status = queued | running | done | dead (gave up after max_attempts, the
@@ -489,7 +500,7 @@ CREATE INDEX IF NOT EXISTS jobs_org ON jobs(org_id, status);
 -- Watcher findings (lib/watchers.ts): something that needs a person, found by a cheap check on the queue.
 -- One row per problem (dedupe_key = kind + group + subject, unique per org), kept up to date on every run and
 -- resolved automatically when the check no longer finds it. workspace_id NULL = organization-wide.
--- audience = members (everyone in the group) | managers (Team Leads of the group and admins) | admins.
+-- audience = members (everyone in the group) | managers (Team Leads of the group and admins) | admins | owners (Org Owners only).
 -- status = open | snoozed (until snoozed_until) | resolved. data_json = counts and ids for the page.
 CREATE TABLE IF NOT EXISTS findings (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, kind TEXT NOT NULL,

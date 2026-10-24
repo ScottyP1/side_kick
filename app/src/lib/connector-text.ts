@@ -1,24 +1,38 @@
 /**
- * @file Pure helpers for connectors (lib/connectors.ts): turning a work item from Azure DevOps or Jira into the
- * plain text Sidekick indexes, and turning each tool's rich text (ADO's HTML, Jira's "Atlassian Document
- * Format") into plain text. No I/O, so the unit tests in tests/db.test.mjs can call them directly.
+ * @file Pure helpers for connectors (lib/connectors.ts): turning a work item from Azure DevOps, Jira or GitHub, or
+ * a Confluence page, into the plain text Sidekick indexes, and turning each tool's rich text (ADO's HTML, Jira's
+ * "Atlassian Document Format", Confluence's storage format) into plain text. No I/O, so the unit tests in
+ * tests/db.test.mjs can call them directly.
  *
  * Concepts
- * - **Work item**: one ADO work item (bug, task, user story...) or one Jira issue, read-only. Sidekick keeps its
- *   title, type, state, assignee, due date, link, what blocks it, its description and a short summary of the
- *   latest comments, written out as one small text "card" (`workItemText`) so Ask, Memory & gaps and meeting
- *   notes can use it like any other source, and cite it with a link back to the tool.
+ * - **Work item**: one ADO work item (bug, task, user story...), one Jira issue, or one GitHub issue or pull
+ *   request, read-only. Sidekick keeps its title, type, state, assignee, due date, link, what blocks it, its
+ *   description and a short summary of the latest comments, written out as one small text "card"
+ *   (`workItemText`) so Ask, Memory & gaps and meeting notes can use it like any other source, and cite it with a
+ *   link back to the tool.
+ * - **Page** (Confluence): a wiki page is a *document*, not a task: it is indexed with its whole text
+ *   (`pageText`, cut at `PAGE_MAX`) as source type `page`, searched and cited like an uploaded document (with a
+ *   link to the page), and kept out of the "open work items" lists. `isPageKind` says which tools hold pages.
  * - **Comments summary**: not written by AI (that would cost a Claude call per item on every sync): the number
  *   of comments plus the latest few, each cut short, newest first.
  */
 
-/** Which tool a connector reads from: Azure DevOps Boards or Jira Cloud. */
-export type ConnectorKind = "ado" | "jira";
-export const CONNECTOR_KINDS: readonly ConnectorKind[] = ["ado", "jira"];
+/** Which tool a connector reads from: Azure DevOps Boards, Jira Cloud, GitHub Issues or Confluence Cloud. */
+export type ConnectorKind = "ado" | "jira" | "github" | "confluence";
+export const CONNECTOR_KINDS: readonly ConnectorKind[] = ["ado", "jira", "github", "confluence"];
 /** The tool's name as people see it. */
-export const KIND_LABEL: Record<ConnectorKind, string> = { ado: "Azure DevOps", jira: "Jira" };
+export const KIND_LABEL: Record<ConnectorKind, string> = { ado: "Azure DevOps", jira: "Jira", github: "GitHub", confluence: "Confluence" };
+/** What one linked "project" is called in each tool (a GitHub repository, a Confluence space). */
+export const PROJECT_WORD: Record<ConnectorKind, string> = { ado: "project", jira: "project", github: "repository", confluence: "space" };
 
-/** One work item (ADO) or issue (Jira) as Sidekick keeps it. `externalId` is "4821" (ADO) or "CUT-12" (Jira). */
+/** True for tools whose items are pages (documents), not work items: Confluence. See the file comment. */
+export const isPageKind = (kind: ConnectorKind) => kind === "confluence";
+
+/**
+ * One work item (ADO), issue (Jira), issue or pull request (GitHub) or page (Confluence) as Sidekick keeps it.
+ * `externalId` is "4821" (ADO), "CUT-12" (Jira), "store-pos#12" (GitHub: repository name and number) or the
+ * Confluence page id.
+ */
 export type WorkItem = {
   externalId: string;
   type: string | null;
@@ -92,8 +106,12 @@ export function adfToText(doc: unknown): string {
   return out.join("").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
 }
 
-/** "Azure DevOps Bug #4821: …" / "Jira CUT-12: …": the title a work item is searched and cited by. */
+/**
+ * "Azure DevOps Bug #4821: …" / "Jira CUT-12: …" / "GitHub Pull request store-pos#12: …" / "Confluence page: …":
+ * the title a work item or page is searched and cited by.
+ */
 export function workItemTitle(kind: ConnectorKind, item: Pick<WorkItem, "externalId" | "title" | "type">): string {
+  if (isPageKind(kind)) return `${KIND_LABEL[kind]} page: ${squeeze(item.title, 200)}`;
   const id = kind === "ado" ? `#${item.externalId}` : item.externalId;
   return `${KIND_LABEL[kind]}${item.type ? ` ${item.type}` : ""} ${id}: ${squeeze(item.title, 200)}`;
 }
@@ -125,6 +143,28 @@ export function workItemText(kind: ConnectorKind, project: string, item: WorkIte
   return lines.filter(Boolean).join("\n");
 }
 
+/** At most this much of a page's text is indexed (about 40 passages); longer pages are cut. */
+export const PAGE_MAX = 50_000;
+
+/**
+ * The text Sidekick indexes for one Confluence page: its title, the space, where it sits (`parent`: its
+ * ancestors), labels, who changed it last and when, the link, then the page's own text (up to `PAGE_MAX`).
+ * lib/search.ts cuts it into passages like an uploaded document.
+ */
+export function pageText(kind: ConnectorKind, space: string, item: WorkItem): string {
+  const body = item.description.length > PAGE_MAX ? `${item.description.slice(0, PAGE_MAX - 1).trimEnd()}…` : item.description;
+  const lines = [
+    workItemTitle(kind, item),
+    `Space: ${space} (${KIND_LABEL[kind]})`,
+    item.parent ? `Part of: ${item.parent}` : null,
+    item.tags.length ? `Labels: ${item.tags.join(", ")}` : null,
+    `Last changed: ${item.changedAt.slice(0, 10)}${item.assignee ? ` by ${item.assignee}` : ""}`,
+    `Link: ${item.url}`,
+    body ? `\n${body}` : null,
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
 /** "Comments (5, latest first): Priya Shah (2026-10-20): …; …", or null when there are none. */
 export function commentsSummary(item: Pick<WorkItem, "commentCount" | "comments">): string | null {
   if (!item.commentCount && !item.comments.length) return null;
@@ -148,14 +188,32 @@ export function isoOf(value: unknown, fallback: string): string {
   return Number.isNaN(t.getTime()) ? fallback : t.toISOString();
 }
 
-/** States that mean "finished" in the usual ADO and Jira workflows (for "open items" lists). */
-export const isDoneState = (state: string | null) => /^(done|closed|resolved|removed|completed|cancel+ed)$/i.test(state ?? "");
+/** States that mean "finished" in the usual ADO, Jira and GitHub workflows (for "open items" lists). */
+export const isDoneState = (state: string | null) => /^(done|closed|resolved|removed|completed|cancel+ed|merged)$/i.test(state ?? "");
 
 /** An ADO organization name as typed ("northwind", or a pasted "https://dev.azure.com/northwind/..."), or null if it can't be one. */
 export function adoOrgName(input: unknown): string | null {
   if (typeof input !== "string") return null;
   const t = input.trim().replace(/^https?:\/\/dev\.azure\.com\//i, "").replace(/^https?:\/\/([\w-]+)\.visualstudio\.com.*$/i, "$1").split("/")[0];
   return /^[A-Za-z0-9][A-Za-z0-9-]{0,49}$/.test(t) ? t : null;
+}
+
+/**
+ * How long a "slow down" answer asks to wait, in seconds, or null when it isn't one: 429, or a 403 that carries
+ * `Retry-After` or `x-ratelimit-remaining: 0` (GitHub's primary and secondary rate limits). `Retry-After` may be
+ * seconds or a date; `x-ratelimit-reset` is a Unix time. Unknown waits count as a minute.
+ */
+export function rateLimitWait(status: number, headers: Headers, at = Date.now()): number | null {
+  const retry = headers.get("retry-after");
+  const remaining = headers.get("x-ratelimit-remaining");
+  if (status !== 429 && !(status === 403 && (retry !== null || remaining === "0"))) return null;
+  if (retry !== null) {
+    const secs = /^\d+$/.test(retry.trim()) ? Number(retry) : (Date.parse(retry) - at) / 1000;
+    if (Number.isFinite(secs)) return Math.max(0, Math.ceil(secs));
+  }
+  const reset = Number(headers.get("x-ratelimit-reset"));
+  if (remaining === "0" && reset > 0) return Math.max(0, Math.ceil(reset - at / 1000));
+  return 60;
 }
 
 /**

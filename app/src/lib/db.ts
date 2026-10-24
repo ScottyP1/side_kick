@@ -431,11 +431,11 @@ CREATE TABLE IF NOT EXISTS answer_feedback (
   UNIQUE (question_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS answer_feedback_org ON answer_feedback(org_id, created_at);
--- Connectors to outside tools (lib/connectors.ts): Azure DevOps Boards and Jira, read-only.
--- connectors: one per organization and tool (kind = ado | jira), connected once by an Org Owner/Admin with the
+-- Connectors to outside tools (lib/connectors.ts): Azure DevOps Boards, Jira, GitHub Issues and Confluence, read-only.
+-- connectors: one per organization and tool (kind = ado | jira | github | confluence), connected once by an Org Owner/Admin with the
 -- tool's own sign-in (OAuth; no passwords). access_token / refresh_token are sealed (lib/secret-box.ts, context
 -- "connectors.<column>:<id>") and refreshed before they run out. status = connected | expired (the sign-in ran
--- out or was revoked: someone must reconnect). account = the ADO organization or the Jira site (cloud id);
+-- out or was revoked: someone must reconnect). account = the ADO organization, the Atlassian site (cloud id) or the GitHub user id;
 -- api_base / web_base = where its API and its web pages are. last_error = the last connector-wide problem.
 CREATE TABLE IF NOT EXISTS connectors (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, status TEXT NOT NULL,
@@ -444,7 +444,7 @@ CREATE TABLE IF NOT EXISTS connectors (
   connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
   UNIQUE (org_id, kind)
 );
--- One project (ADO) or project key (Jira) feeding one group's knowledge, set by an Org Owner/Admin or the
+-- One project (ADO), project key (Jira), repository (GitHub, "owner/name") or space key (Confluence) feeding one group's knowledge, set by an Org Owner/Admin or the
 -- group's Team Lead. audience = internal | shareable (like documents). sync_cursor = the latest "changed" time
 -- seen, so each sync only fetches what changed since. Health: last_sync_at (last try), last_ok_at (last
 -- success), last_error (plain reason, null when fine). sync_started_at = claimed by a running sync.
@@ -457,7 +457,7 @@ CREATE TABLE IF NOT EXISTS connector_links (
 );
 CREATE INDEX IF NOT EXISTS connector_links_ws ON connector_links(org_id, workspace_id);
 -- The work items read from a linked project (title, state, assignee, due date, link...). Their text is in
--- passages (source_type "workitem", source_id = this id). text_hash skips re-indexing unchanged items.
+-- passages (source_type "workitem", or "page" for Confluence pages; source_id = this id). text_hash skips re-indexing unchanged items.
 CREATE TABLE IF NOT EXISTS connector_items (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
   link_id TEXT NOT NULL REFERENCES connector_links(id) ON DELETE CASCADE, external_id TEXT NOT NULL,
@@ -505,7 +505,7 @@ CREATE TABLE IF NOT EXISTS watch_checks (
   org_id TEXT NOT NULL, workspace_id TEXT NOT NULL, pair_key TEXT NOT NULL, verdict TEXT NOT NULL, reason TEXT,
   checked_at TEXT NOT NULL, PRIMARY KEY (org_id, pair_key)
 );
--- Connector health (lib/connector-health.ts): the latest state each connector (Azure DevOps, Jira, ...) reported
+-- Connector health (lib/connector-health.ts): the latest state each connector (Azure DevOps, Jira, GitHub, Confluence) reported
 -- for an organization (and group, when it's per group; '' = organization-wide). status = ok | broken.
 -- The broken-connector watcher turns broken rows into findings.
 CREATE TABLE IF NOT EXISTS connector_health (

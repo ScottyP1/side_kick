@@ -1,13 +1,15 @@
-# Connect Azure DevOps or Jira
+# Connect your tools: Azure DevOps, Jira, GitHub, Confluence
 
-Sidekick can read your team's work items from **Azure DevOps Boards** or **Jira Cloud**, so answers, the knowledge map and meeting notes know what's open, who owns it, when it's due and what's blocking it. Ask "what's blocking the cutover?" and Sidekick answers from the work item itself, cites it ("Azure DevOps Bug #4821 …" or "Jira STORE-15 …") and links straight to it.
+Sidekick can read your team's work items from **Azure DevOps Boards**, **Jira Cloud** or **GitHub Issues** (issues and pull requests), so answers, the knowledge map and meeting notes know what's open, who owns it, when it's due and what's blocking it. Ask "what's blocking the cutover?" and Sidekick answers from the work item itself, cites it ("Azure DevOps Bug #4821 …", "Jira STORE-15 …" or "GitHub Issue store-pos#41 …") and links straight to it.
 
-Sidekick only **reads**. It never creates, changes or comments on anything in Azure DevOps or Jira, and it never stores a password: you sign in with the tool's own sign-in, and Sidekick keeps an encrypted sign-in it can renew.
+It can also read a **Confluence Cloud** space: its pages become part of the group's documents, so answers can quote the runbook or the decision log and link to the page.
+
+Sidekick only **reads**. It never creates, changes or comments on anything in these tools, and it never stores a password: you sign in with the tool's own sign-in, and Sidekick keeps an encrypted sign-in it can renew.
 
 ## What you need
-- **Your plan.** Starter doesn't include connectors; Team includes one connected tool (Azure DevOps *or* Jira); Business and Enterprise include all of them. Connectors shows what yours includes, and **Usage & billing** lets an Org Owner or Billing Admin upgrade.
+- **Your plan.** Starter doesn't include connectors; Team includes one connected tool (Azure DevOps, Jira, GitHub *or* Confluence); Business and Enterprise include all of them. Connectors shows what yours includes, and **Usage & billing** lets an Org Owner or Billing Admin upgrade.
 - **The right role.** An **Org Owner** or **Org Admin** connects (and disconnects) a tool for the whole organization. An Org Owner, Org Admin or a group's **Team Lead** links projects to groups.
-- **Access in the tool.** The account you connect with must be able to open the projects you want. Sidekick sees exactly what that account can see, nothing more.
+- **Access in the tool.** The account you connect with must be able to open the projects (repositories, spaces) you want. Sidekick sees exactly what that account can see, nothing more.
 
 ## Connect Azure DevOps
 1. Open **Connectors** in the portal and scroll to **Azure DevOps** (or click its tile).
@@ -22,10 +24,22 @@ Your Azure DevOps organization must be connected to your company's Microsoft Ent
 2. If your account can open more than one Jira site, type the one to use: the name before `.atlassian.net` (for `https://northwind.atlassian.net` that's `northwind`). With one site, leave it empty.
 3. Press **Connect Jira**, sign in with your Atlassian account and **Accept** the read-only access.
 
+## Connect GitHub
+1. **Install the Sidekick app on your GitHub organization first** (once): someone who owns the organization on GitHub opens the Sidekick GitHub App's page, presses **Install** and picks the repositories Sidekick may read (all, or only some). The app asks only to *read* issues, pull requests and repository basics.
+2. Open **Connectors** and scroll to **GitHub**. There's nothing to type.
+3. Press **Connect GitHub**, sign in with your GitHub account and **Authorize** it.
+
+Only repositories the app is installed on, and that your own GitHub account can open, can be linked. Removing a repository from the installation (or uninstalling the app) stops Sidekick reading it.
+
+## Connect Confluence
+1. Open **Connectors** and scroll to **Confluence**.
+2. If your account can open more than one Atlassian site, type the one to use (the name before `.atlassian.net`). With one site, leave it empty.
+3. Press **Connect Confluence**, sign in with your Atlassian account and **Accept** the read-only access. Connecting Confluence is separate from connecting Jira, even on the same site.
+
 ## Link a project to a group
-A connected tool doesn't feed any group until you link a project to it, so each group only learns from its own engagement's board.
-1. On **Connectors**, under the tool, press **Link a project to a group**.
-2. Pick the **project** (Azure DevOps) or **project key** (Jira, e.g. `STORE`), and the **group**.
+A connected tool doesn't feed any group until you link a project to it, so each group only learns from its own engagement's board, repository or space.
+1. On **Connectors**, under the tool, press **Link a project to a group** (GitHub: **Link a repository**, Confluence: **Link a space**).
+2. Pick the **project** (Azure DevOps), **project key** (Jira, e.g. `STORE`), **repository** (GitHub, e.g. `northwind/store-pos`) or **space** (Confluence), and the **group**.
 3. Choose who may see its items in answers:
    - **Internal (team only)**, the default, or
    - **Shareable (also with client guests)**, for a board your client can see anyway.
@@ -36,10 +50,14 @@ The same project can feed more than one group. Team Leads see and link only the 
 ## What Sidekick reads
 For each work item or issue: its **title**, **type**, **state**, **assignee**, **due date** (or target date), **what blocks it** (Azure DevOps "predecessor" links, Jira "is blocked by" links) and its parent, **tags or labels**, the **description**, and a short **summary of the latest comments** (how many, plus the newest three, shortened). That's what answers can quote, with a link back to the item.
 
+From **GitHub**: every issue and pull request of the repository, with its state (Open, Draft, Closed or Merged), assignees, labels, milestone (its due date counts as the due date), description and latest comments.
+
+From **Confluence**: every current page of the space, with its full text (very long pages are cut after about 50,000 characters), where it sits in the page tree, its labels and who changed it last. Pages are treated like the group's **documents**, not like work items: the **Documents** filter in Ask includes them, and they don't show up as open work. Attachments, page comments and blog posts aren't read.
+
 After the first read, Sidekick checks every 15 minutes and only reads what **changed** since the last time. You can also press **Sync now** on a linked project.
 
 Where the items show up:
-- **Ask** (portal and Teams): answers cite work items like documents, with **Open in Azure DevOps / Jira** links (in Teams, an **Open #4821** button). The **Work items** filter in Ask keeps only them.
+- **Ask** (portal and Teams): answers cite work items like documents, with **Open in Azure DevOps / Jira / GitHub** links (in Teams, an **Open #4821** button), and Confluence pages with **Open in Confluence**. The **Work items** filter in Ask keeps only work items.
 - **Memory & gaps**: the knowledge map sees the group's open items, so an overdue, unassigned or blocked item, or one that contradicts a decision, can show up as a gap.
 - **Meeting notes**: when notes are written, Sidekick knows the group's open items and can name the item an action is about (e.g. "Book the war room (#4850)").
 
@@ -47,6 +65,7 @@ Where the items show up:
 Each tool and each linked project shows its status on Connectors:
 - **Healthy / OK**: the last sync worked. You see when it last synced and how many items it holds.
 - **Problem**: the last sync failed, with the reason in plain words (for example "Azure DevOps refused access to the project: the account that connected it may have lost access"). Nothing is deleted; Sidekick tries again on the next sync. A project that hasn't synced successfully for 6 hours also shows a problem.
+- **"asked Sidekick to slow down (rate limit)"**: the tool limits how many requests it answers per hour (GitHub especially). Sidekick stops, keeps what it has read, and carries on from where it stopped on a later sync. Nothing to do.
 - **Sign-in expired**: the tool's sign-in ran out or was revoked (for example the person who connected it left, or an admin removed the app). Syncing pauses until an Org Owner or Org Admin presses **Reconnect** and signs in again; the items already read stay until then.
 
 ## Unlink or disconnect
@@ -56,13 +75,14 @@ Each tool and each linked project shows its status on Connectors:
 
 ## Good to know
 - **Walls hold.** Work items belong to the group their project is linked to, exactly like documents: other groups, other organizations and the Sidekick assistant of someone outside the group never see them. Client guests only ever see items from projects marked Shareable.
-- **Nothing is written back.** Sidekick asks only for read access in both tools.
-- **Each sync reads at most 2,000 changed items**; a very large board catches up over a few syncs.
+- **Nothing is written back.** Sidekick asks only for read access in every tool.
+- **Each sync reads at most 2,000 changed items** (Confluence: 1,000 pages); a very large board, repository or space catches up over a few syncs.
+- **Deleted items**: a work item, issue or page deleted in the tool stays in Sidekick until you unlink and link the project again.
 - The activity of each sync (how long, how many items) appears on the **Activity** page under **Connectors**, without any item text.
 <!-- help-center:skip -->
 
 ## For developers
-- Code: `app/src/lib/connectors.ts` (framework: sign-in, sealed tokens and refresh, sync, health), `connector-ado.ts`, `connector-jira.ts`, `connector-text.ts`; routes under `app/src/app/api/connectors/`; page `app/src/app/(app)/connectors/`.
-- Tests: `app/tests/api.test.mjs` ("connectors: …" and the isolation test) against the fake tools in `app/scripts/fake-tools.mjs`; the demo world connects both (docs/DEMO.md).
+- Code: `app/src/lib/connectors.ts` (framework: sign-in, sealed tokens and refresh, rate limits, sync, health), `connector-ado.ts`, `connector-jira.ts`, `connector-github.ts`, `connector-confluence.ts`, `connector-text.ts`; routes under `app/src/app/api/connectors/`; page `app/src/app/(app)/connectors/`.
+- Tests: `app/tests/api.test.mjs` ("connectors: …" and the isolation test) against the fake tools in `app/scripts/fake-tools.mjs`; the demo world connects all four (docs/DEMO.md).
 - Setting up the real apps: `docs/RUNBOOKS.md` → Connector apps.
 <!-- /help-center:skip -->

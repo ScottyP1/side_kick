@@ -1,23 +1,27 @@
 /**
- * @file Connectors to outside tools: the framework that lets an organization connect Azure DevOps Boards or Jira
- * once, link projects to groups, and keep those projects' work items in each group's knowledge, **read-only**.
- * The tools themselves are in lib/connector-ado.ts and lib/connector-jira.ts (`Provider`); the text Sidekick
- * indexes for each item is in lib/connector-text.ts.
+ * @file Connectors to outside tools: the framework that lets an organization connect Azure DevOps Boards, Jira,
+ * GitHub Issues or Confluence once, link projects (GitHub: repositories, Confluence: spaces) to groups, and keep
+ * their work items and pages in each group's knowledge, **read-only**. The tools themselves are in
+ * lib/connector-ado.ts, lib/connector-jira.ts, lib/connector-github.ts and lib/connector-confluence.ts
+ * (`Provider`); the text Sidekick indexes for each item is in lib/connector-text.ts.
  *
  * Concepts
  * - **Connector** (`connectors` table): one per organization and tool. An Org Owner or Org Admin connects it
  *   with the tool's own sign-in (OAuth authorization code flow; Microsoft Entra ID for Azure DevOps, Atlassian
- *   for Jira). No passwords are ever stored. The access and refresh tokens are **sealed** (encrypted at rest with
+ *   for Jira and Confluence, a GitHub App for GitHub). No passwords are ever stored. The access and refresh tokens are **sealed** (encrypted at rest with
  *   the `SIDEKICK_ENCRYPTION_KEY` envelope setup, lib/secret-box.ts) and refreshed shortly before they run out.
  *   When a refresh is refused (revoked, expired after long disuse) the connector turns **expired** and someone
  *   must reconnect; nothing is deleted.
- * - **Link** (`connector_links`): one project (ADO) or project key (Jira) feeding one group. Org Owners/Admins
+ * - **Link** (`connector_links`): one project (ADO), project key (Jira), repository (GitHub, "owner/name") or
+ *   space key (Confluence) feeding one group. Org Owners/Admins
  *   and that group's Team Lead link and unlink (`requireManage`). Each link has an audience like documents
  *   (internal by default; shareable ones may be used when client guests are present).
  * - **Items** (`connector_items`): the work items read from a linked project (title, type, state, assignee, due
  *   date, link, what blocks it, description, comments summary). Each is indexed through lib/search.ts as source
  *   type `workitem`, so Ask cites it ("what's blocking the cutover?" → "Azure DevOps Bug #4821 …" with a link),
- *   the knowledge map (Memory & gaps) and meeting notes see the group's open items.
+ *   the knowledge map (Memory & gaps) and meeting notes see the group's open items. Confluence **pages** are
+ *   kept in the same table but indexed whole as source type `page`, searched and cited like documents (with a
+ *   link), and never listed as open work (lib/connector-text.ts `isPageKind`).
  * - **Incremental sync** (`syncLink`): only what changed since the link's cursor (the latest change time seen),
  *   in pages; the cursor is saved after every page, so a failure resumes where it stopped. Unchanged items
  *   (same text) aren't re-indexed. Runs on link, on "Sync now", and every `SYNC_EVERY_MINUTES` on the job queue
@@ -26,8 +30,11 @@
  * - **Health**: on the Connectors page (`connectorHealth`: last sync, last success, the last error in plain words,
  *   an expired sign-in; a link with no success for `STALE_HOURS` shows a problem), and for the "broken connector"
  *   watcher through lib/connector-health.ts: every sync reports its group's result (`reportConnectorHealth`, id
- *   "azure-devops" or "jira"), an expired sign-in is reported organization-wide, and reconnecting, unlinking or
+ *   "azure-devops", "jira", "github" or "confluence"), an expired sign-in is reported organization-wide, and reconnecting, unlinking or
  *   disconnecting clears it. `connectorProblems` lists everything broken across organizations (operators).
+ * - **Rate limits**: a tool that says "slow down" (429, or GitHub's 403 with `Retry-After` / `x-ratelimit-remaining:
+ *   0`) is waited for when the wait is short (`RATE_WAIT_MAX_SECONDS`, once per call); otherwise the sync stops
+ *   with a plain "busy" problem saying when it may continue, the cursor already saved, and the next run resumes.
  * - **Plan limits**: the plan's `connectors` limit (lib/plans.ts: none, one tool, or all) is checked before
  *   a *new* tool is connected (`assertCanAdd(org, "connectors")`); reconnecting one never counts again, and a
  *   smaller plan keeps what's connected.
@@ -49,7 +56,9 @@ import { assertCanAdd } from "./limits";
 import { BRAND } from "./brand";
 import { ado, MAX_PER_SYNC as ADO_MAX } from "./connector-ado";
 import { jira } from "./connector-jira";
-import { adoOrgName, ConnectorError, CONNECTOR_KINDS, isDoneState, KIND_LABEL, workItemText, workItemTitle, type ConnectorKind, type WorkItem } from "./connector-text";
+import { github } from "./connector-github";
+import { confluence } from "./connector-confluence";
+import { adoOrgName, ConnectorError, CONNECTOR_KINDS, isDoneState, isPageKind, KIND_LABEL, pageText, PROJECT_WORD, rateLimitWait, workItemText, workItemTitle, type ConnectorKind, type WorkItem } from "./connector-text";
 
 export { CONNECTOR_KINDS, KIND_LABEL, type ConnectorKind } from "./connector-text";
 
@@ -60,6 +69,8 @@ export const STALE_HOURS = 6;
 /** A sync claimed longer ago than this is assumed to have died and may be claimed again. */
 const SYNC_CLAIM_MINUTES = 15;
 const STATE_MINUTES = 10;
+/** A "slow down" from a tool asking for at most this long is waited out inside the call; longer ends the sync. */
+export const RATE_WAIT_MAX_SECONDS = 5;
 /** Browser cookie tying a connector sign-in to the browser that started it (like Microsoft sign-in's). */
 export const CONNECTOR_COOKIE = "sk_connector";
 
@@ -86,13 +97,15 @@ export type Tokens = { access: string; refresh: string | null; expiresIn: number
  */
 export type ToolApi = (url: string, init?: { method?: string; body?: unknown }, opts?: { what?: string }) => Promise<{ json: unknown; headers: Headers }>;
 
-/** What each tool (lib/connector-ado.ts, lib/connector-jira.ts) provides to the framework. */
+/** What each tool (lib/connector-ado.ts, -jira.ts, -github.ts, -confluence.ts) provides to the framework. */
 export type Provider = {
   kind: ConnectorKind;
   /** True when connecting needs a site typed first (ADO: the organization name). */
   needsSite: boolean;
   /** True when the tool's app id and secret are set on this server. */
   configured(): boolean;
+  /** Extra headers on every API call (GitHub: its media type, API version and a User-Agent). */
+  headers?: Record<string, string>;
   authorizeUrl(o: { state: string; challenge: string; redirectUri: string }): string;
   exchange(code: string, verifier: string, redirectUri: string): Promise<Tokens | { error: string }>;
   refresh(refreshToken: string): Promise<Tokens | { error: string; revoked: boolean }>;
@@ -103,19 +116,23 @@ export type Provider = {
   changes(api: ToolApi, conn: ConnectorRow, project: string, cursor: string | null): AsyncGenerator<WorkItem[]>;
 };
 
-const PROVIDERS: Record<ConnectorKind, Provider> = { ado, jira };
+const PROVIDERS: Record<ConnectorKind, Provider> = { ado, jira, github, confluence };
 
-/** Checks a tool name from a request ("ado" or "jira"), or 400. */
+/** Checks a tool name from a request ("ado", "jira", "github" or "confluence"), or 400. */
 export function kindOf(value: unknown): ConnectorKind {
   if (typeof value === "string" && (CONNECTOR_KINDS as readonly string[]).includes(value)) return value as ConnectorKind;
-  throw new HttpError(400, `Pick a tool: ${CONNECTOR_KINDS.join(" or ")}.`);
+  throw new HttpError(400, `Pick a tool: ${CONNECTOR_KINDS.join(", ")}.`);
 }
 
 /** Whether each tool's app is set up on this server (the Connectors page says "not set up yet" otherwise). */
-export const configuredKinds = (): Record<ConnectorKind, boolean> => ({ ado: ado.configured(), jira: jira.configured() });
+export const configuredKinds = (): Record<ConnectorKind, boolean> =>
+  Object.fromEntries(CONNECTOR_KINDS.map((k) => [k, PROVIDERS[k].configured()])) as Record<ConnectorKind, boolean>;
 
 /** The ids and names the broken-connector watcher knows each tool by (lib/connector-health.ts). */
-const HEALTH: Record<ConnectorKind, { id: string; label: string }> = { ado: { id: "azure-devops", label: "Azure DevOps Boards" }, jira: { id: "jira", label: "Jira" } };
+const HEALTH: Record<ConnectorKind, { id: string; label: string }> = {
+  ado: { id: "azure-devops", label: "Azure DevOps Boards" }, jira: { id: "jira", label: "Jira" },
+  github: { id: "github", label: "GitHub Issues" }, confluence: { id: "confluence", label: "Confluence" },
+};
 
 const expiredMessage = (kind: ConnectorKind) =>
   `The ${KIND_LABEL[kind]} sign-in has expired or was revoked. An Org Owner or Org Admin needs to reconnect it on Connectors.`;
@@ -138,14 +155,17 @@ export function connectorRedirectUri(req: Request): string {
 
 function makeApi(kind: ConnectorKind, token: (force: boolean) => Promise<string>): ToolApi {
   const label = KIND_LABEL[kind];
+  const extra = PROVIDERS[kind].headers ?? {};
   return async (url, init = {}, opts = {}) => {
-    for (let attempt = 0; ; attempt++) {
-      const tok = await token(attempt > 0);
+    let waited = false, refreshed = false, force = false;
+    for (;;) {
+      const tok = await token(force);
+      force = false;
       let res: Response;
       try {
         res = await fetch(url, {
           method: init.method ?? "GET",
-          headers: { Authorization: `Bearer ${tok}`, Accept: "application/json", ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}) },
+          headers: { Accept: "application/json", ...extra, Authorization: `Bearer ${tok}`, ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}) },
           body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
           signal: AbortSignal.timeout(30_000),
           redirect: "manual",
@@ -155,7 +175,20 @@ function makeApi(kind: ConnectorKind, token: (force: boolean) => Promise<string>
       }
       // ADO answers an unusable token with 203 and a sign-in page (or a redirect) instead of 401.
       const unauthorized = res.status === 401 || res.status === 203 || (res.status >= 300 && res.status < 400);
-      if (unauthorized && attempt === 0) continue; // the token may have just run out: refresh once and retry
+      if (unauthorized && !refreshed) {
+        refreshed = force = true; // the token may have just run out: refresh once and retry
+        continue;
+      }
+      const wait = rateLimitWait(res.status, res.headers);
+      if (wait !== null) {
+        if (!waited && wait <= RATE_WAIT_MAX_SECONDS) {
+          waited = true;
+          await new Promise((r) => setTimeout(r, wait * 1000));
+          continue;
+        }
+        const when = new Date(Date.now() + wait * 1000).toISOString().slice(11, 16);
+        throw new ConnectorError("busy", `${label} asked ${BRAND.name} to slow down (rate limit). It will carry on from where it stopped after ${when} UTC.`);
+      }
       if (res.ok && !unauthorized) return { json: await res.json().catch(() => null), headers: res.headers };
       if (unauthorized) throw new ConnectorError("auth", expiredMessage(kind));
       if (res.status === 403) throw new ConnectorError("access", `${label} refused access${opts.what ? ` to ${opts.what}` : ""}: the account that connected it may have lost access. Reconnect with an account that can open it, or unlink it.`);
@@ -244,7 +277,8 @@ export async function startConnect(req: Request, user: User, kindRaw: unknown, s
   const kind = kindOf(kindRaw);
   const p = PROVIDERS[kind];
   if (!p.configured()) throw new HttpError(503, `Connecting ${KIND_LABEL[kind]} isn't set up on this ${BRAND.name} yet. The ${BRAND.name} team adds it (docs/RUNBOOKS.md).`);
-  let site: string | null = typeof siteRaw === "string" && siteRaw.trim() ? siteRaw.trim().slice(0, 200) : null;
+  // GitHub has no site to pick: the repositories come from the GitHub App's installations.
+  let site: string | null = kind !== "github" && typeof siteRaw === "string" && siteRaw.trim() ? siteRaw.trim().slice(0, 200) : null;
   if (kind === "ado") {
     site = adoOrgName(siteRaw);
     if (!site) throw new HttpError(400, "Type your Azure DevOps organization: the name after dev.azure.com/ (for example “northwind”).");
@@ -383,11 +417,11 @@ export async function linkProject(user: User, body: { connector?: unknown; ws?: 
   const ws = await requireManage(user, typeof body.ws === "string" ? body.ws : null);
   const c = await ownConnector(user.org_id, body.connector);
   if (c.status === "expired") throw new HttpError(409, expiredMessage(c.kind));
-  if (typeof body.project !== "string" || !body.project.trim()) throw new HttpError(400, "Pick a project to link.");
+  if (typeof body.project !== "string" || !body.project.trim()) throw new HttpError(400, `Pick a ${PROJECT_WORD[c.kind]} to link.`);
   const audience = body.audience === "shareable" ? "shareable" : "internal";
   const projects = await PROVIDERS[c.kind].projects(toolApi(c), c).catch(asHttp);
   const p = projects.find((x) => x.key === body.project || x.key.toLowerCase() === String(body.project).trim().toLowerCase());
-  if (!p) throw new HttpError(404, `${KIND_LABEL[c.kind]} has no project “${String(body.project).slice(0, 80)}” that the connected account can read.`);
+  if (!p) throw new HttpError(404, `${KIND_LABEL[c.kind]} has no ${PROJECT_WORD[c.kind]} “${String(body.project).slice(0, 80)}” that the connected account can read.`);
   if (await get("SELECT id FROM connector_links WHERE connector_id = ? AND workspace_id = ? AND project = ? AND org_id = ?", c.id, ws, p.key, user.org_id)) {
     throw new HttpError(409, `${p.name} is already linked to this group.`);
   }
@@ -396,7 +430,7 @@ export async function linkProject(user: User, body: { connector?: unknown; ws?: 
     "INSERT INTO connector_links (id, org_id, connector_id, workspace_id, project, project_name, audience, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     id, user.org_id, c.id, ws, p.key, p.name, audience, user.name, now(),
   );
-  await audit(user, `Linked ${KIND_LABEL[c.kind]} project ${p.name} to this group (${audience}, read-only)`, "Connectors", ws);
+  await audit(user, `Linked ${KIND_LABEL[c.kind]} ${PROJECT_WORD[c.kind]} ${p.name} to this group (${audience}, read-only)`, "Connectors", ws);
   await claimAndSync(user.org_id, id).catch(() => undefined); // the link's health records any problem
   return linkHealth(user.org_id, id);
 }
@@ -424,7 +458,7 @@ export async function unlinkProject(user: User, id: unknown): Promise<{ items: n
   if (!(await get("SELECT id FROM connector_links WHERE connector_id = ? AND workspace_id = ? AND org_id = ?", l.connector_id, l.workspace_id, user.org_id))) {
     await removeConnectorHealth(user.org_id, HEALTH[l.kind].id, l.workspace_id);
   }
-  await audit(user, `Unlinked ${KIND_LABEL[l.kind]} project ${l.project_name} from this group: removed ${items.length} imported item${items.length === 1 ? "" : "s"}`, "Connectors", l.workspace_id);
+  await audit(user, `Unlinked ${KIND_LABEL[l.kind]} ${PROJECT_WORD[l.kind]} ${l.project_name} from this group: removed ${items.length} imported item${items.length === 1 ? "" : "s"}`, "Connectors", l.workspace_id);
   return { items: items.length };
 }
 
@@ -455,9 +489,13 @@ async function claimAndSync(orgId: string, linkId: string): Promise<boolean> {
 
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
-/** Saves one item and (re-)indexes it when its text changed. Returns whether it changed. */
+/**
+ * Saves one item and (re-)indexes it when its text changed: work items as source type `workitem`, Confluence
+ * pages whole as source type `page` (like documents). Returns whether it changed.
+ */
 async function saveItem(l: LinkRow, kind: ConnectorKind, item: WorkItem): Promise<boolean> {
-  const text = workItemText(kind, l.project_name, item);
+  const page = isPageKind(kind);
+  const text = page ? pageText(kind, l.project_name, item) : workItemText(kind, l.project_name, item);
   const hash = sha(`${l.audience}\n${text}`);
   const cur = await get<{ id: string; text_hash: string | null }>("SELECT id, text_hash FROM connector_items WHERE link_id = ? AND external_id = ? AND org_id = ?", l.id, item.externalId, l.org_id);
   if (cur?.text_hash === hash) return false;
@@ -476,7 +514,7 @@ async function saveItem(l: LinkRow, kind: ConnectorKind, item: WorkItem): Promis
       id, l.org_id, l.workspace_id, l.id, item.externalId, item.type, item.title.slice(0, 500), item.state, item.assignee, item.dueOn, item.url, item.changedAt, blocked, item.commentCount, hash, now(),
     );
   }
-  await indexText({ orgId: l.org_id, workspaceId: l.workspace_id, sourceType: "workitem", sourceId: id, title: workItemTitle(kind, item), audience: l.audience, text });
+  await indexText({ orgId: l.org_id, workspaceId: l.workspace_id, sourceType: page ? "page" : "workitem", sourceId: id, title: workItemTitle(kind, item), audience: l.audience, text });
   return true;
 }
 
@@ -669,7 +707,7 @@ export async function connectorProblems(at = new Date()): Promise<BrokenConnecto
 /* Using the items: citations, knowledge map, meeting notes          */
 /* ---------------------------------------------------------------- */
 
-/** The tool links of cited work items (source id → URL), scoped to the organization. */
+/** The tool links of cited work items and Confluence pages (source id → URL), scoped to the organization. */
 export async function workItemLinks(orgId: string, ids: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   for (let i = 0; i < ids.length; i += 100) {
@@ -682,8 +720,9 @@ export async function workItemLinks(orgId: string, ids: string[]): Promise<Map<s
 }
 
 /**
- * The group's open work items (not done/closed), most recently changed first, as inventory lines for the
+ * The group's open work items (not done/closed/merged), most recently changed first, as inventory lines for the
  * knowledge map and meeting notes: `- "<title as indexed>": State · assignee · due · blocked by …`. At most `limit`.
+ * Confluence pages aren't work, so they're left out (they reach the knowledge map as documents through search).
  */
 export async function openWorkItemLines(orgId: string, workspaceId: string, limit = 60): Promise<string[]> {
   const rows = await all<{ kind: ConnectorKind; external_id: string; item_type: string | null; title: string; state: string | null; assignee: string | null; due_on: string | null; blocked_by: string | null; changed_at: string | null }>(
@@ -692,7 +731,7 @@ export async function openWorkItemLines(orgId: string, workspaceId: string, limi
       WHERE i.org_id = ? AND i.workspace_id = ? ORDER BY i.changed_at DESC LIMIT 400`,
     orgId, workspaceId,
   );
-  return rows.filter((r) => !isDoneState(r.state)).slice(0, limit).map((r) => {
+  return rows.filter((r) => !isPageKind(r.kind) && !isDoneState(r.state)).slice(0, limit).map((r) => {
     const title = workItemTitle(r.kind, { externalId: r.external_id, title: r.title, type: r.item_type });
     const bits = [r.state, r.assignee ? `assigned to ${r.assignee}` : "unassigned", r.due_on ? `due ${r.due_on}` : null, r.blocked_by ? `blocked by ${r.blocked_by}` : null, r.changed_at ? `changed ${r.changed_at.slice(0, 10)}` : null];
     return `- "${title}": ${bits.filter(Boolean).join(" · ")}`;

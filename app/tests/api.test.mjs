@@ -1649,6 +1649,43 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.ok(!/ZEBRA/.test(JSON.stringify((await other("GET", "/api/audit")).body)));
   assert.equal((await admin("DELETE", `/api/connectors/links/${zl.body.link.id}`)).body.items, 1);
   assert.ok(!(await admin("POST", "/api/ask", { ws: s.wsB, question: "ZEBRA vault key Fabrikam merger" })).body.sources.some((x) => x.type === "workitem"), "unlinking removes the items");
+  // The same walls for GitHub (an issue in a repository) and Confluence (a page in a space) linked to B. A fresh
+  // Member of A asks (the suite has used up others' questions an hour); B's side is checked in the index itself.
+  tools.world.github.installations[0].repos.find((r) => r.full_name === "northwind/internal-wiki").issues.push({
+    number: 77, title: "Rotate the ZEBRA vault key for the Fabrikam merger", state: "open", pr: false, assignees: ["bea-b"], labels: [], milestone: null,
+    updated: new Date().toISOString(), body: "Workspace B only: the vault code is ZEBRA-7731.", comments: [],
+  });
+  tools.world.confluence.sites[0].spaces.find((sp) => sp.key === "OPS").pages.push({
+    id: "77310", title: "ZEBRA vault handover", updated: new Date().toISOString(), by: "Bea B", ancestors: [], labels: [], body: "<p>Workspace B only: the Fabrikam merger vault code is ZEBRA-7731.</p>",
+  });
+  const isoAsker = client();
+  const isoUser = await admin("POST", "/api/users", { name: "Ivy Iso", email: "ivy.iso@test.local", role: "Member", workspaces: [s.wsA] });
+  assert.equal((await firstSignIn(isoAsker, "ivy.iso@test.local", isoUser.body.tempPassword)).status, 200);
+  for (const [kind, project, type] of [["github", "northwind/internal-wiki", "workitem"], ["confluence", "OPS", "page"]]) {
+    const c = await connectTool(admin, kind);
+    assert.equal(c.to?.pathname + c.to?.search, `/connectors?connected=${kind}`, flashOf(c.done ?? c.start));
+    const id = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === kind).id;
+    const l = await admin("POST", "/api/connectors/links", { connector: id, ws: s.wsB, project });
+    assert.equal(l.status, 200, JSON.stringify(l.body));
+    assert.deepEqual([l.body.link.items, l.body.link.problem], [1, null], kind);
+    assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_type = '${type}' AND workspace_id = '${s.wsB}' AND text LIKE '%ZEBRA-7731%'`)), 1, `${kind}: indexed in B only`);
+    assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_type = '${type}' AND workspace_id <> '${s.wsB}' AND text LIKE '%ZEBRA-7731%'`)), 0, `${kind}: nowhere else`);
+    assert.ok(!leaks(await askA(isoAsker, "ZEBRA vault key Fabrikam merger handover")), `${kind}: never reaches A`);
+    assert.deepEqual((await other("GET", "/api/connectors")).body.connectors, [], `${kind}: another organization sees none of this org's tools`);
+    assert.ok(!(await member("GET", "/api/connectors")).body.connectors.find((x) => x.kind === kind).links.some((lk) => lk.workspaceId === s.wsB), `${kind}: a member of A doesn't see B's link`);
+    assert.equal((await other("GET", `/api/connectors/${id}/projects`)).status, 404);
+    assert.equal((await other("POST", `/api/connectors/links/${l.body.link.id}/sync`)).status, 404);
+    assert.equal((await other("DELETE", `/api/connectors/links/${l.body.link.id}`)).status, 404);
+    assert.equal((await other("POST", "/api/connectors/links", { connector: id, ws: theirWs, project })).status, 404, `${kind}: can't feed another org's group`);
+    assert.equal((await other("DELETE", `/api/connectors/${id}`)).status, 404);
+    assert.equal((await member("POST", "/api/connectors/links", { connector: id, ws: s.wsA, project })).status, 403, `${kind}: Members can't link`);
+    assert.equal((await member("DELETE", `/api/connectors/${id}`)).status, 403);
+    assert.equal((await member("GET", `/api/connectors/start?kind=${kind}`)).status, 403);
+    // Disconnecting removes the sign-in, the link and its search entries.
+    assert.deepEqual((await admin("DELETE", `/api/connectors/${id}`)).body, { links: 1, items: 1 });
+    assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE text LIKE '%ZEBRA-7731%' AND source_type = '${type}'`)), 0, `${kind}: search entries gone`);
+  }
+  assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "ZEBRA vault key Fabrikam merger handover" })));
 });
 
 /* ---------- Support: tickets, Owner Console inbox, articles, Help chat, help bot, follow-ups ---------- */
@@ -4282,7 +4319,7 @@ test(`[${ENGINE}] connectors: Azure DevOps connects with a sealed sign-in, lists
   assert.match(sealed, /^enc1\./, "the access token is encrypted at rest");
   assert.match(await dbValue(`SELECT refresh_token FROM connectors WHERE id = '${s.ado}'`), /^enc1\./);
   const list = await admin("GET", "/api/connectors");
-  assert.deepEqual(list.body.configured, { ado: true, jira: true });
+  assert.deepEqual(list.body.configured, { ado: true, jira: true, github: true, confluence: true });
   assert.doesNotMatch(JSON.stringify(list.body), /adoat_|adort_|enc1\./, "no token in any response");
   // Projects come in pages (two per page here).
   tools.state.adoProjectPage = 2;
@@ -4305,7 +4342,7 @@ test(`[${ENGINE}] connectors: Azure DevOps connects with a sealed sign-in, lists
   for (const bit of ["State: Active", "Assigned to: Priya Shah", "Blocked by: #4810 Firewall change request for the payment gateway (New)", "Tags: Blocked, cutover", "Comments (2, latest first): Priya Shah"]) assert.ok(text.includes(bit), `${bit} in: ${text}`);
   assert.ok(!/<p>|<b>/.test(text), "HTML is turned into plain text");
   // Teams answer cards get an "Open #…" button to the tool.
-  assert.match(fs.readFileSync(path.join(APP, "src/lib/teams/cards.ts"), "utf8"), /Action\.OpenUrl", title: `Open /);
+  assert.match(fs.readFileSync(path.join(APP, "src/lib/teams/cards.ts"), "utf8"), /Action\.OpenUrl", title: openLabel\(s\.title\)/);
   // The filter "Work items" keeps only connector sources.
   const only = await askA(asker, "payment gateway cutover", { types: ["work"] });
   assert.ok(only.body.sources.length && only.body.sources.every((x) => x.type === "workitem"));
@@ -4459,4 +4496,147 @@ test(`[${ENGINE}] connectors: disconnecting removes the sign-in, every link and 
   assert.deepEqual((await admin("GET", "/api/connectors")).body.connectors, []);
   assert.equal(await rows("connector_health", "org_id", org), 0, "nothing left for the broken-connector watcher");
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Azure DevOps \(northwind\): removed its sign-in, 1 linked project and 6 imported items/);
+});
+
+test(`[${ENGINE}] connectors: GitHub connects through a GitHub App (PKCE, rotating tokens), pages through repositories and issues, and answers cite issues and pull requests`, async () => {
+  tools.state.githubPage = 2;
+  const c = await connectTool(admin, "github", "ignored-site");
+  assert.equal(c.to?.search, "?connected=github", flashOf(c.done ?? c.start));
+  const gh = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "github");
+  assert.deepEqual([gh.accountName, gh.account], ["northwind-dev", "90001"]);
+  assert.match(await dbValue(`SELECT access_token FROM connectors WHERE id = '${gh.id}'`), /^enc1\./, "sealed at rest");
+  assert.match(await dbValue(`SELECT refresh_token FROM connectors WHERE id = '${gh.id}'`), /^enc1\./);
+  assert.doesNotMatch(JSON.stringify((await admin("GET", "/api/connectors")).body), /githubat_|githubrt_|enc1\./, "no token in any response");
+  // Repositories come from the app's installations, two per page here.
+  const repos = (await admin("GET", `/api/connectors/${gh.id}/projects`)).body.projects;
+  assert.deepEqual(repos.map((p) => p.key), ["northwind/data-pipeline", "northwind/internal-wiki", "northwind/store-pos"]);
+  assert.equal((await admin("POST", "/api/connectors/links", { connector: gh.id, ws: s.wsA, project: "northwind/made-up" })).status, 404);
+  const link = (await admin("POST", "/api/connectors/links", { connector: gh.id, ws: s.wsA, project: "northwind/store-pos" })).body.link;
+  assert.deepEqual([link.items, link.problem, link.projectName], [4, null, "northwind/store-pos"], "every issue and PR over two pages");
+  s.ghLink = link.id;
+  const textOf = (ext) => dbValue(`SELECT text FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE external_id = '${ext}' AND link_id = '${link.id}')`);
+  const t41 = await textOf("store-pos#41");
+  for (const bit of ["GitHub Issue store-pos#41: Receipt printer times out on the new tills", "State: Open", "Assigned to: lena-fischer", "Project: northwind/store-pos (GitHub)", "Part of: Milestone Wave 2", "Tags: bug, cutover", "Comments (2, latest first): lena-fischer"]) assert.ok(t41.includes(bit), `${bit} in: ${t41}`);
+  assert.ok(!t41.includes("template: bug"), "issue-template comments are dropped");
+  assert.match(await textOf("store-pos#38"), /^GitHub Pull request store-pos#38: Till firmware 5\.2\nState: Merged/);
+  assert.match(await dbValue(`SELECT due_on FROM connector_items WHERE external_id = 'store-pos#41'`), /^\d{4}-\d{2}-\d{2}$/, "the milestone's due date");
+  const a = await askA(s.asker, "receipt printer times out on the new tills vendor driver");
+  const src = a.body.sources.find((x) => x.type === "workitem");
+  assert.ok(src, JSON.stringify(a.body.sources));
+  assert.match(src.url, new RegExp(`^${TOOLS_BASE}/gh-web/northwind/store-pos/issues/41$`));
+  // A tampered next link (another host) is never followed: the sync stops after that page.
+  tools.state.githubEvilNext = true;
+  await dbExec(`UPDATE connector_links SET sync_cursor = NULL WHERE id = '${link.id}'`);
+  assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
+  assert.equal(tools.counts.evil, 0, "the token never went off the API");
+  tools.state.githubEvilNext = false;
+  tools.state.githubPage = 100;
+  assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%githubat_%' OR attrs LIKE '%lena-fischer%'")), 0, "no tokens or item text in traces");
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Connected GitHub \(northwind-dev\), read-only/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Linked GitHub repository northwind\/store-pos/);
+});
+
+test(`[${ENGINE}] connectors: GitHub syncs incrementally, waits out a short rate limit, stops on a long one (resuming later), and a revoked app shows as expired`, async () => {
+  const repo = tools.world.github.installations[0].repos.find((r) => r.full_name === "northwind/store-pos");
+  repo.issues.find((i) => i.number === 42).merged = true;
+  repo.issues.find((i) => i.number === 42).state = "closed";
+  repo.issues.find((i) => i.number === 42).updated = new Date().toISOString();
+  repo.issues.push({ number: 43, title: "Card reader pairing guide", state: "open", pr: false, assignees: [], labels: [], milestone: null, updated: new Date().toISOString(), body: "", comments: [] });
+  // The 8-hour token has run out: one refresh (rotating) and the sync carries on.
+  tools.expireAccessTokens();
+  const refreshes = tools.counts.refresh.github;
+  // A short "slow down" (Retry-After: 1) is waited out inside the call.
+  tools.rateLimit("github", { times: 1, retryAfter: 1, status: 403 });
+  const r = (await admin("POST", `/api/connectors/links/${s.ghLink}/sync`)).body.link;
+  assert.deepEqual([r.items, r.problem], [5, null]);
+  assert.equal(tools.counts.refresh.github, refreshes + 1, "one refresh");
+  assert.match(await dbValue(`SELECT state FROM connector_items WHERE external_id = 'store-pos#42'`), /^Merged$/);
+  // A long one stops the sync with a plain problem (nothing deleted, cursor kept), and the next sync resumes.
+  tools.rateLimit("github", { times: 1, retryAfter: 3600 });
+  const limited = (await admin("POST", `/api/connectors/links/${s.ghLink}/sync`)).body.link;
+  assert.match(limited.problem, /GitHub asked Sidekick to slow down \(rate limit\)\. It will carry on from where it stopped after \d\d:\d\d UTC/);
+  assert.equal(limited.items, 5, "nothing deleted");
+  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE connector = 'github' AND workspace_id = '${s.wsA}'`), "broken", "the watcher hears about it");
+  assert.equal((await admin("POST", `/api/connectors/links/${s.ghLink}/sync`)).body.link.problem, null);
+  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE connector = 'github' AND workspace_id = '${s.wsA}'`), "ok");
+  // Uninstalled / revoked on GitHub: the refresh is refused (GitHub's 200 + bad_refresh_token), the connector turns expired.
+  tools.revoke("github");
+  tools.expireAccessTokens();
+  assert.match((await admin("POST", `/api/connectors/links/${s.ghLink}/sync`)).body.link.problem, /GitHub sign-in has expired or was revoked/);
+  assert.equal((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "github").status, "expired");
+  assert.equal(await dbValue("SELECT status FROM connector_health WHERE connector = 'github' AND workspace_id = '' AND org_id = (SELECT id FROM orgs WHERE name = 'Test Org')"), "broken", "organization-wide for admins");
+  await dbExec(`UPDATE connector_links SET last_sync_at = '2026-01-01T00:00:00.000Z' WHERE id = '${s.ghLink}'`);
+  const calls = tools.counts.api.github;
+  await jobTick({ sweep: true, kinds: ["connectors.schedule", "connector.sync"] });
+  assert.equal(tools.counts.api.github, calls, "the scheduler skips an expired connector");
+  assert.equal((await connectTool(admin, "github")).to.search, "?connected=github", "reconnecting the same account");
+  // The job queue syncs it again (connectors.schedule → connector.sync).
+  const tick = await jobTick({ sweep: true, kinds: ["connectors.schedule", "connector.sync"] });
+  assert.ok(tick.synced >= 1, JSON.stringify(tick));
+  assert.equal((await linkNamed(admin, "github", "northwind/store-pos")).problem, null);
+  assert.equal((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "github").status, "ok");
+  // Losing access to the repository is a plain problem on the link.
+  tools.deny("github", "northwind/store-pos");
+  assert.match((await admin("POST", `/api/connectors/links/${s.ghLink}/sync`)).body.link.problem, /GitHub refused access to the repository “northwind\/store-pos”/);
+  tools.allow("github", "northwind/store-pos");
+});
+
+test(`[${ENGINE}] connectors: Confluence connects with the Jira app, reads a space's pages as documents (paged, by last-modified), cites them with links, and handles 429 and revoked access`, async () => {
+  tools.state.confluenceSpacePage = 1;
+  tools.state.confluencePage = 2;
+  const c = await connectTool(admin, "confluence");
+  assert.equal(c.to?.search, "?connected=confluence", flashOf(c.done ?? c.start));
+  const cf = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "confluence");
+  assert.equal(cf.accountName, "northwind");
+  const spaces = (await admin("GET", `/api/connectors/${cf.id}/projects`)).body.projects;
+  assert.deepEqual(spaces.map((p) => p.key), ["OPS", "CUT"], "both pages of spaces (sorted by name)");
+  const link = (await admin("POST", "/api/connectors/links", { connector: cf.id, ws: s.wsA, project: "CUT" })).body.link;
+  assert.deepEqual([link.items, link.problem, link.projectName], [3, null, "Wave 2 Cutover"], "every page over two result pages");
+  // Pages are documents: source type "page", whole text, under the "Documents" filter, cited with a link.
+  const text = await dbValue(`SELECT text FROM passages WHERE source_type = 'page' AND source_id = (SELECT id FROM connector_items WHERE external_id = '98301')`);
+  for (const bit of ["Confluence page: Cutover weekend runbook", "Space: Wave 2 Cutover (Confluence)", "Labels: runbook, cutover", "by Ana Ruiz", "Roll a store back within 30 minutes"]) assert.ok(text.includes(bit), `${bit} in: ${text}`);
+  assert.ok(!/<p>|<h2>/.test(text), "storage format becomes plain text");
+  const a = await askA(s.asker, "cutover weekend runbook roll a store back payment gateway check", { types: ["documents"] });
+  const page = a.body.sources.find((x) => x.type === "page");
+  assert.ok(page, JSON.stringify(a.body.sources));
+  assert.match(page.title, /^Confluence page: /);
+  assert.match(page.url, new RegExp(`^${TOOLS_BASE}/confluence-web/northwind/wiki/spaces/CUT/pages/98301/`));
+  assert.ok(a.body.sources.every((x) => x.type !== "workitem"), "the Documents filter leaves work items out");
+  // Pages never count as open work (knowledge map, meeting notes).
+  assert.equal((await admin("POST", "/api/memory/refresh", { ws: s.wsA })).status, 200);
+  // Incremental by last-modified: an edited page is re-indexed once, not duplicated.
+  const p3 = tools.world.confluence.sites[0].spaces.find((sp) => sp.key === "CUT").pages.find((p) => p.id === "98303");
+  p3.body = "<p>2026-10-21: the airport stores move in batch 3 after all.</p>";
+  p3.updated = new Date().toISOString();
+  // Atlassian says 429 with Retry-After: 1 first; it is waited out.
+  tools.rateLimit("confluence", { times: 1, retryAfter: 1 });
+  tools.expireAccessTokens();
+  assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
+  assert.equal(tools.counts.refresh.confluence, 1, "rotating refresh");
+  const decisions = `SELECT text FROM passages WHERE source_type = 'page' AND source_id = (SELECT id FROM connector_items WHERE external_id = '98303')`;
+  assert.match(await dbValue(decisions), /batch 3 after all/);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE external_id = '98303')`)), 1);
+  // A long 429 stops with a plain problem; the space losing access too.
+  tools.rateLimit("confluence", { times: 1, retryAfter: 900 });
+  assert.match((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, /Confluence asked Sidekick to slow down/);
+  tools.deny("confluence", "CUT");
+  assert.match((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, /Confluence refused access to the space “CUT”/);
+  tools.allow("confluence", "CUT");
+  // Revoked in Atlassian: expired until reconnected; nothing is deleted.
+  tools.revoke("confluence");
+  tools.expireAccessTokens();
+  assert.match((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, /Confluence sign-in has expired or was revoked/);
+  assert.deepEqual((({ status, links }) => [status, links[0].items])((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "confluence")), ["expired", 3]);
+  assert.equal((await connectTool(admin, "confluence")).to.search, "?connected=confluence");
+  assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
+  // Disconnecting both tools removes every page and issue from answers.
+  const org = await dbValue("SELECT id FROM orgs WHERE name = 'Test Org'");
+  assert.deepEqual((await admin("DELETE", `/api/connectors/${cf.id}`)).body, { links: 1, items: 3 });
+  const ghId = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "github").id;
+  assert.deepEqual((await admin("DELETE", `/api/connectors/${ghId}`)).body, { links: 1, items: 5 });
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_type IN ('workitem', 'page') AND org_id = '${org}'`)), 0);
+  assert.equal(await rows("connector_health", "org_id", org), 0);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Confluence \(northwind\): removed its sign-in, 1 linked project and 3 imported items/);
+  tools.state.confluenceSpacePage = 250;
+  tools.state.confluencePage = 25;
 });

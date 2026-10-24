@@ -11,7 +11,8 @@
  *      Console account, plans (test mode), ~135 people, groups with Team Leads, documents, the firm library,
  *      meeting imports (the latest ones marked as captured from Teams by automatic notes, plus one waiting for a
  *      group and one skipped; two decisions saved to knowledge), linked and tracked Teams chats with messages, a
- *      connected Azure DevOps board and Jira project (against the fake tools in scripts/fake-tools.mjs on --tools-port),
+ *      connected Azure DevOps board, Jira project, GitHub repository and Confluence space (against the fake tools in
+ *      scripts/fake-tools.mjs on --tools-port),
  *      guardrails, questions with 👍/👎, support
  *      tickets with replies, and the smaller client organizations. So audit entries and traces exist too.
  *   B. Stops the copy and finishes what has no API, through lib/db.ts: with fake Claude, the meeting notes, answers
@@ -394,12 +395,19 @@ async function phaseA() {
     world.groups[p.key] = { id: r.id, profile: p, lead: world.users[people.find((x) => x.name === p.lead).email].session };
   }
 
-  log("• Connectors: an Azure DevOps board and a Jira project (fake tools on this Mac), linked to groups");
+  log("• Connectors: an Azure DevOps board, a Jira project, a GitHub repository and a Confluence space (fake tools on this Mac), linked to groups");
   await connectDemoTool(owner, "ado", "northwind");
   await connectDemoTool(owner, "jira");
+  await connectDemoTool(owner, "github");
+  await connectDemoTool(owner, "confluence");
   const connected = (await owner("GET", "/api/connectors")).connectors;
   const toolId = (kind) => connected.find((t) => t.kind === kind).id;
-  for (const [kind, project, key] of [["ado", "Wave 2 Cutover", "contoso"], ["jira", "STORE", "contoso"], ["ado", "Data Platform", "litware"]]) {
+  const links = [
+    ["ado", "Wave 2 Cutover", "contoso"], ["jira", "STORE", "contoso"], ["ado", "Data Platform", "litware"],
+    // The tills' code (issues and pull requests) and the cutover wiki (pages, searched like documents) for Contoso.
+    ["github", "northwind/store-pos", "contoso"], ["confluence", "CUT", "contoso"],
+  ];
+  for (const [kind, project, key] of links) {
     const r = await world.groups[key].lead("POST", "/api/connectors/links", { connector: toolId(kind), ws: world.groups[key].id, project });
     if (r.link.problem) throw new Error(`Linking ${project} didn't sync: ${r.link.problem}`);
   }

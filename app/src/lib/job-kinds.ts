@@ -57,7 +57,7 @@ defineJob("rolloffs.run", { label: "Delete ended groups and organizations", ever
 // Connectors (lib/connectors.ts): every 5 minutes, one sync job per linked project that is due (each project syncs
 // every 15 minutes). A tool problem is recorded in the project's health, not retried here.
 defineJob("connectors.schedule", {
-  label: "Schedule Azure DevOps / Jira syncs",
+  label: "Schedule connector syncs (Azure DevOps, Jira, GitHub, Confluence)",
   everyMs: 5 * MIN,
   maxAttempts: 3,
   run: async () => {
@@ -69,7 +69,7 @@ defineJob("connectors.schedule", {
   },
 });
 defineJob("connector.sync", {
-  label: "Sync a linked Azure DevOps / Jira project",
+  label: "Sync a linked connector project (Azure DevOps, Jira, GitHub, Confluence)",
   maxAttempts: 1,
   run: async ({ job, payload }) => (job.org_id && typeof payload.link === "string" ? syncDueLink(job.org_id, payload.link) : undefined),
 });

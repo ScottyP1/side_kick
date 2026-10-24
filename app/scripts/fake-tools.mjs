@@ -1,8 +1,9 @@
 /**
- * A fake Azure DevOps and a fake Jira Cloud on one small local HTTP server, for the automated tests
- * (tests/api.test.mjs) and the demo world (scripts/seed-demo.mjs). No real accounts, nothing leaves this Mac.
+ * A fake Azure DevOps, Jira Cloud, GitHub and Confluence Cloud on one small local HTTP server, for the automated
+ * tests (tests/api.test.mjs) and the demo world (scripts/seed-demo.mjs). No real accounts, nothing leaves this Mac.
  *
- * It speaks just enough of each real API for Sidekick's connectors (lib/connector-ado.ts, lib/connector-jira.ts):
+ * It speaks just enough of each real API for Sidekick's connectors (lib/connector-ado.ts, lib/connector-jira.ts,
+ * lib/connector-github.ts, lib/connector-confluence.ts):
  * - **Microsoft sign-in for ADO** (`/ado-login/<tenant>/oauth2/v2.0/authorize|token`): the authorize page approves
  *   at once and redirects back with a code; the token endpoint checks the client secret and PKCE, and issues
  *   access tokens (lifetime `state.ttl` seconds) and refresh tokens.
@@ -14,11 +15,25 @@
  * - **Jira REST** (`/jira-api/oauth/token/accessible-resources`, `/jira-api/ex/jira/<cloud id>/rest/api/3/...`):
  *   paged project search (`state.jiraProjectPage`) and the enhanced JQL search with `nextPageToken`
  *   (`state.jiraIssuePage`), with `project = "KEY"` and `updated >= "yyyy/MM/dd HH:mm"`.
- * - **Web pages** (`/ado-web/...`, `/jira-web/...`): a plain page per work item, so links in the demo open something.
+ * - **GitHub sign-in** (`/gh-login/login/oauth/authorize|access_token`): a GitHub App's user authorization with
+ *   PKCE; like the real one, errors come back as **200** with an `error` field (`bad_refresh_token`), and refresh
+ *   tokens rotate.
+ * - **GitHub REST** (`/gh-api/...`): `/user`, `/user/installations` and each installation's repositories, the
+ *   issues list (issues and pull requests, `since`, `sort=updated&direction=asc`) and comments, all paged with a
+ *   `Link: <…>; rel="next"` header (`state.githubPage` per page).
+ * - **Confluence** (`/confluence-auth/...`, `/confluence-api/...`): the Atlassian sign-in again (same app ids as Jira,
+ *   rotating refresh tokens), accessible resources with Confluence scopes, v2 spaces (`_links.next`,
+ *   `state.confluenceSpacePage`) and CQL content search (`space = "KEY" AND type = page AND lastmodified >= …`,
+ *   `state.confluencePage` per page).
+ * - **Web pages** (`/ado-web/...`, `/jira-web/...`, `/gh-web/...`, `/confluence-web/...`): a plain page per item, so
+ *   links in the demo open something.
  *
- * Test controls: `revoke(kind)` (sign-in revoked: API calls 401, refreshes fail with invalid_grant), `deny(kind,
- * project)` (403 for one project), `state.ttl` (make tokens run out), `counts` (token refreshes, API calls), and the
- * `world` object itself (add or change items; set `changed` to now so the next sync picks them up).
+ * Test controls: `revoke(kind)` (sign-in revoked: API calls 401, refreshes fail), `deny(kind, project)` (403 for one
+ * project, repository or space), `rateLimit(kind, { times, retryAfter, status })` (the next `times` API calls answer
+ * "slow down" with `Retry-After`), `state.githubEvilNext` (the issues list's next link points off the API: it must
+ * never be followed; `counts.evil` counts tries), `state.ttl` (make tokens run out), `counts` (token refreshes, API
+ * calls), and the `world` object itself (add or change items; set `changed`/`updated` to now so the next sync picks
+ * them up).
  *
  * Use: `const fake = createFakeTools(); const base = await fake.listen(); env = { ...fake.env(base) }`.
  * Standalone (the demo): `node scripts/fake-tools.mjs --port 3331` (or FAKE_TOOLS_PORT=3331; the demo launch config
@@ -31,7 +46,7 @@ const day = 86400_000;
 const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
 const dueIn = (days) => new Date(Date.now() + days * day).toISOString().slice(0, 10);
 
-/** The made-up world: Northwind's ADO organization and Jira site (shared by the tests and the demo). */
+/** The made-up world: Northwind's ADO organization, Jira site, GitHub repositories and Confluence spaces (shared by the tests and the demo). */
 export function defaultWorld() {
   return {
     ado: {
@@ -75,6 +90,47 @@ export function defaultWorld() {
         },
       ],
     },
+    github: {
+      user: { id: 90001, login: "northwind-dev" },
+      installations: [
+        {
+          id: 501,
+          repos: [
+            {
+              full_name: "northwind/store-pos",
+              issues: [
+                { number: 41, title: "Receipt printer times out on the new tills", state: "open", pr: false, assignees: ["lena-fischer"], labels: ["bug", "cutover"], milestone: { title: "Wave 2", due_on: `${dueIn(10)}T07:00:00Z` }, updated: iso(1 * day), body: "Tills in the Leeds pilot store wait 30 seconds for the receipt printer.\n<!-- template: bug -->", comments: [{ by: "tom-baker", at: iso(2 * day), text: "Seen twice on Saturday." }, { by: "lena-fischer", at: iso(1 * day), text: "Vendor driver 2.4.1 fixes it in the lab." }] },
+                { number: 42, title: "Offline mode for card payments", state: "open", pr: true, merged: false, draft: false, assignees: ["priya-shah"], labels: ["payments"], milestone: { title: "Wave 2", due_on: `${dueIn(10)}T07:00:00Z` }, updated: iso(2 * day), body: "Queues card payments while the payment gateway can't be reached and replays them afterwards.", comments: [] },
+                { number: 38, title: "Till firmware 5.2", state: "closed", pr: true, merged: true, draft: false, assignees: ["dev-patel"], labels: [], milestone: null, updated: iso(6 * day), body: "", comments: [] },
+                { number: 35, title: "Store opening checklist screen", state: "closed", pr: false, assignees: [], labels: ["ui"], milestone: null, updated: iso(9 * day), body: "Checklist shown when a manager opens the till in the morning.", comments: [] },
+              ],
+            },
+            { full_name: "northwind/data-pipeline", issues: [{ number: 7, title: "Nightly sales export fails on public holidays", state: "open", pr: false, assignees: [], labels: ["bug"], milestone: null, updated: iso(3 * day), body: "The 02:00 export skips days marked as holidays.", comments: [] }] },
+            { full_name: "northwind/internal-wiki", issues: [] },
+          ],
+        },
+      ],
+    },
+    confluence: {
+      sites: [
+        {
+          id: "11111111-aaaa-4bbb-8ccc-000000000001",
+          name: "northwind",
+          spaces: [
+            {
+              key: "CUT",
+              name: "Wave 2 Cutover",
+              pages: [
+                { id: "98301", title: "Cutover weekend runbook", updated: iso(2 * day), by: "Ana Ruiz", ancestors: ["Wave 2 Cutover"], labels: ["runbook", "cutover"], body: "<h2>Friday</h2><p>22:00: freeze the price files.</p><h2>Saturday</h2><p>06:00: switch the stores in batches of 12. Roll a store back within 30 minutes if the payment gateway check fails.</p>" },
+                { id: "98302", title: "Store batch schedule", updated: iso(3 * day), by: "Marcus Lee", ancestors: ["Wave 2 Cutover"], labels: [], body: "<table><tr><td>Batch 1</td><td>Leeds, York, Hull</td></tr><tr><td>Batch 2</td><td>Bristol, Bath</td></tr></table>" },
+                { id: "98303", title: "Decision log", updated: iso(5 * day), by: "Priya Shah", ancestors: ["Wave 2 Cutover"], labels: ["decisions"], body: "<p>2026-10-14: the three airport stores keep their old tills until January.</p>" },
+              ],
+            },
+            { key: "OPS", name: "Store Operations", pages: [] },
+          ],
+        },
+      ],
+    },
   };
 }
 
@@ -85,9 +141,18 @@ const adf = (text) => (text ? { type: "doc", version: 1, content: [{ type: "para
  * Creates the fake tools server. `world` is the data it serves (see `defaultWorld`); `clients` the app ids and
  * secrets it accepts. Returns controls (see the file comment).
  */
-export function createFakeTools({ world = defaultWorld(), clients = { ado: { id: "fake-ado-client", secret: "fake-ado-secret" }, jira: { id: "fake-jira-client", secret: "fake-jira-secret" } }, lenient = false } = {}) {
-  const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50 };
-  const counts = { refresh: { ado: 0, jira: 0 }, api: { ado: 0, jira: 0 }, unauthorized: 0 };
+export function createFakeTools({
+  world = defaultWorld(),
+  clients = {
+    ado: { id: "fake-ado-client", secret: "fake-ado-secret" }, jira: { id: "fake-jira-client", secret: "fake-jira-secret" }, github: { id: "fake-github-client", secret: "fake-github-secret" },
+    // Confluence uses the same Atlassian app as Jira (lib/connector-confluence.ts falls back to the Jira app ids).
+    confluence: { id: "fake-jira-client", secret: "fake-jira-secret" },
+  },
+  lenient = false,
+} = {}) {
+  const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false };
+  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0 }, unauthorized: 0, limited: 0, evil: 0 };
+  const limits = new Map(); // kind → { times, retryAfter, status }
   const codes = new Map(); // code → { kind, challenge, redirectUri }
   const access = new Map(); // token → { kind, expires }
   const refresh = new Map(); // token → { kind }
@@ -127,14 +192,25 @@ export function createFakeTools({ world = defaultWorld(), clients = { ado: { id:
           send(401, { message: "Unauthorized" });
           return false;
         }
+        const lim = limits.get(kind);
+        if (lim && lim.times > 0) {
+          lim.times--;
+          counts.limited++;
+          const h = { "retry-after": String(lim.retryAfter) };
+          if (lim.status === 403) Object.assign(h, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(Date.now() / 1000) + lim.retryAfter) });
+          send(lim.status, { message: "API rate limit exceeded" }, h);
+          return false;
+        }
         counts.api[kind]++;
         return true;
       };
+      const link = (next) => (next ? { link: `<${next}>; rel="next"` } : {});
 
       // ---- sign-in pages (approve at once) ----
       let m;
-      if (req.method === "GET" && ((m = path.match(/^\/ado-login\/[^/]+\/oauth2\/v2\.0\/authorize$/)) || path === "/jira-auth/authorize")) {
-        const kind = path.startsWith("/ado") ? "ado" : "jira";
+      const kindOfPath = (p) => (p.startsWith("/ado") ? "ado" : p.startsWith("/gh") ? "github" : p.startsWith("/confluence") ? "confluence" : "jira");
+      if (req.method === "GET" && ((m = path.match(/^\/ado-login\/[^/]+\/oauth2\/v2\.0\/authorize$/)) || path === "/jira-auth/authorize" || path === "/gh-login/login/oauth/authorize" || path === "/confluence-auth/authorize")) {
+        const kind = kindOfPath(path);
         const q = url.searchParams;
         if (q.get("client_id") !== clients[kind].id) return send(400, { error: "invalid_client" });
         const code = crypto.randomUUID();
@@ -146,24 +222,28 @@ export function createFakeTools({ world = defaultWorld(), clients = { ado: { id:
         return res.end();
       }
       // ---- token endpoints ----
-      if (req.method === "POST" && (/^\/ado-login\/[^/]+\/oauth2\/v2\.0\/token$/.test(path) || path === "/jira-auth/oauth/token")) {
-        const kind = path.startsWith("/ado") ? "ado" : "jira";
-        const f = kind === "ado" ? Object.fromEntries(new URLSearchParams(body)) : JSON.parse(body || "{}");
-        if (f.client_id !== clients[kind].id || f.client_secret !== clients[kind].secret) return send(401, { error: "invalid_client" });
-        if (f.grant_type === "authorization_code") {
+      if (req.method === "POST" && (/^\/ado-login\/[^/]+\/oauth2\/v2\.0\/token$/.test(path) || path === "/jira-auth/oauth/token" || path === "/gh-login/login/oauth/access_token" || path === "/confluence-auth/oauth/token")) {
+        const kind = kindOfPath(path);
+        const f = kind === "ado" || kind === "github" ? Object.fromEntries(new URLSearchParams(body)) : JSON.parse(body || "{}");
+        // GitHub answers token errors with 200 and an `error` field, like the real one.
+        const fail = (status, error) => send(kind === "github" ? 200 : status, { error });
+        if (f.client_id !== clients[kind].id || f.client_secret !== clients[kind].secret) return fail(401, kind === "github" ? "incorrect_client_credentials" : "invalid_client");
+        // GitHub's code exchange has no grant_type.
+        const grant = f.grant_type ?? (kind === "github" && f.code ? "authorization_code" : undefined);
+        if (grant === "authorization_code") {
           const c = codes.get(f.code);
           codes.delete(f.code);
-          if (!c || c.kind !== kind || c.redirectUri !== f.redirect_uri) return send(400, { error: "invalid_grant" });
-          if (kind === "ado" && crypto.createHash("sha256").update(f.code_verifier ?? "").digest("base64url") !== c.challenge) return send(400, { error: "invalid_grant" });
+          if (!c || c.kind !== kind || c.redirectUri !== f.redirect_uri) return fail(400, kind === "github" ? "bad_verification_code" : "invalid_grant");
+          if ((kind === "ado" || kind === "github") && crypto.createHash("sha256").update(f.code_verifier ?? "").digest("base64url") !== c.challenge) return fail(400, "invalid_grant");
           revokedKinds.delete(kind);
           return send(200, issue(kind));
         }
-        if (f.grant_type === "refresh_token") {
+        if (grant === "refresh_token") {
           const r = refresh.get(f.refresh_token) ?? (lenient && String(f.refresh_token).startsWith(`${kind}rt_`) ? { kind } : undefined);
-          if (!r || r.kind !== kind || revokedKinds.has(kind)) return send(400, { error: "invalid_grant" });
+          if (!r || r.kind !== kind || revokedKinds.has(kind)) return fail(400, kind === "github" ? "bad_refresh_token" : "invalid_grant");
           counts.refresh[kind]++;
           const out = issue(kind);
-          if (kind === "jira") {
+          if (kind !== "ado") {
             refresh.delete(f.refresh_token); // rotating refresh tokens: the old one stops working
           } else {
             refresh.delete(out.refresh_token); // Entra here keeps the same refresh token
@@ -271,9 +351,113 @@ export function createFakeTools({ world = defaultWorld(), clients = { ado: { id:
         return send(404, { message: "Not found" });
       }
 
+      // ---- GitHub REST ----
+      if ((m = path.match(/^\/gh-api\/(.+)$/))) {
+        if (!authed("github")) return;
+        const rest = m[1];
+        const gh = world.github;
+        const pageOf = (list, extra = "") => {
+          const n = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+          const size = Math.min(Number(url.searchParams.get("per_page") ?? 30), state.githubPage);
+          const part = list.slice((n - 1) * size, n * size);
+          const q = new URLSearchParams(url.searchParams);
+          q.set("page", String(n + 1));
+          const next = n * size < list.length ? `${base}/gh-api/${rest}?${q}${extra}` : null;
+          return { part, next };
+        };
+        if (rest === "user") return send(200, { id: gh.user.id, login: gh.user.login, type: "User" });
+        if (rest === "user/installations") {
+          const { part, next } = pageOf(gh.installations);
+          return send(200, { total_count: gh.installations.length, installations: part.map((i) => ({ id: i.id, account: { login: "northwind" } })) }, link(next));
+        }
+        if ((m = rest.match(/^user\/installations\/(\d+)\/repositories$/))) {
+          const inst = gh.installations.find((i) => i.id === Number(m[1]));
+          if (!inst) return send(404, { message: "Not Found" });
+          const { part, next } = pageOf(inst.repos);
+          return send(200, { total_count: inst.repos.length, repositories: part.map((r) => ({ full_name: r.full_name, name: r.full_name.split("/")[1], private: true, archived: false })) }, link(next));
+        }
+        if ((m = rest.match(/^repos\/([^/]+\/[^/]+)\/issues(?:\/(\d+)\/comments)?$/))) {
+          const repo = gh.installations.flatMap((i) => i.repos).find((r) => r.full_name === m[1]);
+          if (!repo) return send(404, { message: "Not Found" });
+          if (denied.has(`github:${repo.full_name}`)) return send(403, { message: "Resource not accessible by integration" });
+          if (m[2]) {
+            const it = repo.issues.find((i) => i.number === Number(m[2]));
+            if (!it) return send(404, { message: "Not Found" });
+            const { part, next } = pageOf([...it.comments].sort((a, b) => a.at.localeCompare(b.at)));
+            return send(200, part.map((c) => ({ user: { login: c.by }, created_at: c.at, body: c.text })), link(next));
+          }
+          const since = url.searchParams.get("since");
+          const list = repo.issues.filter((i) => !since || i.updated >= since).sort((a, b) => a.updated.localeCompare(b.updated));
+          const { part, next } = pageOf(list);
+          const nextLink = next && state.githubEvilNext ? `${base}/gh-evil/steal?page=2` : next;
+          return send(200, part.map((i) => ({
+            number: i.number, title: i.title, state: i.state, updated_at: i.updated, body: i.body, comments: i.comments.length,
+            html_url: `${base}/gh-web/${repo.full_name}/${i.pr ? "pull" : "issues"}/${i.number}`,
+            assignee: i.assignees[0] ? { login: i.assignees[0] } : null, assignees: i.assignees.map((login) => ({ login })),
+            labels: i.labels.map((name) => ({ name })), milestone: i.milestone ? { ...i.milestone, state: "open" } : null,
+            ...(i.pr ? { draft: Boolean(i.draft), pull_request: { merged_at: i.merged ? i.updated : null, html_url: `${base}/gh-web/${repo.full_name}/pull/${i.number}` } } : {}),
+          })), link(nextLink));
+        }
+        return send(404, { message: "Not Found" });
+      }
+      if (path.startsWith("/gh-evil/")) {
+        counts.evil++;
+        return send(200, []);
+      }
+
+      // ---- Confluence REST ----
+      if (path === "/confluence-api/oauth/token/accessible-resources") {
+        if (!authed("confluence")) return;
+        return send(200, world.confluence.sites.map((s) => ({ id: s.id, name: s.name, url: `${base}/confluence-web/${s.name}`, scopes: ["read:confluence-content.all", "read:confluence-space.summary", "search:confluence"] })));
+      }
+      if ((m = path.match(/^\/confluence-api\/ex\/confluence\/([^/]+)\/wiki\/(.+)$/))) {
+        if (!authed("confluence")) return;
+        const site = world.confluence.sites.find((s) => s.id === m[1]);
+        if (!site) return send(404, { message: "Site not found" });
+        if (m[2] === "api/v2/spaces") {
+          const start = Number(url.searchParams.get("cursor") ?? 0);
+          const size = Math.min(Number(url.searchParams.get("limit") ?? 25), state.confluenceSpacePage);
+          const part = site.spaces.slice(start, start + size);
+          const more = start + part.length < site.spaces.length;
+          return send(200, { results: part.map((sp, i) => ({ id: String(1000 + start + i), key: sp.key, name: sp.name, status: "current" })), _links: more ? { next: `/wiki/api/v2/spaces?cursor=${start + part.length}&limit=${size}` } : {} });
+        }
+        if (m[2] === "rest/api/content/search") {
+          const cql = url.searchParams.get("cql") ?? "";
+          const key = cql.match(/space = "([^"]+)"/)?.[1];
+          const space = site.spaces.find((sp) => sp.key === key);
+          if (!space) return send(400, { message: "Could not parse cql" });
+          if (denied.has(`confluence:${space.key}`)) return send(403, { message: "Not permitted to use Confluence" });
+          const since = cql.match(/lastmodified >= "(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})"/);
+          const sinceIso = since ? `${since[1]}-${since[2]}-${since[3]}T${since[4]}:${since[5]}:00.000Z` : null;
+          const list = space.pages.filter((p) => !sinceIso || p.updated >= sinceIso).sort((a, b) => a.updated.localeCompare(b.updated));
+          const start = Number(url.searchParams.get("start") ?? 0);
+          const size = Math.min(Number(url.searchParams.get("limit") ?? 25), state.confluencePage);
+          const part = list.slice(start, start + size);
+          const more = start + part.length < list.length;
+          const q = new URLSearchParams(url.searchParams);
+          q.set("start", String(start + part.length));
+          return send(200, {
+            results: part.map((p) => ({
+              id: p.id, type: "page", status: "current", title: p.title,
+              body: { storage: { value: p.body, representation: "storage" } },
+              version: { when: p.updated, by: { displayName: p.by } },
+              ancestors: p.ancestors.map((title) => ({ title })),
+              metadata: { labels: { results: p.labels.map((name) => ({ name })) } },
+              _links: { webui: `/spaces/${space.key}/pages/${p.id}/${encodeURIComponent(p.title.replace(/ /g, "+"))}` },
+            })),
+            start, limit: size, size: part.length,
+            // Like the real one: relative to the site's /wiki context.
+            _links: { base: `${base}/confluence-web/${site.name}/wiki`, context: "/wiki", ...(more ? { next: `/rest/api/content/search?${q}` } : {}) },
+          });
+        }
+        return send(404, { message: "Not found" });
+      }
+
       // ---- web pages for links ----
       if ((m = path.match(/^\/ado-web\/([^/]+)\/([^/]+)\/_workitems\/edit\/(\d+)$/))) return html(`Azure DevOps · ${m[2]} · work item #${m[3]}`);
       if ((m = path.match(/^\/jira-web\/([^/]+)\/browse\/([\w-]+)$/))) return html(`Jira · ${m[1]} · ${m[2]}`);
+      if ((m = path.match(/^\/gh-web\/([^/]+\/[^/]+)\/(issues|pull)\/(\d+)$/))) return html(`GitHub · ${m[1]} · ${m[2] === "pull" ? "pull request" : "issue"} #${m[3]}`);
+      if ((m = path.match(/^\/confluence-web\/([^/]+)\/wiki\/spaces\/([^/]+)\/pages\/(\d+)/))) return html(`Confluence · ${m[1]} · ${m[2]} · page ${m[3]}`);
       send(404, { message: "Not found" });
     });
   });
@@ -298,10 +482,19 @@ export function createFakeTools({ world = defaultWorld(), clients = { ado: { id:
         ADO_LOGIN_BASE: `${b}/ado-login`, ADO_API_BASE: `${b}/ado`, ADO_WEB_BASE: `${b}/ado-web`,
         JIRA_CLIENT_ID: clients.jira.id, JIRA_CLIENT_SECRET: clients.jira.secret,
         JIRA_AUTH_BASE: `${b}/jira-auth`, JIRA_API_BASE: `${b}/jira-api`,
+        GITHUB_CLIENT_ID: clients.github.id, GITHUB_CLIENT_SECRET: clients.github.secret,
+        GITHUB_LOGIN_BASE: `${b}/gh-login`, GITHUB_API_BASE: `${b}/gh-api`, GITHUB_WEB_BASE: `${b}/gh-web`,
+        // No CONFLUENCE_CLIENT_ID/SECRET: Confluence uses the Jira app (as in production when Cody adds Confluence to it).
+        CONFLUENCE_AUTH_BASE: `${b}/confluence-auth`, CONFLUENCE_API_BASE: `${b}/confluence-api`,
       };
     },
     /** The sign-in was revoked (or expired): API calls answer 401 and refreshes fail, until someone connects again. */
     revoke: (kind) => revokedKinds.add(kind),
+    /**
+     * The next `times` API calls of a tool answer "slow down": `status` 429 (default) or 403 (GitHub's rate limit,
+     * with `x-ratelimit-remaining: 0`), with `Retry-After: retryAfter` seconds. `rateLimit(kind)` clears it.
+     */
+    rateLimit: (kind, { times = 0, retryAfter = 1, status = 429 } = {}) => limits.set(kind, { times, retryAfter, status }),
     /** The connected account loses access to one project (403); `allow` gives it back. */
     deny: (kind, project) => denied.add(`${kind}:${project}`),
     allow: (kind, project) => denied.delete(`${kind}:${project}`),
@@ -316,5 +509,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // Lenient: the demo copy's sealed sign-ins were made by the seed's fake, before this one started.
   const fake = createFakeTools({ lenient: true });
   const b = await fake.listen(i > 0 ? Number(process.argv[i + 1]) : Number(process.env.FAKE_TOOLS_PORT) || 3331);
-  console.log(`Fake Azure DevOps and Jira (made-up data) on ${b}`);
+  console.log(`Fake Azure DevOps, Jira, GitHub and Confluence (made-up data) on ${b}`);
 }

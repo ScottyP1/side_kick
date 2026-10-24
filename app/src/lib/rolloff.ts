@@ -261,7 +261,7 @@ async function groupCounts(orgId: string, workspaceId: string): Promise<Record<s
     "Questions and answers": await c("questions"),
     "Saved Teams chat messages": await c("chat_messages"),
     "Custom guardrail rules": await c("guard_custom_rules"),
-    "Work items read from Azure DevOps or Jira": await c("connector_items"),
+    "Work items and pages read from Azure DevOps, Jira, GitHub or Confluence": await c("connector_items"),
     "Group members": await n("SELECT COUNT(*) AS n FROM workspace_members WHERE workspace_id = ?", workspaceId),
   };
 }
@@ -366,7 +366,7 @@ export async function deleteOrganization(orgId: string, actor: string, rolloff?:
     counts["AI usage records"] = await n("SELECT COUNT(*) AS n FROM usage_events WHERE org_id = ?", orgId);
     counts["Activity traces"] = await n("SELECT COUNT(*) AS n FROM traces WHERE org_id = ?", orgId);
     counts["Firm library documents"] = await n("SELECT COUNT(*) AS n FROM firm_docs WHERE org_id = ?", orgId);
-    counts["Connected tools (Azure DevOps, Jira)"] = await n("SELECT COUNT(*) AS n FROM connectors WHERE org_id = ?", orgId);
+    counts["Connected tools (Azure DevOps, Jira, GitHub, Confluence)"] = await n("SELECT COUNT(*) AS n FROM connectors WHERE org_id = ?", orgId);
     counts["Firm library search entries"] = await n("SELECT COUNT(*) AS n FROM passages WHERE org_id = ? AND workspace_id = ?", orgId, FIRM_SCOPE);
     counts["Settings and guardrail switches"] = await n("SELECT COUNT(*) AS n FROM settings WHERE org_id = ?", orgId) + await n("SELECT COUNT(*) AS n FROM guard_rules WHERE org_id = ?", orgId);
 

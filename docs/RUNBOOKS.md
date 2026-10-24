@@ -17,7 +17,7 @@ operations review is in `docs/security/`.
 | Microsoft 365 trial ends Nov 14, 2026 | [Trial end](#microsoft-365-trial-ending-nov-14-2026) |
 | Locked out of the portal or the Owner Console | [Locked out](#locked-out-of-the-portal-or-the-owner-console) |
 | A merge didn't deploy ("Deploy skipped") | [Deploy skipped](#deploy-skipped) |
-| Set up (or renew) the Azure DevOps / Jira connector apps | [Connector apps](#connector-apps-azure-devops-and-jira) |
+| Set up (or renew) the Azure DevOps / Jira / GitHub / Confluence connector apps | [Connector apps](#connector-apps-azure-devops-jira-github-confluence) |
 | A customer's connector shows "Sign-in expired" or a problem | [Connector problems](#connector-problems) |
 | Reminders/watchers stopped, Owner Console → Job queue shows a backlog, stuck or dead jobs | [Job queue stuck](#job-queue-stuck) |
 | Setting up automatic meeting notes and the Teams tab, or they stopped working | [Automatic meeting notes](#automatic-meeting-notes-microsoft-setup) |
@@ -89,7 +89,8 @@ picks it up within about 30 minutes; restart (step at the end) to use it straigh
 | `azure-openai-api-key` | `az cognitiveservices account keys regenerate -g sidekick-rg -n codyscott-9578-resource --key-name key2` | Same two-key swap as Search. |
 | `encryption-key` (`SIDEKICK_ENCRYPTION_KEY`) | (exists since Oct 21, 2026) | **Never rotate casually**: authenticator-app secrets encrypted with the old key stop opening, so everyone with an authenticator app must remove and re-add it (passkeys and backup codes keep working). Rotate only if it leaked. |
 | `ado-client-secret` (`ADO_CLIENT_SECRET`) | Entra admin center → App registrations → **Sidekick Connectors (Azure DevOps)** → Certificates & secrets | Note its expiry date here when you create it. New secret, set it, restart, connect once from a test org, delete the old one. Customers' connections keep working (their sign-ins aren't tied to the app secret). |
-| `jira-client-secret` (`JIRA_CLIENT_SECRET`) | developer.atlassian.com → My apps → **Sidekick** → Settings → Rotate secret | Atlassian keeps the old secret working for a short overlap; set the new one and restart within it. |
+| `jira-client-secret` (`JIRA_CLIENT_SECRET`) | developer.atlassian.com → My apps → **Sidekick** → Settings → Rotate secret | Atlassian keeps the old secret working for a short overlap; set the new one and restart within it. Confluence uses this app too (unless it has its own `confluence-client-secret`). |
+| `github-client-secret` (`GITHUB_CLIENT_SECRET`) | github.com → Settings → Developer settings → GitHub Apps → **Sidekick connector** → Client secrets | GitHub allows two secrets at once: generate the new one, set it, restart, connect once from a test org, then delete the old one. |
 | `database-url` | `az postgres flexible-server update -g sidekick-rg -n sidekick-labs-db --admin-password "<new>"` | Then rebuild the connection string with the new password. |
 
 Set a new value without it showing on screen. Either type it at a hidden prompt:
@@ -346,10 +347,10 @@ says which case it was:
 **Deploy by hand:** GitHub → Actions → Deploy → **Run workflow** (branch `main`). Or from the Mac:
 `./infra/azure/deploy.sh`. Both deploy the current `main`.
 
-## Connector apps (Azure DevOps and Jira)
+## Connector apps (Azure DevOps, Jira, GitHub, Confluence)
 
 Sidekick's connectors (docs/guide/connect-devops-jira.md, code in `app/src/lib/connectors.ts`) need one app
-registration per tool. **Only Cody creates these** (with his own personal accounts, never a client's), and the
+registration per tool (Jira and Confluence share one Atlassian app). **Only Cody creates these** (with his own personal accounts, never a client's), and the
 secrets go straight into Key Vault; they are never pasted into chat, a ticket or the repo. Until an app exists, its
 tile says "Not set up yet" and nothing else changes. Use the live address for `<site>` (SIDEKICK_PUBLIC_URL).
 
@@ -402,7 +403,45 @@ tile says "Not set up yet" and nothing else changes. Use the live address for `<
 6. Check: a free Jira Cloud site on your personal Atlassian account with one made-up project, then Connect on the
    live Connectors page, link the project, ask about an issue.
 
-Costs: none from Microsoft or Atlassian for these apps. Each sync is a few API calls per linked project every 15
+**Confluence Cloud (the same Atlassian app as Jira)**
+1. developer.atlassian.com → **My apps → Sidekick → Permissions → Confluence API → Add → Configure → Edit scopes
+   (Classic)**: tick **read:confluence-content.all**, **read:confluence-space.summary** and **search:confluence**.
+   Nothing that writes. Existing Jira connections are unaffected (each tool's sign-in asks only for its own scopes).
+   Do the same on the "Sidekick dev" app for the laptop.
+2. **Distribution**: add to the personal-data answer that page authors' names are stored (as part of pages).
+3. Nothing to set on the Container App: Confluence uses `JIRA_CLIENT_ID` / `JIRA_CLIENT_SECRET`. (Only if it ever
+   needs its own app: store `confluence-client-secret` like the Jira one and set `CONFLUENCE_CLIENT_ID` +
+   `CONFLUENCE_CLIENT_SECRET=secretref:confluence-client-secret`.)
+4. Check: add Confluence to your free Atlassian site (same personal account), make a space with two made-up pages,
+   then on the live portal **Connectors → Confluence**, Connect, link the space to a test group and ask about a page
+   (the answer cites "Confluence page: …" with an Open in Confluence link).
+
+**GitHub Issues (a GitHub App, read-only)**
+A GitHub App (not an "OAuth app", whose scopes can't be read-only for private repositories) with read-only
+permissions; Sidekick only uses the signed-in person's user token, never the app's private key.
+1. github.com (your personal account) → **Settings → Developer settings → GitHub Apps → New GitHub App**.
+   - Name: `Sidekick connector` (must be unique on GitHub; add a suffix if taken). Homepage: `https://<site>`.
+   - **Callback URL**: `https://<site>/api/connectors/callback`; **Add callback URL**: `http://localhost:3000/api/connectors/callback`.
+   - Keep **Expire user authorization tokens** ticked (8-hour tokens with refresh). Leave "Request user
+     authorization during installation" and "Device flow" off.
+   - **Webhook**: untick **Active** (Sidekick polls every 15 minutes; no webhook needed).
+   - **Repository permissions**: **Issues: Read-only**, **Pull requests: Read-only**, **Metadata: Read-only**
+     (required). Nothing else, no account or organization permissions.
+   - **Where can this GitHub App be installed?** **Any account**. Create.
+2. On the app's page copy the **Client ID** (`Iv23…`, not a secret), then **Generate a new client secret** and store it
+   at the hidden prompt (no private key is needed):
+   ```bash
+   read -rs "V?github-client-secret: " && az keyvault secret set --vault-name sidekick-kv -n github-client-secret --value "$V" -o none; unset V
+   az containerapp secret set -g sidekick-rg -n sidekick-app --secrets github-client-secret=keyvaultref:https://sidekick-kv.vault.azure.net/secrets/github-client-secret,identityref:system
+   az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars GITHUB_CLIENT_ID=<client id> GITHUB_CLIENT_SECRET=secretref:github-client-secret -o none
+   ```
+   For the laptop, the same two lines in `app/.env.local`.
+3. **Customers install it** on their GitHub organization (github.com/apps/<app name> → Install → pick repositories);
+   only those repositories can be linked. The guide (docs/guide/connect-devops-jira.md) tells them.
+4. Check: a made-up private repository on your personal account with two issues and a pull request, install the app
+   on it, then Connect on the live Connectors page, link the repository and ask about an issue.
+
+Costs: none from Microsoft, Atlassian or GitHub for these apps. Each sync is a few API calls per linked project every 15
 minutes (no AI calls; items only cost AI when someone asks).
 
 ## Connector problems
@@ -415,8 +454,11 @@ help):
 - **"refused access to the project …"**: the connected account lost access to that project. Reconnect with an
   account that can open it, or unlink the project.
 - **"couldn't find …"**: the project or organization was renamed or deleted. Unlink it and link the new one.
-- **"busy or unavailable"** or **"couldn't reach"**: the tool was down or rate limiting; it retries every 15
-  minutes by itself. If every customer shows it, check the tool's status page.
+- **"busy or unavailable"**, **"asked Sidekick to slow down (rate limit)"** or **"couldn't reach"**: the tool was
+  down or rate limiting (GitHub allows 5,000 calls an hour per signed-in person); it carries on from where it stopped
+  on the next sync by itself. If every customer shows it, check the tool's status page.
+- **GitHub: no repositories to pick**: the GitHub App isn't installed on their organization (or not on that
+  repository). Someone who owns their GitHub organization installs it (github.com/apps/<app name>).
 - **Every connection of one tool fails right after a change on our side**: the app secret expired or was rotated
   wrongly ("didn't confirm the sign-in" on connect). Rotate it (Rotate secrets above) and restart.
 - Customers also get a **Needs attention** finding ("Connector not working") from the broken-connector watcher. To

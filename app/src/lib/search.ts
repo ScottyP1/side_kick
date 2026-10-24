@@ -16,8 +16,9 @@
  *   group's search covers that group **plus** its org's firm library, never another group or org.
  * - **Source types**: `document` (a group's upload), `meeting` (a transcript), `notes` (the notes Sidekick wrote
  *   for a meeting: summary, decisions, facts; source id `<meeting id>:notes`), `chat` (a tracked Teams message)
- *   `firm` (a firm library document) and `workitem` (an Azure DevOps work item or Jira issue read by a connector,
- *   lib/connectors.ts; source id = its `connector_items` id).
+ *   `firm` (a firm library document), `workitem` (an Azure DevOps work item, Jira issue or GitHub issue / pull
+ *   request read by a connector, lib/connectors.ts; source id = its `connector_items` id) and `page` (a
+ *   Confluence page read by a connector: a document, so the "Documents" filter covers it; same source ids).
  * - **The answer pipeline** (`findSources`): search returns ~30 candidates (filtered by type and date when the
  *   person asked for that), the database adds each source's date, origin and outdated flags, and lib/rank.ts
  *   re-ranks them (fit to the whole question, freshness, firm-vs-group priority, summaries first), removes
@@ -39,7 +40,7 @@ import { rerank, versionKey, type Candidate, type Ranked } from "./rank";
 export const FIRM_SCOPE = "firm";
 
 /** What a passage was cut from (see the file comment). */
-export type SourceType = "document" | "meeting" | "notes" | "chat" | "firm" | "workitem";
+export type SourceType = "document" | "meeting" | "notes" | "chat" | "firm" | "workitem" | "page";
 
 /** One searchable piece of a document or transcript. `loc` is where it came from, like "Page 3" or "00:12:40". */
 export type Passage = {
@@ -58,7 +59,7 @@ export type Passage = {
 export type SourceFilter = "documents" | "meetings" | "chats" | "decisions" | "firm" | "work";
 /** Which source types each filter covers. "decisions" = the meeting notes (summaries and decisions). */
 export const FILTER_TYPES: Record<SourceFilter, SourceType[]> = {
-  documents: ["document", "firm"],
+  documents: ["document", "firm", "page"],
   meetings: ["meeting", "notes"],
   chats: ["chat"],
   decisions: ["notes"],
@@ -394,7 +395,8 @@ export async function sourceInfo(orgId: string, passages: Pick<Passage, "source_
       out.set(c.id, { date: c.sent_at.slice(0, 10), hash: null, outdated: null, name: null });
     }
   }
-  for (const part of pieces(ids("workitem"))) {
+  // Work items and Confluence pages (both connector_items): dated by when the tool last changed them.
+  for (const part of pieces([...ids("workitem"), ...ids("page")])) {
     for (const w of await all<{ id: string; changed_at: string | null; synced_at: string }>(`SELECT id, changed_at, synced_at FROM connector_items WHERE org_id = ? AND id IN (${q(part.length)})`, orgId, ...part)) {
       out.set(w.id, { date: (w.changed_at ?? w.synced_at).slice(0, 10), hash: null, outdated: null, name: null });
     }

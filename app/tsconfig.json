@@ -44,7 +44,9 @@
     ".next-test-postgres/types/**/*.ts",
     ".next-test-postgres/dev/types/**/*.ts",
     ".next-test-mt-sqlite/types/**/*.ts",
-    ".next-test-mt-sqlite/dev/types/**/*.ts"
+    ".next-test-mt-sqlite/dev/types/**/*.ts",
+    ".next-m365check/types/**/*.ts",
+    ".next-m365check/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

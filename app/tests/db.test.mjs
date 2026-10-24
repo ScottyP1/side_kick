@@ -700,6 +700,54 @@ test("connectors: GitHub and Confluence helpers: page cards, next links that nev
   assert.equal(t.rateLimitWait(403, h({}), at), null, "a refusal, not a rate limit");
   assert.equal(t.rateLimitWait(429, h({}), at), 60);
   assert.equal(t.rateLimitWait(200, h({ "retry-after": "3" }), at), null);
+  // Microsoft Graph's 503 with Retry-After is a "slow down" too; a 503 without one is just down.
+  assert.equal(t.rateLimitWait(503, h({ "retry-after": "2" }), at), 2);
+  assert.equal(t.rateLimitWait(503, h({}), at), null);
+});
+
+test("connectors: Microsoft 365 helpers: file cards, skipped notes, Graph links that never leave Graph, keys and folders; PowerPoint text", async () => {
+  const t = await import("../src/lib/connector-text.ts");
+  const m = await import("../src/lib/connector-m365.ts");
+  const { pptxToText, chunk } = await import("../src/lib/extract.ts");
+  const { readZipParts } = await import("../src/lib/zip.ts");
+  const { office } = await import("../scripts/fake-tools.mjs");
+  const file = {
+    externalId: "01ABC", type: "SharePoint file", title: "Cutover plan.docx", state: null, assignee: "Ana Ruiz", dueOn: null, url: "https://northwind.sharepoint.com/sites/ops/Cutover%20plan.docx",
+    changedAt: "2026-10-20T10:00:00.000Z", description: "[Page 1]\nStores switch in batches of 12.", blockedBy: [], parent: "Wave 2 Cutover", tags: [], commentCount: 0, comments: [],
+  };
+  assert.ok(t.isPageKind("m365"), "files are documents, never open work");
+  assert.equal(t.workItemTitle("m365", file), "SharePoint file: Cutover plan.docx");
+  assert.equal(t.workItemTitle("m365", { ...file, type: "OneDrive file" }), "OneDrive file: Cutover plan.docx");
+  assert.equal(t.fileText("Store Operations › Documents", file),
+    "SharePoint file: Cutover plan.docx\nLibrary: Store Operations › Documents (SharePoint)\nFolder: Wave 2 Cutover\nLast changed: 2026-10-20 by Ana Ruiz\nLink: https://northwind.sharepoint.com/sites/ops/Cutover%20plan.docx\n\n[Page 1]\nStores switch in batches of 12.");
+  const skipped = t.fileText("Docs", { ...file, state: "Skipped", description: "the file is 80 MB, over the 25 MB limit." });
+  assert.match(skipped, /\nNot read: the file is 80 MB, over the 25 MB limit\.$/);
+  const long = t.fileText("Docs", { ...file, description: "x".repeat(t.FILE_MAX + 50) });
+  assert.ok(long.length < t.FILE_MAX + 400 && long.endsWith("(Only the first part of this file was read.)"));
+  // Graph paging links and saved cursors are only followed back to Graph itself.
+  const g = "https://graph.microsoft.com/v1.0";
+  assert.equal(m.graphNext(`${g}/drives/b!x/root/delta?token=abc`, g), `${g}/drives/b!x/root/delta?token=abc`);
+  assert.equal(m.graphNext("https://graph.microsoft.com.evil.test/v1.0/x", g), null);
+  assert.equal(m.graphNext("https://evil.test/v1.0/x", g), null);
+  assert.equal(m.graphNext("2026-10-20T10:00:00.000Z", g), null, "an old timestamp cursor starts a fresh listing");
+  assert.equal(m.graphNext(null, g), null);
+  // Link keys: a whole library, or one folder in it; nothing else.
+  assert.deepEqual(m.m365Key("b!AbC-12_x"), { drive: "b!AbC-12_x", folder: null });
+  assert.deepEqual(m.m365Key("b!AbC/01FOLDER"), { drive: "b!AbC", folder: "01FOLDER" });
+  assert.equal(m.m365Key("../x/y/z"), null);
+  assert.equal(m.m365Key("a b"), null);
+  assert.equal(m.folderOf("/drives/b!x/root:/Wave%202%20Cutover/Runbooks"), "Wave 2 Cutover/Runbooks");
+  assert.equal(m.folderOf("/drives/b!x/root:"), null);
+  assert.ok(m.READ_TYPES.includes(".pptx") && m.READ_TYPES.includes(".pdf") && !m.READ_TYPES.includes(".vtt") && !m.READ_TYPES.includes(".xlsx"));
+  // PowerPoint: slide text in order under [Slide N] markers, entities decoded; passages carry the slide.
+  const deck = office.pptx([["Steering committee"], ["Budget: 1.2M approved", "Risks & issues"]]);
+  assert.equal(pptxToText(deck), "[Slide 1]\nSteering committee\n\n[Slide 2]\nBudget: 1.2M approved\nRisks & issues");
+  assert.deepEqual(chunk(pptxToText(deck), 40).map((c) => c.loc), ["Slide 1", "Slide 2"]);
+  assert.throws(() => pptxToText(Buffer.from("not a zip")), /no slides|couldn't be opened/);
+  // The zip reader stops at its size cap (a "zip bomb" can't fill memory).
+  const bomb = office.pptx([["A".repeat(200_000)]]);
+  assert.throws(() => readZipParts(bomb, () => true, 50_000), /limit|exceeds|buffer/i);
+  assert.equal(readZipParts(bomb, () => true, 1_000_000).length, 1);
 });
 
 /* ---------- Job queue (src/lib/jobs.ts) ---------- */

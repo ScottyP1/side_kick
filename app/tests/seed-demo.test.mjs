@@ -65,8 +65,10 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE owner IS NULL AND status != 'Done'") >= 5, "unowned action items");
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE status != 'Done' AND due_on < '2026-10-22'") >= 5, "overdue action items");
   assert.ok(count("SELECT COUNT(*) FROM answer_feedback WHERE vote < 0") >= 1 && count("SELECT COUNT(*) FROM answer_feedback WHERE vote > 0") >= 10, "👍 and 👎");
-  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 4, "Azure DevOps, Jira, GitHub and Confluence connected");
-  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 5, "five linked projects, repositories and spaces, synced");
+  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 5, "Azure DevOps, Jira, GitHub, Confluence and Microsoft 365 connected");
+  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 6, "six linked projects, repositories, spaces and folders, synced");
+  assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'page' AND title LIKE 'SharePoint file:%'") >= 5, "the SharePoint folder's files are searchable like documents");
+  assert.equal(count("SELECT COUNT(*) FROM connector_items WHERE state = 'Skipped'"), 1, "one file too large to read, kept as a note");
   assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_error LIKE '%refused access%'"), 1, "one lost access since (for the broken-connector watcher)");
   assert.equal(count("SELECT COUNT(*) FROM connector_health WHERE status = 'broken' AND connector = 'azure-devops' AND workspace_id != ''"), 1);
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'workitem'") >= 13, "their work items (with GitHub's issues and pull requests) are searchable");

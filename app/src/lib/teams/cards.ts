@@ -61,10 +61,12 @@ export type CardSource = { id: string; title: string; loc: string | null; type: 
 
 /**
  * The button title for a cited connector source, from its title: "Open #4821" (Azure DevOps), "Open CUT-12"
- * (Jira), "Open store-pos#12" (GitHub), "Open in Confluence" (a page).
+ * (Jira), "Open store-pos#12" (GitHub), "Open in Confluence" (a page), "Open in SharePoint" / "Open in OneDrive" (a file).
  */
 export function openLabel(title: string): string {
   if (title.startsWith("Confluence page")) return "Open in Confluence";
+  if (title.startsWith("SharePoint file")) return "Open in SharePoint";
+  if (title.startsWith("OneDrive file")) return "Open in OneDrive";
   return `Open ${title.split(":")[0].replace(/^(Azure DevOps|Jira|GitHub)\s.*?([#\w.-]+)$/, "$2")}`;
 }
 
@@ -76,7 +78,7 @@ export type AnswerExtras = { blocked?: string | null; conflict?: boolean; follow
  * conversation), the answer (with [S1]-style citations), a note when sources disagree, and each cited source with
  * its origin ("Firm policy · …" for the firm library), location, an "may be out of date" flag, and a short excerpt;
  * a work item from a connector (Azure DevOps, Jira, GitHub) also gets an "Open #4821" button to the tool, and a
- * Confluence page an "Open in Confluence" button (`openLabel`).
+ * Confluence page an "Open in Confluence" button and a Microsoft 365 file "Open in SharePoint" / "Open in OneDrive" (`openLabel`).
  * Unanswered questions say they were logged as a gap; questions refused by the guardrails (`blocked`) say the
  * organization's guardrails apply instead. Answered (and "I don't know") replies get 👍/👎 buttons and a hint
  * about "new question".

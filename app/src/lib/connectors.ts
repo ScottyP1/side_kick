@@ -1,19 +1,20 @@
 /**
  * @file Connectors to outside tools: the framework that lets an organization connect Azure DevOps Boards, Jira,
- * GitHub Issues or Confluence once, link projects (GitHub: repositories, Confluence: spaces) to groups, and keep
- * their work items and pages in each group's knowledge, **read-only**. The tools themselves are in
- * lib/connector-ado.ts, lib/connector-jira.ts, lib/connector-github.ts and lib/connector-confluence.ts
+ * GitHub Issues, Confluence or Microsoft 365 files (SharePoint, OneDrive) once, link projects (GitHub:
+ * repositories, Confluence: spaces, Microsoft 365: libraries or folders) to groups, and keep their work items,
+ * pages and files in each group's knowledge, **read-only**. The tools themselves are in lib/connector-ado.ts,
+ * lib/connector-jira.ts, lib/connector-github.ts, lib/connector-confluence.ts and lib/connector-m365.ts
  * (`Provider`); the text Sidekick indexes for each item is in lib/connector-text.ts.
  *
  * Concepts
  * - **Connector** (`connectors` table): one per organization and tool. An Org Owner or Org Admin connects it
- *   with the tool's own sign-in (OAuth authorization code flow; Microsoft Entra ID for Azure DevOps, Atlassian
- *   for Jira and Confluence, a GitHub App for GitHub). No passwords are ever stored. The access and refresh tokens are **sealed** (encrypted at rest with
+ *   with the tool's own sign-in (OAuth authorization code flow; Microsoft Entra ID for Azure DevOps and Microsoft
+ *   365, Atlassian for Jira and Confluence, a GitHub App for GitHub). No passwords are ever stored. The access and refresh tokens are **sealed** (encrypted at rest with
  *   the `SIDEKICK_ENCRYPTION_KEY` envelope setup, lib/secret-box.ts) and refreshed shortly before they run out.
  *   When a refresh is refused (revoked, expired after long disuse) the connector turns **expired** and someone
  *   must reconnect; nothing is deleted.
- * - **Link** (`connector_links`): one project (ADO), project key (Jira), repository (GitHub, "owner/name") or
- *   space key (Confluence) feeding one group. Org Owners/Admins
+ * - **Link** (`connector_links`): one project (ADO), project key (Jira), repository (GitHub, "owner/name"),
+ *   space key (Confluence) or SharePoint library / folder (Microsoft 365, "<drive id>[/<folder id>]") feeding one group. Org Owners/Admins
  *   and that group's Team Lead link and unlink (`requireManage`). Each link has an audience like documents
  *   (internal by default; shareable ones may be used when client guests are present).
  * - **Items** (`connector_items`): the work items read from a linked project (title, type, state, assignee, due
@@ -21,19 +22,21 @@
  *   type `workitem`, so Ask cites it ("what's blocking the cutover?" → "Azure DevOps Bug #4821 …" with a link),
  *   the knowledge map (Memory & gaps) and meeting notes see the group's open items. Confluence **pages** are
  *   kept in the same table but indexed whole as source type `page`, searched and cited like documents (with a
- *   link), and never listed as open work (lib/connector-text.ts `isPageKind`).
+ *   link), and never listed as open work (lib/connector-text.ts `isPageKind`). Microsoft 365 **files** are
+ *   documents too (source type `page`, read through lib/extract.ts like uploads, `fileText`).
  * - **Incremental sync** (`syncLink`): only what changed since the link's cursor (the latest change time seen),
  *   in pages; the cursor is saved after every page, so a failure resumes where it stopped. Unchanged items
- *   (same text) aren't re-indexed. Runs on link, on "Sync now", and every `SYNC_EVERY_MINUTES` on the job queue
+ *   (same text) aren't re-indexed. A tool may hand back its own cursor and the items that went away
+ *   (`ChangePage`: Microsoft Graph's delta links and deleted files). Runs on link, on "Sync now", and every `SYNC_EVERY_MINUTES` on the job queue
  *   (lib/job-kinds.ts: the recurring `connectors.schedule` job queues one `connector.sync` job per due link,
  *   `dueConnectorLinks` / `syncDueLink`). Every sync is a trace step (kind "connector") with counts only.
  * - **Health**: on the Connectors page (`connectorHealth`: last sync, last success, the last error in plain words,
  *   an expired sign-in; a link with no success for `STALE_HOURS` shows a problem), and for the "broken connector"
  *   watcher through lib/connector-health.ts: every sync reports its group's result (`reportConnectorHealth`, id
- *   "azure-devops", "jira", "github" or "confluence"), an expired sign-in is reported organization-wide, and reconnecting, unlinking or
+ *   "azure-devops", "jira", "github", "confluence" or "microsoft-365-files"), an expired sign-in is reported organization-wide, and reconnecting, unlinking or
  *   disconnecting clears it. `connectorProblems` lists everything broken across organizations (operators).
- * - **Rate limits**: a tool that says "slow down" (429, or GitHub's 403 with `Retry-After` / `x-ratelimit-remaining:
- *   0`) is waited for when the wait is short (`RATE_WAIT_MAX_SECONDS`, once per call); otherwise the sync stops
+ * - **Rate limits**: a tool that says "slow down" (429, GitHub's 403 with `Retry-After` / `x-ratelimit-remaining:
+ *   0`, or a 503 with `Retry-After` as Microsoft Graph sends) is waited for when the wait is short (`RATE_WAIT_MAX_SECONDS`, once per call); otherwise the sync stops
  *   with a plain "busy" problem saying when it may continue, the cursor already saved, and the next run resumes.
  * - **Plan limits**: the plan's `connectors` limit (lib/plans.ts: none, one tool, or all) is checked before
  *   a *new* tool is connected (`assertCanAdd(org, "connectors")`); reconnecting one never counts again, and a
@@ -58,7 +61,8 @@ import { ado, MAX_PER_SYNC as ADO_MAX } from "./connector-ado";
 import { jira } from "./connector-jira";
 import { github } from "./connector-github";
 import { confluence } from "./connector-confluence";
-import { adoOrgName, ConnectorError, CONNECTOR_KINDS, isDoneState, isPageKind, KIND_LABEL, pageText, PROJECT_WORD, rateLimitWait, workItemText, workItemTitle, type ConnectorKind, type WorkItem } from "./connector-text";
+import { m365 } from "./connector-m365";
+import { adoOrgName, ConnectorError, CONNECTOR_KINDS, fileText, isDoneState, isPageKind, KIND_LABEL, pageText, PROJECT_WORD, rateLimitWait, workItemText, workItemTitle, type ConnectorKind, type WorkItem } from "./connector-text";
 
 export { CONNECTOR_KINDS, KIND_LABEL, type ConnectorKind } from "./connector-text";
 
@@ -93,11 +97,21 @@ export type Tokens = { access: string; refresh: string | null; expiresIn: number
 /**
  * Calls the tool's API with the connector's token: JSON in and out, the token refreshed and the call retried
  * once on 401, and every failure turned into a `ConnectorError` with a plain message. `what` names the thing
- * being read ("the project “Wave 2”") for those messages.
+ * being read ("the project “Wave 2”") for those messages. With `binary` the answer is a file (`body`, at most
+ * `maxBytes`, else a `ConnectorError` with status 413); a redirect to a download address (Microsoft Graph's
+ * `/content`) is followed **without** the token (`downloadFrom`).
  */
-export type ToolApi = (url: string, init?: { method?: string; body?: unknown }, opts?: { what?: string }) => Promise<{ json: unknown; headers: Headers }>;
+export type ToolApi = (url: string, init?: { method?: string; body?: unknown }, opts?: { what?: string; binary?: boolean; maxBytes?: number }) => Promise<{ json: unknown; headers: Headers; body?: Buffer }>;
 
-/** What each tool (lib/connector-ado.ts, -jira.ts, -github.ts, -confluence.ts) provides to the framework. */
+/**
+ * One page of changes from a tool. A plain array is just the items (the cursor becomes the latest `changedAt`).
+ * Otherwise `cursor` is the tool's own resume point (saved as it is; Microsoft Graph's next or delta link) and
+ * `removed` the external ids of items that went away (deleted, moved out, no longer readable): their copies and
+ * search entries are deleted.
+ */
+export type ChangePage = { items: WorkItem[]; removed?: string[]; cursor?: string };
+
+/** What each tool (lib/connector-ado.ts, -jira.ts, -github.ts, -confluence.ts, -m365.ts) provides to the framework. */
 export type Provider = {
   kind: ConnectorKind;
   /** True when connecting needs a site typed first (ADO: the organization name). */
@@ -112,13 +126,13 @@ export type Provider = {
   /** Which account/site the signed-in person's token opens (checks access). */
   account(api: ToolApi, site: string | null): Promise<{ account: string; accountName: string; apiBase: string; webBase: string }>;
   projects(api: ToolApi, conn: ConnectorRow): Promise<{ key: string; name: string }[]>;
-  /** The items changed since `cursor` (null = everything), oldest first, one page at a time. */
-  changes(api: ToolApi, conn: ConnectorRow, project: string, cursor: string | null): AsyncGenerator<WorkItem[]>;
+  /** The items changed since `cursor` (null = everything), oldest first, one page at a time (see `ChangePage`). */
+  changes(api: ToolApi, conn: ConnectorRow, project: string, cursor: string | null): AsyncGenerator<WorkItem[] | ChangePage>;
 };
 
-const PROVIDERS: Record<ConnectorKind, Provider> = { ado, jira, github, confluence };
+const PROVIDERS: Record<ConnectorKind, Provider> = { ado, jira, github, confluence, m365 };
 
-/** Checks a tool name from a request ("ado", "jira", "github" or "confluence"), or 400. */
+/** Checks a tool name from a request ("ado", "jira", "github", "confluence" or "m365"), or 400. */
 export function kindOf(value: unknown): ConnectorKind {
   if (typeof value === "string" && (CONNECTOR_KINDS as readonly string[]).includes(value)) return value as ConnectorKind;
   throw new HttpError(400, `Pick a tool: ${CONNECTOR_KINDS.join(", ")}.`);
@@ -132,6 +146,7 @@ export const configuredKinds = (): Record<ConnectorKind, boolean> =>
 const HEALTH: Record<ConnectorKind, { id: string; label: string }> = {
   ado: { id: "azure-devops", label: "Azure DevOps Boards" }, jira: { id: "jira", label: "Jira" },
   github: { id: "github", label: "GitHub Issues" }, confluence: { id: "confluence", label: "Confluence" },
+  m365: { id: "microsoft-365-files", label: "Microsoft 365 files (SharePoint, OneDrive)" },
 };
 
 const expiredMessage = (kind: ConnectorKind) =>
@@ -153,6 +168,55 @@ export function connectorRedirectUri(req: Request): string {
 /* Calling a tool: tokens, refresh, errors                           */
 /* ---------------------------------------------------------------- */
 
+const tooBig = (label: string) => new ConnectorError("tool", `The file is larger than ${BRAND.name} reads from ${label}.`, 413);
+
+/** Reads a response body as bytes, stopping (413) once it passes `max`. */
+async function readCapped(res: Response, max: number, label: string): Promise<Buffer> {
+  if (Number(res.headers.get("content-length") ?? 0) > max) {
+    await res.body?.cancel().catch(() => undefined);
+    throw tooBig(label);
+  }
+  const parts: Buffer[] = [];
+  let n = 0;
+  const reader = res.body?.getReader();
+  for (;;) {
+    const { done, value } = reader ? await reader.read() : { done: true, value: undefined };
+    if (done || !value) break;
+    n += value.length;
+    if (n > max) {
+      await reader!.cancel().catch(() => undefined);
+      throw tooBig(label);
+    }
+    parts.push(Buffer.from(value));
+  }
+  return Buffer.concat(parts);
+}
+
+/**
+ * Fetches a file from the short-lived download address a tool redirected to (Microsoft Graph's pre-authenticated
+ * SharePoint address). Never sends the token there; only https (plain http on this machine outside production,
+ * for the fake tools).
+ */
+async function downloadFrom(location: string, max: number, label: string): Promise<Buffer> {
+  let u: URL;
+  try {
+    u = new URL(location);
+  } catch {
+    throw new ConnectorError("tool", `${label} sent a download address ${BRAND.name} can't use.`);
+  }
+  const local = process.env.NODE_ENV !== "production" && u.protocol === "http:" && ["127.0.0.1", "localhost"].includes(u.hostname);
+  if (u.protocol !== "https:" && !local) throw new ConnectorError("tool", `${label} sent a download address ${BRAND.name} can't use.`);
+  let res: Response;
+  try {
+    res = await fetch(u, { signal: AbortSignal.timeout(120_000) });
+  } catch {
+    throw new ConnectorError("network", `${BRAND.name} couldn't download a file from ${label}. It will try again on the next sync.`);
+  }
+  if (res.status === 404) throw new ConnectorError("notfound", `${label} couldn't find the file. It may have been deleted.`, 404);
+  if (!res.ok) throw new ConnectorError(res.status === 429 || res.status >= 500 ? "busy" : "tool", `${label} didn't hand over a file (${res.status}). ${BRAND.name} will try again on the next sync.`, res.status);
+  return readCapped(res, max, label);
+}
+
 function makeApi(kind: ConnectorKind, token: (force: boolean) => Promise<string>): ToolApi {
   const label = KIND_LABEL[kind];
   const extra = PROVIDERS[kind].headers ?? {};
@@ -173,6 +237,11 @@ function makeApi(kind: ConnectorKind, token: (force: boolean) => Promise<string>
       } catch {
         throw new ConnectorError("network", `${BRAND.name} couldn't reach ${label}. It will try again on the next sync.`);
       }
+      // A file download: Graph answers 302 to a pre-authenticated address (fetched without the token).
+      const location = res.headers.get("location");
+      if (opts.binary && res.status >= 300 && res.status < 400 && location) {
+        return { json: null, headers: res.headers, body: await downloadFrom(new URL(location, url).toString(), opts.maxBytes ?? Infinity, label) };
+      }
       // ADO answers an unusable token with 203 and a sign-in page (or a redirect) instead of 401.
       const unauthorized = res.status === 401 || res.status === 203 || (res.status >= 300 && res.status < 400);
       if (unauthorized && !refreshed) {
@@ -189,12 +258,15 @@ function makeApi(kind: ConnectorKind, token: (force: boolean) => Promise<string>
         const when = new Date(Date.now() + wait * 1000).toISOString().slice(11, 16);
         throw new ConnectorError("busy", `${label} asked ${BRAND.name} to slow down (rate limit). It will carry on from where it stopped after ${when} UTC.`);
       }
-      if (res.ok && !unauthorized) return { json: await res.json().catch(() => null), headers: res.headers };
-      if (unauthorized) throw new ConnectorError("auth", expiredMessage(kind));
-      if (res.status === 403) throw new ConnectorError("access", `${label} refused access${opts.what ? ` to ${opts.what}` : ""}: the account that connected it may have lost access. Reconnect with an account that can open it, or unlink it.`);
-      if (res.status === 404) throw new ConnectorError("notfound", `${label} couldn't find ${opts.what ?? "what was asked for"}. It may have been renamed or deleted.`);
-      if (res.status === 429 || res.status >= 500) throw new ConnectorError("busy", `${label} is busy or unavailable right now (${res.status}). ${BRAND.name} will try again on the next sync.`);
-      throw new ConnectorError("tool", `${label} answered ${res.status}.`);
+      if (res.ok && !unauthorized) {
+        if (opts.binary) return { json: null, headers: res.headers, body: await readCapped(res, opts.maxBytes ?? Infinity, label) };
+        return { json: await res.json().catch(() => null), headers: res.headers };
+      }
+      if (unauthorized) throw new ConnectorError("auth", expiredMessage(kind), res.status);
+      if (res.status === 403) throw new ConnectorError("access", `${label} refused access${opts.what ? ` to ${opts.what}` : ""}: the account that connected it may have lost access. Reconnect with an account that can open it, or unlink it.`, 403);
+      if (res.status === 404) throw new ConnectorError("notfound", `${label} couldn't find ${opts.what ?? "what was asked for"}. It may have been renamed or deleted.`, 404);
+      if (res.status === 429 || res.status >= 500) throw new ConnectorError("busy", `${label} is busy or unavailable right now (${res.status}). ${BRAND.name} will try again on the next sync.`, res.status);
+      throw new ConnectorError("tool", `${label} answered ${res.status}.`, res.status);
     }
   };
 }
@@ -283,6 +355,8 @@ export async function startConnect(req: Request, user: User, kindRaw: unknown, s
     site = adoOrgName(siteRaw);
     if (!site) throw new HttpError(400, "Type your Azure DevOps organization: the name after dev.azure.com/ (for example “northwind”).");
   }
+  // Microsoft 365: nothing to type; the organization's own Microsoft tenant (when it linked one) is the only one allowed.
+  if (kind === "m365") site = (await get<{ t: string | null }>("SELECT entra_tenant_id AS t FROM orgs WHERE id = ?", user.org_id))?.t ?? null;
   const existing = await get<{ id: string }>("SELECT id FROM connectors WHERE org_id = ? AND kind = ?", user.org_id, kind);
   if (!existing) await assertCanAdd(user.org_id, "connectors");
   const state = b64url(crypto.randomBytes(24));
@@ -491,11 +565,11 @@ const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
 /**
  * Saves one item and (re-)indexes it when its text changed: work items as source type `workitem`, Confluence
- * pages whole as source type `page` (like documents). Returns whether it changed.
+ * pages and Microsoft 365 files whole as source type `page` (like documents). Returns whether it changed.
  */
 async function saveItem(l: LinkRow, kind: ConnectorKind, item: WorkItem): Promise<boolean> {
   const page = isPageKind(kind);
-  const text = page ? pageText(kind, l.project_name, item) : workItemText(kind, l.project_name, item);
+  const text = kind === "m365" ? fileText(l.project_name, item) : page ? pageText(kind, l.project_name, item) : workItemText(kind, l.project_name, item);
   const hash = sha(`${l.audience}\n${text}`);
   const cur = await get<{ id: string; text_hash: string | null }>("SELECT id, text_hash FROM connector_items WHERE link_id = ? AND external_id = ? AND org_id = ?", l.id, item.externalId, l.org_id);
   if (cur?.text_hash === hash) return false;
@@ -518,9 +592,23 @@ async function saveItem(l: LinkRow, kind: ConnectorKind, item: WorkItem): Promis
   return true;
 }
 
+/** Deletes a link's items that went away in the tool (by external id) with their search entries. Returns how many. */
+async function removeItems(l: LinkRow, externalIds: string[]): Promise<number> {
+  let n = 0;
+  for (let i = 0; i < externalIds.length; i += 100) {
+    const part = externalIds.slice(i, i + 100);
+    const gone = await all<{ id: string }>(`SELECT id FROM connector_items WHERE link_id = ? AND org_id = ? AND external_id IN (${part.map(() => "?").join(", ")})`, l.id, l.org_id, ...part);
+    if (!gone.length) continue;
+    await removeIndexedMany(l.org_id, gone.map((g) => g.id));
+    await run(`DELETE FROM connector_items WHERE link_id = ? AND org_id = ? AND id IN (${gone.map(() => "?").join(", ")})`, l.id, l.org_id, ...gone.map((g) => g.id));
+    n += gone.length;
+  }
+  return n;
+}
+
 /**
  * Syncs one linked project: reads what changed since its cursor, page by page (cursor saved after each page),
- * saves and indexes changed items, and records the link's health (last try, last success, error in plain
+ * saves and indexes changed items, deletes the ones that went away, and records the link's health (last try, last success, error in plain
  * words). An expired sign-in marks the connector expired. Traced with counts only. Throws the problem after
  * recording it, so callers can tell; scheduled runs just move on.
  */
@@ -530,23 +618,27 @@ export async function syncLink(orgId: string, linkId: string): Promise<{ changed
   const c = await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ?", l.connector_id, orgId);
   if (!c) throw new HttpError(404, "Connector not found.");
   return span("connector", `Sync ${KIND_LABEL[c.kind]} project`, async () => {
-    let seen = 0, changed = 0, pages = 0;
+    let seen = 0, changed = 0, pages = 0, removed = 0, skipped = 0;
     let cursor = l.sync_cursor;
     try {
       if (c.status === "expired") throw new ConnectorError("auth", expiredMessage(c.kind));
-      for await (const page of PROVIDERS[c.kind].changes(toolApi(c), c, l.project, l.sync_cursor)) {
+      for await (const raw of PROVIDERS[c.kind].changes(toolApi(c), c, l.project, l.sync_cursor)) {
+        const page: ChangePage = Array.isArray(raw) ? { items: raw } : raw;
         pages++;
-        for (const item of page) {
+        for (const item of page.items) {
           seen++;
+          if (item.state === "Skipped") skipped++;
           if (await saveItem(l, c.kind, item)) changed++;
-          if (!cursor || item.changedAt > cursor) cursor = item.changedAt;
+          if (page.cursor === undefined && (!cursor || item.changedAt > cursor)) cursor = item.changedAt;
         }
+        if (page.removed?.length) removed += await removeItems(l, page.removed);
+        if (page.cursor !== undefined) cursor = page.cursor;
         await run("UPDATE connector_links SET sync_cursor = ? WHERE id = ? AND org_id = ?", cursor, l.id, orgId);
       }
       const count = Number((await get<{ n: number | string }>("SELECT COUNT(*) AS n FROM connector_items WHERE link_id = ? AND org_id = ?", l.id, orgId))?.n ?? 0);
       const at = now();
       await run("UPDATE connector_links SET item_count = ?, last_sync_at = ?, last_ok_at = ?, last_error = NULL WHERE id = ? AND org_id = ?", count, at, at, l.id, orgId);
-      spanAttrs({ kind: c.kind, pages, seen, changed, items: count, full: !l.sync_cursor, capped: seen >= ADO_MAX });
+      spanAttrs({ kind: c.kind, pages, seen, changed, removed, skipped, items: count, full: !l.sync_cursor, capped: seen >= ADO_MAX });
       await reportConnectorHealth({ orgId, workspaceId: l.workspace_id, connector: HEALTH[c.kind].id, label: HEALTH[c.kind].label, ok: true, fixHref: "/connectors" });
       return { changed, seen };
     } catch (e) {
@@ -555,7 +647,7 @@ export async function syncLink(orgId: string, linkId: string): Promise<{ changed
       if (e instanceof ConnectorError && e.reason === "auth") await markExpired(c); // reported organization-wide
       else await reportConnectorHealth({ orgId, workspaceId: l.workspace_id, connector: HEALTH[c.kind].id, label: HEALTH[c.kind].label, ok: false, message, fixHref: "/connectors" });
       await run("UPDATE connector_links SET last_sync_at = ?, last_error = ? WHERE id = ? AND org_id = ?", now(), message, l.id, orgId);
-      spanAttrs({ kind: c.kind, pages, seen, changed, reason: e instanceof ConnectorError ? e.reason : "unexpected" });
+      spanAttrs({ kind: c.kind, pages, seen, changed, removed, reason: e instanceof ConnectorError ? e.reason : "unexpected" });
       throw e;
     }
   });
@@ -600,10 +692,13 @@ export async function syncDueLink(orgId: string, linkId: string): Promise<{ sync
 /* Health                                                            */
 /* ---------------------------------------------------------------- */
 
-/** One linked project's health, as the Connectors page shows it. `problem` is null when all is well. */
+/**
+ * One linked project's health, as the Connectors page shows it. `problem` is null when all is well. `skipped` is
+ * how many of its items are notes for files that weren't read (Microsoft 365: too large, or couldn't be opened).
+ */
 export type LinkHealth = {
   id: string; connectorId: string; kind: ConnectorKind; workspaceId: string; workspaceName: string; project: string; projectName: string;
-  audience: "internal" | "shareable"; items: number; lastSyncAt: string | null; lastOkAt: string | null; syncing: boolean; problem: string | null;
+  audience: "internal" | "shareable"; items: number; skipped: number; lastSyncAt: string | null; lastOkAt: string | null; syncing: boolean; problem: string | null;
 };
 /** One connected tool's health. `status`: ok, expired (reconnect), error (a project fails or is stale), waiting (no sync yet). */
 export type ConnectorHealth = {
@@ -621,14 +716,16 @@ function linkProblem(l: Pick<LinkRow, "last_error" | "last_ok_at" | "created_at"
   return null;
 }
 
-type LinkJoin = LinkRow & { kind: ConnectorKind; workspace_name: string };
+type LinkJoin = LinkRow & { kind: ConnectorKind; workspace_name: string; skipped: number | string };
 const toLinkHealth = (l: LinkJoin, at: Date): LinkHealth => ({
   id: l.id, connectorId: l.connector_id, kind: l.kind, workspaceId: l.workspace_id, workspaceName: l.workspace_name, project: l.project, projectName: l.project_name,
-  audience: l.audience, items: Number(l.item_count), lastSyncAt: l.last_sync_at, lastOkAt: l.last_ok_at,
+  audience: l.audience, items: Number(l.item_count), skipped: Number(l.skipped ?? 0), lastSyncAt: l.last_sync_at, lastOkAt: l.last_ok_at,
   syncing: Boolean(l.sync_started_at && l.sync_started_at > new Date(at.getTime() - SYNC_CLAIM_MINUTES * 60_000).toISOString()), problem: linkProblem(l, at),
 });
 
-const LINK_SELECT = `SELECT l.*, c.kind, w.name AS workspace_name FROM connector_links l
+const LINK_SELECT = `SELECT l.*, c.kind, w.name AS workspace_name,
+    (SELECT COUNT(*) FROM connector_items i WHERE i.link_id = l.id AND i.org_id = l.org_id AND i.state = 'Skipped') AS skipped
+  FROM connector_links l
   JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
   JOIN workspaces w ON w.id = l.workspace_id AND w.org_id = l.org_id`;
 

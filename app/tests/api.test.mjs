@@ -4898,7 +4898,6 @@ test(`[${ENGINE}] connector requests: each role's part; a Team Lead asks, the Or
   const lead = await fresh("Tess Lead", "Team Lead", [s.wsA]);
   const member = await fresh("Mo Member", "Member", [s.wsA]);
   const viewer = await fresh("Val Viewer", "Viewer", [s.wsA]);
-  const billing = await fresh("Bo Billing", "Billing Admin", []);
   // Start with Azure DevOps, Jira and Confluence not allowed.
   for (const kind of ["ado", "jira", "confluence"]) assert.equal((await allowTool(admin, kind, false)).status, 200);
   // What each role may do on the page.
@@ -4906,9 +4905,9 @@ test(`[${ENGINE}] connector requests: each role's part; a Team Lead asks, the Or
   assert.deepEqual(await may(admin), [true, true, false], "Org Owner: allows tool types (and connects for any group)");
   assert.deepEqual(await may(orgAdmin), [false, true, true], "Org Admin: connects for any group and asks, never allows types");
   assert.deepEqual(await may(lead), [false, true, true], "Team Lead: connects for their groups and asks");
-  for (const [name, call] of [["member", member], ["viewer", viewer], ["billing", billing]]) assert.deepEqual(await may(call), [false, false, false], name);
+  for (const [name, call] of [["member", member], ["viewer", viewer]]) assert.equal((await call("GET", "/api/connectors")).status, 403, `${name}: Connectors is for admins and Team Leads`);
   // Only the Org Owner allows a type; nobody connects a type that isn't allowed.
-  for (const call of [orgAdmin, lead, member, viewer, billing]) assert.equal((await allowTool(call, "ado")).status, 403);
+  for (const call of [orgAdmin, lead, member, viewer]) assert.equal((await allowTool(call, "ado")).status, 403);
   const adminOn = await connectTool(orgAdmin, "ado", "northwind");
   assert.equal(adminOn.start.location, `${BASE}/connectors?error=1`);
   assert.match(flashOf(adminOn.start), /Azure DevOps isn't allowed in your organization yet\. Ask the Org Owner for it on Connectors/);

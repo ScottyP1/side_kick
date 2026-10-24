@@ -5,6 +5,8 @@
  * Overview tab. Each row: what's wrong (with a pill for the kind and the group on Home), the detail, the next step,
  * a button to the page that fixes it, and Snooze (7 days) for people who may act on it (admins, the group's Team
  * Lead). Loads GET /api/findings (with `ws` for one group); the server applies the workspace walls and roles.
+ * A document that may be another client's (`misfiled_doc`, kept anyway) also gets **It belongs here**, which
+ * confirms it (POST /api/docs/:id or /api/firm/:id `review`); "Move or keep" opens it on its page to move it.
  */
 
 import Link from "next/link";
@@ -16,6 +18,8 @@ export type Finding = {
   id: string; kind: string; kindLabel: string; workspaceId: string | null; workspace: string | null; severity: "info" | "warn" | "bad"; status: string;
   title: string; detail: string | null; nextStep: string; actionHref: string | null; actionLabel: string | null;
   firstSeen: string; lastSeen: string; snoozedUntil: string | null; canAct: boolean;
+  /** Upload guard findings: the document and where it lives. */
+  guard?: { doc: string; scope: "document" | "firm"; held: boolean };
 };
 
 /** Loads the findings this person may see (one group's with `ws`) and reloads after a snooze. */
@@ -49,6 +53,13 @@ export function FindingRows({ findings, reload, showGroup, onOpen, limit, here }
         reload();
       })
       .catch(reportError);
+  const keep = (f: Finding) =>
+    api(f.guard!.scope === "firm" ? `/api/firm/${f.guard!.doc}` : `/api/docs/${f.guard!.doc}`, { method: "POST", json: { action: "review" } })
+      .then(() => {
+        toast("Confirmed: it stays where it is.");
+        reload();
+      })
+      .catch(reportError);
   return (
     <>
       {shown.map((f) => (
@@ -65,6 +76,9 @@ export function FindingRows({ findings, reload, showGroup, onOpen, limit, here }
                   <Link className="btn small" href={f.actionHref} onClick={() => onOpen?.(f)}>
                     {f.actionLabel ?? "Open"}
                   </Link>
+                )}
+                {f.canAct && f.guard && !f.guard.held && (
+                  <button className="btn small" onClick={() => keep(f)} title="Keep it where it is and clear this">It belongs here</button>
                 )}
                 {f.canAct && (
                   <button className="btn small ghost" onClick={() => snooze(f)} title="Hide it for a week">

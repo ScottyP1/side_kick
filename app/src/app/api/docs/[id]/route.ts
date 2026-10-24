@@ -1,11 +1,16 @@
 /**
  * PATCH/DELETE /api/docs/:id: re-tag a document as internal or shareable, or delete it (and its search passages).
- * Who: anyone who can edit content in the document's workspace. Audited.
+ * POST /api/docs/:id `{ action }`: the upload guard (lib/upload-guard.ts) for a held or flagged document:
+ * - `keep`: index a held document in its group anyway (raises a "Needs attention" finding for the managers),
+ * - `move` with `to` (a group id): move it to another group the person belongs to (admins: any group),
+ * - `review`: the group's Team Lead or an Org Owner/Admin confirms a kept document belongs here (clears the finding).
+ * Who: anyone who can edit content in the document's workspace (review: managers). Audited.
  */
 import { handle, readJson } from "@/lib/api";
 import { audit, canEdit, HttpError, requireUser, requireWorkspace } from "@/lib/auth";
 import { get, run } from "@/lib/db";
 import { removeIndexed, setAudience } from "@/lib/search";
+import { keepHeld, moveDoc, reviewHeld } from "@/lib/upload-guard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -33,5 +38,16 @@ export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
   await removeIndexed(doc.id);
   await run("DELETE FROM documents WHERE id = ?", doc.id);
   await audit(user, `Deleted “${doc.name}” and removed it from search`, "Data", doc.workspace_id);
+  return { ok: true };
+});
+
+export const POST = handle(async (req: Request, { params }: Ctx) => {
+  const user = await requireUser();
+  const id = (await params).id;
+  const body = await readJson<{ action?: unknown; to?: unknown }>(req);
+  if (body.action === "keep") await keepHeld(user, "document", id);
+  else if (body.action === "review") await reviewHeld(user, "document", id);
+  else if (body.action === "move") return { ok: true, ...(await moveDoc(user, "document", id, body.to)) };
+  else throw new HttpError(400, "Unknown action.");
   return { ok: true };
 });

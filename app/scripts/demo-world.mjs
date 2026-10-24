@@ -995,3 +995,48 @@ export function supportTickets() {
       staff: [] },
   ];
 }
+
+/**
+ * The upload guard's demo (lib/upload-guard.ts), uploaded by scripts/seed-demo.mjs after the groups' own documents:
+ * - `misfiled`: a Litware document that Maria Chen (in Contoso and Litware) drops into **Contoso** by mistake. It
+ *   names Litware and its engagement code, so it is saved **Held** and Contoso's Knowledge page asks "Keep it here,
+ *   or move it?".
+ * - `limited`: a firm standard for the two banking engagements only ("Applies to": Fabrikam Bank and Woodgrove Bank).
+ * - `firmHeld`: a Contoso-only store checklist uploaded to the **firm library**, held because firm documents reach
+ *   every group ("Put it in the Contoso group instead?").
+ */
+export function uploadGuardDemo() {
+  return {
+    misfiled: {
+      name: "Litware pipeline SLA notes.md", audience: "internal", text: `# Litware – data pipeline SLA notes (LIT-DATA-26)
+
+Internal working notes for the Litware Data Platform engagement.
+
+- Litware expects the nightly ingestion to finish by 05:00 Central so the finance dashboards are ready at 07:00.
+- Late loads more than twice in a week trigger a service review with Litware's data office.
+- Our on-call rotation covers the pipelines from Monday to Friday; weekend support starts after the November release.
+- Open point: Litware wants a 99.5% monthly availability target for the curated layer; we proposed 99%.
+` },
+    limited: {
+      name: "Banking engagements - data residency standard.md", title: "Banking engagements: data residency standard", audience: "internal", effective: "2026-09-01",
+      groups: ["fabrikam", "woodgrove"], text: `# ${NORTHWIND.org} – Data residency standard for banking engagements
+
+Effective 1 September 2026. Applies to engagements with regulated banks only.
+
+- Customer and account data stays in the bank's own cloud tenant and region. Never copy it to our tenant, laptops or personal storage.
+- Test data is masked or synthetic. Production extracts need the bank's written approval, recorded in the RAID log.
+- Screenshots in status reports never show account numbers, balances or customer names.
+- Any suspected data leak is reported to the engagement lead and the firm's security team within 1 hour.
+` },
+    firmHeld: {
+      name: "Store cutover checklist - wave 2.md", title: "Store cutover checklist (wave 2)", audience: "internal", effective: "2026-10-01", text: `# Contoso Retail – store cutover checklist, wave 2
+
+For store managers in the Contoso Retail cloud migration (wave 2 stores).
+
+1. The evening before: confirm the last end-of-day report reached the old system.
+2. Cutover night: tills stay offline from 23:00 to 02:00; the night manager keeps the paper log.
+3. Next morning: open one till first and run a test sale before opening the others.
+4. Problems: call the Contoso Retail cutover bridge, not the regular help desk.
+` },
+  };
+}

@@ -171,9 +171,10 @@ export async function azureSetAudience(sourceId: string, audience: string) {
 /**
  * Hybrid search in one org, across the given workspace ids (a group, plus `FIRM_SCOPE` for the org's firm
  * library). The filter is applied inside Azure before ranking, so results can never come from another org or
- * group (or from internal passages when guests are present). `types` limits the source types.
+ * group (or from internal passages when guests are present). `types` limits the source types; `excludeSources`
+ * leaves out these source ids (firm documents limited to other groups, lib/search.ts).
  */
-export async function azureSearch(orgId: string, scopes: string[], question: string, opts: { guests?: boolean; limit: number; types?: string[] }): Promise<Passage[]> {
+export async function azureSearch(orgId: string, scopes: string[], question: string, opts: { guests?: boolean; limit: number; types?: string[]; excludeSources?: string[] }): Promise<Passage[]> {
   const { client, ready } = azure();
   await ready;
   const filter = [
@@ -181,6 +182,8 @@ export async function azureSearch(orgId: string, scopes: string[], question: str
     `(${scopes.map((w) => `workspace_id eq ${lit(w)}`).join(" or ")})`,
     opts.guests ? `audience eq 'shareable'` : "",
     opts.types?.length ? `(${opts.types.map((t) => `source_type eq ${lit(t)}`).join(" or ")})` : "",
+    // Firm documents limited to other groups (lib/search.ts); ids are generated, so "|" never appears in one.
+    opts.excludeSources?.length ? `not search.in(source_id, ${lit(opts.excludeSources.join("|"))}, '|')` : "",
   ].filter(Boolean).join(" and ");
   const vector = embeddingsConfigured() ? (await embed([question], { orgId, workspaceId: scopes[0] ?? null }))[0] : null;
   const res = await client.search(question, {

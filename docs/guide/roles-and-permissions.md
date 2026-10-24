@@ -45,6 +45,8 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See connected tools (Azure DevOps, Jira), their health and the projects feeding their groups | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Inside their workspaces: change** | | | | | | |
 | Upload, rename or delete documents | ✓ | ✓ | ✓ | | ✓ | |
+| Keep or move a held document (one that may be another client's) to another of their groups | ✓ | ✓ (any group) | ✓ (own groups) | | ✓ (own groups) | |
+| Confirm a kept document belongs in its group (**It belongs here**) | ✓ | ✓ | ✓ (own groups) | | | |
 | Add a past or outside meeting, reprocess or delete meetings | ✓ | ✓ | ✓ | | ✓ | |
 | Save a meeting's decisions, requirements, risks and facts to knowledge (portal, Teams card and tab) | ✓ | ✓ | ✓ | | ✓ | |
 | See the automatic-notes panel and their groups' captured Teams meetings | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -69,6 +71,7 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | Export a group, or the whole organization's data, as a zip | ✓ | ✓ | | | | |
 | See roll-offs and download deletion certificates | ✓ | ✓ | | | | |
 | Add, change or delete firm library documents | ✓ | ✓ | | | | |
+| Keep, limit to chosen groups or move a held firm library document into a group; choose which groups a firm document applies to | ✓ | ✓ | | | | |
 | Turn automatic notes after Teams meetings on or off, check now, try a skipped meeting again | ✓ | ✓ | | | | |
 | Connect, reconnect or disconnect Azure DevOps or Jira (read-only; within the plan's connectors) | ✓ | ✓ | | | | |
 | Link a connected tool's project to their groups, sync it now or unlink it | ✓ | ✓ | ✓ | | | |

@@ -460,7 +460,10 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .perm.no .ico{color:var(--bad)}
 @media (max-width:860px){.wiz{grid-template-columns:minmax(0,1fr)}.wiz-side{position:static}.wiz-steps{flex-direction:row;overflow-x:auto;gap:6px}.wiz-steps li{flex-direction:column;align-items:center;min-width:72px;text-align:center}.wiz-steps li::after{display:none}.wiz-steps small{display:none}.wiz-card{padding:18px}.wiz-row{grid-template-columns:minmax(0,1fr)}}
 
-.site-hero-badges{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:6px;font-size:14px;color:var(--muted)}
+.site-hero-badges{list-style:none;padding:0;margin:16px 0 26px;display:grid;gap:8px;font-size:14px;color:var(--muted)}
+/* pill and its text on one line, lined up; the gap below keeps the pills off the buttons */
+.site-hero-badges li{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.site-hero-badges .site-badge{margin-right:0;line-height:1.5}
 .site-badge{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
 .site-hero-sub{margin:10px 0 0;font-size:15px;color:var(--muted)}
 

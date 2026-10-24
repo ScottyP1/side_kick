@@ -554,3 +554,5 @@ ALTER TABLE meetings ADD COLUMN IF NOT EXISTS graph_meeting_id TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_posted_at TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS saved_by TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS saved_at TEXT;
+-- Scale readiness: Graph subscriptions are looked up per organization (renewals, notes status).
+CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at);

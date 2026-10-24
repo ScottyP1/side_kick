@@ -695,6 +695,7 @@ function migrate(conn: DatabaseSync) {
     "CREATE INDEX IF NOT EXISTS app_errors_time ON app_errors(created_at)",
     "CREATE INDEX IF NOT EXISTS guard_events_time ON guard_events(created_at)",
     "CREATE INDEX IF NOT EXISTS teams_conversations_org ON teams_conversations(org_id, workspace_id)",
+    "CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at)",
   ]) conn.exec(sql);
 }
 

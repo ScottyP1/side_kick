@@ -7,7 +7,7 @@
  *   (`aiCreditUsd` in lib/plans.ts), or the Sidekick team's override (`org_terms.ai_credit_usd`), plus any
  *   **top-ups** the team granted for this month (`credit_topups`). Use = this month's `usage_events` cost
  *   for the organization. No credit (null) = unlimited.
- * - **Levels**: `ok`; `warn` from 80% (a banner for Org Owners, Org Admins and Billing Admins, and one
+ * - **Levels**: `ok`; `warn` from 80% (a banner for Org Owners and Org Admins, and one
  *   audit entry a month; email later); `essentials` from 100%: answers and the guardrail check keep working
  *   on cheaper models (`ESSENTIAL_MODELS`), short meetings still get notes, and the extras pause with a plain
  *   message: automatic reminders (which also stops Claude reading tracked chats for them), the knowledge
@@ -137,7 +137,7 @@ async function notice(orgId: string, s: CreditStatus) {
 
 /** The plain message for a paused extra, worded for whoever reads it. */
 function pausedMessage(feature: string) {
-  return `${PAUSED[feature] ?? "This AI feature is"} paused because your organization has used this month's AI credit. Answers to questions keep working. The credit starts again on the 1st; an Org Owner or Billing Admin can see the details on Usage & billing.`;
+  return `${PAUSED[feature] ?? "This AI feature is"} paused because your organization has used this month's AI credit. Answers to questions keep working. The credit starts again on the 1st; an Org Owner or Org Admin can see the details on Usage & billing.`;
 }
 
 /**

@@ -120,7 +120,7 @@ export const FAQ: readonly FaqItem[] = [
     id: "cancel",
     q: "Can we cancel any time?",
     a: [
-      `Yes. The Org Owner or a Billing Admin can change plan or cancel from Usage & billing. After canceling, ${BRAND.name} stays fully usable until the end of what you paid for, then turns read-only for ${ORG_GRACE_DAYS} days: everyone can still sign in and see everything, and Org Owners and Org Admins can download all of it. After those ${ORG_GRACE_DAYS} days everything is deleted and you get a deletion certificate. Paying again before then keeps everything.`,
+      `Yes. The Org Owner can change plan or cancel from Usage & billing. After canceling, ${BRAND.name} stays fully usable until the end of what you paid for, then turns read-only for ${ORG_GRACE_DAYS} days: everyone can still sign in and see everything, and Org Owners and Org Admins can download all of it. After those ${ORG_GRACE_DAYS} days everything is deleted and you get a deletion certificate. Paying again before then keeps everything.`,
     ],
     topics: ["pricing"],
     guide: "/docs/admin-guide#15-sign-up-plan-and-billing",

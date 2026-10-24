@@ -26,7 +26,7 @@ export type NavItem = { href: string; label: string; icon: string; short?: strin
 /** A titled group of menu entries (Overview, Manage, Govern, Help). */
 export type NavGroup = { group: string; items: NavItem[] };
 
-const BILLING_ROLES = ["Org Owner", "Org Admin", "Billing Admin"];
+const BILLING_ROLES = ["Org Owner", "Org Admin"];
 
 /** Every portal page in the menu, in order, with its role rule (the same rules for desktop and phone). */
 export const PORTAL_NAV: NavGroup[] = [

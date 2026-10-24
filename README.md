@@ -243,7 +243,7 @@ That writes `teams/build/sidekick-teams-local.zip` (it passes Microsoft's 62 app
 
 | Works now | Next (see PROGRESS → Roadmap & queue) |
 |---|---|
-| Sign-in (Microsoft or password, sign-in limit, temporary passwords), six roles incl. Team Lead, group walls, audit log | Multi-tenant Microsoft 365 (any company), directory import, chat picker instead of link codes |
+| Sign-in (Microsoft or password, sign-in limit, temporary passwords), five roles incl. Team Lead, group walls, audit log | Multi-tenant Microsoft 365 (any company), directory import, chat picker instead of link codes |
 | Groups with Team Leads; documents (PDF / Word / text / transcripts); keyword + Azure AI Search meaning search | Plan limits and monthly AI credit, bring-your-own AI for Enterprise |
 | Meeting notes, Q&A with sources, knowledge map, gaps, action items | Notes chat per group with automatic Teams meeting transcripts; "save to knowledge" cards |
 | Teams: @Sidekick answers, notes, reminders with card buttons, chat tracking | Azure DevOps and Jira connectors |

@@ -1,7 +1,7 @@
 /**
  * GET /api/usage/export: a CSV of AI cost and activity per group (workspace) per month, with each group's
  * engagement code and client, for charging the cost back to engagements (WBS chargeback).
- * Who: Org Owners, Org Admins and Billing Admins; only their own organization's groups.
+ * Who: Org Owners and Org Admins (`BILLING_VIEW_ROLES`); only their own organization's groups.
  *
  * Query: `month=YYYY-MM` for one month, or `months=N` for the last N months including this one (default 12,
  * at most 36). Months are calendar months in UTC, like the AI credit.
@@ -13,6 +13,7 @@
 import { handle } from "@/lib/api";
 import { HttpError, requireUser } from "@/lib/auth";
 import { all } from "@/lib/db";
+import { BILLING_VIEW_ROLES } from "@/lib/billing";
 
 type Count = { ws: string | null; month: string; n: number; cost?: number; minutes?: number };
 
@@ -25,7 +26,7 @@ function cell(v: string | number | null): string {
 }
 
 export const GET = handle(async (req: Request) => {
-  const user = await requireUser(["Org Owner", "Org Admin", "Billing Admin"]);
+  const user = await requireUser(BILLING_VIEW_ROLES);
   const q = new URL(req.url).searchParams;
   const now = new Date();
   let from: string;

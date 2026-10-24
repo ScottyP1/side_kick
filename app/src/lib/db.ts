@@ -25,6 +25,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import pg from "pg";
 import { countDbQuery } from "./trace";
+import { BRAND } from "./brand";
 
 /** Which engine this server uses: Postgres when DATABASE_URL is set, otherwise the local SQLite file. */
 export const DIALECT: "postgres" | "sqlite" = process.env.DATABASE_URL ? "postgres" : "sqlite";
@@ -697,7 +698,66 @@ function migrate(conn: DatabaseSync) {
     "CREATE INDEX IF NOT EXISTS teams_conversations_org ON teams_conversations(org_id, workspace_id)",
     "CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at)",
   ]) conn.exec(sql);
+  // Data migrations (same SQL as Postgres, see `DATA_MIGRATIONS`), all or nothing. A savepoint rather than BEGIN,
+  // because a code reload can re-run this while a transaction is open.
+  conn.exec("SAVEPOINT data_migrations");
+  try {
+    for (const m of DATA_MIGRATIONS) conn.prepare(m.sql).run(...m.params());
+    conn.exec("RELEASE data_migrations");
+  } catch (e) {
+    conn.exec("ROLLBACK TO data_migrations");
+    conn.exec("RELEASE data_migrations");
+    throw e;
+  }
 }
+
+/**
+ * Data migrations: changes to existing rows (not columns), run on both engines with the same SQL after the schema,
+ * every time it is applied. Each must be **idempotent**: written so that a second run finds nothing left to change.
+ * SQLite runs them in `migrate`; Postgres in `postgresDriver`, inside the schema's advisory lock and one transaction.
+ *
+ * - **Retiring the Billing Admin role** (October 2026, the `retireBillingAdmins` steps): only Org Owners and Org Admins see
+ *   usage and billing now. Everyone who still has the role becomes a **Member** (least privilege) with no groups,
+ *   gets one audit entry ("Access", by Sidekick), and the Org Owner gets one notice on Home: a finding of kind
+ *   `role_changed` with audience `owner` (lib/watchers.ts keeps it open for a while unless they change the role).
+ *   The role change runs last, so a second run matches nobody and changes nothing.
+ */
+const DATA_MIGRATIONS: { name: string; sql: string; params: () => Param[] }[] = (() => {
+  const t = () => new Date().toISOString();
+  const retired = "FROM users WHERE role = 'Billing Admin'";
+  return [
+    {
+      name: "retireBillingAdmins: audit entry per person",
+      sql: `INSERT INTO audit_log (org_id, actor, action, kind, workspace_id, created_at)
+            SELECT org_id, ?, 'Changed ' || name || ' from Billing Admin to Member: the Billing Admin role was retired (only Org Owners and Org Admins see billing now)', 'Access', NULL, ?
+            ${retired}`,
+      params: () => [BRAND.name, t()],
+    },
+    {
+      name: "retireBillingAdmins: one notice to the Org Owner per person",
+      sql: `INSERT INTO findings (id, org_id, workspace_id, kind, dedupe_key, audience, severity, status, title, detail, next_step,
+                                 action_href, action_label, data_json, first_seen_at, last_seen_at, updated_at)
+            SELECT 'role_changed:' || id, org_id, NULL, 'role_changed', 'role_changed:org:' || id, 'owner', 'info', 'open',
+                   name || ' was a Billing Admin and is now a Member',
+                   'The Billing Admin role was retired: only Org Owners and Org Admins see usage and billing now.',
+                   'Make them an Org Admin on Users & access if they should keep seeing billing.',
+                   '/users', 'Open Users & access', NULL, ?, ?, ?
+            ${retired}
+            ON CONFLICT DO NOTHING`,
+      params: () => { const now = t(); return [now, now, now]; },
+    },
+    {
+      name: "retireBillingAdmins: no groups",
+      sql: `DELETE FROM workspace_members WHERE user_id IN (SELECT id ${retired})`,
+      params: () => [],
+    },
+    {
+      name: "retireBillingAdmins: Billing Admin becomes Member",
+      sql: "UPDATE users SET role = 'Member' WHERE role = 'Billing Admin'",
+      params: () => [],
+    },
+  ];
+})();
 
 /**
  * SQLite has one connection for the whole server, so a transaction would otherwise see writes from other
@@ -794,6 +854,15 @@ async function postgresDriver(): Promise<Driver> {
     try {
       await client.query("SELECT pg_advisory_lock(727274)");
       await client.query(sql);
+      // Data migrations (`DATA_MIGRATIONS`, same SQL as SQLite) in one transaction, still under the lock.
+      await client.query("BEGIN");
+      try {
+        for (const m of DATA_MIGRATIONS) await client.query(toPgPlaceholders(m.sql), m.params());
+        await client.query("COMMIT");
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw e;
+      }
     } finally {
       await client.query("SELECT pg_advisory_unlock(727274)").catch(() => {});
       client.release();
@@ -850,6 +919,17 @@ function driver(): Promise<Driver> {
     globalThis.__sidekickDriver = d;
   }
   return globalThis.__sidekickDriver;
+}
+
+/**
+ * Runs the data migrations (`DATA_MIGRATIONS`) again, in one transaction, through the active engine. They already
+ * run whenever the schema is applied; this is for tests and scripts that need them on demand. Safe to call any
+ * number of times: a second run changes nothing.
+ */
+export async function runDataMigrations(): Promise<void> {
+  await tx(async () => {
+    for (const m of DATA_MIGRATIONS) await run(m.sql, ...m.params());
+  });
 }
 
 /** New random id for a row (UUID v4). */

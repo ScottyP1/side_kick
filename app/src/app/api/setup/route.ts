@@ -4,7 +4,7 @@
  * it's finished) and returns the real state the wizard checks: whether Microsoft sign-in is connected, how
  * many groups exist, the people who can be picked as a group's Team Lead, which guardrails starting point
  * matches the current switches, both presets' switch values, and whether this person may change switches
- * (the Org Owner) and pay (Org Owner / Billing Admin; see /api/billing).
+ * (the Org Owner) and pay (the Org Owner; see /api/billing).
  * PUT { step, state: "done" | "skipped" } records a step; { finished: true | false } finishes or reopens setup.
  * Finishing is in the audit log.
  */

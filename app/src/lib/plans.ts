@@ -370,7 +370,7 @@ export type SubTimes = {
 /**
  * What an organization may do right now:
  * - `full`: everything its roles allow.
- * - `read_only`: people can still sign in and see everything already there, and Org Owners/Billing Admins
+ * - `read_only`: people can still sign in and see everything already there, and the Org Owner
  *   can fix billing; nothing new is added or changed, and Sidekick does no new AI work (answers in the
  *   portal and Teams, meeting notes, knowledge map, assistant, reminders).
  * `notice` is the banner text for the portal (null = nothing to say); `reason` says why it's read-only.
@@ -411,7 +411,7 @@ export function accessFor(sub: SubTimes | null | undefined, at: number = Date.no
 }
 
 function readOnly(why: string): Access {
-  const reason = `${BRAND.name} is read-only for your organization because ${why}. You can still see everything; an Org Owner or Billing Admin can pay on Usage & billing to turn everything back on.`;
+  const reason = `${BRAND.name} is read-only for your organization because ${why}. You can still see everything; the Org Owner can pay on Usage & billing to turn everything back on.`;
   return { mode: "read_only", notice: reason, reason };
 }
 
@@ -430,7 +430,7 @@ export type OrgRolloffTimes = { read_only_from: string | null; delete_on: string
 export function withRolloff(access: Access, roll: OrgRolloffTimes | null | undefined, opts: { selfService: boolean }, at: number = Date.now()): Access {
   if (!roll) return access;
   const when = day(roll.delete_on);
-  const keep = opts.selfService ? "To keep it, an Org Owner or Billing Admin can pay again on Usage & billing." : `To keep it, contact the ${BRAND.name} team.`;
+  const keep = opts.selfService ? "To keep it, the Org Owner can pay again on Usage & billing." : `To keep it, contact the ${BRAND.name} team.`;
   if (roll.read_only_from && Date.parse(roll.read_only_from) <= at) {
     const reason = `${BRAND.name} is read-only for your organization${roll.reason ? ` because ${roll.reason}` : ""}, and everything in it will be deleted on ${when}. Org Owners and Org Admins can download everything on Settings → Export your data until then. ${keep}`;
     return { mode: "read_only", notice: reason, reason };

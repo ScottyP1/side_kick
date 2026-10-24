@@ -20,14 +20,13 @@ import { BRAND } from "@/lib/brand";
 import { featureNote } from "@/lib/plans";
 
 type P = { id: string; name: string; email: string; role: string; last_active: string | null; must_change_password: number; microsoft: number; signin_locked?: boolean; workspaces: string[] };
-const ROLES = ["Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"];
+const ROLES = ["Org Admin", "Team Lead", "Member", "Viewer"];
 /** Roles a Team Lead can give (same rule as the server: LEAD_ASSIGNABLE_ROLES in lib/auth.ts). */
 const LEAD_ROLES = ["Member", "Viewer"];
 const ROLE_HELP: [string, string][] = [
   ["Org Owner", "Everything, plus the organization-wide guardrail switches and Microsoft sign-in"],
-  ["Org Admin", "People, workspaces, usage and audit log, across all workspaces"],
+  ["Org Admin", "People, workspaces, usage and billing (sees the plan; only the Org Owner pays or changes it) and audit log, across all workspaces"],
   ["Team Lead", "A Member who also adds people to the workspaces they lead (as Member or Viewer), takes them off again, and links Teams chats to those workspaces"],
-  ["Billing Admin", "Usage and billing only"],
   ["Member", "Their workspaces: upload documents, import meetings, ask, manage action items"],
   ["Viewer", "Their workspaces, read-only"],
 ];

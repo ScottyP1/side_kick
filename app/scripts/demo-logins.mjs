@@ -71,12 +71,7 @@ ${row("Org Admin (runs people, groups and Teams day to day)", p("orgAdmin").name
   "**Firm library**: add or replace a policy (Expense policy v3 replaced v2).",
   "**Guardrails**: you can make a group stricter and write custom rules; the company-wide switches show as On/Off only (\"Set by your Org Owner\").",
   "**Activity** and **Security & audit**: traces from the seeding, sign-ins, every change.",
-])}
-${row("Billing Admin (pays, changes no content)", p("billingAdmin").name, p("billingAdmin").email, passwords.billingAdmin, "No groups (sees the menu, but no client work)", [
-  "**Usage & billing**: the whole company's AI spend, the plan, extra groups, the 80% credit notice. Change the plan in test mode.",
-  "**Groups**: empty, because a Billing Admin isn't in any group. Asking for a group's address directly says \"not found\".",
-  "**Users & access**, **Activity**, **Security & audit** aren't in the menu; opening /audit shows who can use it.",
-  "**Help & support → My tickets**: your invoice PO ticket with the Sidekick team's reply.",
+  "**Usage & billing**: the whole company's AI spend, the plan and the 80% credit notice; only the Org Owner can pay or change the plan (\"Only the Org Owner can…\"). Hannah Brooks, another Org Admin, looks after billing and has the invoice PO ticket.",
 ])}
 ${row("Team Lead (runs the people side of their group)", p("teamLead").name, p("teamLead").email, passwords.teamLead, group("contoso"), [
   "**Groups → Contoso**: your one group; People tab shows emails (you manage it). Add a Member or Viewer; you can't add an Org Admin or take yourself off.",

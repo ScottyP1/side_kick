@@ -11,6 +11,15 @@ export type ChangelogEntry = { date: string; label: string; title: string; chang
 /** Every release, newest first. */
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-24",
+    label: "October 24, 2026",
+    title: "Billing is for Org Owners and Org Admins",
+    changes: [
+      "The Billing Admin role is gone: Usage & billing, the AI credit and its notices are for Org Owners and Org Admins, and only the Org Owner pays, changes the plan or cancels.",
+      "Anyone who was a Billing Admin is now a Member. The change is on Security & audit, and the Org Owner sees a note on Home: make them an Org Admin if they should keep seeing billing.",
+    ],
+  },
+  {
     date: "2026-10-23",
     label: "October 23, 2026",
     title: "SharePoint and OneDrive files",

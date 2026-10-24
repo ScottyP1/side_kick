@@ -2434,13 +2434,11 @@ const flashOf = (res) => {
 };
 const errorOf = (r) => flashOf(r.back);
 
-const billing = client();
-
 test(`[${ENGINE}] permission matrix: every role gets exactly the access the roles guide promises`, async () => {
+  // The Billing Admin role was retired: nobody can be given it any more.
   const b = await admin("POST", "/api/users", { name: "Bea Billing", email: "billing@test.local", role: "Billing Admin", workspaces: [s.wsA] });
-  assert.equal(b.status, 200, JSON.stringify(b.body));
-  assert.equal((await firstSignIn(billing, "billing@test.local", b.body.tempPassword)).status, 200);
-  const as = { owner: admin, admin: orgAdmin, lead, billing, member, viewer };
+  assert.equal(b.status, 400, "Billing Admin is no longer a role");
+  const as = { owner: admin, admin: orgAdmin, lead, member, viewer };
   const wrong = [];
   for (const row of MATRIX) {
     for (const role of EVERYONE) {
@@ -2460,11 +2458,11 @@ test(`[${ENGINE}] permission matrix: every role gets exactly the access the role
     }
   }
   assert.deepEqual(wrong, [], "permission mismatches:\n" + wrong.join("\n"));
-  // AI use on the home page: the company total for the billing roles, only their own for everyone else.
+  // AI use on the home page: the company total for Org Owners and Org Admins, only their own for everyone else.
   const org = (await admin("GET", "/api/overview")).body.stats;
   for (const role of EVERYONE) {
     const st = (await as[role]("GET", "/api/overview")).body.stats;
-    const wholeOrg = ["owner", "admin", "billing"].includes(role);
+    const wholeOrg = ["owner", "admin"].includes(role);
     assert.equal(st.spendScope, wholeOrg ? "org" : "you", `${role} spend scope`);
     if (wholeOrg) assert.equal(st.aiCallsMonth, org.aiCallsMonth, `${role} sees the company total`);
   }
@@ -2865,7 +2863,7 @@ test(`[${ENGINE}] users: clear errors for unknown roles and for Members trying t
   assert.doesNotMatch(byMember.body.error, /your workspaces/, "a Member has no workspaces to manage");
   assert.match((await tl.call("DELETE", `/api/users/${target.id}`)).body.error, /take them off your workspaces/);
   // Role refusals name who can do it.
-  assert.match((await mem.call("GET", "/api/usage")).body.error, /Only Org Owners, Org Admins and Billing Admins/);
+  assert.match((await mem.call("GET", "/api/usage")).body.error, /Only Org Owners and Org Admins can do this/);
   const adm = await newPerson("Abe Admin", "abe@test.local", "Org Admin");
   assert.match((await adm.call("PUT", "/api/guardrails", { competitors: true })).body.error, /Only the Org Owner/);
   s.abe = adm;
@@ -2952,7 +2950,7 @@ test(`[${ENGINE}] setup wizard: sign-up starts it, admins record steps and finis
   // tests count the people in Fay's organization.)
   const boss = client();
   assert.equal((await signUpAs(boss, { org: "Setup Roles Co", name: "Rhea Roles", email: "rhea@setuproles.test", password: "correct horse battery", plan: "team" })).status, 200);
-  for (const [role, email] of [["Member", "mo@setuproles.test"], ["Team Lead", "tl@setuproles.test"], ["Billing Admin", "bill@setuproles.test"]]) {
+  for (const [role, email] of [["Member", "mo@setuproles.test"], ["Team Lead", "tl@setuproles.test"], ["Viewer", "vi@setuproles.test"]]) {
     const added = await boss("POST", "/api/users", { name: role, email, role, workspaces: [] });
     assert.equal(added.status, 200, JSON.stringify(added.body));
     const who = client();
@@ -3048,7 +3046,7 @@ test(`[${ENGINE}] mock checkout: pay, change plan, a failed payment, pay again a
   assert.equal((await admin("POST", "/api/billing", { action: "pay", plan: "team" })).status, 404);
 });
 
-test(`[${ENGINE}] billing roles: Org Owners and Billing Admins manage the plan, Org Admins only see it, others neither`, async () => {
+test(`[${ENGINE}] billing roles: only the Org Owner manages the plan, Org Admins only see it, others neither`, async () => {
   const c = s.fay;
   const add = async (name, email, role) => {
     const call = client();
@@ -3057,20 +3055,29 @@ test(`[${ENGINE}] billing roles: Org Owners and Billing Admins manage the plan, 
     assert.equal((await firstSignIn(call, email, u.body.tempPassword)).status, 200);
     return call;
   };
-  const bill = await add("Bo Billing", "bo@fabrikam.test", "Billing Admin");
+  const refusedRole = await c("POST", "/api/users", { name: "Bo Billing", email: "bo@fabrikam.test", role: "Billing Admin", workspaces: [] });
+  assert.equal(refusedRole.status, 400, "the Billing Admin role was retired");
+  const vie = await add("Vic Viewer", "vic@fabrikam.test", "Viewer");
   const adm = await add("Ada Admin", "ada@fabrikam.test", "Org Admin");
   const mem = await add("Max Member", "max@fabrikam.test", "Member");
-  assert.equal((await bill("GET", "/api/billing")).body.canManage, true);
-  const paid = await bill("POST", "/api/billing", { action: "pay", plan: "team" });
-  assert.equal(paid.status, 200, "a Billing Admin can pay");
+  assert.equal((await c("GET", "/api/billing")).body.canManage, true);
+  const paid = await c("POST", "/api/billing", { action: "pay", plan: "team" });
+  assert.equal(paid.status, 200, "the Org Owner can pay");
   assert.equal(paid.body.subscription.status, "active");
   assert.equal((await adm("GET", "/api/billing")).body.canManage, false);
   const refused = await adm("POST", "/api/billing", { action: "cancel" });
   assert.equal(refused.status, 403);
-  assert.match(refused.body.error, /Only Org Owners and Billing Admins/);
-  assert.equal((await mem("GET", "/api/billing")).status, 403);
-  assert.equal((await mem("POST", "/api/billing", { action: "fail" })).status, 403);
-  assert.equal((await bill("GET", "/api/billing")).body.usage.seats, 4);
+  assert.match(refused.body.error, /Only the Org Owner can do this/);
+  assert.equal((await adm("GET", "/api/usage")).status, 200, "an Org Admin sees Usage & billing");
+  for (const [who, call] of [["Member", mem], ["Viewer", vie]]) {
+    for (const [method, url, body] of [["GET", "/api/billing"], ["POST", "/api/billing", { action: "fail" }], ["GET", "/api/usage"], ["GET", "/api/usage/export?months=1"]]) {
+      const r = await call(method, url, body);
+      assert.equal(r.status, 403, `${who} ${method} ${url}`);
+      assert.match(r.body.error ?? "", /Only (the Org Owner|Org Owners and Org Admins) can do this/, `${who} ${method} ${url}`);
+    }
+    assert.equal((await call("GET", "/api/me")).body.credit, null, `${who} gets no AI credit figures`);
+  }
+  assert.equal((await adm("GET", "/api/billing")).body.usage.seats, 4);
   s.fabMember = mem;
 });
 
@@ -3168,7 +3175,7 @@ test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meet
   assert.equal(ws2.status, 402);
   assert.equal(ws2.body.kind, "limit");
   assert.equal(ws2.body.limit, "workspaces");
-  assert.match(ws2.body.error, /Your Starter plan allows 1 group and you have 1\. An Org Owner or Billing Admin can add 1 extra group \(Starter \+ 1 extra group for \$328 a month\), or move to Team for \$699 a month on Usage & billing/);
+  assert.match(ws2.body.error, /Your Starter plan allows 1 group and you have 1\. The Org Owner can add 1 extra group \(Starter \+ 1 extra group for \$328 a month\), or move to Team for \$699 a month on Usage & billing/);
   assert.deepEqual([ws2.body.need, ws2.body.options.cheaper, ws2.body.options.extra.priceUsd, ws2.body.options.upgrade.plan], [2, "extra", 328, "team"], "the page gets both options with prices");
 
   const m = await c("POST", "/api/users", { name: "Lou Member", email: "lou@limitco.test", role: "Member", workspaces: [s.limitWs] });
@@ -3229,7 +3236,7 @@ test(`[${ENGINE}] plan features: Starter refuses Team Leads, custom rules, remin
   // Team Leads: not when adding someone, changing a role, or picking a Member as a new group's lead.
   const lead = await c("POST", "/api/users", { name: "Lea Lead", email: "lea@featureco.test", role: "Team Lead", workspaces: [] });
   refused(lead, "teamLeads", "team");
-  assert.match(lead.body.error, /^Your Starter plan doesn't include Team Leads\. Team \(\$699 \/ month\) and up include it: an Org Owner or Billing Admin can move to Team on Usage & billing\. Anything already set up keeps working\.$/);
+  assert.match(lead.body.error, /^Your Starter plan doesn't include Team Leads\. Team \(\$699 \/ month\) and up include it: the Org Owner can move to Team on Usage & billing\. Anything already set up keeps working\.$/);
   const m = await c("POST", "/api/users", { name: "Lea Lead", email: "lea@featureco.test", role: "Member", workspaces: [] });
   assert.equal(m.status, 200);
   refused(await c("POST", "/api/workspaces", { name: "Feature Group", lead: m.body.id }), "teamLeads", "team");
@@ -3632,7 +3639,7 @@ test(`[${ENGINE}] organization roll-off: canceling leads to read-only, export an
   // Canceling: still usable until the end of the paid period, and the banner gives the deletion date.
   const canceled = await c("POST", "/api/billing", { action: "cancel" });
   assert.equal(canceled.body.access.mode, "full");
-  assert.match(canceled.body.access.notice, /Your organization's data will be deleted on .*To keep it, an Org Owner or Billing Admin can pay again/);
+  assert.match(canceled.body.access.notice, /Your organization's data will be deleted on .*To keep it, the Org Owner can pay again/);
   const pending = (await c("GET", "/api/rolloffs")).body.rolloffs.find((r) => r.scope === "org");
   assert.equal(pending.status, "scheduled");
   assert.ok(Date.parse(pending.deleteOn) - Date.parse(pending.readOnlyFrom) === 30 * 86400_000, "30 days after the paid period ends");
@@ -3957,6 +3964,39 @@ test(`[${ENGINE}] watchers: findings aren't duplicated, can be snoozed, and reso
   assert.ok(health.findings.some((f) => f.kind === "no_notes_chat" && f.open >= 1));
   assert.ok(health.companies.some((c) => c.name === "Watch Co"));
   assert.doesNotMatch(JSON.stringify(health), /purple elephant|Cutover runbook|Quiet group/);
+});
+
+test(`[${ENGINE}] retired Billing Admins: the Org Owner alone gets a notice on Home until the role changes`, async () => {
+  // What the data migration in lib/db.ts writes for a retired Billing Admin (tested on both engines in db.test.mjs):
+  // Nora is now a Member, and Watch Co's Org Owner gets one owner-only finding about her.
+  const noraId = await dbValue("SELECT id FROM users WHERE email = 'nora@watch.test'");
+  const t = new Date().toISOString();
+  await dbExec(`INSERT INTO findings (id, org_id, workspace_id, kind, dedupe_key, audience, severity, status, title, detail, next_step, action_href, action_label, data_json, first_seen_at, last_seen_at, updated_at)
+    VALUES ('role_changed:${noraId}', '${w.org}', NULL, 'role_changed', 'role_changed:org:${noraId}', 'owner', 'info', 'open', 'Nora Member was a Billing Admin and is now a Member',
+            'The Billing Admin role was retired: only Org Owners and Org Admins see usage and billing now.', 'Make them an Org Admin on Users & access if they should keep seeing billing.',
+            '/users', 'Open Users & access', NULL, '${t}', '${t}', '${t}')`);
+  const ola = client();
+  const u = await wa("POST", "/api/users", { name: "Ola Admin", email: "ola@watch.test", role: "Org Admin", workspaces: [] });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  assert.equal((await firstSignIn(ola, "ola@watch.test", u.body.tempPassword)).status, 200);
+  const notice = async (call) => (await call("GET", "/api/findings")).body.findings.find((f) => f.kind === "role_changed");
+  await jobTick();
+  const f = await notice(wa);
+  assert.ok(f, "still open while Nora is a Member");
+  assert.match(f.title, /Nora Member was a Billing Admin and is now a Member/);
+  assert.match(f.nextStep, /Make them an Org Admin/);
+  assert.equal(f.actionHref, "/users");
+  assert.equal(f.canAct, true, "the Org Owner can snooze it");
+  for (const [who, call] of [["Org Admin", ola], ["Team Lead", lena], ["Member", nora]]) assert.equal(await notice(call), undefined, `${who} doesn't see it`);
+  assert.equal((await ola("POST", "/api/findings", { id: f.id, action: "snooze" })).status, 404, "an Org Admin can't act on it");
+  assert.equal((await admin("POST", "/api/findings", { id: f.id, action: "snooze" })).status, 404, "another organization can't either");
+  // The Org Owner makes Nora an Org Admin: the notice resolves itself on the next run.
+  assert.equal((await wa("PATCH", `/api/users/${noraId}`, { role: "Billing Admin" })).status, 400, "nobody can be given the retired role");
+  assert.equal((await wa("PATCH", `/api/users/${noraId}`, { role: "Org Admin" })).status, 200);
+  await jobTick();
+  assert.equal(await notice(wa), undefined, "resolved once the role changed");
+  assert.equal(await dbValue(`SELECT status FROM findings WHERE id = 'role_changed:${noraId}'`), "resolved");
+  assert.equal((await wa("PATCH", `/api/users/${noraId}`, { role: "Member" })).status, 200);
 });
 
 /* ---------- access recovery: scripts/reset-password.mjs (run last: it resets the Owner Console account) ---------- */
@@ -4470,7 +4510,7 @@ test(`[${ENGINE}] connectors: plans limit how many tools (none, one, all) with a
   assert.equal((await signUpAs(st, { org: "Connector Starter Co", name: "Sid Starter", email: "sid@connstarter.test", password: "correct horse battery", plan: "starter" })).status, 200);
   const starter = await connectTool(st, "ado", "northwind");
   assert.equal(starter.start.location, `${BASE}/connectors?error=1`);
-  assert.match(flashOf(starter.start), /Your Starter plan doesn't include connectors\. An Org Owner or Billing Admin can move to a bigger plan on Usage & billing/);
+  assert.match(flashOf(starter.start), /Your Starter plan doesn't include connectors\. The Org Owner can move to a bigger plan on Usage & billing/);
   // Team (one tool): the first connects, a second tool is refused; reconnecting the first still works.
   const t = client();
   assert.equal((await signUpAs(t, { org: "Connector Team Co", name: "Tia Team", email: "tia@connteam.test", password: "correct horse battery", plan: "team" })).status, 200);

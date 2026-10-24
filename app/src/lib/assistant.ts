@@ -49,7 +49,7 @@ import { BRAND } from "./brand";
 /** Pages the assistant can send someone to, with who may see each (mirrors the sidebar in shell.tsx). */
 export const PAGES: Record<string, { label: string; href: string; who?: (u: User) => boolean }> = {
   overview: { label: "Overview", href: "/home" },
-  usage: { label: "Usage & billing", href: "/usage", who: (u) => isAdmin(u) || u.role === "Billing Admin" },
+  usage: { label: "Usage & billing", href: "/usage", who: isAdmin },
   agent: { label: "AI models & agent", href: "/agent" },
   workspaces: { label: "Workspaces", href: "/workspaces" },
   knowledge: { label: "Knowledge & docs", href: "/knowledge" },
@@ -64,7 +64,7 @@ export const PAGES: Record<string, { label: string; href: string; who?: (u: User
 };
 
 /** Roles an admin may give a new person from the assistant (Org Owner is never handed out this way). */
-const NEW_PERSON_ROLES = ["Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"] as const;
+const NEW_PERSON_ROLES = ["Org Admin", "Team Lead", "Member", "Viewer"] as const;
 
 /** What Claude returns: a reply, and at most one proposed action (all fields present, unused ones null). */
 const AssistSchema = z.object({
@@ -188,7 +188,7 @@ const GUIDE = `
 ${BRAND.name} is an AI teammate for Microsoft Teams used by delivery teams on client engagements.
 Pages (sidebar): Overview (home), Usage & billing, AI models & agent, Workspaces, Knowledge & docs (upload documents, Ask ${BRAND.name} with cited sources), Meetings (import Teams .vtt / Word / text transcripts; ${BRAND.name} writes the summary, decisions, action items, open questions), Memory & gaps (knowledge map: topics with a 0-100 coverage score, gaps, conflicts, action-item tracker), Connectors (Azure DevOps Boards, Jira, GitHub Issues and Confluence, read-only: Org Owners/Admins connect a tool with its own sign-in (GitHub: the Sidekick GitHub App must be installed on their GitHub organization first), Owners/Admins/Team Leads link a project, repository or space to a group so its work items or pages feed answers with links, health and "Sync now" shown there; the plan sets how many tools: Starter none, Team one, Business all), Users & access, Guardrails (rules ${BRAND.name} always follows: a locked floor against hate, harassment, sexual content, harm, jailbreaks, crossing client walls and guessing; plus org-wide switches only the Org Owner can change, e.g. refuse swearing, stick to work, no judging people, steer HR/legal/medical questions, hide contact details, no competitor talk; Org Owners/Admins can make one workspace stricter with extra switches, add up to 20 custom rules like "Never quote day rates" (org-wide or per workspace; rules that loosen the guardrails are refused) and try a question in the Test it box; admins see counts of how often each rule fired), Activity (traces, waterfall, messages, audit trail), Security & audit, Settings.
 Workspaces: one per client engagement; walls mean people only see workspaces they belong to (admins see all in their org). Each document is Internal or Shareable; when client guests are present only Shareable documents are used.
-Roles: Org Owner and Org Admin (everything: people, workspaces, Teams links, settings, Activity), Team Lead (a Member who also adds people as Member or Viewer to the workspaces they lead, takes them off again, and links Teams chats to those workspaces; can't create workspaces or organizations, change roles or see other workspaces), Billing Admin (usage and billing only), Member (works in their workspaces: upload, import meetings, ask, refresh map), Viewer (read-only).
+Roles: Org Owner and Org Admin (everything: people, workspaces, Teams links, settings, Activity, Usage & billing; only the Org Owner pays, changes the plan or cancels), Team Lead (a Member who also adds people as Member or Viewer to the workspaces they lead, takes them off again, and links Teams chats to those workspaces; can't create workspaces or organizations, change roles or see other workspaces), Member (works in their workspaces: upload, import meetings, ask, refresh map), Viewer (read-only).
 Teams: add the ${BRAND.name} app to a chat or channel, write "@${BRAND.name} link" and it posts a link code; an admin enters the code here (or asks this assistant) to link it to a workspace. Then "@${BRAND.name} <question>" answers with sources, and processed meetings post a notes card with Assign / Done buttons on action items. "@${BRAND.name} help" lists commands. ${BRAND.name} only reads messages that mention it.
 Problems: errors show a dialog with a reference code like K7Q2-9XM4; share it with the ${BRAND.name} team, or admins can search it on Activity.
 New organizations (a new client company using ${BRAND.name}) are created by the ${BRAND.name} team in the Owner Console, not from inside an organization; this assistant can't do that.
@@ -235,7 +235,7 @@ export async function assist(user: User, message: string, conversationId?: unkno
     : [];
   const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", user.org_id);
   let spend: { calls: number; cost: number } | undefined;
-  if (isAdmin(user) || user.role === "Billing Admin") {
+  if (isAdmin(user)) {
     const d = new Date();
     spend = await get<{ calls: number; cost: number }>(
       "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost FROM usage_events WHERE org_id = ? AND created_at >= ?",

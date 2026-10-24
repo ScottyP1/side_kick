@@ -9,7 +9,7 @@ And it can read **SharePoint document libraries** and **OneDrive shared folders*
 Sidekick only **reads**. It never creates, changes or comments on anything in these tools, and it never stores a password: you sign in with the tool's own sign-in, and Sidekick keeps an encrypted sign-in it can renew.
 
 ## What you need
-- **Your plan.** Starter doesn't include connectors; Team includes one connected tool (Azure DevOps, Jira, GitHub, Confluence *or* Microsoft 365; SharePoint and OneDrive together count as one); Business and Enterprise include all of them. Connectors shows what yours includes, and **Usage & billing** lets an Org Owner or Billing Admin upgrade.
+- **Your plan.** Starter doesn't include connectors; Team includes one connected tool (Azure DevOps, Jira, GitHub, Confluence *or* Microsoft 365; SharePoint and OneDrive together count as one); Business and Enterprise include all of them. Connectors shows what yours includes, and **Usage & billing** lets the Org Owner upgrade.
 - **The right role.** An **Org Owner** or **Org Admin** connects (and disconnects) a tool for the whole organization. An Org Owner, Org Admin or a group's **Team Lead** links projects to groups.
 - **Access in the tool.** The account you connect with must be able to open the projects (repositories, spaces) you want. Sidekick sees exactly what that account can see, nothing more.
 

@@ -32,6 +32,43 @@ test(`[${engine}] insert, read back, numbers come back as numbers`, async () => 
   assert.equal(typeof count.n, "number");
 });
 
+test(`[${engine}] retiring Billing Admins: they become Members with no groups, audited, the Org Owner told once`, async () => {
+  const org = db.newId();
+  const [ownerId, billId, memberId, ws] = [db.newId(), db.newId(), db.newId(), db.newId()];
+  const t = db.now();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Retire Co", t);
+  for (const [id, name, role] of [[ownerId, "Rita Owner", "Org Owner"], [billId, "Bill Payer", "Billing Admin"], [memberId, "Mo Member", "Member"]]) {
+    await db.run("INSERT INTO users (id, org_id, name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", id, org, name, `${id}@retire.test`, role, "x", t);
+  }
+  await db.run("INSERT INTO workspaces (id, org_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)", ws, org, "Retire group", "#4f46e5", t);
+  for (const u of [billId, memberId]) await db.run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", ws, u);
+
+  await db.runDataMigrations();
+  const role = async (id) => (await db.get("SELECT role FROM users WHERE id = ?", id)).role;
+  assert.equal(await role(billId), "Member", "least privilege");
+  assert.equal(await role(ownerId), "Org Owner");
+  assert.equal(await role(memberId), "Member");
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM workspace_members WHERE user_id = ?", billId)).n, 0, "no groups");
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM workspace_members WHERE user_id = ?", memberId)).n, 1, "other people keep theirs");
+  const audits = await db.all("SELECT actor, action, kind FROM audit_log WHERE org_id = ? ORDER BY id", org);
+  assert.equal(audits.length, 1, "one audit entry per person");
+  assert.equal(audits[0].actor, "Sidekick");
+  assert.equal(audits[0].kind, "Access");
+  assert.match(audits[0].action, /^Changed Bill Payer from Billing Admin to Member: the Billing Admin role was retired/);
+  const notices = await db.all("SELECT id, kind, audience, status, title, next_step, action_href, workspace_id FROM findings WHERE org_id = ?", org);
+  assert.equal(notices.length, 1);
+  assert.deepEqual({ ...notices[0], id: undefined }, {
+    id: undefined, kind: "role_changed", audience: "owner", status: "open", workspace_id: null, action_href: "/users",
+    title: "Bill Payer was a Billing Admin and is now a Member",
+    next_step: "Make them an Org Admin on Users & access if they should keep seeing billing.",
+  });
+  // Running it again (every start-up does) changes nothing.
+  await db.runDataMigrations();
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM audit_log WHERE org_id = ?", org)).n, 1);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM findings WHERE org_id = ?", org)).n, 1);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'Billing Admin'")).n, 0);
+});
+
 test(`[${engine}] a failed transaction saves nothing`, async () => {
   const id = db.newId();
   await assert.rejects(
@@ -495,7 +532,7 @@ test(`[${engine}] roll-off: a pending deletion makes the organization read-only 
   assert.equal(plans.withRolloff(full, null, { selfService: true }, now), full);
   const soon = plans.withRolloff(full, { read_only_from: iso(now + DAY), delete_on: iso(now + 31 * DAY), reason: "the plan was canceled" }, { selfService: true }, now);
   assert.equal(soon.mode, "full", "usable until the paid period ends");
-  assert.match(soon.notice, /deleted on Nov 21, 2026\. To keep it, an Org Owner or Billing Admin can pay again/);
+  assert.match(soon.notice, /deleted on Nov 21, 2026\. To keep it, the Org Owner can pay again/);
   const ro = plans.withRolloff(full, { read_only_from: iso(now - DAY), delete_on: iso(now + 29 * DAY), reason: "the plan was canceled" }, { selfService: false }, now);
   assert.equal(ro.mode, "read_only");
   assert.match(ro.reason, /read-only for your organization because the plan was canceled, and everything in it will be deleted on Nov 19, 2026\. .*Export your data.*contact the Sidekick team/);
@@ -598,7 +635,6 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
   const people = {
     owner: { role: "Org Owner", admin: true },
     orgAdmin: { role: "Org Admin", admin: true },
-    billing: { role: "Billing Admin", admin: false },
     lead: { role: "Team Lead", admin: false, lead: true },
     member: { role: "Member", admin: false },
     viewer: { role: "Viewer", admin: false },
@@ -609,7 +645,7 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
   assert.deepEqual(hrefs(people.orgAdmin), all);
   for (const [who, u] of Object.entries(people)) {
     const mine = hrefs(u);
-    assert.equal(mine.includes("/usage"), ["owner", "orgAdmin", "billing"].includes(who), `${who}: Usage`);
+    assert.equal(mine.includes("/usage"), ["owner", "orgAdmin"].includes(who), `${who}: Usage`);
     assert.equal(mine.includes("/users"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Users`);
     assert.equal(mine.includes("/activity") || mine.includes("/audit"), u.admin, `${who}: Activity/Audit`);
     for (const inGroup of [true, false]) {
@@ -621,7 +657,8 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
     assert.deepEqual(pnav.phoneTabs(u, true).map((t) => t.href), ["/home", "/workspaces", "/knowledge", "/meetings"]);
   }
   // Nobody in a group: no empty Knowledge/Meetings tabs; pages the role can use instead.
-  assert.deepEqual(pnav.phoneTabs(people.billing, false).map((t) => t.short ?? t.label), ["Home", "Usage", "Settings", "Help"]);
+  // The retired Billing Admin role (nobody has it after the migration) would get no Usage & billing either.
+  assert.ok(!hrefs({ role: "Billing Admin", admin: false }).includes("/usage"));
   assert.deepEqual(pnav.phoneTabs(people.owner, false).map((t) => t.href), ["/home", "/usage", "/workspaces", "/settings"]);
   assert.deepEqual(pnav.phoneTabs(people.viewer, false).map((t) => t.href), ["/home", "/settings", "/help"]);
   // A page counts as active for its own address and the pages under it, not for look-alike prefixes.

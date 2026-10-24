@@ -9,11 +9,11 @@
  * roles get a 400/404 instead of changing anything, except the harmless reads. `skipAllowed` rows only
  * check that the other roles are refused (running them would disconnect or change real settings).
  *
- * Roles: owner = Org Owner, admin = Org Admin, lead = Team Lead, billing = Billing Admin, member = Member,
- * viewer = Viewer. Team Leads, Billing Admins, Members and Viewers are in workspace A only; Org Owners and
+ * Roles: owner = Org Owner, admin = Org Admin, lead = Team Lead, member = Member, viewer = Viewer (the Billing
+ * Admin role was retired in October 2026). Team Leads, Members and Viewers are in workspace A only; Org Owners and
  * Org Admins see every workspace.
  */
-export const EVERYONE = ["owner", "admin", "lead", "billing", "member", "viewer"];
+export const EVERYONE = ["owner", "admin", "lead", "member", "viewer"];
 const ADMINS = ["owner", "admin"];
 const MANAGERS = ["owner", "admin", "lead"];
 const EDITORS = ["owner", "admin", "lead", "member"];
@@ -50,10 +50,10 @@ export const MATRIX = [
   { what: "Resolve or dismiss knowledge gaps", method: "POST", url: () => "/api/gaps", body: {}, allow: EDITORS },
   { what: "Snooze a Needs attention item", method: "POST", url: () => "/api/findings", body: { id: NOPE, action: "snooze" }, allow: MANAGERS },
   // Money
-  { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ["owner", "admin", "billing"] },
-  { what: "See the plan and subscription", method: "GET", url: () => "/api/billing", allow: ["owner", "admin", "billing"] },
-  { what: "Export usage per group (CSV, for chargeback)", method: "GET", url: () => "/api/usage/export?months=1", allow: ["owner", "admin", "billing"] },
-  { what: "Pay, change the plan or extra groups, or cancel it", method: "POST", url: () => "/api/billing", body: { action: "nope" }, allow: ["owner", "billing"] },
+  { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ADMINS },
+  { what: "See the plan and subscription", method: "GET", url: () => "/api/billing", allow: ADMINS },
+  { what: "Export usage per group (CSV, for chargeback)", method: "GET", url: () => "/api/usage/export?months=1", allow: ADMINS },
+  { what: "Pay, change the plan or extra groups, or cancel it", method: "POST", url: () => "/api/billing", body: { action: "nope" }, allow: ["owner"] },
   // Running the organization
   { what: "Create workspaces", method: "POST", url: () => "/api/workspaces", body: {}, allow: ADMINS },
   { what: "Rename a workspace or change its engagement code", method: "PATCH", url: () => `/api/workspaces/${NOPE}`, body: {}, allow: ADMINS },

@@ -14,9 +14,8 @@ The full rulebook, with every action and which roles may do it, is [Roles and pe
 | Role | Can do |
 |---|---|
 | **Org Owner** | Everything, including the organization itself |
-| **Org Admin** | People, workspaces, Teams channels, usage and the audit log, across all workspaces |
+| **Org Admin** | People, workspaces, Teams channels, usage and billing (only the Org Owner pays or changes the plan) and the audit log, across all workspaces |
 | **Team Lead** | Everything a Member can do, plus the people side of the workspaces they lead (the ones they belong to): add people to them as Member or Viewer, take people off them, and link Teams chats to them. Can't create workspaces or organizations, change anyone's role, remove people from the organization, or see other workspaces |
-| **Billing Admin** | Usage and billing only |
 | **Member** | Work inside the workspaces they belong to: upload, import meetings, ask, update action items |
 | **Viewer** | Read-only inside the workspaces they belong to |
 
@@ -26,7 +25,7 @@ The workspace you're in shows at the top of the pages that belong to one workspa
 
 ## Using Sidekick on a phone
 On a phone (or any narrow window) the sidebar makes way for two things:
-- A **tab bar** floating at the bottom with the pages you use most: **Home**, **Groups**, **Knowledge** and **Meetings**, plus **Ask**, which opens the assistant and "I need help" (it replaces the round button, and shows the same dot when the Sidekick team has replied to you). If you're not in a group yet (a Billing Admin, for example), the tabs are **Home**, **Usage** (if your role pays the bills), **Settings** and **Help** instead.
+- A **tab bar** floating at the bottom with the pages you use most: **Home**, **Groups**, **Knowledge** and **Meetings**, plus **Ask**, which opens the assistant and "I need help" (it replaces the round button, and shows the same dot when the Sidekick team has replied to you). If you're not in a group yet, the tabs are **Home**, **Settings** and **Help** instead.
 - The **menu button** (three lines, top left) opens everything else: every page your role can use (the same list as the sidebar), the switcher between your groups if you're in two or more, and **Sign out**. Tap outside it, press the ✕ or Escape to close it.
 
 ## Sources and citations

@@ -30,7 +30,7 @@ export default function MemoryPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState("Open");
   const [factTab, setFactTab] = useState("decision");
-  const canEdit = !["Viewer", "Billing Admin"].includes(me.user.role);
+  const canEdit = me.user.role !== "Viewer";
 
   const load = useCallback(async () => {
     if (!ws) return;

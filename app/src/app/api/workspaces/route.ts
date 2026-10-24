@@ -61,7 +61,7 @@ export const GET = handle(async () => {
  * Creates a workspace: `{ name, code?, client?, lead?, members? }` where `lead` and `members` are user ids
  * in the same organization. The creator is always a member (so they can open it). A lead who is a Member or
  * Viewer becomes a Team Lead (that needs a plan with Team Leads, Team and up: 402 `kind: "limit"`; picking
- * someone who is already a Team Lead always works); Org Owners/Admins/Billing Admins can't be picked as lead.
+ * someone who is already a Team Lead always works); Org Owners/Admins can't be picked as lead.
  */
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();

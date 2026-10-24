@@ -72,6 +72,8 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
       // Connector links and their imported work items (lib/connectors.ts); the tool stays connected for other groups.
       "connector_items", "connector_links",
       "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
+      // A firm document limited to chosen groups (lib/upload-guard.ts) stops applying to this one.
+      "firm_doc_groups",
     ]) {
       await run(`DELETE FROM ${table} WHERE workspace_id = ? AND org_id = ?`, ...ws);
     }

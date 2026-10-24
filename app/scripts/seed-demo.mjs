@@ -50,7 +50,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
 import {
-  LOGIN_KEYS, NORTHWIND, OPERATOR, OTHER_ORGS, PROFILES, WORLD_TODAY, addDays, emailAt, firmLibrary, groupContent, northwindPeople, smallOrgContent, supportTickets,
+  LOGIN_KEYS, NORTHWIND, OPERATOR, OTHER_ORGS, PROFILES, WORLD_TODAY, addDays, emailAt, firmLibrary, groupContent, northwindPeople, smallOrgContent, supportTickets, uploadGuardDemo,
 } from "./demo-world.mjs";
 import { loginsGuide } from "./demo-logins.mjs";
 import { createFakeTools } from "./fake-tools.mjs";
@@ -428,6 +428,7 @@ async function phaseA() {
     const r = await owner("POST", "/api/firm", undefined, {
       form: formOf({ title: d.title, audience: d.audience, effective_on: d.effective, replaces: d.replaces ? firmIds[d.replaces] : null }, [{ field: "files", name: d.name, text: d.text, type: mime(d.name) }]),
     });
+    if (r.results[0]?.held) throw new Error(`${d.title} was held by the upload guard: ${r.results[0].question}`);
     firmIds[d.title] = r.results[0]?.id;
   }
 
@@ -438,13 +439,30 @@ async function phaseA() {
     for (const d of c.docs) {
       const r = await g.lead("POST", "/api/docs", undefined, { form: formOf({ ws: g.id, audience: d.audience }, [{ field: "files", name: d.name, text: d.text, type: mime(d.name) }]) });
       if (!r.results[0]?.ok) throw new Error(`Upload of ${d.name} failed: ${r.results[0]?.error}`);
+      if (r.results[0].held) throw new Error(`${d.name} was held by the upload guard: ${r.results[0].question}`);
       world.docs.push({ ws: g.id, name: d.name, day: d.day });
     }
     for (const m of c.meetings) {
       const r = await g.lead("POST", "/api/meetings", undefined, { form: formOf({ ws: g.id, title: m.title, held_at: m.day, external: m.guests ? "true" : "false" }, [{ field: "file", name: `${m.title}.vtt`, text: m.vtt, type: "text/vtt" }]) });
+      if (r.check) throw new Error(`${m.title} was stopped by the upload guard: ${r.check.question}`);
       world.meetings.push({ id: r.id, ws: g.id, ...m });
     }
   }
+
+  log("• Upload guard: a Litware file held in Contoso, a firm standard for two groups, a client checklist held in the firm library");
+  const guard = uploadGuardDemo();
+  const maria = world.users[people.find((x) => x.name === "Maria Chen").email].session;
+  const misfiled = await maria("POST", "/api/docs", undefined, { form: formOf({ ws: world.groups.contoso.id, audience: guard.misfiled.audience }, [{ field: "files", name: guard.misfiled.name, text: guard.misfiled.text, type: "text/markdown" }]) });
+  if (!misfiled.results[0]?.held) throw new Error(`The misfiled Litware document wasn't held: ${JSON.stringify(misfiled.results[0])}`);
+  world.docs.push({ ws: world.groups.contoso.id, name: guard.misfiled.name, day: "2026-10-21" });
+  const limitedForm = formOf({ title: guard.limited.title, audience: guard.limited.audience, effective_on: guard.limited.effective }, [{ field: "files", name: guard.limited.name, text: guard.limited.text, type: "text/markdown" }]);
+  for (const k of guard.limited.groups) limitedForm.append("applies_to", world.groups[k].id);
+  const limited = await owner("POST", "/api/firm", undefined, { form: limitedForm });
+  if (!limited.results[0]?.ok || limited.results[0]?.held) throw new Error(`The limited firm standard wasn't added: ${JSON.stringify(limited.results[0])}`);
+  const firmHeld = await owner("POST", "/api/firm", undefined, {
+    form: formOf({ title: guard.firmHeld.title, audience: guard.firmHeld.audience, effective_on: guard.firmHeld.effective }, [{ field: "files", name: guard.firmHeld.name, text: guard.firmHeld.text, type: "text/markdown" }]),
+  });
+  if (!firmHeld.results[0]?.held) throw new Error(`The client checklist wasn't held in the firm library: ${JSON.stringify(firmHeld.results[0])}`);
 
   log("• Teams chats: added, linked, tracked, messages sent through the local Teams test path");
   SERVICE_URL = `http://127.0.0.1:${connector.address().port}`;

@@ -422,6 +422,13 @@ CREATE TABLE IF NOT EXISTS firm_docs (
   uploaded_by TEXT, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS firm_docs_org ON firm_docs(org_id, created_at);
+-- Upload guard (lib/upload-guard.ts): the groups a firm document is limited to when its applies_to is 'some'
+-- (firm_docs.applies_to 'all' = every group, the default). Only these groups' answers use it.
+CREATE TABLE IF NOT EXISTS firm_doc_groups (
+  firm_doc_id TEXT NOT NULL REFERENCES firm_docs(id) ON DELETE CASCADE, org_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, PRIMARY KEY (firm_doc_id, workspace_id)
+);
+CREATE INDEX IF NOT EXISTS firm_doc_groups_ws ON firm_doc_groups(org_id, workspace_id);
 -- Thumbs up/down on an answer (lib/feedback.ts), one per person per answer (a second click changes it).
 -- question_id = the questions row the answer was saved as; channel = portal | teams. No question or answer
 -- text is stored here: admins and the Owner Console see counts and trends only.
@@ -667,6 +674,12 @@ function migrate(conn: DatabaseSync) {
   // graph_meetings row, when its notes went to Teams (posted once), and who saved an item to knowledge.
   for (const col of ["source", "graph_meeting_id", "notes_posted_at"]) if (!has("meetings", col)) conn.exec(`ALTER TABLE meetings ADD COLUMN ${col} TEXT`);
   for (const col of ["saved_by", "saved_at"]) if (!has("items", col)) conn.exec(`ALTER TABLE items ADD COLUMN ${col} TEXT`);
+  // Upload guard (lib/upload-guard.ts): a document or firm document that looks like it belongs to another client is
+  // saved Held (status 'Held', text kept in held_text, not indexed) until the uploader keeps or moves it.
+  // guard_status: null = never flagged, 'kept' = flagged and kept (a Needs attention finding), 'reviewed' = a
+  // manager confirmed it; guard_json = what matched. firm_docs.applies_to: 'all' groups or 'some' (firm_doc_groups).
+  for (const t of ["documents", "firm_docs"]) for (const col of ["guard_status", "guard_json", "held_text"]) if (!has(t, col)) conn.exec(`ALTER TABLE ${t} ADD COLUMN ${col} TEXT`);
+  if (!has("firm_docs", "applies_to")) conn.exec("ALTER TABLE firm_docs ADD COLUMN applies_to TEXT NOT NULL DEFAULT 'all'");
   // Scale readiness (docs/SCALE.md): indexes for per-group lists and counts, per-person lookups and the retention
   // clean-up (lib/retention.ts), found with the load test on 10,000 groups. Same list as db/schema.postgres.sql.
   for (const sql of [

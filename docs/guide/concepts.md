@@ -42,7 +42,10 @@ Before answering, Sidekick puts the passages it found in order of how well they 
 **Filters** in Ask narrow the sources to documents, meetings, Teams chats, decisions & notes or the firm library, and to a date range.
 
 ## Firm library
-Your organization's own policies, standards, templates, methods and rate-card rules, kept once for the whole organization on the **Firm library** page and used in **every** group's answers (cited as "Firm policy · Expense policy v3"). Groups still never see each other's documents. Each firm document has a title, an **Internal**/**Shareable** tag (client guests only ever see Shareable ones), an optional **effective date**, and can be marked **superseded** by a newer one. Everyone can see the list; Org Owners and Org Admins manage it. Firm documents count toward your plan's document limit.
+Your organization's own policies, standards, templates, methods and rate-card rules, kept once for the whole organization on the **Firm library** page and used in **every** group's answers (cited as "Firm policy · Expense policy v3"). Groups still never see each other's documents. Each firm document has a title, an **Internal**/**Shareable** tag (client guests only ever see Shareable ones), an optional **effective date**, and can be marked **superseded** by a newer one. Everyone can see the list; Org Owners and Org Admins manage it. Firm documents count toward your plan's document limit. A firm document can **apply to** all groups (the default) or only **chosen groups**: then only those groups' answers use it.
+
+## Held documents (another client's file?)
+Every upload says where it's going ("Uploading to Contoso Retail – Cloud Migration (Contoso Retail)", or "Uploading to the firm library: every group can use it"), and people in two or more groups confirm the group each time. After reading a file, Sidekick checks it against your organization's other groups (client names, group names, engagement codes; no AI). A file that looks like it's about another client is **held**: it's kept but not used in any answer until someone keeps it or moves it to the right group. For the firm library any mention of a client holds it, because firm documents reach every group. Moving a document takes it out of the old group's search completely. A document kept anyway shows up under Needs attention for the group's Team Lead (firm library: the Org Owner and Admins).
 
 ## Follow-up questions
 Ask builds on your last questions in the same group, so "and wave 3?" after "When is the wave 2 cutover?" is understood as "When is the wave 3 cutover?". The answer shows **Following up on "…"**; press **New question** to start afresh. Your conversation is yours alone, in one group (and one guests setting): nobody else can continue it, and it's forgotten 24 hours after your last question. Guardrails check every turn, so a refused topic can't be reached with a short follow-up. In Teams, a follow-up is a reply in the same channel thread, or a message in the same chat within 30 minutes.
@@ -61,7 +64,8 @@ Sidekick keeps an eye on each group in the background, every 15 minutes, and lis
 - action items past their due date, and action items nobody owns two days after the meeting,
 - documents a newer meeting decision seems to change ("may be out of date"),
 - groups without a Team Lead (plans with Team Leads) or without a Teams chat for meeting notes,
-- connectors (such as Jira or Azure DevOps) that stopped working.
+- connectors (such as Jira or Azure DevOps) that stopped working,
+- documents that may be another client's: held ones waiting for a decision, and ones kept anyway (for the group's Team Lead and the admins; firm library ones for the Org Owner and Admins).
 
 Each problem is one item, however long it lasts, and it **clears itself** once it's fixed. You only see items for your own groups: everyone in a group sees its action items, unanswered questions and out-of-date documents; the group's Team Lead and the admins also see its Teams problems; organization-wide items (chats waiting, groups without a lead, connectors) are for Org Owners and Org Admins. Admins and the group's Team Lead can **Snooze** an item for a week; it comes back if it's still there. The checks themselves use no AI; only the "may be out of date" check asks the AI, and only about a document and decision that already look related.
 

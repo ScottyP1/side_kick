@@ -16,6 +16,7 @@ import { processMeeting } from "@/lib/sidekick";
 import { assertEnabled } from "@/lib/owner";
 import { postMeetingNotes } from "@/lib/teams/bot";
 import { remindAfterMeeting } from "@/lib/reminders";
+import { checkWrongClient, heldQuestion } from "@/lib/upload-guard";
 
 /** A real calendar day written as YYYY-MM-DD (2026-02-30 and "notadate" are not). */
 function isDay(s: string) {
@@ -47,6 +48,10 @@ export const GET = handle(async (req: Request) => {
  * used up, long meetings are refused before saving (short ones still get notes; lib/credit.ts).
  * If writing the notes fails, the meeting is still saved (status Failed) and the error body carries its
  * `meeting_id`, so the page can open it with **Try again** instead of the person importing it twice.
+ * **Upload guard** (lib/upload-guard.ts): before anything is saved or any AI runs, the transcript is checked
+ * against the organization's other groups (no AI). If it looks like another client's meeting the answer is
+ * `{ check: { question, match } }` and nothing is saved; the page asks, then sends it again with
+ * `wrong_client_ok=1` (add it here anyway: audited) or to another group.
  */
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
@@ -71,6 +76,10 @@ export const POST = handle(async (req: Request) => {
   const heldAt = String(form.get("held_at") ?? "").trim() || now().slice(0, 10);
   // Dates sort as text, so anything but a real YYYY-MM-DD date would jump above real meetings.
   if (!isDay(heldAt)) throw new HttpError(400, "Meeting date must be a date like 2026-10-20.");
+  // Another client's meeting? Ask before saving anything (and before any AI cost).
+  const keptAnyway = form.get("wrong_client_ok") === "1";
+  const match = await checkWrongClient(user.org_id, transcript, { workspaceId: ws });
+  if (match && !keptAnyway) return { check: { question: heldQuestion(match, false), match } };
   // Plan limits before anything is saved: meeting hours this month, and (AI credit used up) long meetings.
   const minutes = transcriptMinutes(transcript);
   await assertCanAdd(user.org_id, "meetingHours", minutes / 60);
@@ -80,7 +89,7 @@ export const POST = handle(async (req: Request) => {
     "INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at, duration_min) VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?, ?)",
     id, user.org_id, ws, title, heldAt, form.get("external") === "true" ? 1 : 0, transcript, user.id, now(), minutes,
   );
-  await audit(user, `Imported meeting “${title}”`, "Data", ws);
+  await audit(user, `Imported meeting “${title}”${match ? ` although it looks like it's about ${match.group}` : ""}`, "Data", ws);
   try {
     await processMeeting(user, id);
   } catch (e) {

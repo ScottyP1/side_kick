@@ -11,6 +11,17 @@ export type ChangelogEntry = { date: string; label: string; title: string; chang
 /** Every release, newest first. */
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-24",
+    label: "October 24, 2026",
+    title: "Documents land where they belong",
+    changes: [
+      "Every upload says which group it goes to, in the group's colour, and people in several groups confirm the group each time (also when adding a past or outside meeting).",
+      `If a file looks like it's about another of your clients (their name or engagement code), ${BRAND.name} holds it: it isn't used in any answer until you keep it or move it to the right group. Moving takes it out of the old group's search completely.`,
+      "Firm library: client material is held before it can reach every group, and a firm document can now apply to chosen groups only.",
+      "A file kept anyway shows up under Needs attention for the group's Team Lead (firm library: the admins), with It belongs here.",
+    ],
+  },
+  {
     date: "2026-10-23",
     label: "October 23, 2026",
     title: "SharePoint and OneDrive files",

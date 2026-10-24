@@ -1,5 +1,5 @@
 /**
- * GET /api/connectors: the organization's connected tools (Azure DevOps, Jira, GitHub, Confluence) with their health (status, last
+ * GET /api/connectors: the organization's connected tools (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365) with their health (status, last
  * sync, last success, problem in plain words) and the projects linked to groups, plus which tools this server
  * has set up (`configured`). Everyone signed in may look: Org Owners/Admins see every group's linked projects,
  * everyone else only their own groups'. Never includes tokens. See lib/connectors.ts.

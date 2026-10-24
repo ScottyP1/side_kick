@@ -2,20 +2,22 @@
  * @file Turning uploaded files into plain text, and plain text into searchable passages.
  *
  * Concepts
- * - **Extraction**: PDFs, Word files and Teams transcripts are converted to plain text, keeping location
- *   markers (`[Page 3]` for PDFs, `[00:12:40]` timestamps for transcripts) so answers can cite where a
- *   fact came from.
+ * - **Extraction**: PDFs, Word files, PowerPoint decks and Teams transcripts are converted to plain text,
+ *   keeping location markers (`[Page 3]` for PDFs, `[Slide 4]` for PowerPoint, `[00:12:40]` timestamps for
+ *   transcripts) so answers can cite where a fact came from. Uploads and the Microsoft 365 files connector
+ *   (lib/connector-m365.ts) both read files through `fileToText`.
  * - **Chunking**: long text is cut into passages of about 1,200 characters on paragraph or speaker
  *   boundaries. Small passages make search precise and keep what we send to Claude short (and cheap).
  */
 import "server-only";
 import path from "node:path";
-import { HttpError } from "./auth";
+import { HttpError } from "./http-error";
 import { span } from "./trace";
 import { docxUnpackedBytes } from "./security";
+import { readZipParts } from "./zip";
 
-/** File types Sidekick can read: PDF, Word, Teams transcripts (.vtt) and text formats. */
-export const ACCEPTED = [".pdf", ".docx", ".txt", ".md", ".vtt", ".csv", ".json"];
+/** File types Sidekick can read: PDF, Word, PowerPoint, Teams transcripts (.vtt) and text formats. */
+export const ACCEPTED = [".pdf", ".docx", ".pptx", ".txt", ".md", ".vtt", ".csv", ".json"];
 /** Largest file accepted, per file (25 MB). */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 /** Most files in one upload. */
@@ -31,7 +33,7 @@ export const MAX_DOCX_UNPACKED_BYTES = 60 * 1024 * 1024;
 /** Most pages read from one PDF. */
 export const MAX_PDF_PAGES = 2000;
 /** The accepted types in words, for error messages and the upload box. */
-export const ACCEPTED_TEXT = "PDF, Word (.docx), text, Markdown, CSV, JSON or a Teams transcript (.vtt)";
+export const ACCEPTED_TEXT = "PDF, Word (.docx), PowerPoint (.pptx), text, Markdown, CSV, JSON or a Teams transcript (.vtt)";
 
 /**
  * Why an upload can't be accepted at all (wrong type, empty, too large), or null if it may be read.
@@ -54,8 +56,8 @@ export function uploadProblem(name: string, size: number): string | null {
 export const MAX_TRANSCRIPT_CHARS = 300_000;
 
 /**
- * Extracts the text of an uploaded file. PDFs get a `[Page N]` marker per page; `.vtt` transcripts are
- * converted to readable "[time] Speaker: words" lines.
+ * Extracts the text of an uploaded file. PDFs get a `[Page N]` marker per page, PowerPoint decks a `[Slide N]`
+ * marker per slide (`pptxToText`); `.vtt` transcripts are converted to readable "[time] Speaker: words" lines.
  * @throws HttpError 415 for file types Sidekick can't read yet
  */
 export async function fileToText(name: string, buf: Buffer): Promise<string> {
@@ -80,8 +82,51 @@ async function readFileText(name: string, buf: Buffer): Promise<string> {
     const { value } = await mammoth.extractRawText({ buffer: buf });
     return value;
   }
+  if (ext === ".pptx") {
+    if (docxUnpackedBytes(buf) > MAX_DOCX_UNPACKED_BYTES) throw new HttpError(413, "This PowerPoint file unpacks to far more text than a real deck holds, so it wasn't read. Save it again from PowerPoint, or split it.");
+    return pptxToText(buf);
+  }
   const text = buf.toString("utf8");
   return ext === ".vtt" ? vttToTranscript(text) : text;
+}
+
+const XML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+const xmlText = (s: string) => s.replace(/&(#\d+|#x[0-9a-f]+|amp|lt|gt|quot|apos);/gi, (m, e: string) =>
+  e.startsWith("#x") ? String.fromCodePoint(parseInt(e.slice(2), 16)) : e.startsWith("#") ? String.fromCodePoint(Number(e.slice(1))) : XML_ENTITIES[e.toLowerCase()] ?? m);
+
+/**
+ * The text of a PowerPoint deck (.pptx): each slide's text boxes in slide order, one line per paragraph, under a
+ * `[Slide N]` marker, with the speaker notes after "Notes:". Slides without text are left out. Reads only the
+ * slide and notes parts (at most `MAX_DOCX_UNPACKED_BYTES`), never images or embedded files.
+ * @throws HttpError 415 when the file isn't a PowerPoint deck Sidekick can open
+ */
+export function pptxToText(buf: Buffer): string {
+  let parts;
+  try {
+    parts = readZipParts(buf, (n) => /^ppt\/(slides\/slide|notesSlides\/notesSlide)\d+\.xml$/.test(n), MAX_DOCX_UNPACKED_BYTES);
+  } catch {
+    throw new HttpError(415, "This PowerPoint file couldn't be opened. Save it again from PowerPoint and try once more.");
+  }
+  const textOf = (xml: string) => xml
+    .split(/<\/a:p>/)
+    .map((para) => [...para.matchAll(/<a:t(?:\s[^>]*)?>([^<]*)<\/a:t>/g)].map((m) => xmlText(m[1])).join(""))
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+  const num = (name: string) => Number(name.match(/(\d+)\.xml$/)?.[1] ?? 0);
+  const notes = new Map(parts.filter((p) => p.name.includes("notesSlide")).map((p) => [num(p.name), textOf(String(p.data))]));
+  const slides = parts.filter((p) => p.name.startsWith("ppt/slides/")).sort((a, b) => num(a.name) - num(b.name));
+  if (!slides.length) throw new HttpError(415, "This PowerPoint file has no slides Sidekick can read.");
+  return slides
+    .map((p) => {
+      const n = num(p.name);
+      const body = textOf(String(p.data));
+      // Notes slides repeat the slide number as their last line; drop a bare number.
+      const note = (notes.get(n) ?? "").split("\n").filter((l) => !/^\d+$/.test(l)).join("\n");
+      return body || note ? `[Slide ${n}]\n${body}${note ? `\nNotes: ${note}` : ""}` : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /**
@@ -123,11 +168,11 @@ export function vttToTranscript(vtt: string): string {
  * are cut into fixed-size slices.
  */
 export function chunk(text: string, size = 1200): { text: string; loc: string }[] {
-  const parts = text.split(/\n(?=\[Page \d+\])|\n{2,}|\n(?=\[\d{2}:\d{2}:\d{2}\])/);
+  const parts = text.split(/\n(?=\[(?:Page|Slide) \d+\])|\n{2,}|\n(?=\[\d{2}:\d{2}:\d{2}\])/);
   const chunks: { text: string; loc: string }[] = [];
   let buf = "";
   let loc = "";
-  const locOf = (s: string) => s.match(/^\[(Page \d+|\d{2}:\d{2}:\d{2})\]/)?.[1] ?? "";
+  const locOf = (s: string) => s.match(/^\[((?:Page|Slide) \d+|\d{2}:\d{2}:\d{2})\]/)?.[1] ?? "";
   for (const p of parts) {
     const piece = p.trim();
     if (!piece) continue;

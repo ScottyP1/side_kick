@@ -128,7 +128,7 @@ export default function KnowledgePage() {
             </div>
             <button className="btn" onClick={() => fileRef.current?.click()} disabled={uploading}>Choose files</button>
           </div>
-          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.vtt,.csv,.json" onChange={(e) => e.target.files && upload(e.target.files)} />
+          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.pptx,.txt,.md,.vtt,.csv,.json" onChange={(e) => e.target.files && upload(e.target.files)} />
         </div>
       )}
 

@@ -1,5 +1,6 @@
 /**
- * @file A tiny zip writer for data exports (lib/export.ts), using only Node's built-in zlib.
+ * @file A tiny zip writer for data exports (lib/export.ts), and a reader for Office files (PowerPoint text in
+ * lib/extract.ts), using only Node's built-in zlib.
  *
  * Concepts
  * - A zip file is each file's header and compressed bytes one after another, then a "central directory"
@@ -7,6 +8,8 @@
  *   unzip tool (Windows Explorer, macOS Archive Utility, 7-Zip) opens them.
  * - Built in memory: fine for one group's export (documents are stored as their extracted text). A very
  *   large organization would want a streamed export on the job queue later (docs/PROGRESS.md).
+ * - Reading (`readZipParts`) goes through the central directory, so it works for zips that Word and PowerPoint
+ *   write (sizes after the data, "data descriptors"), and stops at a size cap so a "zip bomb" can't fill memory.
  * - Names are cleaned (`safeName`) so a document called "../../x" can't write outside the export folder
  *   when someone unzips it.
  */
@@ -107,6 +110,48 @@ export function readZip(zip: Buffer): ZipEntry[] {
     const start = p + 30 + nameLen + extraLen;
     out.push({ name, data: zlib.inflateRawSync(zip.subarray(start, start + size)) });
     p = start + size;
+  }
+  return out;
+}
+
+/**
+ * Reads the parts of a zip (an Office file such as .pptx) whose names pass `want`, through the central directory.
+ * Only stored and deflated parts are read; each part, and all of them together, may unpack to at most `maxBytes`
+ * (a bigger total throws, so a "zip bomb" can't exhaust memory). A file that isn't a zip returns no parts.
+ * Who calls it: lib/extract.ts (PowerPoint text). Pure, no I/O.
+ */
+export function readZipParts(zip: Buffer, want: (name: string) => boolean, maxBytes: number): ZipEntry[] {
+  let eocd = -1;
+  for (let i = zip.length - 22; i >= Math.max(0, zip.length - 65_557); i--) {
+    if (zip.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) return [];
+  const count = zip.readUInt16LE(eocd + 10);
+  let p = zip.readUInt32LE(eocd + 16);
+  let total = 0;
+  const out: ZipEntry[] = [];
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > zip.length || zip.readUInt32LE(p) !== 0x02014b50) throw new Error("The zip's directory is broken.");
+    const method = zip.readUInt16LE(p + 10);
+    const compressed = zip.readUInt32LE(p + 20);
+    const nameLen = zip.readUInt16LE(p + 28);
+    const local = zip.readUInt32LE(p + 42);
+    const name = zip.toString("utf8", p + 46, p + 46 + nameLen);
+    p += 46 + nameLen + zip.readUInt16LE(p + 30) + zip.readUInt16LE(p + 32);
+    if (!want(name) || (method !== 0 && method !== 8)) continue;
+    if (local + 30 > zip.length || zip.readUInt32LE(local) !== 0x04034b50) throw new Error("The zip's directory is broken.");
+    const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+    const raw = zip.subarray(start, start + compressed);
+    const room = maxBytes - total;
+    if (room <= 0) throw new Error("The file unpacks to more than the limit.");
+    // maxOutputLength makes zlib stop (and throw) instead of unpacking a bomb.
+    const data = method === 0 ? Buffer.from(raw) : zlib.inflateRawSync(raw, { maxOutputLength: room });
+    if (data.length > room) throw new Error("The file unpacks to more than the limit.");
+    total += data.length;
+    out.push({ name, data });
   }
   return out;
 }

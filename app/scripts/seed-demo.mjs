@@ -11,7 +11,7 @@
  *      Console account, plans (test mode), ~135 people, groups with Team Leads, documents, the firm library,
  *      meeting imports (the latest ones marked as captured from Teams by automatic notes, plus one waiting for a
  *      group and one skipped; two decisions saved to knowledge), linked and tracked Teams chats with messages, a
- *      connected Azure DevOps board, Jira project, GitHub repository and Confluence space (against the fake tools in
+ *      connected Azure DevOps board, Jira project, GitHub repository, Confluence space and SharePoint folder (against the fake tools in
  *      scripts/fake-tools.mjs on --tools-port),
  *      guardrails, questions with 👍/👎, support
  *      tickets with replies, and the smaller client organizations. So audit entries and traces exist too.
@@ -395,17 +395,20 @@ async function phaseA() {
     world.groups[p.key] = { id: r.id, profile: p, lead: world.users[people.find((x) => x.name === p.lead).email].session };
   }
 
-  log("• Connectors: an Azure DevOps board, a Jira project, a GitHub repository and a Confluence space (fake tools on this Mac), linked to groups");
+  log("• Connectors: an Azure DevOps board, a Jira project, a GitHub repository, a Confluence space and a SharePoint folder (fake tools on this Mac), linked to groups");
   await connectDemoTool(owner, "ado", "northwind");
   await connectDemoTool(owner, "jira");
   await connectDemoTool(owner, "github");
   await connectDemoTool(owner, "confluence");
+  await connectDemoTool(owner, "m365");
   const connected = (await owner("GET", "/api/connectors")).connectors;
   const toolId = (kind) => connected.find((t) => t.kind === kind).id;
   const links = [
     ["ado", "Wave 2 Cutover", "contoso"], ["jira", "STORE", "contoso"], ["ado", "Data Platform", "litware"],
     // The tills' code (issues and pull requests) and the cutover wiki (pages, searched like documents) for Contoso.
     ["github", "northwind/store-pos", "contoso"], ["confluence", "CUT", "contoso"],
+    // Contoso's SharePoint cutover folder: Word, PDF, PowerPoint and text files, plus one too large to read.
+    ["m365", "b!ops-documents/cut-folder", "contoso"],
   ];
   for (const [kind, project, key] of links) {
     const r = await world.groups[key].lead("POST", "/api/connectors/links", { connector: toolId(kind), ws: world.groups[key].id, project });

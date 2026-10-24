@@ -1658,10 +1658,14 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   tools.world.confluence.sites[0].spaces.find((sp) => sp.key === "OPS").pages.push({
     id: "77310", title: "ZEBRA vault handover", updated: new Date().toISOString(), by: "Bea B", ancestors: [], labels: [], body: "<p>Workspace B only: the Fabrikam merger vault code is ZEBRA-7731.</p>",
   });
+  // Microsoft 365: a file in a SharePoint library. The fake Microsoft organization is the one this org linked (if any).
+  tools.m365File("b!wiki-documents", { id: "zebra-file", name: "ZEBRA vault handover.txt", content: () => Buffer.from("Workspace B only: the Fabrikam merger vault code is ZEBRA-7731.") });
+  const ownTenant = await dbValue("SELECT entra_tenant_id FROM orgs WHERE name = 'Test Org'");
+  if (ownTenant) tools.world.m365.tenantId = ownTenant;
   const isoAsker = client();
   const isoUser = await admin("POST", "/api/users", { name: "Ivy Iso", email: "ivy.iso@test.local", role: "Member", workspaces: [s.wsA] });
   assert.equal((await firstSignIn(isoAsker, "ivy.iso@test.local", isoUser.body.tempPassword)).status, 200);
-  for (const [kind, project, type] of [["github", "northwind/internal-wiki", "workitem"], ["confluence", "OPS", "page"]]) {
+  for (const [kind, project, type] of [["github", "northwind/internal-wiki", "workitem"], ["confluence", "OPS", "page"], ["m365", "b!wiki-documents", "page"]]) {
     const c = await connectTool(admin, kind);
     assert.equal(c.to?.pathname + c.to?.search, `/connectors?connected=${kind}`, flashOf(c.done ?? c.start));
     const id = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === kind).id;
@@ -4319,7 +4323,7 @@ test(`[${ENGINE}] connectors: Azure DevOps connects with a sealed sign-in, lists
   assert.match(sealed, /^enc1\./, "the access token is encrypted at rest");
   assert.match(await dbValue(`SELECT refresh_token FROM connectors WHERE id = '${s.ado}'`), /^enc1\./);
   const list = await admin("GET", "/api/connectors");
-  assert.deepEqual(list.body.configured, { ado: true, jira: true, github: true, confluence: true });
+  assert.deepEqual(list.body.configured, { ado: true, jira: true, github: true, confluence: true, m365: true });
   assert.doesNotMatch(JSON.stringify(list.body), /adoat_|adort_|enc1\./, "no token in any response");
   // Projects come in pages (two per page here).
   tools.state.adoProjectPage = 2;
@@ -4639,4 +4643,112 @@ test(`[${ENGINE}] connectors: Confluence connects with the Jira app, reads a spa
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Confluence \(northwind\): removed its sign-in, 1 linked project and 3 imported items/);
   tools.state.confluenceSpacePage = 250;
   tools.state.confluencePage = 25;
+});
+
+test(`[${ENGINE}] connectors: Microsoft 365 connects (own tenant only, sealed), lists libraries, folders and OneDrive shares, reads Word, PDF, PowerPoint and text files by delta query, cites them with links, skips large files with a note, and handles 429, 410, lost access and revoked consent`, async () => {
+  const org = await dbValue("SELECT id FROM orgs WHERE name = 'Test Org'");
+  // Only the Microsoft organization this Sidekick organization linked may be connected.
+  const own = await dbValue(`SELECT entra_tenant_id FROM orgs WHERE id = '${org}'`);
+  const linked = own || "aaaaaaaa-0000-4000-8000-00000000abcd";
+  if (!own) await dbExec(`UPDATE orgs SET entra_tenant_id = '${linked}' WHERE id = '${org}'`);
+  tools.world.m365.tenantId = "33333333-cccc-4ddd-8eee-000000000003";
+  const wrong = await connectTool(admin, "m365");
+  assert.match(flashOf(wrong.done ?? wrong.start), /belongs to Northwind Traders, not the Microsoft organization linked/);
+  assert.ok(!(await admin("GET", "/api/connectors")).body.connectors.some((x) => x.kind === "m365"), "nothing saved");
+  tools.world.m365.tenantId = linked;
+  const c = await connectTool(admin, "m365");
+  assert.equal(c.to?.search, "?connected=m365", flashOf(c.done ?? c.start));
+  const list = await admin("GET", "/api/connectors");
+  const conn = list.body.connectors.find((x) => x.kind === "m365");
+  assert.deepEqual([conn.label, conn.accountName, conn.account], ["Microsoft 365", "Northwind Traders", linked]);
+  assert.match(await dbValue(`SELECT access_token FROM connectors WHERE id = '${conn.id}'`), /^enc1\./, "sealed at rest");
+  assert.doesNotMatch(JSON.stringify(list.body), /m365at_|m365rt_|enc1\./, "no token in any response");
+  // Libraries (sites come in pages), their top-level folders, and folders shared with the account.
+  tools.state.graphSitePage = 1;
+  const projects = (await admin("GET", `/api/connectors/${conn.id}/projects`)).body.projects;
+  tools.state.graphSitePage = 100;
+  assert.deepEqual(projects.map((p) => p.name), ["Internal Wiki › Documents", "OneDrive › Priya handover (shared by Priya Shah)", "Store Operations › Documents", "Store Operations › Documents › Wave 2 Cutover"]);
+  assert.equal((await admin("POST", "/api/connectors/links", { connector: conn.id, ws: s.wsA, project: "b!ops-documents/made-up" })).status, 404, "only listed libraries and folders");
+  // Link one folder; the drive's delta comes two items a page. Word, PDF, PowerPoint and text are read; the 80 MB
+  // file is a note; the spreadsheet and the file outside the folder are left out.
+  tools.state.graphDeltaPage = 2;
+  const downloads = tools.counts.downloads;
+  const link = (await admin("POST", "/api/connectors/links", { connector: conn.id, ws: s.wsA, project: "b!ops-documents/cut-folder" })).body.link;
+  assert.deepEqual([link.items, link.skipped, link.problem, link.projectName], [5, 1, null, "Store Operations › Documents › Wave 2 Cutover"]);
+  assert.equal(tools.counts.downloads - downloads, 4, "the large file is never downloaded");
+  assert.equal(tools.counts.downloadAuth, 0, "the download address never gets the token");
+  assert.match(await dbValue(`SELECT sync_cursor FROM connector_links WHERE id = '${link.id}'`), new RegExp(`^${TOOLS_BASE}/graph/drives/.+/root/delta\\?token=\\d+$`), "the cursor is the delta link");
+  // Each of these small files is one passage.
+  const textOf = (ext) => dbValue(`SELECT text FROM passages WHERE source_type = 'page' AND source_id = (SELECT id FROM connector_items WHERE external_id = '${ext}' AND link_id = '${link.id}')`);
+  const deck = await textOf("cut-deck");
+  for (const bit of ["SharePoint file: Steering committee deck.pptx", "Library: Store Operations › Documents › Wave 2 Cutover (SharePoint)", "Folder: Wave 2 Cutover", "by Priya Shah", "[Slide 2]", "Budget: 1.2M approved"]) assert.ok(deck.includes(bit), `${bit} in: ${deck}`);
+  assert.match(await textOf("cut-checklist"), /\[Page 1\][\s\S]*Price files frozen at 22:00 Friday/);
+  assert.match(await textOf("cut-photos"), /Not read: the file is 80 MB, over the 25 MB limit for files Sidekick reads\. Open it in SharePoint/);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM connector_items WHERE link_id = '${link.id}' AND external_id IN ('cut-budget', 'ops-handbook')`)), 0);
+  // Answers cite the file with a link to it, under the Documents filter.
+  const a = await askA(s.asker, "stores switch in batches of 12 payment gateway check roll the store back cutover plan", { types: ["documents"] });
+  const f = a.body.sources.find((x) => x.title.startsWith("SharePoint file:"));
+  assert.ok(f, JSON.stringify(a.body.sources));
+  assert.equal(f.type, "page");
+  assert.ok(f.url.startsWith(`${TOOLS_BASE}/m365-web/`), f.url);
+  // Incremental: an edit, a deletion, a new file in a subfolder, and a file whose size was wrong in the listing
+  // (cut off at 25 MB while downloading). Graph says 429 once with Retry-After: 1, which is waited out.
+  const drive = tools.world.m365.sites[0].drives[0];
+  const notes = drive.items.find((x) => x.id === "cut-notes");
+  notes.content = () => Buffer.from("Decision: the airport stores keep their old tills until January.");
+  tools.m365Touch(notes);
+  tools.m365Delete(drive.items.find((x) => x.id === "cut-checklist"));
+  tools.m365File("b!ops-documents", { id: "cut-sub", name: "Runbooks", folder: true, parent: "cut-folder" });
+  tools.m365File("b!ops-documents", { id: "cut-runbook", name: "Rollback runbook.md", parent: "cut-sub", content: () => Buffer.from("Roll back a store by switching its tills to offline mode.") });
+  tools.m365File("b!ops-documents", { id: "cut-scan", name: "Scan archive.pdf", parent: "cut-folder", size: 2048, content: () => Buffer.alloc(26 * 1024 * 1024, 32) });
+  tools.m365File("b!ops-documents", { id: "elsewhere", name: "Elsewhere.txt", content: () => Buffer.from("outside the linked folder") });
+  tools.rateLimit("m365", { times: 1, retryAfter: 1 });
+  tools.expireAccessTokens();
+  const again = (await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link;
+  assert.deepEqual([again.items, again.skipped, again.problem], [6, 2, null]);
+  assert.equal(tools.counts.refresh.m365, 1, "the token was refreshed");
+  assert.match(await textOf("cut-notes"), /airport stores keep their old tills/);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE external_id = 'cut-notes')`)), 1, "re-indexed, not duplicated");
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM connector_items WHERE external_id = 'cut-checklist'`)), 0, "a deleted file goes");
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE text LIKE '%Price files frozen%'`)), 0, "with its search entries");
+  assert.match(await textOf("cut-runbook"), /Folder: Wave 2 Cutover\/Runbooks[\s\S]*offline mode/);
+  assert.match(await textOf("cut-scan"), /Not read: the file is 25 MB/);
+  // Moved out of the linked folder: its copy goes.
+  const runbook = drive.items.find((x) => x.id === "cut-runbook");
+  runbook.parent = null;
+  tools.m365Touch(runbook);
+  assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.items, 5);
+  // 410 Gone (the delta token expired): a fresh listing, nothing duplicated.
+  tools.state.graphDeltaGone = true;
+  const resync = (await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link;
+  assert.deepEqual([resync.items, resync.problem], [5, null]);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE external_id = 'cut-plan')`)), 1);
+  // A long 429 stops with a plain problem (the cursor kept); the library losing access too.
+  tools.rateLimit("m365", { times: 1, retryAfter: 900 });
+  assert.match((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, /Microsoft 365 asked Sidekick to slow down \(rate limit\)/);
+  tools.deny("m365", "b!ops-documents");
+  assert.match((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, /Microsoft 365 refused access to the linked library or folder/);
+  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE org_id = '${org}' AND connector = 'microsoft-365-files' AND workspace_id = '${s.wsA}'`), "broken", "the broken-connector watcher sees it");
+  tools.allow("m365", "b!ops-documents");
+  // Consent revoked in Microsoft: expired until reconnected; nothing is deleted.
+  tools.revoke("m365");
+  tools.expireAccessTokens();
+  assert.match((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, /Microsoft 365 sign-in has expired or was revoked/);
+  assert.deepEqual((({ status, links }) => [status, links[0].items])((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "m365")), ["expired", 5]);
+  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE org_id = '${org}' AND connector = 'microsoft-365-files' AND workspace_id = ''`), "broken");
+  assert.equal((await connectTool(admin, "m365")).to.search, "?connected=m365");
+  assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
+  // A OneDrive folder shared with the account.
+  const od = (await admin("POST", "/api/connectors/links", { connector: conn.id, ws: s.wsA, project: "b!priya-onedrive/handover" })).body.link;
+  assert.deepEqual([od.items, od.problem], [1, null]);
+  assert.match(await dbValue(`SELECT title FROM passages WHERE source_id = (SELECT id FROM connector_items WHERE link_id = '${od.id}')`), /^OneDrive file: Handover notes\.md$/);
+  // Unlinking removes the folder's files and their search entries; disconnecting removes the rest.
+  assert.deepEqual((await admin("DELETE", `/api/connectors/links/${link.id}`)).body, { items: 5 });
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE title LIKE 'SharePoint file:%' AND org_id = '${org}'`)), 0);
+  assert.deepEqual((await admin("DELETE", `/api/connectors/${conn.id}`)).body, { links: 1, items: 1 });
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE title LIKE 'OneDrive file:%' AND org_id = '${org}'`)), 0);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM connector_health WHERE org_id = '${org}' AND connector = 'microsoft-365-files'`)), 0);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Microsoft 365 \(Northwind Traders\): removed its sign-in, 1 linked project and 1 imported item/);
+  tools.state.graphDeltaPage = 200;
+  if (!own) await dbExec(`UPDATE orgs SET entra_tenant_id = NULL WHERE id = '${org}'`);
 });

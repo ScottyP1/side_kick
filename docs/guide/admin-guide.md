@@ -67,11 +67,13 @@ A file whose text is already in the group (the same document uploaded twice, eve
 - The same text can't be added twice. Firm documents count toward your plan's document limit, and are deleted with the organization when it rolls off.
 - Everyone in the organization can see the list (read-only).
 
-## 6. Import meetings
-**Meetings → Import transcript.** Upload the Teams transcript (`.vtt`), a Word file or paste the text, give it a title and date, and tick **Client guests attended** if the client was there. Notes are usually ready in 20–60 seconds.
+## 6. Meetings
+**Automatic notes after Teams meetings.** Turn it on under **Meetings** (Org Owners and Org Admins) once Microsoft sign-in is connected and your Microsoft admin approved meeting transcripts: then Sidekick writes the notes after every Teams meeting of a group's people, with no bot in the call, puts them in the right group and posts them to the group's notes chat. How the group is picked, ties (**Pick a group**), skipped meetings and plan hours: see [Meetings and automatic notes](meetings.md).
+
+**Meetings → Add a past or outside meeting.** For meetings held before automatic notes were on, or outside Teams. Upload the Teams transcript (`.vtt`), a Word file or paste the text, give it a title and date, and tick **Client guests attended** if the client was there. Notes are usually ready in 20–60 seconds.
 - **Limits:** files up to 25 MB, and the transcript text (pasted or from the file) up to 300,000 characters, about five hours of talk. The whole transcript goes to the AI in one request, so this keeps each import within what it can read at once and its cost predictable. Split a longer meeting into parts. Each meeting's length (from its timestamps, or its length without them) counts toward your plan's **meeting hours** this month (see section 16).
-- **If writing the notes fails** (for example, the AI was busy), the meeting is still saved: the dialog closes and the meeting opens with a **Failed** label and the reason. Choose **Try again** there; don't import it again.
-- **On the meeting's page:** the summary, decisions, open questions and facts, plus the **action items**, which you can edit right there like on Memory & gaps: tick them done, set the owner, pick a due date and change the status. The **Transcript** tab shows a long transcript in pieces (**Show more**).
+- **If writing the notes fails** (for example, the AI was busy), the meeting is still saved: the dialog closes and the meeting opens with a **Failed** label and the reason. Choose **Try again** there; don't add it again.
+- **On the meeting's page:** the summary, decisions, open questions and facts (each decision, requirement, risk, fact or term can be **saved to knowledge**), plus the **action items**, which you can edit right there like on Memory & gaps: tick them done, set the owner, pick a due date and change the status. The **Transcript** tab shows a long transcript in pieces (**Show more**).
 - **Delete** asks first: it removes the meeting together with its notes, action items and transcript.
 
 If the workspace has linked Teams chats or channels, Sidekick posts the notes and action items there automatically.

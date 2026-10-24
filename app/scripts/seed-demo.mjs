@@ -9,8 +9,10 @@
  *      connector (Teams is simulated through the app's local Teams test path) and a fake breached-password list.
  *      It then loads the world through the app's own API, like people and Teams would: first-run setup, the Owner
  *      Console account, plans (test mode), ~135 people, groups with Team Leads, documents, the firm library,
- *      meeting imports, linked and tracked Teams chats with messages, a connected Azure DevOps board and Jira project
- *      (against the fake tools in scripts/fake-tools.mjs on --tools-port), guardrails, questions with 👍/👎, support
+ *      meeting imports (the latest ones marked as captured from Teams by automatic notes, plus one waiting for a
+ *      group and one skipped; two decisions saved to knowledge), linked and tracked Teams chats with messages, a
+ *      connected Azure DevOps board and Jira project (against the fake tools in scripts/fake-tools.mjs on --tools-port),
+ *      guardrails, questions with 👍/👎, support
  *      tickets with replies, and the smaller client organizations. So audit entries and traces exist too.
  *   B. Stops the copy and finishes what has no API, through lib/db.ts: with fake Claude, the meeting notes, answers
  *      and knowledge maps are replaced by the realistic ones from demo-world.mjs (fake Claude only writes "Test
@@ -702,6 +704,48 @@ async function phaseB() {
       );
     }
   }
+  // Automatic notes after Teams meetings (lib/meetings-graph.ts): on for Northwind since last week; the latest two
+  // meetings of three groups were captured from Teams (with their notes posted), one meeting several groups were in
+  // waits for a group, and one was skipped. No Microsoft is called: the demo has no Entra app, so nothing polls.
+  await run(
+    `INSERT INTO auto_meetings (org_id, enabled, changed_by, changed_at, last_poll_at, last_ok_at) VALUES (?, 1, ?, ?, ?, ?)
+     ON CONFLICT (org_id) DO UPDATE SET enabled = 1, changed_by = excluded.changed_by, changed_at = excluded.changed_at, last_poll_at = excluded.last_poll_at, last_ok_at = excluded.last_ok_at, last_error = NULL`,
+    northwind, byKey.orgAdmin.name, iso(nowMs - 9 * dayMs), iso(nowMs - 8 * 60_000), iso(nowMs - 8 * 60_000),
+  );
+  const organizerOid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const graphRow = async (fields) => {
+    const id = newId();
+    await run(
+      `INSERT INTO graph_meetings (id, org_id, online_meeting_id, transcript_id, organizer_oid, via, status, reason, title, started_at, ended_at, workspace_id, candidates, meeting_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (org_id, transcript_id) DO NOTHING`,
+      id, northwind, `demo-meeting-${fields.key}`, `demo-transcript-${fields.key}`, organizerOid(fields.n ?? 1), fields.via ?? "notification", fields.status, fields.reason ?? null,
+      fields.title, fields.start, fields.end, fields.ws ?? null, fields.candidates ? JSON.stringify(fields.candidates) : null, fields.meetingId ?? null, fields.end, fields.end,
+    );
+    return id;
+  };
+  let captured = 0;
+  for (const [n, key] of ["contoso", "fabrikam", "litware"].entries()) {
+    const g = world.groups[key];
+    if (!g) continue;
+    const latest = await all("SELECT id, title, held_at, duration_min FROM meetings WHERE workspace_id = ? ORDER BY held_at DESC LIMIT 2", g.id);
+    for (const [i, m] of latest.entries()) {
+      const start = `${m.held_at}T14:00:00.000Z`;
+      const end = iso(Date.parse(start) + (m.duration_min ?? 45) * 60_000);
+      const gid = await graphRow({ key: `${key}-${i}`, n: n + 1, via: i ? "poll" : "notification", status: "done", title: m.title, start, end, ws: g.id, meetingId: m.id });
+      await run("UPDATE meetings SET source = 'teams', imported_by = 'Microsoft Teams', graph_meeting_id = ?, notes_posted_at = ? WHERE id = ?", gid, end, m.id);
+      captured++;
+    }
+  }
+  if (world.groups.contoso && world.groups.fabrikam) {
+    const day = addDays(WORLD_TODAY, -1);
+    await graphRow({ key: "joint-steering", n: 4, status: "waiting", title: "Joint steering: Contoso and Fabrikam leads", start: at(day, "15:00:00"), end: at(day, "15:40:00"), candidates: [world.groups.contoso.id, world.groups.fabrikam.id].sort(), reason: "People from several groups were in this meeting. Pick the group it belongs to." });
+  }
+  if (world.groups.contoso) {
+    const day = addDays(WORLD_TODAY, -2);
+    await graphRow({ key: "quick-sync", n: 1, via: "poll", status: "skipped", title: "Quick sync before the client call", start: at(day, "09:00:00"), end: at(day, "09:10:00"), ws: world.groups.contoso.id, reason: "The meeting's transcript was empty." });
+  }
+  log(`  ${captured} meetings captured from Teams, one waiting for a group, one skipped`);
+
   // A newer decision that changes the Contoso wave 2 runbook (the stale-document watcher finds it).
   const contosoMeeting = await get("SELECT id FROM meetings WHERE workspace_id = ? ORDER BY held_at DESC LIMIT 1", world.groups.contoso.id);
   await run(
@@ -734,6 +778,10 @@ async function phaseC() {
     if ((await lead("GET", `/api/docs?ws=${contoso}`)).index.passages >= before + 8) break;
     await new Promise((r) => setTimeout(r, 500));
   }
+  log("• Saved to knowledge: two Contoso decisions, from the latest meeting (as on the Teams notes card)");
+  const latest = (await lead("GET", `/api/meetings?ws=${contoso}`)).meetings[0];
+  const decisions = (await lead("GET", `/api/meetings/${latest.id}`)).items.filter((i) => i.kind === "decision").slice(0, 2);
+  for (const d of decisions) await lead("PATCH", `/api/items/${d.id}`, { saved: true });
   log("• Teams reminders sent now in two chats");
   const admin = s.orgAdmin;
   for (const key of ["contoso", "fabrikam"]) {

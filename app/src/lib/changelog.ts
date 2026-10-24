@@ -13,6 +13,17 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-23",
     label: "October 23, 2026",
+    title: "Automatic notes after every Teams meeting",
+    changes: [
+      `Turn on automatic notes and ${BRAND.name} writes the notes after every Teams meeting of a group's people, from the meeting's transcript (no bot joins the call), puts them in the right group and posts them to the group's notes chat. A meeting several groups were in waits for a Team Lead or admin to pick the group.`,
+      "Save to knowledge: keep a decision, requirement, risk or fact from a meeting as lasting group knowledge, right from the notes card in Teams or the meeting's page. Answers find saved items first.",
+      `${BRAND.name} in the Teams app bar and as a tab in chats, channels and meetings: the group's meetings, notes and open action items, signed in with your Microsoft account.`,
+      "Importing a transcript is now called “Add a past or outside meeting”, for meetings held before automatic notes were on or outside Teams.",
+    ],
+  },
+  {
+    date: "2026-10-23",
+    label: "October 23, 2026",
     title: "Needs attention: Sidekick keeps watch",
     changes: [
       `${BRAND.name} now checks every group in the background and lists what needs a person under Needs attention, on Home and on each group's page: unanswered questions, Teams posts that didn't get through, chats waiting to be assigned or that ${BRAND.name} was removed from, overdue and unowned action items, documents a newer decision changed, groups without a Team Lead or a notes chat, and connectors that stopped working.`,

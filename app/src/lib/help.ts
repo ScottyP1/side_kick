@@ -26,6 +26,7 @@ const AUDIENCE: Record<string, string> = {
   concepts: "Everyone",
   "admin-guide": "Org Owners and Org Admins",
   "teams-guide": "Everyone in Teams",
+  meetings: "Everyone",
   "roles-and-permissions": "Everyone",
   "install-app": "Everyone",
 };

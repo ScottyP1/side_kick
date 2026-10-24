@@ -26,7 +26,7 @@ function suggestionsFor(role: string, admin: boolean): string[] {
   if (admin) return ["Create a workspace", "Add a person to a workspace", "Link a Teams chat", "What did we spend on AI this month?"];
   if (role === "Billing Admin") return ["What did we spend on AI this month?", "What can my role do?", "How is cost tracked?"];
   if (role === "Viewer") return ["What can my role do?", "How do I find a decision from a meeting?", "What are knowledge gaps?"];
-  return ["How do I import a meeting?", "Refresh the knowledge map", `How do I use ${BRAND.name} in Teams?`];
+  return ["How do I add a past meeting?", "Refresh the knowledge map", `How do I use ${BRAND.name} in Teams?`];
 }
 
 /** What the thinking bubble cycles through, in order (the last one repeats until the reply arrives). */

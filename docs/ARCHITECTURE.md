@@ -72,6 +72,9 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `lib/excerpt.ts` | Plain-text source excerpts for answers, taken from the part of a passage that matches the question |
 | `lib/workspaces.ts` | Unique workspace names, renaming, and deleting a workspace with everything scoped to it (both engines, plus Azure search) |
 | `lib/teams/bot.ts`, `cards.ts` | Teams bot (Teams SDK 2.1) and its Adaptive Cards; tenant check, waiting chats |
+| `lib/meetings-graph.ts` | **Automatic meeting notes** from Microsoft Graph (no media bot): the per-org switch (`auto_meetings`), one transcript subscription per org (validation-token handshake, client state, renewal a day ahead, recreate on 404 / `subscriptionRemoved`), notifications and lifecycle events, the polling fallback (`getAllTranscripts` per organizer, `graph_poll_cursors`), `recordTranscript` (one `graph_meetings` row per transcript), `pickGroup` (meeting chat, else most people, ties wait), `fetchTranscript` (plan checks, saves a `source = 'teams'` meeting) and `writeNotes` (notes + one Teams post). Every step is a job (`meetings.*` in lib/job-kinds.ts) |
+| `lib/saved-items.ts` | **Save to knowledge**: a meeting item (decision, requirement, risk, fact, term) kept as group knowledge (`items.pinned`, `saved_by`, `saved_at`) and indexed as its own `notes` source `saved:<item id>`; from the Teams notes card, the meeting page and the Teams tab |
+| `lib/teams/tab.ts` | **The Teams tab / personal app**: `tabUser` (Teams SSO bearer token → Sidekick user by tenant + Microsoft account id, no cookies, no email matching), `tabView` (groups, meetings, open action items, one meeting's notes), `tabAction` (done/reopen, save/unsave) |
 | `lib/teams/install.ts` | Who may add Sidekick to a chat (Team Leads/admins), and Sidekick leaving chats through Graph (refused installer, 7 days unassigned, removed in the portal) |
 | `lib/teams/members.ts` | `@Sidekick add` / `remove @name`: who may, who can be added, auditing |
 | `lib/reminders.ts` | Per-chat settings (notes, tracking, reminders), saving tracked chat messages, building reminder digests (items picked in code, worded by Claude feature `remind`, every point with a source) and their card buttons |
@@ -107,6 +110,8 @@ Browser (client portal, Owner Console)        Microsoft Teams
 | `/checkout` | Pay for the plan (test mode) | Portal |
 | `/home` and every other portal page (`app/(app)/*`) | The client portal (`noindex`); home moved here from `/` so the website can own `/` | Portal |
 | `/owner/*` | Owner Console (`noindex`), own sign-in at `/owner/login` | Owner |
+| `/teams/tab`, `/teams/config` | The Teams tab and its setup page (`app/teams/*`), framed only by Teams (their own `frame-ancestors` in `next.config.ts`; X-Frame-Options DENY everywhere else); skipped by the proxy | Teams SSO (bearer token to `/api/teams-tab`) |
+| `/api/graph/notifications`, `/api/graph/lifecycle` | Microsoft Graph's change and lifecycle notifications for meeting transcripts (validation token echoed as text; client state checked) | None (Graph) |
 | `/api/*` | API routes; each checks the session itself (the proxy skips them) | Per route |
 
 **Public chat slot**: `components/site-chat-slot.tsx` (rendered at the end of every public page by `public-shell.tsx`) holds the "Ask about Sidekick" help bot (`components/helpbot.tsx`, `lib/helpbot.ts`). It is always shown (the pages are prerendered); when the "Public help bot" switch is paused or its daily budget is spent, it answers with FAQ entries and "Talk to a human".
@@ -130,7 +135,12 @@ Adding a public page: add it to `PUBLIC_PAGES` in `lib/site.ts` (sitemap, metada
 
 Quality check: `npm --prefix app run eval:answers` runs the accuracy test set (`samples/eval/contoso.json`) against the real Claude in a throwaway copy and prints a score and the cost (not in CI; the plumbing is tested with fake Claude).
 
-**Importing a meeting**
+**A Teams meeting ends (automatic notes)**
+1. Graph notifies `/api/graph/notifications` (or the 15-minute poll finds the transcript): `recordTranscript` adds a `graph_meetings` row (unique per transcript) and enqueues `meetings.fetch`.
+2. `fetchTranscript` reads the meeting, picks the group (`pickGroup`), downloads the `.vtt`, checks read-only plan / paused AI / meeting hours / AI credit, and saves a `meetings` row (`source = 'teams'`, status Processing), then enqueues `meetings.notes`. Throttling (429 Retry-After) makes the job retry no sooner than Graph asked.
+3. `writeNotes` runs `processMeeting()` as Sidekick, then claims `notes_posted_at` and posts the notes card (with **Save to knowledge**) and action-item cards to the group's notes chats, then the after-meeting reminders.
+
+**Adding a past or outside meeting** (importing a transcript)
 1. `POST /api/meetings` stores the transcript (`.vtt` converted to "[time] Speaker: text").
 2. `processMeeting()` asks Claude for summary, decisions, action items, open questions and facts, saves them in one transaction, and indexes the transcript and the notes (source type `notes`, id `<meeting id>:notes`, ranked before transcript passages). Meetings processed before notes were indexed are indexed on the first question after a server start.
 3. After the response is sent (`after()`), `postMeetingNotes()` posts the cards to the linked Teams conversations that take notes, then `remindAfterMeeting()` posts a reminder to the chats that want one after meetings.

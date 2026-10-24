@@ -20,6 +20,7 @@ operations review is in `docs/security/`.
 | Set up (or renew) the Azure DevOps / Jira connector apps | [Connector apps](#connector-apps-azure-devops-and-jira) |
 | A customer's connector shows "Sign-in expired" or a problem | [Connector problems](#connector-problems) |
 | Reminders/watchers stopped, Owner Console → Job queue shows a backlog, stuck or dead jobs | [Job queue stuck](#job-queue-stuck) |
+| Setting up automatic meeting notes and the Teams tab, or they stopped working | [Automatic meeting notes](#automatic-meeting-notes-microsoft-setup) |
 
 ## Roll back a bad deploy
 
@@ -185,6 +186,84 @@ Signs of trouble: reminders or "Needs attention" stop updating, or **Owner Conso
    ```
    Never delete `queued` rows of a kind you don't understand: a roll-off deletion job deletes client data on
    purpose and must finish or be canceled in the Owner Console (Roll-offs) instead.
+
+## Automatic meeting notes: Microsoft setup
+
+Automatic notes after Teams meetings (lib/meetings-graph.ts) and the Sidekick tab in Teams (lib/teams/tab.ts) are
+built and tested against a fake Microsoft Graph, but need these **one-time Microsoft settings, done by Cody** (the
+app never changes Azure, Entra or Teams settings itself, and no secret is needed in chat or in the repo). Do them
+in order; each step says where. "The Entra app" is the multi-tenant sign-in/directory app (`ENTRA_CLIENT_ID` on the
+Container App; if that isn't set, the bot's app `CLIENT_ID`).
+
+**Before you start: cost check.** Microsoft meters some Teams Graph APIs. Open Microsoft's page *"Payment models and
+licensing requirements for Microsoft Teams APIs"* and check whether meeting transcripts (`getAllTranscripts`,
+transcript content) are listed as metered for your licence. If they are, stop and decide first: nothing is charged
+until a customer turns automatic notes on.
+
+### 1. Graph permissions on the Entra app (Entra admin center)
+1. Entra admin center → App registrations → the Entra app → **API permissions** → Add a permission → Microsoft Graph
+   → **Application permissions**: add `OnlineMeetingTranscript.Read.All` (read transcripts) and
+   `OnlineMeetings.Read.All` (read the meeting's subject, times, chat and invitees, to pick the group).
+2. **Grant admin consent for Sidekick Labs** (the button on the same page). Both show a green tick.
+3. Customers' Microsoft admins approve the new permissions with the same button as before: portal → **Users &
+   access → Approve Sidekick for your organization** (it asks for everything the Entra app lists).
+
+### 2. Teams single sign-on for the tab (Entra admin center, same app)
+1. **Expose an API** → Application ID URI: `api://<live host>/<Entra app id>` (the live host without https://, e.g.
+   `sidekick-app.<…>.azurecontainerapps.io`; must match the Teams package, which `teams:package` fills the same way).
+   If you later move to a custom domain, set `SIDEKICK_TEAMS_SSO_URL` on the Container App to the old address until
+   the new package is out, so both audiences are accepted.
+2. **Add a scope** `access_as_user`, "Admins and users", display names "Use Sidekick in Teams".
+3. **Add a client application** for each of Microsoft's Teams/Microsoft 365 client ids, ticking that scope:
+   `1fec8e78-bce4-4aaf-ab1b-5451cc387264` (Teams desktop/mobile), `5e3ce6c0-2b1f-4285-8d4b-75ee78787346` (Teams web),
+   `4765445b-32c6-49b0-83e6-1d93765276ca`, `0ec893e0-5785-4de6-99da-4ed124e5296c`, `d3590ed6-52b3-4102-aeff-aad2292ab01c`,
+   `bc59ab01-8403-45c6-8796-ac3ef710b3e3`, `27922004-5251-4030-b22d-91ecd9a37ea4` (Microsoft 365 and Outlook).
+4. **Manifest** (the app registration's own JSON): set `"accessTokenAcceptedVersion": 2` (Sidekick checks v2 tokens).
+
+### 3. Allow Sidekick to read meetings (Teams PowerShell, once per tenant)
+Graph only lets an app read online meetings with an *application access policy*. On the Mac:
+```bash
+pwsh -Command "Install-Module MicrosoftTeams -Scope CurrentUser; Connect-MicrosoftTeams; New-CsApplicationAccessPolicy -Identity Sidekick-Meetings -AppIds '<Entra app id>' -Description 'Sidekick reads meeting transcripts'; Grant-CsApplicationAccessPolicy -PolicyName Sidekick-Meetings -Global"
+```
+It can take up to 30 minutes to apply. Customers' Teams admins run the same two commands in their tenant (the help
+center tells them to ask the Sidekick team for the steps; send them this section).
+
+### 4. Teams transcription on (Teams admin center)
+Meetings → Meeting policies → Global (or the policy the users have) → Recording & transcription → **Transcription:
+On**. Sidekick can only write notes for meetings with a transcript.
+
+### 5. New Teams package (version 1.4.0: Meetings tab, chat/channel/meeting tab)
+```bash
+npm --prefix app run teams:package
+```
+Upload `teams/build/sidekick-teams-live.zip` in the Teams admin center → Manage apps → Sidekick → **Upload file**
+(replaces 1.3.0). Users see the **Meetings** tab in Sidekick's app bar entry, and can add Sidekick as a tab with **+**
+in chats, channels and meetings.
+
+### 6. Turn it on and check (with Jojo Boom and User2)
+1. Portal → **Meetings** → *Automatic notes after Teams meetings* → **Turn on**. The panel should say new meetings
+   "arrive within minutes" (a Graph subscription exists). If it shows a problem instead, it names the missing step.
+2. Jojo and User2 each sign in to the portal **with Microsoft** once and are members of the same group; that group
+   has a Teams notes chat.
+3. Jojo schedules a short Teams meeting with User2, both join, **start transcription**, talk for a minute about a
+   decision and a to-do, end the meeting.
+4. Within a few minutes (at most ~15): the meeting appears under Meetings with a **Teams** tag, and the notes card is
+   in the group's notes chat. Click **Save to knowledge** on the decision.
+5. In Teams, open Sidekick → **Meetings**: the tab shows the group, the meeting and its action items without asking
+   to sign in.
+
+### When it stops working
+- **Panel says Sidekick can't read transcripts / isn't approved**: steps 1 and 3 (consent, or the access policy
+  missing in that tenant). Fix, then **Check now**.
+- **Panel says "checked every 15 minutes" (no instant notifications)**: the subscription couldn't be made; the poll
+  still works. Check that `SIDEKICK_PUBLIC_URL` is the live https address and `/api/graph/notifications` is reachable.
+  Owner Console → Job queue → `meetings.subscription` shows the last error.
+- **A meeting shows Skipped**: the reason says why (not one group's meeting, meeting hours used up, AI credit, read-only
+  plan). **Failed** = Graph kept refusing after 6 tries: **Try again** after fixing the cause.
+- **The tab says "Teams didn't sign you in"**: step 2 (Application ID URI must match the package's
+  `webApplicationInfo.resource`; `accessTokenAcceptedVersion` 2; the scope and client ids).
+- **The tab says you don't have an account**: the person must exist in Sidekick and sign in with Microsoft once
+  (there's no matching by email).
 
 ## Microsoft 365 trial ending Nov 14, 2026
 

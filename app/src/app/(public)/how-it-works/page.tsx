@@ -84,10 +84,10 @@ export default function HowItWorksPage() {
       <section className="site-section" aria-labelledby="meet-title">
         <div className="site-wrap">
           <span className="site-eyebrow">Meetings</span>
-          <h2 id="meet-title">Meeting notes today, more on the way</h2>
+          <h2 id="meet-title">Notes after every meeting, live meetings next</h2>
           <div className="site-grid">
-            <div className="site-card"><span className="site-badge-now">Today</span><h3>Notes from transcripts</h3><p>Import a meeting&apos;s Teams transcript and {BRAND.name} posts the notes and action items to the group&apos;s chat.</p></div>
-            <div className="site-card"><span className="site-badge-soon">Coming soon</span><h3>Automatic notes</h3><p>Notes after every meeting without importing anything, including in the meeting&apos;s own chat.</p></div>
+            <div className="site-card"><span className="site-badge-now">Today</span><h3>Automatic notes</h3><p>When a Teams meeting of a group&apos;s people ends, {BRAND.name} reads its transcript and posts the notes and action items to the group&apos;s chat. No bot joins the call.</p></div>
+            <div className="site-card"><span className="site-badge-now">Today</span><h3>Past or outside meetings</h3><p>Add a meeting held earlier or outside Teams from its transcript, and get the same notes.</p></div>
             <div className="site-card"><span className="site-badge-soon">Coming soon · Enterprise</span><h3>{BRAND.name} in the meeting</h3><p>{BRAND.name} joins the call live to answer and take notes as you talk.</p></div>
           </div>
         </div>

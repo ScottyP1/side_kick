@@ -20,10 +20,10 @@ const GROUPS: { id: string; title: string; lead: string; items: Feature[] }[] = 
   {
     id: "teams",
     title: "In Microsoft Teams",
-    lead: `Where your people already work: group chats, channels and 1:1 chats with ${BRAND.name} (meeting chats are coming with automatic meeting notes).`,
+    lead: `Where your people already work: group chats, channels and 1:1 chats with ${BRAND.name} and meeting chats, plus a ${BRAND.name} tab with the group's meetings and action items.`,
     items: [
       { icon: "answer", title: "Answers with sources", text: `Mention @${BRAND.name} with a question and get an answer from that client's group, with the documents and meetings it came from.`, points: ["Says \"I couldn't find that\" instead of guessing", "Unanswered questions become knowledge gaps to fill", "Follows the chat once a Team Lead assigns it to a group"] },
-      { icon: "notes", title: "Meeting notes and action items", text: `Import a meeting's Teams transcript and ${BRAND.name} posts a notes card and one card per action item. Automatic notes after every meeting are coming soon.`, points: ["Summary, decisions and open questions", "Owners and due dates on action items", "Assign or mark done right from the card"] },
+      { icon: "notes", title: "Meeting notes and action items", text: `After every Teams meeting ${BRAND.name} reads the transcript and posts a notes card and one card per action item to the group's notes chat. Save decisions to the group's knowledge right from the card.`, points: ["Summary, decisions and open questions", "Owners and due dates on action items", "Assign or mark done right from the card"] },
       { icon: "bell", title: "Reminders", text: "A daily check per chat raises what's slipping, so nobody has to chase it.", points: ["Overdue and unowned action items", "Decisions still waiting to be made", "Documents that look out of date or conflict"] },
       { icon: "people", title: "Team Leads in charge", text: `Only Team Leads and admins can add ${BRAND.name} to a chat; anyone else, and it politely leaves.`, points: [`@${BRAND.name} add @name to bring someone into the group`, "Chats nobody assigns are left after 7 days", "Client guests in a chat only get shareable material"] },
     ],

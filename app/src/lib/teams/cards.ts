@@ -27,6 +27,9 @@ export const VERBS = {
   // 👍/👎 on an answer card (lib/feedback.ts). data: { questionId }.
   feedbackUp: "sidekick.feedback.up",
   feedbackDown: "sidekick.feedback.down",
+  // "Save to knowledge" / "Undo" on a meeting-notes card (lib/saved-items.ts). data: { itemId, meetingId }.
+  saveKnowledge: "sidekick.knowledge.save",
+  unsaveKnowledge: "sidekick.knowledge.unsave",
 } as const;
 /** Every reminder-card verb starts with this, so the bot can route them to reminders.ts. */
 export const REMIND_PREFIX = "sidekick.remind.";
@@ -187,7 +190,14 @@ export function helpCard(workspace: string | null): IAdaptiveCard {
   ]);
 }
 
-/** Everything the meeting-notes card shows. `portalUrl` is where "Open in Sidekick" goes. */
+/** A decision, requirement, risk, fact or term on the notes card, with its "Save to knowledge" state. */
+export type NotesKeepItem = { id: string; kind: string; text: string; savedBy: string | null };
+
+/**
+ * Everything the meeting-notes card shows. `portalUrl` is where "Open in Sidekick" goes. `meetingId` and `keep`
+ * add a "Save to knowledge" button per decision and per requirement/risk/fact/term (lib/saved-items.ts); a card
+ * without them shows the decisions as a plain list (`decisions`).
+ */
 export type NotesInput = {
   workspace: string;
   title: string;
@@ -197,17 +207,60 @@ export type NotesInput = {
   openQuestions: string[];
   actionCount: number;
   portalUrl: string;
+  meetingId?: string;
+  keep?: NotesKeepItem[];
+  /** "Captured from Microsoft Teams" for automatic notes. */
+  source?: string;
 };
 
-/** Meeting summary, decisions and still-open questions, with a link to the full notes in the portal. */
+/** Cap on rows with a Save button, so a long meeting's card stays within Teams' card size; the rest is in the portal. */
+const MAX_KEEP_ROWS = 12;
+const KEEP_LABEL: Record<string, string> = { decision: "Decision", requirement: "Requirement", fact: "Fact", risk: "Risk", glossary: "Term" };
+
+/**
+ * Meeting summary, decisions and still-open questions, with a link to the full notes in the portal. With `keep`,
+ * each decision (then requirements, risks, facts, terms) is a row with **Save to knowledge** (verb
+ * `VERBS.saveKnowledge`, data `{ itemId, meetingId }`); a saved one shows who saved it and **Undo**
+ * (`VERBS.unsaveKnowledge`). The bot answers a click with this card rebuilt, so everyone sees the new state.
+ */
 export function meetingNotesCard(m: NotesInput): IAdaptiveCard {
-  const body: Block[] = [...header(`Meeting notes · ${m.workspace}`, m.title), text(m.heldAt, { isSubtle: true, spacing: "None", size: "Small" }), text(m.summary, { spacing: "Medium" })];
+  const sub = [m.heldAt, m.source].filter(Boolean).join(" · ");
+  const body: Block[] = [...header(`Meeting notes · ${m.workspace}`, m.title), text(sub, { isSubtle: true, spacing: "None", size: "Small" }), text(m.summary, { spacing: "Medium" })];
   const list = (label: string, items: string[]) => {
     if (!items.length) return;
     body.push(text(label, { weight: "Bolder", spacing: "Large", separator: true }));
     body.push(text(items.map((i) => `- ${i}`).join("\n"), { spacing: "Small" }));
   };
-  list("Decisions", m.decisions);
+  if (m.keep && m.meetingId) {
+    const rows = [...m.keep.filter((k) => k.kind === "decision"), ...m.keep.filter((k) => k.kind !== "decision")];
+    if (rows.length) {
+      body.push(text("Decisions and things to keep", { weight: "Bolder", spacing: "Large", separator: true }));
+      for (const k of rows.slice(0, MAX_KEEP_ROWS)) {
+        const label = k.kind === "decision" ? "" : `${KEEP_LABEL[k.kind] ?? "Note"}: `;
+        body.push({
+          type: "ColumnSet",
+          spacing: "Small",
+          columns: [
+            { type: "Column", width: "stretch", verticalContentAlignment: "Center", items: [text(`${label}${k.text}`, { spacing: "None" }), ...(k.savedBy ? [text(`✓ Saved to knowledge by ${noLinks(k.savedBy)}`, { size: "Small", color: "Good", spacing: "None" })] : [])] },
+            {
+              type: "Column",
+              width: "auto",
+              verticalContentAlignment: "Center",
+              items: [{
+                type: "ActionSet",
+                actions: [k.savedBy
+                  ? { type: "Action.Execute", title: "Undo", verb: VERBS.unsaveKnowledge, data: { itemId: k.id, meetingId: m.meetingId } }
+                  : { type: "Action.Execute", title: "Save to knowledge", verb: VERBS.saveKnowledge, data: { itemId: k.id, meetingId: m.meetingId } }],
+              }],
+            },
+          ],
+        });
+      }
+      if (rows.length > MAX_KEEP_ROWS) body.push(text(`${rows.length - MAX_KEEP_ROWS} more in ${BRAND.name}.`, { size: "Small", isSubtle: true }));
+    }
+  } else {
+    list("Decisions", m.decisions);
+  }
   list("Still open", m.openQuestions);
   if (m.actionCount) body.push(text(`${m.actionCount} action item${m.actionCount === 1 ? "" : "s"} below. Assign them or mark them done right here.`, { size: "Small", isSubtle: true, spacing: "Large" }));
   return card(body, [{ type: "Action.OpenUrl", title: `Open in ${BRAND.name}`, url: m.portalUrl }]);

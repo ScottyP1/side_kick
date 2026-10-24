@@ -18,6 +18,18 @@
  * - `watch.org` (payload `{}`; the job's org): runs every watcher for that organization (lib/watchers.ts). Counts:
  *   `opened`, `resolved`, `open`. Traced under the organization, so it shows on its Activity page.
  *
+ * Automatic meeting notes (lib/meetings-graph.ts), all per organization except the two sweeps:
+ * - `meetings.poll` (15 min) / `meetings.subscriptions` (1 h): enqueue `meetings.poll.org` / `meetings.subscription`
+ *   for every organization with automatic notes on (key per org and slot).
+ * - `meetings.poll.org`: lists new Teams transcripts of the org's people (polling fallback). Counts: `found`.
+ * - `meetings.subscription`: creates, renews or removes the org's Graph transcript subscription. Counts:
+ *   `subscriptionsCreated`, `subscriptionsRenewed`, `subscriptionsRemoved`.
+ * - `meetings.fetch` (payload `{ id }` = graph_meetings row; key per transcript): reads the meeting, picks the
+ *   group, downloads the transcript, checks the plan, saves the meeting. Dead = the row shows Failed. Counts:
+ *   `captured`, `skipped`, `waiting`.
+ * - `meetings.notes` (payload `{ meetingId }`; key per meeting): writes the notes and posts them to Teams once.
+ *   Counts: `notesWritten`, `notesPosted`.
+ *
  * Adding one (e.g. item 4's meeting transcripts from Microsoft Graph): `defineJob("meetings.fetch", { label, run })`
  * here, then `enqueue("meetings.fetch", { orgId, payload: { meetingId }, key: \`meeting:${id}\` })` where it starts.
  * Keep payloads to ids, make `run` safe to repeat, and return a few counts.
@@ -33,6 +45,7 @@ import { runWatchers } from "./watchers";
 import { dueConnectorLinks, syncDueLink } from "./connectors";
 import { HttpError } from "./auth";
 import { pruneOldData } from "./retention";
+import { autoNotesOrgs, ensureSubscription, fetchTranscript, markFetchFailed, pollOrg, writeNotes } from "./meetings-graph";
 
 const MIN = 60_000;
 /** How often the watchers run for each organization. */
@@ -93,6 +106,71 @@ defineJob("watch.org", {
     if (!job.org_id) return;
     const r = await runWatchers(job.org_id);
     return { opened: r.opened, resolved: r.resolved, open: r.open };
+  },
+});
+
+// Automatic meeting notes from Microsoft Graph (lib/meetings-graph.ts).
+const MEETINGS_POLL_MS = 15 * MIN;
+const MEETINGS_SUBSCRIPTIONS_MS = 60 * MIN;
+defineJob("meetings.poll", {
+  label: "Look for new Teams meeting transcripts",
+  everyMs: MEETINGS_POLL_MS,
+  maxAttempts: 3,
+  run: async ({ job, payload }) => {
+    const slot = payload.sweep ? `sweep:${job.id}` : String(Math.floor(Date.now() / MEETINGS_POLL_MS));
+    let queued = 0;
+    for (const org of await autoNotesOrgs()) if ((await enqueue("meetings.poll.org", { orgId: org, key: `poll:${org}:${slot}` })).created) queued++;
+    return { pollsQueued: queued };
+  },
+});
+defineJob("meetings.subscriptions", {
+  label: "Keep Teams meeting subscriptions alive",
+  everyMs: MEETINGS_SUBSCRIPTIONS_MS,
+  maxAttempts: 3,
+  run: async ({ job, payload }) => {
+    const slot = payload.sweep ? `sweep:${job.id}` : String(Math.floor(Date.now() / MEETINGS_SUBSCRIPTIONS_MS));
+    let queued = 0;
+    for (const org of await autoNotesOrgs()) if ((await enqueue("meetings.subscription", { orgId: org, key: `subscription:${org}:${slot}` })).created) queued++;
+    return { subscriptionChecksQueued: queued };
+  },
+});
+defineJob("meetings.poll.org", {
+  label: "Look for new Teams meetings",
+  maxAttempts: 4,
+  leaseMs: 15 * MIN,
+  run: async ({ job }) => (job.org_id ? { found: (await pollOrg(job.org_id)).found } : undefined),
+});
+defineJob("meetings.subscription", {
+  label: "Keep the Teams meeting subscription alive",
+  maxAttempts: 4,
+  run: async ({ job }) => {
+    if (!job.org_id) return;
+    const r = await ensureSubscription(job.org_id);
+    return { subscriptionsCreated: r.created, subscriptionsRenewed: r.renewed, subscriptionsRemoved: r.removed };
+  },
+});
+defineJob("meetings.fetch", {
+  label: "Fetch a Teams meeting transcript",
+  maxAttempts: 6,
+  run: async ({ job, payload }) => {
+    if (!job.org_id) return;
+    try {
+      return await fetchTranscript(job.org_id, String(payload.id ?? ""));
+    } catch (e) {
+      // The last attempt failed: show the meeting as Failed (with Try again) instead of leaving it queued.
+      if (job.attempts >= job.max_attempts) await markFetchFailed(job.org_id, String(payload.id ?? ""), e);
+      throw e;
+    }
+  },
+});
+defineJob("meetings.notes", {
+  label: "Write and post meeting notes",
+  maxAttempts: 4,
+  leaseMs: 20 * MIN,
+  run: async ({ job, payload }) => {
+    if (!job.org_id) return;
+    const r = await writeNotes(job.org_id, String(payload.meetingId ?? ""));
+    return { notesWritten: r.written, notesPosted: r.posted };
   },
 });
 

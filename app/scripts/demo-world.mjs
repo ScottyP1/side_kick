@@ -71,7 +71,7 @@ const localPart = (name) => name.normalize("NFD").replace(/[̀-ͯ]/g, "").replac
 export const NORTHWIND = { org: "Northwind Consulting", domain: "northwind.example" };
 
 /** The accounts the logins file lists (one per role), by key. Their passwords are kept between runs. */
-export const LOGIN_KEYS = ["operator", "orgOwner", "orgAdmin", "billingAdmin", "teamLead", "member", "viewer", "tailspinOwner"];
+export const LOGIN_KEYS = ["operator", "orgOwner", "orgAdmin", "teamLead", "member", "viewer", "tailspinOwner"];
 
 /** The Owner Console (Sidekick team) account: not part of any organization. */
 export const OPERATOR = { key: "operator", name: "Demo Operator", email: "operator@sidekick-demo.example" };
@@ -105,7 +105,9 @@ export function northwindPeople() {
   add("Marcus Lee", "Org Admin", [], "orgAdmin");
   add("Aisha Khan", "Org Admin");
   add("Tomás Silva", "Org Admin");
-  add("Hannah Brooks", "Billing Admin", [], "billingAdmin");
+  // Hannah is the Org Admin who looks after billing (the plan, invoices, the AI credit): only Org Owners and Org Admins
+  // see Usage & billing, and only Olivia (the Org Owner) pays or changes the plan.
+  add("Hannah Brooks", "Org Admin", [], "financeAdmin");
   // Team Leads, one per group (Priya leads the Contoso sample engagement).
   for (const p of PROFILES) add(p.lead, "Team Lead", [p.key], p.key === "contoso" ? "teamLead" : null);
   // The Contoso sample team (Maria is the Member login and also helps on Litware).
@@ -984,7 +986,7 @@ export function supportTickets() {
       description: "I imported a 4-hour design workshop transcript into Contoso and it said it was too long. Is there a limit?",
       staff: [{ body: "Thanks Maria. The limit is about five hours of talk per transcript; yours was just over because of the long breaks in the recording. Splitting it into two parts and importing each one works. We're also looking at raising the limit." }],
       customer: [{ body: "Split it in two, both imported fine. Thanks!" }], resolve: true },
-    { as: "billingAdmin", subject: "Can invoices show our purchase order number?", category: "billing", priority: "low",
+    { as: "financeAdmin", subject: "Can invoices show our purchase order number?", category: "billing", priority: "low",
       description: "Our finance team needs PO 4500-1182 on every invoice from November.",
       staff: [{ body: "Yes, we can add it from the November invoice. Can you confirm the PO is valid until the end of the year?" }] },
     { as: "fabrikamLead", subject: "Can client guests in a Teams chat see internal documents?", category: "question", priority: "normal",

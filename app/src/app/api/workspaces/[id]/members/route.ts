@@ -26,7 +26,7 @@ async function groupName(user: User, id: string): Promise<string> {
  * The group's people, Team Leads first. `canManage` says whether the caller may add or remove people.
  * With `?candidates=1` (managers only, else 403): `{ candidates }`, the people of the caller's organization
  * not in the group yet that the caller may add. Org Owners and Org Admins get everyone else; a Team Lead gets
- * only Members and Viewers (the roles they can add), never admins, Billing Admins or other Team Leads.
+ * only Members and Viewers (the roles they can add), never admins or other Team Leads.
  * This is the "Add people" picker's list: GET /api/users only shows a Team Lead the people already in their
  * groups, so it can't offer anyone new to the group.
  */

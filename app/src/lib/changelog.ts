@@ -11,6 +11,18 @@ export type ChangelogEntry = { date: string; label: string; title: string; chang
 /** Every release, newest first. */
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-24",
+    label: "October 24, 2026",
+    title: "Billing is for Org Owners and Org Admins",
+    changes: [
+      "The Billing Admin role is gone: Usage & billing, the AI credit and its notices are for Org Owners and Org Admins, and only the Org Owner pays, changes the plan or cancels.",
+      "Anyone who was a Billing Admin is now a Member. The change is on Security & audit, and the Org Owner sees a note on Home: make them an Org Admin if they should keep seeing billing.",
+      "A simpler menu: Members and Viewers see the pages for their client work, Settings is just your own account unless you run the organization, and AI models & agent, Guardrails, Activity and Security & audit are for Org Owners and Org Admins. Connectors is for them and Team Leads.",
+      "Each group's page lists the tools that feed it (Sources), and its Team Lead sees the group's last 30 days: questions, answers, meetings, documents and its share of the organization's AI use.",
+      "Help & support lists the rules Sidekick follows: the ones that are always on, your organization's switches, and how many extra rules apply.",
+    ],
+  },
+  {
     date: "2026-10-23",
     label: "October 23, 2026",
     title: "SharePoint and OneDrive files",

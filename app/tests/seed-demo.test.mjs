@@ -49,7 +49,7 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   const northwind = "(SELECT id FROM orgs WHERE name = 'Northwind Consulting')";
   assert.equal(count("SELECT COUNT(*) FROM orgs"), 4, "Northwind and three more client organizations");
   assert.ok(count(`SELECT COUNT(*) FROM users WHERE org_id = ${northwind}`) >= 110, "~115 people at Northwind");
-  for (const [role, n] of [["Org Owner", 1], ["Org Admin", 3], ["Billing Admin", 1], ["Team Lead", 10]]) {
+  for (const [role, n] of [["Org Owner", 1], ["Org Admin", 4], ["Billing Admin", 0], ["Team Lead", 10]]) {
     assert.equal(count(`SELECT COUNT(*) FROM users WHERE org_id = ${northwind} AND role = ?`, role), n, role);
   }
   assert.ok(count(`SELECT COUNT(*) FROM users WHERE org_id = ${northwind} AND role = 'Viewer'`) >= 15);
@@ -98,11 +98,12 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.equal(count("SELECT COUNT(*) FROM users WHERE org_id = (SELECT id FROM orgs WHERE name = 'Tailspin Partners')"), 14);
   // The private files exist, are only readable by this user, and hold every login.
   const saved = JSON.parse(fs.readFileSync(secrets, "utf8"));
-  for (const k of ["operator", "orgOwner", "orgAdmin", "billingAdmin", "teamLead", "member", "viewer", "tailspinOwner"]) assert.ok(saved.passwords[k]?.length >= 12, k);
+  for (const k of ["operator", "orgOwner", "orgAdmin", "teamLead", "member", "viewer", "tailspinOwner"]) assert.ok(saved.passwords[k]?.length >= 12, k);
   assert.equal(fs.statSync(secrets).mode & 0o077, 0, "secrets file is private");
   const guide = fs.readFileSync(secrets.replace(/\.json$/, ".md"), "utf8");
   assert.match(guide, /LOCAL ONLY/);
   assert.ok(guide.includes(saved.passwords.orgOwner));
+  assert.ok(!/Billing Admin/.test(guide), "the logins guide has no Billing Admin section (the role was retired)");
   assert.ok(!out.includes(saved.passwords.orgOwner), "passwords are never printed");
 });
 

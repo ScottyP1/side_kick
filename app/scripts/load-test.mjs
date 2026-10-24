@@ -180,7 +180,7 @@ async function loadPeople() {
     org: r.org_id,
     role: r.role,
     weight: Math.sqrt(Number(r.org_groups)),
-    groups: ["Org Owner", "Org Admin", "Billing Admin"].includes(r.role) ? byOrg.get(r.org_id) ?? [] : groups.get(r.id) ?? [],
+    groups: ["Org Owner", "Org Admin"].includes(r.role) ? byOrg.get(r.org_id) ?? [] : groups.get(r.id) ?? [],
   })).filter((p) => p.groups.length);
 }
 /** Picks a person, bigger organizations more often (weight = √groups). */
@@ -193,7 +193,7 @@ function weightedPick(people) {
 
 const TOPICS = ["cutover", "migration", "payroll", "invoice", "onboarding", "budget", "timeline", "vendor", "contract", "testing", "rollout", "security", "backup", "license", "reporting", "integration", "forecast", "staffing", "approval", "compliance"];
 const question = () => `What did we decide about the ${rand(TOPICS)} ${rand(["date", "owner", "plan", "risk", "cost"])}?`;
-const canEdit = (p) => !["Viewer", "Billing Admin"].includes(p.role);
+const canEdit = (p) => p.role !== "Viewer";
 
 /* ---------- actions ---------- */
 const PAGES = {

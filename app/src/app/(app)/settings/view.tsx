@@ -1,12 +1,15 @@
 "use client";
 
 /**
- * Settings (/settings): Microsoft sign-in (connect the org's Microsoft tenant, require it), "Require two-step
- * sign-in for everyone" (Org Owner; Org Admins see it read-only), organization
- * branding (logo and brand color) and your own account: password, two-step sign-in (components/two-step.tsx)
- * and where you're signed in (sign out other sessions). Org Owners and Org Admins also get **Export your
- * data** (the whole organization as a zip, GET /api/export) and **Roll-offs and certificates**: groups
- * ending, a pending deletion of the organization, and deletion certificates to download (GET /api/rolloffs).
+ * Settings (/settings), in two parts:
+ * - **Company settings** (Org Owners and Org Admins only): Microsoft sign-in (connect the org's Microsoft tenant,
+ *   require it), "Require two-step sign-in for everyone" (Org Owner; Org Admins see it read-only), organization
+ *   branding (logo and brand color), **Export your data** (the whole organization as a zip, GET /api/export) and
+ *   **Roll-offs and certificates**: groups ending, a pending deletion of the organization, and deletion
+ *   certificates to download (GET /api/rolloffs).
+ * - **My account** (everyone): password, two-step sign-in (authenticator app or passkey, components/two-step.tsx),
+ *   where you're signed in (sign out other sessions) and, for everyone but admins, whether Microsoft sign-in is on
+ *   and their own account is linked. For Members, Viewers and Team Leads this is the whole page.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -290,54 +293,63 @@ export default function SettingsPage() {
 
   return (
     <>
-      <div className="page-head"><div><div className="eyebrow">Settings</div><h1>Organization & account</h1></div></div>
-      <div className="grid g2">
-        <MicrosoftPanel />
-        {me.user.admin && <TwoStepPolicyPanel />}
-        {me.user.admin && (
-          <div className="panel">
-            <div className="panel-h"><h2>Your branding</h2><span className="muted">Applies to the whole portal</span></div>
-            <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div className="field">
-                <label>Logo</label>
-                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <div className="logo-slot">{logo ? <img src={logo} alt="Organization logo" /> : <span className="muted" style={{ fontSize: 12 }}>No logo yet</span>}</div>
-                  <button className="btn small" onClick={() => ref.current?.click()}><Icon n="upload" />Upload logo</button>
-                  {logo && <button className="btn small ghost" onClick={() => setLogo(null)}>Remove</button>}
-                  <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => loadLogo(e.target.files?.[0])} />
+      <div className="page-head"><div><div className="eyebrow">Settings</div><h1>{me.user.admin ? "Organization & account" : "My account"}</h1></div></div>
+      {me.user.admin && (
+        <section aria-labelledby="company-h" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <h2 id="company-h" className="eyebrow">Company settings</h2>
+          <div className="grid g2">
+            <MicrosoftPanel />
+            <TwoStepPolicyPanel />
+            <div className="panel">
+              <div className="panel-h"><h2>Your branding</h2><span className="muted">Applies to the whole portal</span></div>
+              <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div className="field">
+                  <label>Logo</label>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <div className="logo-slot">{logo ? <img src={logo} alt="Organization logo" /> : <span className="muted" style={{ fontSize: 12 }}>No logo yet</span>}</div>
+                    <button className="btn small" onClick={() => ref.current?.click()}><Icon n="upload" />Upload logo</button>
+                    {logo && <button className="btn small ghost" onClick={() => setLogo(null)}>Remove</button>}
+                    <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => loadLogo(e.target.files?.[0])} />
+                  </div>
+                  <span className="hint">Use the official file from your brand portal. PNG or SVG with a transparent background works best.</span>
                 </div>
-                <span className="hint">Use the official file from your brand portal. PNG or SVG with a transparent background works best.</span>
-              </div>
-              <div className="field">
-                <label>Brand color</label>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {ACCENTS.map(([n, c]) => (
-                    <button key={n} className="swatch-btn" aria-pressed={accent === c} title={n} aria-label={`Brand color ${n}`} onClick={() => setAccent(c)} style={{ background: c ?? "#4f46e5" }} />
-                  ))}
-                  <label className="btn small" style={{ position: "relative" }}>
-                    Custom
-                    <input type="color" aria-label="Custom brand color" style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} onChange={(e) => setAccent(e.target.value)} />
-                  </label>
+                <div className="field">
+                  <label>Brand color</label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    {ACCENTS.map(([n, c]) => (
+                      <button key={n} className="swatch-btn" aria-pressed={accent === c} title={n} aria-label={`Brand color ${n}`} onClick={() => setAccent(c)} style={{ background: c ?? "#4f46e5" }} />
+                    ))}
+                    <label className="btn small" style={{ position: "relative" }}>
+                      Custom
+                      <input type="color" aria-label="Custom brand color" style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} onChange={(e) => setAccent(e.target.value)} />
+                    </label>
+                  </div>
                 </div>
+                <div><button className="btn primary" onClick={saveBrand}>Save branding</button></div>
               </div>
-              <div><button className="btn primary" onClick={saveBrand}>Save branding</button></div>
             </div>
+            <DataPanel />
           </div>
-        )}
-        <form className="panel" onSubmit={changePw}>
-          <div className="panel-h"><h2>Change password</h2></div>
-          <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="field"><label htmlFor="cur">Current password</label><input id="cur" className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></div>
-            <div className="field"><label htmlFor="new">New password</label><input id="new" className="input" type="password" autoComplete="new-password" minLength={12} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 12 characters, and not one from a known data breach. A password manager can make one.</span></div>
-            {pwErr && <p className="err">{pwErr}</p>}
-            <div><button className="btn primary" type="submit" disabled={!pw.current || pw.next.length < 12}>Change password</button></div>
-          </div>
-        </form>
-        <TwoStepPanel base="/api/auth/mfa" note="Signing in with Microsoft skips this step: Microsoft runs its own checks." />
-        <SessionsPanel />
-        {me.user.admin && <DataPanel />}
-      </div>
+        </section>
+      )}
+      <section aria-labelledby="account-h" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: me.user.admin ? 18 : 0 }}>
+        {me.user.admin && <h2 id="account-h" className="eyebrow">My account</h2>}
+        <div className="grid g2">
+          {!me.user.admin && <MicrosoftPanel />}
+          <form className="panel" onSubmit={changePw}>
+            <div className="panel-h"><h2>Change password</h2></div>
+            <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div className="field"><label htmlFor="cur">Current password</label><input id="cur" className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></div>
+              <div className="field"><label htmlFor="new">New password</label><input id="new" className="input" type="password" autoComplete="new-password" minLength={12} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /><span className="hint">At least 12 characters, and not one from a known data breach. A password manager can make one.</span></div>
+              {pwErr && <p className="err">{pwErr}</p>}
+              <div><button className="btn primary" type="submit" disabled={!pw.current || pw.next.length < 12}>Change password</button></div>
+            </div>
+          </form>
+          <TwoStepPanel base="/api/auth/mfa" note="Signing in with Microsoft skips this step: Microsoft runs its own checks." />
+          <SessionsPanel />
+        </div>
+      </section>
     </>
   );
 }

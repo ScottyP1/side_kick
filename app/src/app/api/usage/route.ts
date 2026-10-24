@@ -1,17 +1,18 @@
 /**
  * GET /api/usage: what Sidekick's AI work cost this organization this month, by feature, group and day,
  * plus the monthly AI credit (lib/credit.ts) and every plan limit with its use (lib/limits.ts).
- * Who: Org Owners, Org Admins and Billing Admins. No model or provider names: customers see plain wording
+ * Who: Org Owners and Org Admins (`BILLING_VIEW_ROLES`). No model or provider names: customers see plain wording
  * ("AI requests"); models are in the Owner Console.
  */
 import { handle } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { all, get } from "@/lib/db";
+import { BILLING_VIEW_ROLES } from "@/lib/billing";
 import { creditStatus } from "@/lib/credit";
 import { limitReport, monthStart } from "@/lib/limits";
 
 export const GET = handle(async () => {
-  const user = await requireUser(["Org Owner", "Org Admin", "Billing Admin"]);
+  const user = await requireUser(BILLING_VIEW_ROLES);
   const d = new Date();
   const s = monthStart(d);
   const start = new Date(s);

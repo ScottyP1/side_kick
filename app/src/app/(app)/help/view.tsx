@@ -8,12 +8,15 @@
  * - **My tickets** (`#tickets`): the person's tickets (Org Owners and Org Admins: everyone's in the
  *   organization), with a dot for a team reply they haven't read.
  * - A pointer to the Help chat (bottom-left button → I need help) and the help center.
+ * - **Rules Sidekick follows** (`#rules`, components/rules-summary.tsx): the locked rules, the organization's
+ *   switches as On/Off and how many extra rules apply, read-only for everyone.
  * - A quiet, dismissible "Install as an app" hint where the browser supports it (components/install-app.tsx).
  */
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useApp } from "@/components/shell";
 import { InstallAppHint } from "@/components/install-app";
+import { RulesSummary } from "@/components/rules-summary";
 import { api, fmtTime, Icon, Pill, Spinner, useReportError } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 
@@ -102,6 +105,7 @@ export default function HelpView() {
             </div>
           )}
         </div>
+        <RulesSummary />
       </div>
     </>
   );

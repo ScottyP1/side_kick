@@ -30,7 +30,7 @@ export default function KnowledgePage() {
   const [uploading, setUploading] = useState(false);
   const [audience, setAudience] = useState<"internal" | "shareable">("internal");
   const fileRef = useRef<HTMLInputElement>(null);
-  const canEdit = !["Viewer", "Billing Admin"].includes(me.user.role);
+  const canEdit = me.user.role !== "Viewer";
 
   const load = useCallback(async () => {
     if (!ws) return;

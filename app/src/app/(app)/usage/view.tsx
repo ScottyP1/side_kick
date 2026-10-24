@@ -5,7 +5,7 @@
  * monthly AI credit, then every AI request metered: tokens, cost and response time by feature, group and day,
  * and **Export CSV** (AI cost and activity per group with its engagement code, per month, for chargeback;
  * GET /api/usage/export). Plain wording: no model names (those are for the Sidekick team).
- * Owners, Admins and Billing Admins (only Owners and Billing Admins change the plan).
+ * Org Owners and Org Admins (only the Org Owner changes the plan).
  */
 
 import { useEffect, useState } from "react";
@@ -78,7 +78,7 @@ function CreditPanel({ c }: { c: Credit }) {
         <span className="muted">
           {c.creditUsd === null ? "Your organization's AI use isn't capped."
             : c.level === "essentials" ? `Used up: ${BRAND.name} keeps answering questions and checking them against your guardrails; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st. Ask the ${BRAND.name} team for a top-up, or move to a bigger plan.`
-            : `At 80% the Org Owner, Org Admins and Billing Admins see a notice. At 100% ${BRAND.name} keeps answering questions and pauses the extras until the 1st.`}
+            : `At 80% the Org Owner and Org Admins see a notice. At 100% ${BRAND.name} keeps answering questions and pauses the extras until the 1st.`}
         </span>
       </div>
     </div>

@@ -390,7 +390,6 @@ The client's home base: everything an admin needs to manage Sidekick for their o
 |---|---|---|
 | **Org Owner** | Whole tenant | Everything: billing, security, delete org data, assign Org Admins |
 | **Org Admin** | Whole tenant | Users, workspaces, connectors, org-wide restrictions, view all usage |
-| **Billing Admin** | Whole tenant | Usage, invoices, budgets, and nothing else |
 | **Workspace Admin** | One or more workspaces | Workspace members, docs, connectors, agent rules, workspace restrictions |
 | **Member** | Assigned workspaces | View meetings/notes/memory, upload docs (if allowed), give feedback, approve draft stories |
 | **Viewer** | Assigned workspaces | Read-only notes and meetings |

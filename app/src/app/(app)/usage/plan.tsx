@@ -5,7 +5,7 @@
  * by groups, lib/plans.ts), its extra groups and monthly price, subscription status, every plan limit with
  * its use (people, groups, tracked chats, meeting hours, documents, connectors, AI credit; "Over limit" when
  * a plan shrank below what's used, nothing is ever deleted), every plan feature (included, or "Not in your
- * plan" with "still in use" when a smaller plan kept what was already set up), and (Org Owners and Billing Admins) pay, change
+ * plan" with "still in use" when a smaller plan kept what was already set up), and (the Org Owner) pay, change
  * plan, add or remove extra groups, cancel, and the test-mode "simulate a failed payment". Org Admins see it
  * read-only. Organizations managed by the Sidekick team (no self-service subscription) and Enterprise see
  * their limits and a note to contact the team.
@@ -130,7 +130,7 @@ export function PlanSection() {
                 </button>
               ))}
             </div>
-            {!b.canManage && <span className="muted">Ask your Org Owner or a Billing Admin to pick one.</span>}
+            {!b.canManage && <span className="muted">Ask your Org Owner to pick one.</span>}
           </div>
         )}
         <div className="grid g3">
@@ -173,7 +173,7 @@ export function PlanSection() {
             </div>
           </>
         ) : (
-          <span className="muted">Only the Org Owner and Billing Admins can pay, change the plan or extra groups, or cancel.</span>
+          <span className="muted">Only the Org Owner can pay, change the plan or extra groups, or cancel.</span>
         )}
       </div>
       {confirm === "change" && next && (

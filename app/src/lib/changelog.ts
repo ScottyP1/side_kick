@@ -13,6 +13,16 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-23",
     label: "October 23, 2026",
+    title: "GitHub and Confluence connectors",
+    changes: [
+      `Connect GitHub (read-only, through the ${BRAND.name} GitHub App) and link a repository to a group: its issues and pull requests, with state, assignees, labels, milestones and the latest comments, become part of the group's knowledge, cited with a link.`,
+      "Connect Confluence (read-only, with your Atlassian account) and link a space to a group: its pages are searched like the group's documents and cited with an Open in Confluence link.",
+      `When a tool asks ${BRAND.name} to slow down, syncing pauses and carries on from where it stopped; Connectors says so in plain words.`,
+    ],
+  },
+  {
+    date: "2026-10-23",
+    label: "October 23, 2026",
     title: "Automatic notes after every Teams meeting",
     changes: [
       `Turn on automatic notes and ${BRAND.name} writes the notes after every Teams meeting of a group's people, from the meeting's transcript (no bot joins the call), puts them in the right group and posts them to the group's notes chat. A meeting several groups were in waits for a Team Lead or admin to pick the group.`,

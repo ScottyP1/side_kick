@@ -433,7 +433,7 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS scope_key TEXT;
 CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key);
--- Connectors to outside tools (lib/connectors.ts, Azure DevOps Boards and Jira): see the SQLite schema in lib/db.ts
+-- Connectors to outside tools (lib/connectors.ts: Azure DevOps Boards, Jira, GitHub Issues, Confluence): see the SQLite schema in lib/db.ts
 -- for what each column means.
 CREATE TABLE IF NOT EXISTS connectors (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, status TEXT NOT NULL,

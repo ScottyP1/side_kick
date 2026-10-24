@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * The connected-tools part of the Connectors page: Azure DevOps Boards and Jira. For each tool it shows whether
- * it's connected and healthy (last sync, last success, the problem in plain words, an expired sign-in), the
- * projects linked to groups, and the actions the person's role allows:
- * - Org Owners/Admins connect (the tool's own sign-in; ADO first asks for the organization name), reconnect and
- *   disconnect (which removes the sign-in and every imported item);
+ * The connected-tools part of the Connectors page: Azure DevOps Boards, Jira, GitHub Issues and Confluence. For
+ * each tool it shows whether it's connected and healthy (last sync, last success, the problem in plain words, an
+ * expired sign-in), the projects (GitHub: repositories, Confluence: spaces) linked to groups, and the actions the
+ * person's role allows:
+ * - Org Owners/Admins connect (the tool's own sign-in; ADO first asks for the organization name, Jira and
+ *   Confluence optionally for the Atlassian site, GitHub for nothing), reconnect and disconnect (which removes
+ *   the sign-in and every imported item);
  * - Org Owners/Admins and Team Leads link a project to one of their groups (internal or shareable), sync it now,
  *   or unlink it;
  * - everyone else sees the status of their own groups' projects.
@@ -20,7 +22,9 @@ import { CONNECTOR_ICONS } from "@/components/connector-icons";
 import { takeFlash } from "@/lib/flash";
 import { BRAND } from "@/lib/brand";
 
-type Kind = "ado" | "jira";
+/** The tools (lib/connector-text.ts `ConnectorKind`), in the order their panels show. */
+export const KINDS = ["ado", "jira", "github", "confluence"] as const;
+type Kind = (typeof KINDS)[number];
 type LinkHealth = {
   id: string; connectorId: string; kind: Kind; workspaceId: string; workspaceName: string; project: string; projectName: string;
   audience: "internal" | "shareable"; items: number; lastSyncAt: string | null; lastOkAt: string | null; syncing: boolean; problem: string | null;
@@ -31,15 +35,26 @@ type ConnectorHealth = {
 };
 type Data = { connectors: ConnectorHealth[]; configured: Record<Kind, boolean> };
 
-/** Each tool's tile facts and connect wording. */
-export const TOOLS: Record<Kind, { name: string; bg: string; what: string; site: { label: string; placeholder: string; hint: string; optional?: boolean } }> = {
+/**
+ * Each tool's tile facts and connect wording: `site` is what to type before connecting (null: nothing), `signIn`
+ * whose sign-in opens, `project`/`items` what a linked project and its items are called.
+ */
+export const TOOLS: Record<Kind, { name: string; bg: string; what: string; signIn: string; project: string; items: string; site: { label: string; placeholder: string; hint: string; optional?: boolean } | null }> = {
   ado: {
-    name: "Azure DevOps", bg: "#0078D4", what: "Boards: work items, their state, owners, due dates and what blocks them",
+    name: "Azure DevOps", bg: "#0078D4", what: "Boards: work items, their state, owners, due dates and what blocks them", signIn: "your Microsoft work account", project: "project", items: "work items",
     site: { label: "Azure DevOps organization", placeholder: "northwind", hint: "The name after dev.azure.com/" },
   },
   jira: {
-    name: "Jira", bg: "#0052CC", what: "Issues: status, assignee, due dates, links and comments",
+    name: "Jira", bg: "#0052CC", what: "Issues: status, assignee, due dates, links and comments", signIn: "your Atlassian account", project: "project", items: "work items",
     site: { label: "Jira site (optional)", placeholder: "northwind", hint: "The name before .atlassian.net; leave it empty if you use one site", optional: true },
+  },
+  github: {
+    name: "GitHub", bg: "#24292F", what: "Issues and pull requests: state, assignees, labels, milestones and comments", signIn: "your GitHub account", project: "repository", items: "issues and pull requests",
+    site: null,
+  },
+  confluence: {
+    name: "Confluence", bg: "#1868DB", what: "Spaces and pages, kept up to date as group documents", signIn: "your Atlassian account", project: "space", items: "pages",
+    site: { label: "Confluence site (optional)", placeholder: "northwind", hint: "The name before .atlassian.net; leave it empty if you use one site", optional: true },
   },
 };
 
@@ -64,7 +79,7 @@ export function useConnectors() {
 
 const ago = (s: string | null) => (s ? fmtTime(s) : "never");
 
-/** The panels for Azure DevOps and Jira (see the file comment). */
+/** The panels for every tool (see the file comment). */
 export function ToolPanels({ data, load }: { data: Data | null; load: () => Promise<void> }) {
   const { me } = useApp();
   const toast = useToast();
@@ -72,7 +87,7 @@ export function ToolPanels({ data, load }: { data: Data | null; load: () => Prom
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const done = q.get("connected");
-    if (done === "ado" || done === "jira") toast(`${TOOLS[done].name} connected. Link a project to a group next.`);
+    if ((KINDS as readonly string[]).includes(done ?? "")) toast(`${TOOLS[done as Kind].name} connected. Link a ${TOOLS[done as Kind].project} to a group next.`);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (q.has("error")) setError(takeFlash("Connecting didn't finish. Try again."));
     if (q.size) history.replaceState(null, "", "/connectors");
@@ -85,7 +100,7 @@ export function ToolPanels({ data, load }: { data: Data | null; load: () => Prom
     <section style={{ display: "flex", flexDirection: "column", gap: 12 }} id="tools">
       <div className="eyebrow">Connected tools (read-only)</div>
       {error && <div className="callout bad" role="alert">{error}</div>}
-      {(["ado", "jira"] as const).map((k) => (
+      {KINDS.map((k) => (
         <ToolPanel key={k} kind={k} c={data.connectors.find((x) => x.kind === k) ?? null} configured={data.configured[k]}
           blocked={included === 0 || (included !== null && included !== undefined && !usedKinds.includes(k) && usedKinds.length >= included)} reload={load} />
       ))}
@@ -116,7 +131,7 @@ function ToolPanel({ kind, c, configured, blocked, reload }: { kind: Kind; c: Co
     }
   };
   const disconnect = () => {
-    if (!c || !confirm(`Disconnect ${t.name}? ${BRAND.name} forgets its sign-in and removes every work item it read (${c.links.reduce((n, l) => n + l.items, 0)}) from your groups' knowledge.`)) return;
+    if (!c || !confirm(`Disconnect ${t.name}? ${BRAND.name} forgets its sign-in and removes every one of the ${t.items} it read (${c.links.reduce((n, l) => n + l.items, 0)}) from your groups' knowledge.`)) return;
     void act("disconnect", () => api(`/api/connectors/${c.id}`, { method: "DELETE" }), `${t.name} disconnected`);
   };
   return (
@@ -133,7 +148,7 @@ function ToolPanel({ kind, c, configured, blocked, reload }: { kind: Kind; c: Co
             {admin && (
               <>
                 {/* A page navigation (not fetch): the tool's sign-in opens and comes back here. */}
-                <a className="btn small" href={`/api/connectors/start?kind=${kind}&site=${encodeURIComponent(kind === "ado" ? c.account : c.accountName ?? "")}`}>Reconnect</a>
+                <a className="btn small" href={`/api/connectors/start?kind=${kind}${t.site ? `&site=${encodeURIComponent(kind === "ado" ? c.account : c.accountName ?? "")}` : ""}`}>Reconnect</a>
                 <button className="btn small ghost" onClick={disconnect} disabled={busy === "disconnect"}>Disconnect</button>
               </>
             )}
@@ -153,13 +168,18 @@ function ToolPanel({ kind, c, configured, blocked, reload }: { kind: Kind; c: Co
           // A plain GET form: the browser goes to the tool's sign-in and comes back to this page.
           <form className="actions" style={{ alignItems: "flex-end", flexWrap: "wrap" }} method="get" action="/api/connectors/start">
             <input type="hidden" name="kind" value={kind} />
-            <label className="field" style={{ minWidth: 220 }}>
-              <span>{t.site.label}</span>
-              <input className="input" name="site" required={!t.site.optional} pattern="[A-Za-z0-9][A-Za-z0-9\-]{0,49}" title={t.site.hint} placeholder={t.site.placeholder} aria-describedby={`hint-${kind}`} />
-              <span className="muted" id={`hint-${kind}`} style={{ fontSize: 12 }}>{t.site.hint}</span>
-            </label>
+            {t.site && (
+              <label className="field" style={{ minWidth: 220 }}>
+                <span>{t.site.label}</span>
+                <input className="input" name="site" required={!t.site.optional} pattern="[A-Za-z0-9][A-Za-z0-9\-]{0,49}" title={t.site.hint} placeholder={t.site.placeholder} aria-describedby={`hint-${kind}`} />
+                <span className="muted" id={`hint-${kind}`} style={{ fontSize: 12 }}>{t.site.hint}</span>
+              </label>
+            )}
             <button className="btn primary" type="submit">Connect {t.name}</button>
-            <span className="muted" style={{ fontSize: 12.5 }}>You sign in with {kind === "ado" ? "your Microsoft work account" : "your Atlassian account"}; {BRAND.name} only reads, and stores no password.</span>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              You sign in with {t.signIn}; {BRAND.name} only reads, and stores no password.
+              {kind === "github" && " Only repositories your GitHub owner installed the Sidekick app on can be linked."}
+            </span>
           </form>
         ) : <div className="muted">An Org Owner or Org Admin can connect {t.name}.</div>)}
         {c?.problem && <div className={`callout ${c.status === "expired" ? "bad" : "warn"}`} role="status">{c.problem}</div>}
@@ -172,12 +192,14 @@ function ToolPanel({ kind, c, configured, blocked, reload }: { kind: Kind; c: Co
 function Links({ c, canLink, reload, act, busy }: { c: ConnectorHealth; canLink: boolean; reload: () => Promise<void>; act: (l: string, fn: () => Promise<unknown>, done: string) => Promise<void>; busy: string }) {
   const { me } = useApp();
   const [adding, setAdding] = useState(false);
+  const t = TOOLS[c.kind];
+  const Word = t.project[0].toUpperCase() + t.project.slice(1);
   return (
     <>
       {c.links.length ? (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Project</th><th>Group</th><th>Status</th><th className="r">Items</th><th>Last sync</th><th /></tr></thead>
+            <thead><tr><th>{Word}</th><th>Group</th><th>Status</th><th className="r">Items</th><th>Last sync</th><th /></tr></thead>
             <tbody>
               {c.links.map((l) => (
                 <tr key={l.id}>
@@ -203,7 +225,7 @@ function Links({ c, canLink, reload, act, busy }: { c: ConnectorHealth; canLink:
                         }, `Synced ${l.projectName}`)}>
                           {busy === `sync-${l.id}` ? <Spinner /> : "Sync now"}
                         </button>
-                        <button className="btn small ghost" disabled={!!busy} onClick={() => confirm(`Unlink ${l.projectName} from ${l.workspaceName}? Its ${l.items} work items leave the group's knowledge.`) && act(`unlink-${l.id}`, () => api(`/api/connectors/links/${l.id}`, { method: "DELETE" }), `Unlinked ${l.projectName}`)}>
+                        <button className="btn small ghost" disabled={!!busy} onClick={() => confirm(`Unlink ${l.projectName} from ${l.workspaceName}? Its ${l.items} ${t.items} leave the group's knowledge.`) && act(`unlink-${l.id}`, () => api(`/api/connectors/links/${l.id}`, { method: "DELETE" }), `Unlinked ${l.projectName}`)}>
                           Unlink
                         </button>
                       </>
@@ -215,11 +237,11 @@ function Links({ c, canLink, reload, act, busy }: { c: ConnectorHealth; canLink:
           </table>
         </div>
       ) : (
-        <div className="muted">No projects linked to {canLink ? "your groups" : "your groups"} yet.{canLink ? " Link one so its work items become part of a group's knowledge." : ""}</div>
+        <div className="muted">No {t.project === "repository" ? "repositories" : `${t.project}s`} linked to your groups yet.{canLink ? ` Link one so its ${t.items} become part of a group's knowledge.` : ""}</div>
       )}
       {canLink && c.status !== "expired" && (adding
         ? <LinkForm c={c} onDone={async () => { setAdding(false); await reload(); }} onCancel={() => setAdding(false)} />
-        : <div><button className="btn small" onClick={() => setAdding(true)}>Link a project to a group</button></div>)}
+        : <div><button className="btn small" onClick={() => setAdding(true)}>Link a {t.project} to a group</button></div>)}
     </>
   );
 }
@@ -233,17 +255,18 @@ function LinkForm({ c, onDone, onCancel }: { c: ConnectorHealth; onDone: () => P
   const [audience, setAudience] = useState<"internal" | "shareable">("internal");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const t = TOOLS[c.kind];
   useEffect(() => {
     api<{ projects: { key: string; name: string }[] }>(`/api/connectors/${c.id}/projects`)
       .then((r) => { setProjects(r.projects); setProject(r.projects[0]?.key ?? ""); })
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load the projects."));
-  }, [c.id]);
+      .catch((e) => setError(e instanceof Error ? e.message : `Couldn't load the ${t.project === "repository" ? "repositories" : `${t.project}s`}.`));
+  }, [c.id, t.project]);
   const save = async () => {
     setSaving(true);
     setError("");
     try {
       const r = await api<{ link: LinkHealth }>("/api/connectors/links", { method: "POST", json: { connector: c.id, ws, project, audience } });
-      toast(r.link.problem ? `Linked, but the first sync had a problem: ${r.link.problem}` : `Linked ${r.link.projectName}: ${r.link.items} work items read`, r.link.problem ? "error" : "info");
+      toast(r.link.problem ? `Linked, but the first sync had a problem: ${r.link.problem}` : `Linked ${r.link.projectName}: ${r.link.items} ${t.items} read`, r.link.problem ? "error" : "info");
       await onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't link it.");
@@ -256,13 +279,13 @@ function LinkForm({ c, onDone, onCancel }: { c: ConnectorHealth; onDone: () => P
       {error && <div className="callout bad" role="alert">{error}</div>}
       <div className="form-grid" style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
         <label className="field">
-          <span>Project in {c.label}</span>
+          <span>{t.project[0].toUpperCase() + t.project.slice(1)} in {c.label}</span>
           {projects ? (
             <select className="input" value={project} onChange={(e) => setProject(e.target.value)}>
-              {!projects.length && <option value="">No projects this account can read</option>}
+              {!projects.length && <option value="">{c.kind === "github" ? "No repositories: install the app on one first" : `No ${t.project}s this account can read`}</option>}
               {projects.map((p) => <option key={p.key} value={p.key}>{p.name}{p.name !== p.key ? ` (${p.key})` : ""}</option>)}
             </select>
-          ) : <span className="muted"><Spinner /> Loading projects…</span>}
+          ) : <span className="muted"><Spinner /> Loading…</span>}
         </label>
         <label className="field">
           <span>Group</span>
@@ -272,7 +295,7 @@ function LinkForm({ c, onDone, onCancel }: { c: ConnectorHealth; onDone: () => P
         </label>
       </div>
       <div className="field">
-        <span>Who may see its items in answers</span>
+        <span>Who may see its {t.items} in answers</span>
         <div className="seg">
           {(["internal", "shareable"] as const).map((a) => (
             <button key={a} type="button" aria-pressed={audience === a} onClick={() => setAudience(a)}>{a === "internal" ? "Internal (team only)" : "Shareable (also with client guests)"}</button>
@@ -280,7 +303,7 @@ function LinkForm({ c, onDone, onCancel }: { c: ConnectorHealth; onDone: () => P
         </div>
       </div>
       <div className="actions">
-        <button className="btn primary" onClick={save} disabled={saving || !project || !ws}>{saving ? <><Spinner /> Linking and reading items…</> : "Link and sync"}</button>
+        <button className="btn primary" onClick={save} disabled={saving || !project || !ws}>{saving ? <><Spinner /> Linking and reading {t.items}…</> : "Link and sync"}</button>
         <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
       </div>
     </div>

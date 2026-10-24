@@ -65,11 +65,12 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE owner IS NULL AND status != 'Done'") >= 5, "unowned action items");
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE status != 'Done' AND due_on < '2026-10-22'") >= 5, "overdue action items");
   assert.ok(count("SELECT COUNT(*) FROM answer_feedback WHERE vote < 0") >= 1 && count("SELECT COUNT(*) FROM answer_feedback WHERE vote > 0") >= 10, "👍 and 👎");
-  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 2, "Azure DevOps and Jira connected");
-  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 3, "three linked projects, synced");
+  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 4, "Azure DevOps, Jira, GitHub and Confluence connected");
+  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 5, "five linked projects, repositories and spaces, synced");
   assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_error LIKE '%refused access%'"), 1, "one lost access since (for the broken-connector watcher)");
   assert.equal(count("SELECT COUNT(*) FROM connector_health WHERE status = 'broken' AND connector = 'azure-devops' AND workspace_id != ''"), 1);
-  assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'workitem'") >= 9, "their work items are searchable");
+  assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'workitem'") >= 13, "their work items (with GitHub's issues and pull requests) are searchable");
+  assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'page'") >= 3, "the Confluence space's pages are searchable like documents");
   assert.ok(count("SELECT COUNT(*) FROM support_tickets") >= 5 && count("SELECT COUNT(*) FROM support_messages WHERE author_kind = 'staff'") >= 3, "tickets with replies");
   assert.ok(count("SELECT COUNT(*) FROM insights") >= 10, "knowledge maps");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'notes'") >= 50, "the rewritten notes are searchable again");

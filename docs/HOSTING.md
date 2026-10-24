@@ -62,9 +62,10 @@ encrypted with it can't be read with another key (everyone would have to remove 
 authenticator app; passkeys and backup codes are unaffected). Later, Key Vault could do the wrapping itself;
 the stored format already has a key id for that.
 
-**Connector apps** (optional, Azure DevOps and Jira: `app/src/lib/connectors.ts`): `ADO_CLIENT_ID` + `ADO_CLIENT_SECRET`
-(`secretref:ado-client-secret`) and `JIRA_CLIENT_ID` + `JIRA_CLIENT_SECRET` (`secretref:jira-client-secret`), Key Vault
-references like the others. Not set = that tool's tile says "Not set up yet". How to create them: RUNBOOKS → Connector
+**Connector apps** (optional, Azure DevOps, Jira, GitHub and Confluence: `app/src/lib/connectors.ts`): `ADO_CLIENT_ID` + `ADO_CLIENT_SECRET`
+(`secretref:ado-client-secret`), `JIRA_CLIENT_ID` + `JIRA_CLIENT_SECRET` (`secretref:jira-client-secret`; Confluence uses
+the same Atlassian app unless `CONFLUENCE_CLIENT_ID` + `CONFLUENCE_CLIENT_SECRET` are set) and `GITHUB_CLIENT_ID` +
+`GITHUB_CLIENT_SECRET` (`secretref:github-client-secret`, a GitHub App), Key Vault references like the others. Not set = that tool's tile says "Not set up yet". How to create them: RUNBOOKS → Connector
 apps. Customers' tool sign-ins are stored in the database, sealed with `SIDEKICK_ENCRYPTION_KEY` (one more reason
 never to regenerate it: they'd all have to reconnect).
 

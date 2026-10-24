@@ -57,12 +57,12 @@ function fromTurns(turns: Turn[]): Exchange[] {
   return out;
 }
 
-/** Which tool a cited work item came from, for its "Open in …" link (source type "workitem"). */
-const toolName = (s: Source) => (s.title.startsWith("Jira") ? "Jira" : "Azure DevOps");
+/** Which tool a cited work item or page came from, for its "Open in …" link (source types "workitem" and "page"). */
+const toolName = (s: Source) => ["Jira", "GitHub", "Confluence"].find((t) => s.title.startsWith(t)) ?? "Azure DevOps";
 
 /**
  * One cited source line: "Firm policy ·" for the firm library, its location, an outdated flag, and for a work item
- * from a connector (Azure DevOps, Jira) a link that opens it in the tool.
+ * or page from a connector (Azure DevOps, Jira, GitHub, Confluence) a link that opens it in the tool.
  */
 function SourceLine({ s }: { s: Source }) {
   return (

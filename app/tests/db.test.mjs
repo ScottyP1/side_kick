@@ -663,6 +663,45 @@ test("connectors: work items become plain text cards; ADO HTML and Jira's docume
   assert.equal(jqlSince(null), null);
 });
 
+test("connectors: GitHub and Confluence helpers: page cards, next links that never leave the API, rate-limit waits", async () => {
+  const t = await import("../src/lib/connector-text.ts");
+  const { nextLink } = await import("../src/lib/connector-github.ts");
+  const { confluenceNext } = await import("../src/lib/connector-confluence.ts");
+  // A Confluence page is a document: indexed whole (cut at PAGE_MAX), with its space, place, labels and editor.
+  const page = {
+    externalId: "98301", type: "Page", title: "Cutover runbook", state: null, assignee: "Ana Ruiz", dueOn: null, url: "https://x.atlassian.net/wiki/spaces/CUT/pages/98301",
+    changedAt: "2026-10-20T10:00:00.000Z", description: "Step one.\n".repeat(8000), blockedBy: [], parent: "Wave 2 Cutover", tags: ["runbook"], commentCount: 0, comments: [],
+  };
+  const text = t.pageText("confluence", "Wave 2 Cutover", page);
+  assert.match(text, /^Confluence page: Cutover runbook\nSpace: Wave 2 Cutover \(Confluence\)\nPart of: Wave 2 Cutover\nLabels: runbook\nLast changed: 2026-10-20 by Ana Ruiz\nLink: https:/);
+  assert.ok(text.length <= t.PAGE_MAX + 400 && text.endsWith("…"), "long pages are cut");
+  assert.ok(t.isPageKind("confluence") && !t.isPageKind("github"));
+  assert.equal(t.workItemTitle("github", { externalId: "store-pos#42", title: "Offline mode", type: "Pull request" }), "GitHub Pull request store-pos#42: Offline mode");
+  assert.ok(t.isDoneState("Merged") && !t.isDoneState("Open") && !t.isDoneState("Draft"));
+  // GitHub's Link header: only "next" links back to the API are followed (never another host).
+  const api = "https://api.github.com";
+  assert.equal(nextLink('<https://api.github.com/repos/a/b/issues?page=2>; rel="next", <https://api.github.com/repos/a/b/issues?page=5>; rel="last"', api), "https://api.github.com/repos/a/b/issues?page=2");
+  assert.equal(nextLink('<https://api.github.com.evil.test/x?page=2>; rel="next"', api), null);
+  assert.equal(nextLink('<https://api.github.com/x?page=1>; rel="prev"', api), null);
+  assert.equal(nextLink(null, api), null);
+  // Confluence's _links.next is a path on the site: with or without its /wiki context, never another host.
+  const cf = "https://api.atlassian.com/ex/confluence/abc";
+  assert.equal(confluenceNext("/rest/api/content/search?cursor=x", cf), `${cf}/wiki/rest/api/content/search?cursor=x`);
+  assert.equal(confluenceNext("/wiki/api/v2/spaces?cursor=y", cf), `${cf}/wiki/api/v2/spaces?cursor=y`);
+  assert.equal(confluenceNext("//evil.test/x", cf), null);
+  assert.equal(confluenceNext("https://evil.test/x", cf), null);
+  assert.equal(confluenceNext(undefined, cf), null);
+  // "Slow down" answers: 429, or GitHub's 403 with Retry-After / x-ratelimit-remaining 0; a plain 403 is not one.
+  const at = Date.parse("2026-10-23T12:00:00Z");
+  const h = (o) => new Headers(o);
+  assert.equal(t.rateLimitWait(429, h({ "retry-after": "3" }), at), 3);
+  assert.equal(t.rateLimitWait(429, h({ "retry-after": "Fri, 23 Oct 2026 12:01:00 GMT" }), at), 60);
+  assert.equal(t.rateLimitWait(403, h({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(at / 1000 + 120) }), at), 120);
+  assert.equal(t.rateLimitWait(403, h({}), at), null, "a refusal, not a rate limit");
+  assert.equal(t.rateLimitWait(429, h({}), at), 60);
+  assert.equal(t.rateLimitWait(200, h({ "retry-after": "3" }), at), null);
+});
+
 /* ---------- Job queue (src/lib/jobs.ts) ---------- */
 
 const jobs = await import("../src/lib/jobs.ts");

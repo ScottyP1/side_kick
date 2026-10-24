@@ -927,6 +927,45 @@ test("fair limiter: people-facing work goes first; a task that waits too long is
   assert.equal(lim.stats().running, 0);
 });
 
+// Roll-off promises nothing is left of a deleted organization, but a trace is saved just after its request
+// ends, so it can arrive mid-deletion. This plays that race out step by step (no timing luck): the save waits
+// for the deletion's lock, then finds the organization gone and saves nothing.
+test(`[${engine}] traces: a trace finishing while its organization is deleted is dropped, never left behind`, async () => {
+  const { withTrace, flushTraces } = await import("../src/lib/trace.ts");
+  const org = db.newId();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Deleted mid-trace", db.now());
+  const traced = (name) => withTrace({ name, channel: "system", orgId: org, detached: true }, async () => "done");
+  const count = async () => (await db.get("SELECT COUNT(*) AS n FROM traces WHERE org_id = ?", org)).n;
+  // A trace saved before the deletion starts is there, and the deletion removes it.
+  await traced("before");
+  await flushTraces();
+  assert.equal(await count(), 1);
+  // The deletion holds the organization (as lib/rolloff.ts deleteOrganization does) while another trace ends.
+  let locked, release;
+  const holding = new Promise((r) => (locked = r));
+  const gate = new Promise((r) => (release = r));
+  const deletion = db.tx(async () => {
+    if (engine === "postgres") await db.get("SELECT id FROM orgs WHERE id = ? FOR UPDATE", org);
+    locked();
+    await gate;
+    await db.run("DELETE FROM trace_spans WHERE trace_id IN (SELECT id FROM traces WHERE org_id = ?)", org);
+    await db.run("DELETE FROM traces WHERE org_id = ?", org);
+    await db.run("DELETE FROM orgs WHERE id = ?", org);
+  });
+  await holding;
+  await traced("during"); // the request is done; its trace save is now waiting for the deletion
+  await new Promise((r) => setTimeout(r, 50));
+  release();
+  await deletion;
+  await flushTraces();
+  assert.equal(await count(), 0, "nothing left for the deleted organization");
+  // And a trace that ends after the organization is gone isn't saved either.
+  await traced("after");
+  await flushTraces();
+  assert.equal(await count(), 0);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM trace_spans WHERE name IN ('before', 'during', 'after')")).n, 0, "no stray steps");
+});
+
 test(`[${engine}] retention: old traces, usage, audit and expired rows go in batches; recent ones and client content stay`, async () => {
   const { pruneOldData } = await import("../src/lib/retention.ts");
   const org = db.newId();

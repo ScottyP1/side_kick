@@ -14,6 +14,13 @@
  * are saved only once they belong to an organization, are visible only to that org's admins, and are
  * deleted after 30 days.
  *
+ * Deleted organizations: a trace is saved just after its request finishes, so it can arrive while (or after)
+ * the organization is being deleted (lib/rolloff.ts `deleteOrganization`, e.g. that job's own steps or a
+ * request still in flight). `saveTrace` therefore saves only if the organization still exists, checked in
+ * one transaction that holds the organization's row (`FOR KEY SHARE` on Postgres; SQLite transactions are
+ * exclusive anyway). The deletion locks the same row first (`FOR UPDATE`), so either the trace is saved
+ * before the deletion starts (and is deleted with everything else) or it's dropped: never left behind.
+ *
  * Usage: `withTrace(...)` starts a trace around a request (done by `handle()` in api.ts and by the
  * Teams bot); `span(...)` wraps a step inside it; `traceScope(...)` fills in org/workspace/actor as
  * soon as they're known. Outside a trace, `span` just runs the function, so library code can always use it.
@@ -179,27 +186,49 @@ export async function withTrace<T>(
     rootSpan.status = t.status;
     rootSpan.attrs.db_queries = t.dbQueries;
     rootSpan.attrs.db_ms = Math.round(t.dbMs);
-    void saveTrace(t);
+    const saving = saveTrace(t);
+    inFlight.add(saving);
+    void saving.finally(() => inFlight.delete(saving));
   }
 }
 
-/** Writes a finished trace and its spans (only traces that belong to an org). Old ones go in lib/retention.ts. */
+/** Trace saves that haven't finished yet (see `flushTraces`). */
+const inFlight = new Set<Promise<void>>();
+
+/**
+ * Waits until every trace this process has started saving is written (or dropped). For tests, which
+ * otherwise would have to guess how long a save takes; requests never wait for their trace.
+ */
+export async function flushTraces(): Promise<void> {
+  while (inFlight.size) await Promise.all([...inFlight]);
+}
+
+/**
+ * Writes a finished trace and its spans, only for traces that belong to an organization that still exists
+ * (see "Deleted organizations" at the top of this file). Old ones go in lib/retention.ts.
+ */
 async function saveTrace(t: TraceState) {
-  if (!t.orgId) return;
+  const orgId = t.orgId;
+  if (!orgId) return;
   try {
-    const { run } = await import("./db"); // lazy: db.ts imports this file for countDbQuery
+    const { DIALECT, get, run, tx } = await import("./db"); // lazy: db.ts imports this file for countDbQuery
     const duration = t.spans[0]?.duration ?? 0;
-    await run(
-      `INSERT INTO traces (id, org_id, workspace_id, channel, name, actor, status, http_status, error, ref, duration_ms, span_count, db_queries, db_ms, started_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      t.id, t.orgId, t.workspaceId, t.channel, t.name, t.actor, t.status, t.httpStatus, t.error, t.ref, duration, t.spans.length, t.dbQueries, Math.round(t.dbMs), new Date(t.startedAt).toISOString(),
-    );
-    for (const s of t.spans) {
+    await tx(async () => {
+      // Waits while the organization is being deleted; afterwards finds nothing, and the trace is dropped.
+      const org = await get(`SELECT id FROM orgs WHERE id = ?${DIALECT === "postgres" ? " FOR KEY SHARE" : ""}`, orgId);
+      if (!org) return;
       await run(
-        "INSERT INTO trace_spans (trace_id, span_id, parent_id, kind, name, start_ms, duration_ms, status, error, attrs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        t.id, s.id, s.parentId, s.kind, s.name, s.start, s.duration, s.status, s.error ?? null, JSON.stringify(s.attrs),
+        `INSERT INTO traces (id, org_id, workspace_id, channel, name, actor, status, http_status, error, ref, duration_ms, span_count, db_queries, db_ms, started_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        t.id, t.orgId, t.workspaceId, t.channel, t.name, t.actor, t.status, t.httpStatus, t.error, t.ref, duration, t.spans.length, t.dbQueries, Math.round(t.dbMs), new Date(t.startedAt).toISOString(),
       );
-    }
+      for (const s of t.spans) {
+        await run(
+          "INSERT INTO trace_spans (trace_id, span_id, parent_id, kind, name, start_ms, duration_ms, status, error, attrs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          t.id, s.id, s.parentId, s.kind, s.name, s.start, s.duration, s.status, s.error ?? null, JSON.stringify(s.attrs),
+        );
+      }
+    });
   } catch (e) {
     console.error("Couldn't save trace", e);
   }

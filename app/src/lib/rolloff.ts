@@ -34,7 +34,7 @@
 import "server-only";
 import crypto from "node:crypto";
 import { audit, HttpError, type User } from "./auth";
-import { all, get, newId, now, run, tx } from "./db";
+import { all, DIALECT, get, newId, now, run, tx } from "./db";
 import { deleteWorkspace } from "./workspaces";
 import { FIRM_SCOPE, removeFirmIndex } from "./search";
 import { platformLog } from "./owner";
@@ -345,6 +345,8 @@ export const ORG_TABLES = [
  * with its id (`ORG_TABLES`), its people's sign-in data (sessions, two-step factors, backup codes, Microsoft
  * sign-ins in progress, failed sign-ins, rate-limit hits), Teams chats waiting in its Microsoft tenant, and
  * the organization itself. Writes the certificate on the roll-off row (or a new one) and the operator log.
+ * Traces that finish while (or after) this runs, including this deletion's own steps, are never left behind:
+ * the final transaction holds the organization's row and trace saves wait for it (see lib/trace.ts).
  * Called by `runDueRolloffs`; never from a customer request. Returns the certificate.
  */
 export async function deleteOrganization(orgId: string, actor: string, rolloff?: Rolloff | null): Promise<Certificate> {
@@ -374,6 +376,9 @@ export async function deleteOrganization(orgId: string, actor: string, rolloff?:
     // The firm library is indexed once per org (not per group): remove it from Azure too, before the rows go.
     await removeFirmIndex(orgId);
     await tx(async () => {
+      // Hold the organization's row first: a trace still being saved for it (lib/trace.ts `saveTrace`) either
+      // finishes before this goes on (and is deleted below) or waits and then finds the organization gone.
+      if (DIALECT === "postgres") await get("SELECT id FROM orgs WHERE id = ? FOR UPDATE", orgId);
       const users = "(SELECT id FROM users WHERE org_id = ?)";
       await run(`DELETE FROM mfa_backup_codes WHERE account_kind = 'user' AND account_id IN ${users}`, orgId);
       await run(`DELETE FROM mfa_factors WHERE account_kind = 'user' AND account_id IN ${users}`, orgId);

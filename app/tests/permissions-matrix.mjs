@@ -26,7 +26,8 @@ export const MATRIX = [
   { what: "List the workspaces they can see", method: "GET", url: () => "/api/workspaces", allow: EVERYONE },
   { what: "See live status on the home page (names: admins only)", method: "GET", url: () => "/api/activity?view=live", allow: EVERYONE },
   { what: "Use the home assistant", method: "POST", url: () => "/api/assistant", body: { message: "" }, allow: EVERYONE },
-  { what: "See the guardrails in force", method: "GET", url: () => "/api/guardrails", allow: EVERYONE },
+  { what: "See the rules Sidekick follows (Help & support)", method: "GET", url: (s) => `/api/rules?ws=${s.wsA}`, allow: EVERYONE },
+  { what: "Open Guardrails (switches, custom rules and their text, how often rules fired)", method: "GET", url: () => "/api/guardrails", allow: ADMINS },
   { what: "See Microsoft sign-in status", method: "GET", url: () => "/api/auth/microsoft", allow: EVERYONE },
   // Inside a workspace they belong to (read)
   { what: "Read documents in their workspaces", method: "GET", url: (s) => `/api/docs?ws=${s.wsA}`, allow: EVERYONE },
@@ -35,7 +36,9 @@ export const MATRIX = [
   { what: "Ask Sidekick questions", method: "POST", url: (s) => "/api/ask", body: (s) => ({ ws: s.wsA, question: "" }), allow: EVERYONE },
   { what: "Rate answers 👍/👎", method: "POST", url: () => "/api/feedback", body: (s) => ({ ws: s.wsA, questionId: NOPE, vote: "up" }), allow: EVERYONE },
   { what: "See the firm library", method: "GET", url: () => "/api/firm", allow: EVERYONE },
-  { what: "See connected tools (Azure DevOps, Jira) and their groups' linked projects", method: "GET", url: () => "/api/connectors", allow: EVERYONE },
+  { what: "See which tools feed their group (its page's Sources line)", method: "GET", url: (s) => `/api/workspaces/${s.wsA}/sources`, allow: EVERYONE },
+  { what: "Open Connectors: connected tools, their health and the projects linked to their groups", method: "GET", url: () => "/api/connectors", allow: MANAGERS },
+  { what: "See a group's last 30 days (Team Leads: their own groups)", method: "GET", url: (s) => `/api/workspaces/${s.wsA}/usage`, allow: MANAGERS },
   { what: "See Needs attention for their groups", method: "GET", url: () => "/api/findings", allow: EVERYONE },
   // Change workspace content
   { what: "Upload documents", method: "POST", url: () => "/api/docs", form: (s) => ({ ws: s.wsA }), allow: EDITORS },

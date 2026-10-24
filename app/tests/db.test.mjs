@@ -647,7 +647,9 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
     const mine = hrefs(u);
     assert.equal(mine.includes("/usage"), ["owner", "orgAdmin"].includes(who), `${who}: Usage`);
     assert.equal(mine.includes("/users"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Users`);
-    assert.equal(mine.includes("/activity") || mine.includes("/audit"), u.admin, `${who}: Activity/Audit`);
+    for (const href of ["/usage", "/agent", "/guardrails", "/activity", "/audit"]) assert.equal(mine.includes(href), u.admin, `${who}: ${href} is for Org Owners and Org Admins`);
+    assert.equal(mine.includes("/connectors"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Connectors`);
+    for (const href of ["/home", "/workspaces", "/knowledge", "/firm-library", "/meetings", "/memory", "/settings", "/help"]) assert.ok(mine.includes(href), `${who}: ${href} is for everyone`);
     for (const inGroup of [true, false]) {
       const tabs = pnav.phoneTabs(u, inGroup).map((t) => t.href);
       assert.ok(tabs.length >= 1 && tabs.length <= pnav.MAX_PHONE_TABS, `${who}: ${tabs.length} tabs`);
@@ -661,6 +663,7 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
   assert.ok(!hrefs({ role: "Billing Admin", admin: false }).includes("/usage"));
   assert.deepEqual(pnav.phoneTabs(people.owner, false).map((t) => t.href), ["/home", "/usage", "/workspaces", "/settings"]);
   assert.deepEqual(pnav.phoneTabs(people.viewer, false).map((t) => t.href), ["/home", "/settings", "/help"]);
+  for (const who of ["member", "lead"]) assert.deepEqual(pnav.phoneTabs(people[who], false).map((t) => t.href), ["/home", "/settings", "/help"], `${who} in no group`);
   // A page counts as active for its own address and the pages under it, not for look-alike prefixes.
   assert.ok(pnav.isActive("/workspaces/abc", "/workspaces"));
   assert.ok(pnav.isActive("/home", "/home"));

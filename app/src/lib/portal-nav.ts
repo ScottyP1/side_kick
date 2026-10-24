@@ -6,10 +6,16 @@
  * Concepts:
  * - **Menu items** carry a role check (`allow`). Hiding an item is only a convenience: every page and API checks
  *   the person's role again on the server (lib/auth.ts), so a hidden page typed by hand still refuses.
+ * - **Who sees what** (Oct 24, 2026): everyone gets the pages for the client work (Overview, Groups, Knowledge &
+ *   docs, Firm library, Meetings, Memory & gaps) plus Settings (for most people just "My account") and Help &
+ *   support. Running the organization is for Org Owners and Org Admins only: Usage & billing, AI models & agent,
+ *   Guardrails (everyone else reads "Rules Sidekick follows" on Help & support), Activity and Security & audit.
+ *   Connectors and Users & access are also for Team Leads (their own groups). Members and Viewers see which tools
+ *   feed a group on that group's page.
  * - **Phone tab bar**: on phones (under 860px) the sidebar is replaced by a floating pill bar at the bottom with
  *   up to four destinations (`phoneTabs`) plus the assistant button, and a menu button at the top that opens
- *   everything else. People in a group get Home, Groups, Knowledge and Meetings; someone with no group (a Billing
- *   Admin, or anyone not added to one yet) gets pages they can actually use instead (Usage, Settings, Help).
+ *   everything else. People in a group get Home, Groups, Knowledge and Meetings; someone with no group yet gets
+ *   Home, Settings and Help (admins also Usage and Groups, to create the first one).
  *
  * Who may import it: client components (the portal shell) and tests. No secrets, no server-only code.
  */
@@ -23,10 +29,13 @@ export type NavUser = { role: string; admin: boolean; lead?: boolean };
  */
 export type NavItem = { href: string; label: string; icon: string; short?: string; allow?: (u: NavUser) => boolean };
 
-/** A titled group of menu entries (Overview, Manage, Govern, Help). */
+/** A titled group of menu entries (Overview, Manage, Govern, You). */
 export type NavGroup = { group: string; items: NavItem[] };
 
-const BILLING_ROLES = ["Org Owner", "Org Admin"];
+/** Org Owners and Org Admins: the pages that run the organization. */
+const admins = (u: NavUser) => u.admin;
+/** Org Owners/Admins and Team Leads (who manage their own groups). */
+const managers = (u: NavUser) => u.admin || Boolean(u.lead);
 
 /** Every portal page in the menu, in order, with its role rule (the same rules for desktop and phone). */
 export const PORTAL_NAV: NavGroup[] = [
@@ -34,8 +43,8 @@ export const PORTAL_NAV: NavGroup[] = [
     group: "Overview",
     items: [
       { href: "/home", label: "Overview", short: "Home", icon: "home" },
-      { href: "/usage", label: "Usage & billing", short: "Usage", icon: "chart", allow: (u) => BILLING_ROLES.includes(u.role) },
-      { href: "/agent", label: "AI models & agent", icon: "cpu" },
+      { href: "/usage", label: "Usage & billing", short: "Usage", icon: "chart", allow: admins },
+      { href: "/agent", label: "AI models & agent", icon: "cpu", allow: admins },
     ],
   },
   {
@@ -46,20 +55,25 @@ export const PORTAL_NAV: NavGroup[] = [
       { href: "/firm-library", label: "Firm library", icon: "library" },
       { href: "/meetings", label: "Meetings", icon: "video" },
       { href: "/memory", label: "Memory & gaps", icon: "brain" },
-      { href: "/connectors", label: "Connectors", icon: "plug" },
-      { href: "/users", label: "Users & access", icon: "users", allow: (u) => u.admin || Boolean(u.lead) },
+      { href: "/connectors", label: "Connectors", icon: "plug", allow: managers },
+      { href: "/users", label: "Users & access", icon: "users", allow: managers },
     ],
   },
   {
     group: "Govern",
     items: [
-      { href: "/guardrails", label: "Guardrails", icon: "shield" },
-      { href: "/activity", label: "Activity", icon: "activity", allow: (u) => u.admin },
-      { href: "/audit", label: "Security & audit", icon: "lock", allow: (u) => u.admin },
-      { href: "/settings", label: "Settings", icon: "gear" },
+      { href: "/guardrails", label: "Guardrails", icon: "shield", allow: admins },
+      { href: "/activity", label: "Activity", icon: "activity", allow: admins },
+      { href: "/audit", label: "Security & audit", icon: "lock", allow: admins },
     ],
   },
-  { group: "Help", items: [{ href: "/help", label: "Help & support", short: "Help", icon: "chat" }] },
+  {
+    group: "You",
+    items: [
+      { href: "/settings", label: "Settings", icon: "gear" },
+      { href: "/help", label: "Help & support", short: "Help", icon: "chat" },
+    ],
+  },
 ];
 
 /** The menu this person may see: `PORTAL_NAV` with entries their role can't use removed (and empty groups dropped). */
@@ -73,12 +87,12 @@ export const MAX_PHONE_TABS = 4;
 /**
  * The phone tab bar's destinations for this person, in order (at most `MAX_PHONE_TABS`), always a subset of
  * `navFor(u)`. `inGroup` says whether they belong to at least one group (workspace): without one, Knowledge and
- * Meetings would only say "No workspace yet", so they get Usage (if their role pays), Groups (admins, to create
- * one), Settings and Help instead.
+ * Meetings would only say "No workspace yet", so they get Settings and Help instead (admins also Usage and Groups,
+ * to create the first group).
  */
 export function phoneTabs(u: NavUser, inGroup: boolean): NavItem[] {
   const allowed = new Map(navFor(u).flatMap((g) => g.items).map((i) => [i.href, i]));
-  const wanted = inGroup ? ["/home", "/workspaces", "/knowledge", "/meetings"] : ["/home", "/usage", ...(u.admin ? ["/workspaces"] : []), "/settings", "/help"];
+  const wanted = inGroup ? ["/home", "/workspaces", "/knowledge", "/meetings"] : ["/home", ...(u.admin ? ["/usage", "/workspaces"] : []), "/settings", "/help"];
   return wanted.flatMap((h) => allowed.get(h) ?? []).slice(0, MAX_PHONE_TABS);
 }
 

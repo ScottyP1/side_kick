@@ -26,12 +26,26 @@ billing. Anyone who was a Billing Admin became a **Member** with no groups, the 
 and the Org Owner sees a note on Home ("… was a Billing Admin and is now a Member") for two weeks, or until
 they give that person another role. Make them an **Org Admin** if they should keep seeing billing.
 
+## What's in each person's menu
+
+Everyone gets the pages for the client work: **Overview**, **Groups**, **Knowledge & docs**, **Firm library**
+(read-only unless you're an admin), **Meetings**, **Memory & gaps**, **Settings** and **Help & support**.
+
+- **Org Owners and Org Admins** also get **Usage & billing**, **AI models & agent**, **Guardrails**, **Activity**
+  and **Security & audit**, and Settings shows the **company settings** (Microsoft sign-in, two-step sign-in for
+  everyone, branding, export and roll-offs) as well as **My account**.
+- **Team Leads** also get **Connectors** and **Users & access** (for the groups they lead).
+- **Members and Viewers**: Settings is just **My account**. Each group's page shows which tools feed it
+  ("Sources"), and **Help & support** lists the rules Sidekick follows.
+
+Typing the address of a page that isn't in your menu shows a short message saying who can use it.
+
 ## Who can do what
 
 ✓ = allowed. Workspace actions also need the person to be in that workspace (Org Owners and Org Admins
 are in all of them). Anything not allowed is refused with a message naming who can do it, e.g. "Only the
 Org Owner can do this" or "Only Org Owners and Org Admins can do this". Pages a role can't
-use (Usage & billing, Activity, Security & audit) show the same kind of message instead of their content.
+use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Security & audit) show the same kind of message instead of their content.
 
 | What | Org Owner | Org Admin | Team Lead | Member | Viewer |
 |---|:-:|:-:|:-:|:-:|:-:|
@@ -40,13 +54,16 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
 | See who's in their groups (emails: admins and the group's Team Lead only) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See live status on the home page (names of who's active: admins only) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Use the home assistant (it only offers actions their role allows) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See the guardrails in force | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See the rules Sidekick follows (Help & support: locked rules, the organization's switches On/Off, how many extra rules apply, no rule text) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Settings → My account: password, two-step sign-in, where they're signed in | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Inside their workspaces: read** | | | | | |
 | Read documents, meetings, notes and the knowledge map | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Ask Sidekick questions (portal and Teams), with follow-ups | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Rate answers 👍/👎 (portal and Teams) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See the firm library (the organization's policies and standards) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See connected tools (Azure DevOps, Jira), their health and the projects feeding their groups | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See which tools feed their group (the group page's Sources line: tool, name, last sync) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Open Connectors: connected tools, their health and the projects feeding their groups | ✓ | ✓ | ✓ (own groups) | | |
+| See a group's last 30 days on its page (questions, answers, meetings, documents, share of AI use) | ✓ | ✓ | ✓ (own groups) | | |
 | **Inside their workspaces: change** | | | | | |
 | Upload, rename or delete documents | ✓ | ✓ | ✓ | ✓ | |
 | Add a past or outside meeting, reprocess or delete meetings | ✓ | ✓ | ✓ | ✓ | |

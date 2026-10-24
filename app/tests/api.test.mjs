@@ -1224,12 +1224,13 @@ test(`[${ENGINE}] groups: members see who's in their group; admins and its Team 
 /* ---------- Guardrails (lib/guardrails.ts) and the workspace isolation check ---------- */
 const askA = (who, question, extra = {}) => who("POST", "/api/ask", { ws: s.wsA, question, ...extra });
 
-test(`[${ENGINE}] guardrails: everyone sees the rules, only the Org Owner changes switches, and changes are audited`, async () => {
-  const forMember = (await member("GET", "/api/guardrails")).body;
-  assert.ok(forMember.floor.some((f) => f.id === "jailbreak") && forMember.floor.some((f) => f.id === "other_data"));
-  assert.equal(forMember.canEdit, false);
-  assert.equal(forMember.summary, null, "members don't see the counts");
-  const on = Object.fromEntries(forMember.switches.map((x) => [x.key, x.on]));
+test(`[${ENGINE}] guardrails: everyone sees the rules Sidekick follows, only admins open Guardrails, only the Org Owner changes switches, audited`, async () => {
+  assert.equal((await member("GET", "/api/guardrails")).status, 403, "the Guardrails page is for Org Owners and Org Admins");
+  const forMember = (await member("GET", "/api/rules")).body;
+  assert.ok(forMember.locked.some((f) => /talked out of its rules/.test(f.label)) && forMember.locked.some((f) => /client walls/.test(f.label)));
+  const forAdmin = (await admin("GET", "/api/guardrails")).body;
+  assert.deepEqual(forMember.switches.map((x) => [x.label, x.on]), forAdmin.switches.map((x) => [x.label, x.on]), "everyone sees the same On/Off");
+  const on = Object.fromEntries(forAdmin.switches.map((x) => [x.key, x.on]));
   assert.deepEqual(on, { profanity: true, small_talk: false, judging_people: true, advice: true, contacts: true, competitors: false }, "defaults");
   assert.equal((await member("PUT", "/api/guardrails", { small_talk: true })).status, 403);
   const r = await admin("PUT", "/api/guardrails", { small_talk: true, hate: false, jailbreak: false, nonsense: true });
@@ -1340,7 +1341,7 @@ test(`[${ENGINE}] guardrails: a workspace can be made stricter (Org Owners/Admin
   assert.ok(forAdmin.workspaces.some((w) => w.id === s.wsB));
   assert.equal((await orgAdmin("PUT", "/api/guardrails", { competitors: true })).status, 403);
   assert.equal((await member("PUT", "/api/guardrails/workspace", { ws: s.wsA, competitors: true })).status, 403);
-  assert.equal((await member("GET", `/api/guardrails?ws=${s.wsB}`)).status, 404, "a member can't look at a workspace they're not in");
+  assert.equal((await member("GET", `/api/rules?ws=${s.wsB}`)).status, 404, "a member can't look at a workspace they're not in");
   const r = await orgAdmin("PUT", "/api/guardrails/workspace", { ws: s.wsB, competitors: true, profanity: false, nonsense: true });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.deepEqual(r.body.changed, ["competitors"]);
@@ -1364,7 +1365,10 @@ test(`[${ENGINE}] guardrails: custom rules refuse matching questions everywhere,
   assert.equal(add.status, 200, JSON.stringify(add.body));
   const id = add.body.rule.id;
   assert.equal(add.body.rule.text, "Never quote day rates");
-  assert.deepEqual((await member("GET", "/api/guardrails")).body.rules.map((x) => x.text), ["Never quote day rates"], "everyone can see the rules");
+  assert.deepEqual((await orgAdmin("GET", "/api/guardrails")).body.rules.map((x) => x.text), ["Never quote day rates"], "admins see the rule's text");
+  const plain = (await member("GET", "/api/rules")).body;
+  assert.equal(plain.orgRules, 1, "everyone sees that there is one extra rule…");
+  assert.doesNotMatch(JSON.stringify(plain), /day rates/, "…but not its text");
   // Portal, Teams and the assistant all follow it, with the fixed reply that doesn't quote the rule.
   const q = await askA(member, "What are our day rates for the cutover?");
   assert.equal(q.body.blocked, `custom:${id}`);
@@ -1435,7 +1439,9 @@ test(`[${ENGINE}] guardrails: workspace rules apply only in their workspace, up 
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal((await askB(admin, "What is the merger codename?")).body.blocked, `custom:${r.body.rule.id}`);
   assert.equal((await askA(member, "What is the merger codename?")).body.blocked, null, "not in workspace A");
-  assert.equal((await member("GET", "/api/guardrails")).body.rules.length, 0, "not an org-wide rule");
+  assert.equal((await orgAdmin("GET", "/api/guardrails")).body.rules.length, 0, "not an org-wide rule");
+  assert.equal((await admin("GET", `/api/rules?ws=${s.wsB}`)).body.group.extraRules, 1, "group B shows one extra rule, without its text");
+  assert.equal((await member("GET", `/api/rules?ws=${s.wsA}`)).body.group.extraRules, 0);
   const b = (await orgAdmin("GET", `/api/guardrails?ws=${s.wsB}`)).body;
   assert.deepEqual(b.workspace.rules.map((x) => x.text), ["Never mention the merger codename"]);
   assert.equal((await member("POST", "/api/guardrails/rules", { text: "Never mention lunch", ws: s.wsA })).status, 403);
@@ -1521,8 +1527,9 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await other("GET", `/api/guardrails/rules?id=${ruleB}`)).status, 404);
   assert.equal((await other("POST", "/api/guardrails/test", { question: "vault", ws: s.wsB })).status, 404);
   assert.ok(!leaks(await other("GET", "/api/guardrails")) && !/ZEBRA/.test(JSON.stringify((await other("GET", "/api/guardrails")).body)));
-  assert.equal((await member("GET", `/api/guardrails?ws=${s.wsB}`)).status, 404);
-  assert.ok(!/ZEBRA/.test(JSON.stringify((await member("GET", "/api/guardrails")).body)), "a member of A never sees B's rules");
+  assert.equal((await member("GET", `/api/rules?ws=${s.wsB}`)).status, 404);
+  assert.equal((await other("GET", `/api/rules?ws=${s.wsB}`)).status, 404);
+  assert.ok(!/ZEBRA/.test(JSON.stringify((await member("GET", "/api/rules")).body)), "a member of A never sees B's rules");
   await admin("DELETE", `/api/guardrails/rules?id=${ruleB}`);
   // From an organization that signed itself up (self-service), even with workspace B's id.
   const signedUp = client();
@@ -1653,7 +1660,24 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.ok(!leaks(await askA(admin, "ZEBRA vault key Fabrikam merger")), "an admin asking in A only gets A");
   assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "ZEBRA vault key Fabrikam merger" })));
   assert.deepEqual((await other("GET", "/api/connectors")).body.connectors, [], "another organization sees none of this org's tools");
-  assert.ok(!(await member("GET", "/api/connectors")).body.connectors[0].links.some((l) => l.workspaceId === s.wsB), "a member of A doesn't see B's linked projects");
+  assert.equal((await member("GET", "/api/connectors")).status, 403, "Connectors is for admins and Team Leads");
+  assert.ok(!(await lead("GET", "/api/connectors")).body.connectors[0].links.some((l) => l.workspaceId === s.wsB), "a Team Lead of A doesn't see B's linked projects");
+  // A group's sources: everyone in it sees which tools feed it (names only); nobody outside it.
+  const srcA = await member("GET", `/api/workspaces/${s.wsA}/sources`);
+  assert.equal(srcA.status, 200);
+  assert.doesNotMatch(JSON.stringify(srcA.body), /token|access_|refresh_|ZEBRA/i, "names and dates only");
+  assert.equal((await member("GET", `/api/workspaces/${s.wsB}/sources`)).status, 404);
+  assert.equal((await other("GET", `/api/workspaces/${s.wsB}/sources`)).status, 404);
+  assert.ok((await admin("GET", `/api/workspaces/${s.wsB}/sources`)).body.sources.some((x) => x.tool === "Azure DevOps"), "B's linked project shows on B's page");
+  // A group's last 30 days: its Team Lead and admins only, never another group's (or organization's) numbers.
+  const mine = await lead("GET", `/api/workspaces/${s.wsA}/usage`);
+  assert.equal(mine.status, 200, JSON.stringify(mine.body));
+  assert.deepEqual(Object.keys(mine.body.activity).sort(), ["aiSharePct", "answered", "days", "documents", "meetings", "questions"], "counts and a share only, no prices");
+  assert.ok(mine.body.activity.questions >= 1);
+  assert.equal((await lead("GET", `/api/workspaces/${s.wsB}/usage`)).status, 404, "a Team Lead can't read another group's numbers");
+  assert.equal((await member("GET", `/api/workspaces/${s.wsA}/usage`)).status, 403);
+  assert.equal((await viewer("GET", `/api/workspaces/${s.wsA}/usage`)).status, 403);
+  assert.equal((await other("GET", `/api/workspaces/${s.wsB}/usage`)).status, 404, "another organization's Owner gets not found");
   assert.equal((await other("GET", `/api/connectors/${s.ado}/projects`)).status, 404);
   assert.equal((await other("DELETE", `/api/connectors/${s.ado}`)).status, 404);
   assert.equal((await other("POST", `/api/connectors/links/${zl.body.link.id}/sync`)).status, 404);
@@ -1694,7 +1718,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
     assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_type = '${type}' AND workspace_id <> '${s.wsB}' AND text LIKE '%ZEBRA-7731%'`)), 0, `${kind}: nowhere else`);
     assert.ok(!leaks(await askA(isoAsker, "ZEBRA vault key Fabrikam merger handover")), `${kind}: never reaches A`);
     assert.deepEqual((await other("GET", "/api/connectors")).body.connectors, [], `${kind}: another organization sees none of this org's tools`);
-    assert.ok(!(await member("GET", "/api/connectors")).body.connectors.find((x) => x.kind === kind).links.some((lk) => lk.workspaceId === s.wsB), `${kind}: a member of A doesn't see B's link`);
+    assert.ok(!(await lead("GET", "/api/connectors")).body.connectors.find((x) => x.kind === kind).links.some((lk) => lk.workspaceId === s.wsB), `${kind}: a Team Lead of A doesn't see B's link`);
     assert.equal((await other("GET", `/api/connectors/${id}/projects`)).status, 404);
     assert.equal((await other("POST", `/api/connectors/links/${l.body.link.id}/sync`)).status, 404);
     assert.equal((await other("DELETE", `/api/connectors/links/${l.body.link.id}`)).status, 404);
@@ -4451,8 +4475,10 @@ test(`[${ENGINE}] connectors: syncs are incremental, refresh expired tokens, rec
   assert.equal((await linkNamed(admin, "ado", "Wave 2 Cutover")).problem, null, "healthy again after the scheduled sync");
   assert.equal(await healthOf(), "ok", "and the watcher's health entry is resolved");
   assert.ok(Number(await dbValue("SELECT COUNT(*) FROM jobs WHERE kind = 'connector.sync' AND status = 'done'")) >= 1);
-  // A Member of the group sees the health; only managers act.
-  assert.ok(await linkNamed(s.asker, "ado", "Wave 2 Cutover"));
+  // A Member of the group sees the tool on the group's Sources line (not the Connectors page); only managers act.
+  assert.equal((await s.asker("GET", "/api/connectors")).status, 403);
+  const src = (await s.asker("GET", `/api/workspaces/${s.wsA}/sources`)).body.sources.find((x) => x.name === "Wave 2 Cutover");
+  assert.ok(src && src.tool === "Azure DevOps" && src.working && src.lastSync, JSON.stringify(src));
   assert.equal((await s.asker("DELETE", `/api/connectors/links/${s.adoLink}`)).status, 403);
 });
 

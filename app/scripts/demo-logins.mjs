@@ -76,15 +76,17 @@ ${row("Org Admin (runs people, groups and Teams day to day)", p("orgAdmin").name
 ${row("Team Lead (runs the people side of their group)", p("teamLead").name, p("teamLead").email, passwords.teamLead, group("contoso"), [
   "**Groups → Contoso**: your one group; People tab shows emails (you manage it). Add a Member or Viewer; you can't add an Org Admin or take yourself off.",
   "**Users & access**: only the people in your group, and only the Member and Viewer roles.",
+  "**Groups → Contoso → Overview**: the **Last 30 days** card (questions, answers, meetings, documents, Contoso's share of the AI use; no prices) and the **Sources** line. Opening another group's numbers by address says \"not found\".",
   "**Teams chats** tab: two linked chats (one with client guests: answers there use only Shareable documents). Change reminders for the team chat.",
   "**Meetings**: eight Contoso meetings with notes, decisions and action items; mark an item Done.",
-  "**Usage & billing**, **Activity**, **Guardrails** switches: not yours (the page says who can).",
+  "**Connectors** is in your menu (link a tool's project to Contoso); **Usage & billing**, **AI models & agent**, **Guardrails**, **Activity** aren't (typing the address shows who can use it).",
 ])}
 ${row("Member (does the client work)", p("member").name, p("member").email, passwords.member, `${group("contoso")} and ${group("litware")}`, [
   "Top bar: switch between your two groups; you never see the other eight.",
   "**Knowledge & docs**: upload a document, ask a question, rate an answer 👍/👎.",
   "**Meetings**: import \`samples/Contoso - Sprint 14 planning.vtt\` again, or update an action item.",
-  "**Users & access** isn't in your menu; the Groups page has no New group button.",
+  "Your menu has only the client-work pages plus Settings (**My account**: password, two-step, sessions) and Help. No Users & access, Connectors, Guardrails or AI models & agent; the Groups page has no New group button.",
+  "**Groups → Contoso**: the **Sources** line shows which tools feed it. **Help & support → Rules Sidekick follows**: the locked rules and your organization's switches, On/Off.",
   "**Help & support → My tickets**: your resolved ticket about a long transcript.",
 ])}
 ${row("Viewer (reads and asks, changes nothing)", p("viewer").name, p("viewer").email, passwords.viewer, `${group("contoso")} and ${group("fabrikam")}`, [

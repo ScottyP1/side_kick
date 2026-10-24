@@ -74,6 +74,15 @@ export default function FeaturesPage() {
                 {g.id === "portal" && (
                   <div style={{ marginBottom: 28 }}>
                     <ProductShot name="portal-ask" frame="laptop" alt={`The ${BRAND.name} portal's Ask page: a question about the wave 2 cutover, an answer with numbered source markers, and the matching passages from documents and meetings below it.`} caption="Ask with sources in the portal. Made-up example data." />
+                    <div className="site-grid two" style={{ marginTop: 28, alignItems: "start" }}>
+                      <ProductShot name="portal-meeting" frame="laptop" alt={`Meeting notes in the ${BRAND.name} portal for Contoso's Sprint 14 planning, captured from Microsoft Teams: summary, decisions (one saved to knowledge), action items with owners, due dates and status, and open questions.`} caption="Notes captured from a Teams meeting, with Save to knowledge. Made-up example data." />
+                      <ProductShot name="portal-attention" frame="laptop" alt={`The ${BRAND.name} home page for a Team Lead: recent meetings, and Needs attention listing a question nobody could answer, an overdue action item, action items without an owner and a runbook a later decision changed, each with a next step.`} caption="Needs attention: what's slipping, with the next step. Made-up example data." />
+                    </div>
+                  </div>
+                )}
+                {g.id === "admin" && (
+                  <div style={{ marginBottom: 28 }}>
+                    <ProductShot name="portal-connectors" frame="laptop" alt={`The ${BRAND.name} Connectors page: Azure DevOps, GitHub, Jira and Confluence connected read-only, business apps planned, and the connected tools with their health.`} caption="Connectors: Azure DevOps, Jira, GitHub and Confluence, read-only. Made-up example data." />
                   </div>
                 )}
                 <div className="site-grid">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>

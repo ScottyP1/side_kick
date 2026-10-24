@@ -1,12 +1,12 @@
 // Re-renders the website's chat product shots (app/public/site/chat-*.webp, phone-reminder*.webp).
-// Source: the pitch pack's static chat mockups (~/Desktop/Sidekick Pitch/build/src/teams-*.html, made-up data,
+// Source: the pitch pack's static chat mockups (~/Desktop/Sidekick Pitch/_build/src/teams-*.html, made-up data,
 // card layouts copied from Sidekick's real Teams cards), restyled by site-override.css here: Indigo brand,
 // Sidekick's own fonts, a generic chat-app frame (never Microsoft's artwork), plus dark and phone variants.
-// Needs Google Chrome, the pitch pack's build/node_modules (playwright-core) and Python with Pillow.
+// Needs Google Chrome, the pitch pack's _build/node_modules (playwright-core) and Python with Pillow.
 // Usage: node app/scripts/site-shots/render.cjs   → writes 2x PNGs to a temp folder, then WebP into app/public/site/.
-// The portal shots (portal-*.webp) come from the pitch pack's screenshots/ (a throwaway local copy, made-up data).
+// The portal shots (portal-*.webp, phone-meeting*.webp) come from the pitch pack's screenshots or from demo-shots.cjs here (the demo world).
 const path = require("path"); const fs = require("fs"); const os = require("os"); const { execFileSync } = require("child_process");
-const PITCH = path.join(os.homedir(), "Desktop/Sidekick Pitch/build");
+const PITCH = path.join(os.homedir(), "Desktop/Sidekick Pitch/_build");
 const { chromium } = require(path.join(PITCH, "node_modules/playwright-core"));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "site-shots-"));
 fs.cpSync(path.join(PITCH, "src"), path.join(tmp, "src"), { recursive: true });

@@ -10,6 +10,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { FaqList } from "@/components/faq-list";
 import { AnswerMock, ApproveMock, GroupMock, InstallMock, SignupMock, WaitingChatMock } from "@/components/how-mocks";
+import { ProductShot } from "@/components/product-shot";
 import { PublicShell } from "@/components/public-shell";
 import { JourneyArt } from "@/components/site-art";
 import { SiteIcon } from "@/components/site-icons";
@@ -89,6 +90,10 @@ export default function HowItWorksPage() {
             <div className="site-card"><span className="site-badge-now">Today</span><h3>Automatic notes</h3><p>When a Teams meeting of a group&apos;s people ends, {BRAND.name} reads its transcript and posts the notes and action items to the group&apos;s chat. No bot joins the call.</p></div>
             <div className="site-card"><span className="site-badge-now">Today</span><h3>Past or outside meetings</h3><p>Add a meeting held earlier or outside Teams from its transcript, and get the same notes.</p></div>
             <div className="site-card"><span className="site-badge-soon">Coming soon · Enterprise</span><h3>{BRAND.name} in the meeting</h3><p>{BRAND.name} joins the call live to answer and take notes as you talk.</p></div>
+          </div>
+          <div className="site-grid two" style={{ marginTop: 28, alignItems: "center" }}>
+            <ProductShot name="portal-meetings-auto" frame="laptop" alt={`The ${BRAND.name} Meetings page with automatic notes after Teams meetings switched on: meetings captured from Teams with their group and status (notes written, one skipped because its transcript was empty), a meeting from several groups waiting for someone to pick its group, and the group's meetings with decisions, actions and open questions.`} caption="Meetings captured from Teams, sorted into the right group. Made-up example data." />
+            <ProductShot name="phone-meeting" frame="phone" alt={`Meeting notes on a phone: Contoso's Sprint 14 planning, captured from Microsoft Teams, with its decisions, open action items, open questions and summary.`} caption="The same notes on a phone." />
           </div>
         </div>
       </section>

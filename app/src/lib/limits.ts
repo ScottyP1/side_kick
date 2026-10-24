@@ -9,8 +9,8 @@
  *   team sets some. Enterprise starts from the Business numbers.
  * - **Enforced where created**: each route that creates something counted here calls `assertCanAdd` first
  *   (people: POST /api/users; groups: POST /api/workspaces; tracked chats: POST /api/teams-links; meeting
- *   hours: POST /api/meetings; documents: POST /api/docs and POST /api/firm (group documents and the firm library count together); connectors: connecting a new tool in
- *   lib/connectors.ts; live meeting hours: when that exists, e.g. `assertCanAdd(orgId, "liveMeetingHours", hours)` before Sidekick joins a call). The refusal is
+ *   hours: POST /api/meetings; documents: POST /api/docs and POST /api/firm (group documents and the firm library count together); connectors: allowing a new tool type in
+ *   lib/connector-requests.ts (`allowKind`); live meeting hours: when that exists, e.g. `assertCanAdd(orgId, "liveMeetingHours", hours)` before Sidekick joins a call). The refusal is
  *   a 402 whose message names the limit and how to get more, with `kind: "limit"` and `limit` in the body.
  * - **Never deletes**: when a plan shrinks (or the team lowers a limit) nothing is removed; new things are
  *   refused and Usage & billing and the Owner Console show "over limit".
@@ -92,7 +92,7 @@ const count = async (sql: string, ...p: string[]) => Number((await get<{ n: numb
  * How much of each limit the organization uses now. Groups that are ending (scheduled for deletion) don't
  * count. Meeting hours are this month's; the AI credit's use
  * is filled in by lib/credit.ts (here it's 0, so limits stay cheap to count). Connectors are the tools
- * connected (lib/connectors.ts: one per tool, however many projects are linked).
+ * allowed (lib/connectors.ts: one per tool type, however many groups connect it).
  */
 export async function usageCounts(orgId: string): Promise<Record<LimitKey, number>> {
   const [seats, workspaces, chats, minutes, documents, connectors] = await Promise.all([
@@ -102,8 +102,8 @@ export async function usageCounts(orgId: string): Promise<Record<LimitKey, numbe
     count("SELECT COALESCE(SUM(duration_min), 0) AS n FROM meetings WHERE org_id = ? AND created_at >= ?", orgId, monthStart()),
     // Group documents plus the firm library (lib/firm.ts): both count toward the plan's document limit.
     count("SELECT (SELECT COUNT(*) FROM documents WHERE org_id = ?) + (SELECT COUNT(*) FROM firm_docs WHERE org_id = ?) AS n", orgId, orgId),
-    // Connected tools (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365: lib/connectors.ts), one row per tool, expired ones included.
-    count("SELECT COUNT(*) AS n FROM connectors WHERE org_id = ?", orgId),
+    // Allowed tool types (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365: lib/connectors.ts), however many groups connect each.
+    count("SELECT COUNT(*) AS n FROM connector_kinds WHERE org_id = ?", orgId),
   ]);
   // Live meetings (Sidekick joining calls, product step 3) aren't built yet: nothing used so far.
   return { seats, workspaces, chats, meetingHours: minutes / 60, liveMeetingHours: 0, documents, connectors, aiCreditUsd: 0 };

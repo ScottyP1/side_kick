@@ -8,7 +8,7 @@
  *   `499b84ac-1321-427f-aa17-267ca6975798`, plus `offline_access` for a refresh token. Sidekick only ever reads.
  *   App: `ADO_CLIENT_ID` / `ADO_CLIENT_SECRET` (an Entra app for "accounts in any organizational directory",
  *   created by Cody: docs/RUNBOOKS.md → Connector apps), authority `ADO_TENANT` (default "organizations").
- * - **ADO organization**: the `dev.azure.com/<name>` part. The Org Admin types it when connecting; Sidekick checks
+ * - **ADO organization**: the `dev.azure.com/<name>` part. The Org Owner types it when turning the tool on; Sidekick checks
  *   the signed-in account can open it. **Project**: what gets linked to a group (its whole board).
  * - **Incremental sync**: a WIQL query for items changed since the cursor (`[System.ChangedDate] > cursor`, with
  *   time precision), oldest first, at most `MAX_PER_SYNC` per run; then the items in batches of 200 (with their

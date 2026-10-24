@@ -12,7 +12,9 @@
  *
  * Both take an org id and a workspace id the caller has already checked against the workspace wall, and filter on
  * both. Kept apart from lib/connectors.ts so the connector code can change shape without touching these pages:
- * if the connector tables change, only `groupSources` needs adapting.
+ * if the connector tables change, only `groupSources` needs adapting. Since connections are per group (each group's
+ * Team Lead connects a tool with the client's account), a group's sources are the projects linked through its own
+ * connection (`connectors.workspace_id`; older organization-wide connections have none).
  */
 import "server-only";
 import { all, get } from "./db";
@@ -29,7 +31,7 @@ export async function groupSources(orgId: string, workspaceId: string): Promise<
   const rows = await all<{ kind: ConnectorKind; status: string; project_name: string; last_ok_at: string | null; last_error: string | null }>(
     `SELECT c.kind, c.status, l.project_name, l.last_ok_at, l.last_error
        FROM connector_links l JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
-      WHERE l.org_id = ? AND l.workspace_id = ?
+      WHERE l.org_id = ? AND l.workspace_id = ? AND (c.workspace_id = l.workspace_id OR c.workspace_id IS NULL)
       ORDER BY c.kind, l.project_name`,
     orgId, workspaceId,
   );

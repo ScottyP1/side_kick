@@ -62,7 +62,7 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | Rate answers 👍/👎 (portal and Teams) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See the firm library (the organization's policies and standards) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See which tools feed their group (the group page's Sources line: tool, name, last sync) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Open Connectors: connected tools, their health and the projects feeding their groups | ✓ | ✓ | ✓ (own groups) | | |
+| Open Connectors: which tool types the organization allows, their groups' connections, health and linked projects (only the connecting Team Lead or admin ever signs in to a tool) | ✓ | ✓ | ✓ (own groups) | | |
 | See a group's last 30 days on its page (questions, answers, meetings, documents, share of AI use) | ✓ | ✓ | ✓ (own groups) | | |
 | **Inside their workspaces: change** | | | | | |
 | Upload, rename or delete documents | ✓ | ✓ | ✓ | ✓ | |
@@ -75,6 +75,7 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | See Needs attention for their groups: action items, unanswered questions, out-of-date documents | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See Needs attention about their groups' Teams chats (posts failing, Sidekick removed, no notes chat) | ✓ | ✓ | ✓ (own groups) | | |
 | See organization-wide Needs attention (chats waiting, groups without a Team Lead, connectors) | ✓ | ✓ | | | |
+| See Needs attention about a tool request for their groups (approved: connect it; declined, with the note) | ✓ | ✓ | ✓ (own groups) | | |
 | Snooze a Needs attention item for a week | ✓ | ✓ | ✓ (own groups' items) | | |
 | **Money** | | | | | |
 | See their own AI use this month on the home page | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -92,8 +93,10 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | See roll-offs and download deletion certificates | ✓ | ✓ | | | |
 | Add, change or delete firm library documents | ✓ | ✓ | | | |
 | Turn automatic notes after Teams meetings on or off, check now, try a skipped meeting again | ✓ | ✓ | | | |
-| Connect, reconnect or disconnect Azure DevOps or Jira (read-only; within the plan's connectors) | ✓ | ✓ | | | |
-| Link a connected tool's project to their groups, sync it now or unlink it | ✓ | ✓ | ✓ | | |
+| Connect an allowed tool for a group with the account the client gave them, reconnect or disconnect the group's connection | ✓ | ✓ | ✓ (own groups) | | |
+| Link projects through a group's connection (repositories, spaces, libraries), sync now or unlink | ✓ | ✓ | ✓ (own groups) | | |
+| Ask the Org Owner to allow a tool type for their group (with a reason), see the request's status, cancel their own | | ✓ | ✓ (own groups) | | |
+| See every request to allow a tool type | ✓ | ✓ | ✓ (own groups') | | |
 | See answer quality (👍/👎 and "I don't know" counts, no text) | ✓ | ✓ | | | |
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | |
@@ -110,6 +113,8 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | **Org Owner only** | | | | | |
 | Turn company-wide guardrail switches on or off | ✓ | | | | |
 | Connect, require (Business plan and up) or disconnect Microsoft sign-in | ✓ | | | | |
+| Allow or stop a tool type for the organization (a switch on Connectors, no sign-in; stopping disconnects every group's connection of it; within the plan's connectors) | ✓ | | | | |
+| Approve (allows the type) or decline (with a note) a request to allow a tool type; see pending requests on Home | ✓ | | | | |
 
 ## Rules that always hold
 

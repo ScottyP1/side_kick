@@ -153,8 +153,11 @@ let TOOLS_BASE;
  * and follows its redirect back to the callback. Returns the start response, the callback's response and where
  * the browser lands (`to`). When the start is refused, only `start` is set (it redirects to /connectors?error=1).
  */
-async function connectTool(call, kind, site) {
-  const start = await call("GET", `/api/connectors/start?kind=${kind}${site ? `&site=${encodeURIComponent(site)}` : ""}`);
+/** Allows a tool type for the caller's organization (the Org Owner's switch on Connectors). */
+const allowTool = (call, kind, allowed = true) => call("PUT", "/api/connectors/kinds", { kind, allowed });
+/** Connects a tool for one group (default: workspace A) through the fake tool's sign-in, like the Connect button. */
+async function connectTool(call, kind, site, ws = s.wsA) {
+  const start = await call("GET", `/api/connectors/start?kind=${kind}&ws=${ws}${site ? `&site=${encodeURIComponent(site)}` : ""}`);
   if (start.status !== 307 || !start.location?.startsWith(TOOLS_BASE)) return { start };
   const approve = await fetch(start.location, { redirect: "manual" });
   const back = new URL(approve.headers.get("location"));
@@ -1649,9 +1652,11 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
     id: 7731, type: "Task", title: "Rotate the ZEBRA vault key for the Fabrikam merger", state: "Active", assignedTo: "Bea B", due: null,
     changed: new Date().toISOString(), description: "<p>Workspace B only: the vault code is ZEBRA-7731.</p>", tags: [], comments: [], blockedBy: [], parent: null,
   });
-  const conn = await connectTool(admin, "ado", "northwind");
+  assert.equal((await allowTool(admin, "ado")).status, 200);
+  const conn = await connectTool(admin, "ado", "northwind", s.wsB);
   assert.equal(conn.to?.pathname + conn.to?.search, "/connectors?connected=ado", flashOf(conn.done ?? conn.start));
-  s.ado = (await admin("GET", "/api/connectors")).body.connectors.find((c) => c.kind === "ado").id;
+  const adoB = (await admin("GET", "/api/connectors")).body.connectors.find((c) => c.kind === "ado" && c.workspaceId === s.wsB).id;
+  s.ado = adoB;
   const zl = await admin("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsB, project: "Internal Tools" });
   assert.equal(zl.status, 200, JSON.stringify(zl.body));
   assert.equal(zl.body.link.items, 1);
@@ -1661,7 +1666,6 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "ZEBRA vault key Fabrikam merger" })));
   assert.deepEqual((await other("GET", "/api/connectors")).body.connectors, [], "another organization sees none of this org's tools");
   assert.equal((await member("GET", "/api/connectors")).status, 403, "Connectors is for admins and Team Leads");
-  assert.ok(!(await lead("GET", "/api/connectors")).body.connectors[0].links.some((l) => l.workspaceId === s.wsB), "a Team Lead of A doesn't see B's linked projects");
   // A group's sources: everyone in it sees which tools feed it (names only); nobody outside it.
   const srcA = await member("GET", `/api/workspaces/${s.wsA}/sources`);
   assert.equal(srcA.status, 200);
@@ -1678,6 +1682,16 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await member("GET", `/api/workspaces/${s.wsA}/usage`)).status, 403);
   assert.equal((await viewer("GET", `/api/workspaces/${s.wsA}/usage`)).status, 403);
   assert.equal((await other("GET", `/api/workspaces/${s.wsB}/usage`)).status, 404, "another organization's Owner gets not found");
+  // Group walls between connections: workspace B's sign-in never lists, links, syncs or feeds anything for workspace A,
+  // and A's Team Lead can't touch it.
+  assert.equal((await admin("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Internal Tools" })).status, 404, "B's connection can't feed A");
+  assert.equal((await lead("GET", `/api/connectors/${s.ado}/projects`)).status, 404, "A's Team Lead can't use B's sign-in");
+  assert.equal((await lead("POST", "/api/connectors/links", { connector: s.ado, project: "Internal Tools" })).status, 404);
+  assert.equal((await lead("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Internal Tools" })).status, 404);
+  assert.equal((await lead("POST", `/api/connectors/links/${zl.body.link.id}/sync`)).status, 404);
+  assert.equal((await lead("DELETE", `/api/connectors/${s.ado}`)).status, 404);
+  assert.match(flashOf((await connectTool(lead, "ado", "northwind", s.wsB)).start), /Workspace not found/, "A's Team Lead can't connect for B");
+  assert.ok(!(await lead("GET", "/api/connectors")).body.connectors.some((c) => c.workspaceId === s.wsB), "nor see B's connection");
   assert.equal((await other("GET", `/api/connectors/${s.ado}/projects`)).status, 404);
   assert.equal((await other("DELETE", `/api/connectors/${s.ado}`)).status, 404);
   assert.equal((await other("POST", `/api/connectors/links/${zl.body.link.id}/sync`)).status, 404);
@@ -1687,10 +1701,24 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await member("POST", `/api/connectors/links/${zl.body.link.id}/sync`)).status, 403, "Members can't sync");
   assert.equal((await member("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Internal Tools" })).status, 403, "Members can't link projects");
   assert.equal((await member("DELETE", `/api/connectors/${s.ado}`)).status, 403);
-  assert.equal((await member("GET", "/api/connectors/start?kind=ado&site=northwind")).status, 403, "only Org Owners/Admins connect tools");
+  assert.equal((await member("GET", `/api/connectors/start?kind=ado&site=northwind&ws=${s.wsA}`)).status, 403, "Members never sign in to tools");
+  assert.equal((await member("PUT", "/api/connectors/kinds", { kind: "jira", allowed: true })).status, 403);
+  // Requests to turn a tool on: another organization never sees, decides, cancels or adds to this org's requests,
+  // and a Team Lead of A never sees B's.
+  const zreq = await orgAdmin("POST", "/api/connectors/requests", { kind: "jira", ws: s.wsB, reason: "The ZEBRA-7731 board for the Fabrikam merger" });
+  assert.equal(zreq.status, 200, JSON.stringify(zreq.body));
+  assert.deepEqual((await other("GET", "/api/connectors")).body.requests, [], "another organization sees none of this org's requests");
+  for (const action of ["approve", "decline", "cancel"]) assert.equal((await other("POST", `/api/connectors/requests/${zreq.body.request.id}`, { action })).status, 404, action);
+  assert.equal((await other("POST", "/api/connectors/requests", { kind: "jira", ws: s.wsB })).status, 404, "can't ask for another org's group");
+  assert.ok(!leaks(await other("GET", "/api/findings")));
+  assert.ok(!(await lead("GET", "/api/connectors")).body.requests.some((x) => x.workspaceId === s.wsB), "a Team Lead of A doesn't see B's requests");
+  assert.ok(!leaks(await lead("GET", "/api/findings")));
+  assert.equal((await member("GET", "/api/connectors")).status, 403, "Members don't open Connectors (so see no requests)");
+  assert.equal((await orgAdmin("POST", `/api/connectors/requests/${zreq.body.request.id}`, { action: "cancel" })).body.request.status, "cancelled");
   assert.ok(!/ZEBRA/.test(JSON.stringify((await other("GET", "/api/audit")).body)));
   assert.equal((await admin("DELETE", `/api/connectors/links/${zl.body.link.id}`)).body.items, 1);
   assert.ok(!(await admin("POST", "/api/ask", { ws: s.wsB, question: "ZEBRA vault key Fabrikam merger" })).body.sources.some((x) => x.type === "workitem"), "unlinking removes the items");
+  assert.deepEqual((await admin("DELETE", `/api/connectors/${s.ado}`)).body, { links: 0, items: 0 });
   // The same walls for GitHub (an issue in a repository) and Confluence (a page in a space) linked to B. A fresh
   // Member of A asks (the suite has used up others' questions an hour); B's side is checked in the index itself.
   tools.world.github.installations[0].repos.find((r) => r.full_name === "northwind/internal-wiki").issues.push({
@@ -1708,9 +1736,10 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   const isoUser = await admin("POST", "/api/users", { name: "Ivy Iso", email: "ivy.iso@test.local", role: "Member", workspaces: [s.wsA] });
   assert.equal((await firstSignIn(isoAsker, "ivy.iso@test.local", isoUser.body.tempPassword)).status, 200);
   for (const [kind, project, type] of [["github", "northwind/internal-wiki", "workitem"], ["confluence", "OPS", "page"], ["m365", "b!wiki-documents", "page"]]) {
-    const c = await connectTool(admin, kind);
+    assert.equal((await allowTool(admin, kind)).status, 200);
+    const c = await connectTool(admin, kind, undefined, s.wsB);
     assert.equal(c.to?.pathname + c.to?.search, `/connectors?connected=${kind}`, flashOf(c.done ?? c.start));
-    const id = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === kind).id;
+    const id = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === kind && x.workspaceId === s.wsB).id;
     const l = await admin("POST", "/api/connectors/links", { connector: id, ws: s.wsB, project });
     assert.equal(l.status, 200, JSON.stringify(l.body));
     assert.deepEqual([l.body.link.items, l.body.link.problem], [1, null], kind);
@@ -1718,7 +1747,9 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
     assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_type = '${type}' AND workspace_id <> '${s.wsB}' AND text LIKE '%ZEBRA-7731%'`)), 0, `${kind}: nowhere else`);
     assert.ok(!leaks(await askA(isoAsker, "ZEBRA vault key Fabrikam merger handover")), `${kind}: never reaches A`);
     assert.deepEqual((await other("GET", "/api/connectors")).body.connectors, [], `${kind}: another organization sees none of this org's tools`);
-    assert.ok(!(await lead("GET", "/api/connectors")).body.connectors.find((x) => x.kind === kind).links.some((lk) => lk.workspaceId === s.wsB), `${kind}: a Team Lead of A doesn't see B's link`);
+    assert.ok(!(await lead("GET", "/api/connectors")).body.connectors.some((x) => x.kind === kind && (x.workspaceId === s.wsB || x.links.some((lk) => lk.workspaceId === s.wsB))), `${kind}: a Team Lead of A doesn't see B's connection`);
+    assert.equal((await admin("POST", "/api/connectors/links", { connector: id, ws: s.wsA, project })).status, 404, `${kind}: B's sign-in can't feed A`);
+    assert.equal((await lead("GET", `/api/connectors/${id}/projects`)).status, 404, `${kind}: A's Team Lead can't use B's sign-in`);
     assert.equal((await other("GET", `/api/connectors/${id}/projects`)).status, 404);
     assert.equal((await other("POST", `/api/connectors/links/${l.body.link.id}/sync`)).status, 404);
     assert.equal((await other("DELETE", `/api/connectors/links/${l.body.link.id}`)).status, 404);
@@ -1726,7 +1757,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
     assert.equal((await other("DELETE", `/api/connectors/${id}`)).status, 404);
     assert.equal((await member("POST", "/api/connectors/links", { connector: id, ws: s.wsA, project })).status, 403, `${kind}: Members can't link`);
     assert.equal((await member("DELETE", `/api/connectors/${id}`)).status, 403);
-    assert.equal((await member("GET", `/api/connectors/start?kind=${kind}`)).status, 403);
+    assert.equal((await member("GET", `/api/connectors/start?kind=${kind}&ws=${s.wsA}`)).status, 403);
     // Disconnecting removes the sign-in, the link and its search entries.
     assert.deepEqual((await admin("DELETE", `/api/connectors/${id}`)).body, { links: 1, items: 1 });
     assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE text LIKE '%ZEBRA-7731%' AND source_type = '${type}'`)), 0, `${kind}: search entries gone`);
@@ -3996,7 +4027,7 @@ test(`[${ENGINE}] retired Billing Admins: the Org Owner alone gets a notice on H
   const noraId = await dbValue("SELECT id FROM users WHERE email = 'nora@watch.test'");
   const t = new Date().toISOString();
   await dbExec(`INSERT INTO findings (id, org_id, workspace_id, kind, dedupe_key, audience, severity, status, title, detail, next_step, action_href, action_label, data_json, first_seen_at, last_seen_at, updated_at)
-    VALUES ('role_changed:${noraId}', '${w.org}', NULL, 'role_changed', 'role_changed:org:${noraId}', 'owner', 'info', 'open', 'Nora Member was a Billing Admin and is now a Member',
+    VALUES ('role_changed:${noraId}', '${w.org}', NULL, 'role_changed', 'role_changed:org:${noraId}', 'owners', 'info', 'open', 'Nora Member was a Billing Admin and is now a Member',
             'The Billing Admin role was retired: only Org Owners and Org Admins see usage and billing now.', 'Make them an Org Admin on Users & access if they should keep seeing billing.',
             '/users', 'Open Users & access', NULL, '${t}', '${t}', '${t}')`);
   const ola = client();
@@ -4395,9 +4426,10 @@ test(`[${ENGINE}] connectors: Azure DevOps connects with a sealed sign-in, lists
   const noSite = await connectTool(admin, "ado", "");
   assert.equal(noSite.start.location, `${BASE}/connectors?error=1`);
   assert.match(flashOf(noSite.start), /Type your Azure DevOps organization/);
-  // Already connected in the isolation test: reconnecting the same organization keeps it (and counts once).
+  // Allowed in the isolation test: workspace A gets its own connection (B's was removed there).
   const again = await connectTool(admin, "ado", "northwind");
   assert.equal(again.to.search, "?connected=ado");
+  s.ado = (await admin("GET", "/api/connectors")).body.connectors.find((c) => c.kind === "ado" && c.workspaceId === s.wsA).id;
   const other = await connectTool(admin, "ado", "contoso");
   assert.match(flashOf(other.done ?? other.start), /couldn't find the Azure DevOps organization|already connected/);
   // Tokens are sealed at rest and never returned.
@@ -4435,7 +4467,7 @@ test(`[${ENGINE}] connectors: Azure DevOps connects with a sealed sign-in, lists
   // Every sync is a trace step with counts only.
   assert.ok(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE kind = 'connector'")) > 0);
   assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%adoat_%' OR attrs LIKE '%Priya%'")), 0, "no tokens or item text in traces");
-  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Connected Azure DevOps \(northwind\), read-only.*|Linked Azure DevOps project Wave 2 Cutover/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Connected Azure DevOps \(northwind\) for this group, read-only/);
   // The knowledge map and meeting notes run with the group's open work items in their inventory.
   assert.equal((await admin("POST", "/api/memory/refresh", { ws: s.wsA })).status, 200);
 });
@@ -4485,6 +4517,7 @@ test(`[${ENGINE}] connectors: syncs are incremental, refresh expired tokens, rec
 test(`[${ENGINE}] connectors: Jira connects (rotating refresh tokens), pages through projects and issues, and a revoked sign-in shows as expired until reconnected`, async () => {
   tools.state.jiraProjectPage = 1;
   tools.state.jiraIssuePage = 2;
+  assert.equal((await allowTool(admin, "jira")).status, 200);
   const c = await connectTool(admin, "jira");
   assert.equal(c.to.search, "?connected=jira", flashOf(c.done ?? c.start));
   const jira = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "jira");
@@ -4514,58 +4547,73 @@ test(`[${ENGINE}] connectors: Jira connects (rotating refresh tokens), pages thr
   const h = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "jira");
   assert.deepEqual([h.status, h.links[0].items], ["expired", 4]);
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /The Jira sign-in expired or was revoked/);
-  assert.equal((await admin("POST", "/api/connectors/links", { connector: jira.id, ws: s.wsB, project: "OPS" })).status, 409, "no new links while expired");
+  assert.equal((await admin("POST", "/api/connectors/links", { connector: jira.id, ws: s.wsA, project: "OPS" })).status, 409, "no new links while expired");
+  assert.equal((await admin("POST", "/api/connectors/links", { connector: jira.id, ws: s.wsB, project: "OPS" })).status, 404, "and never into another group");
   await dbExec(`UPDATE connector_links SET last_sync_at = '2026-01-01T00:00:00.000Z' WHERE id = '${link.id}'`);
   const calls = tools.counts.api.jira;
   await jobTick({ sweep: true, kinds: ["connectors.schedule", "connector.sync"] });
   assert.equal(tools.counts.api.jira, calls, "the scheduler skips an expired connector");
-  assert.equal(await dbValue("SELECT status FROM connector_health WHERE connector = 'jira' AND workspace_id = '' AND org_id = (SELECT id FROM orgs WHERE name = 'Test Org')"), "broken", "reported organization-wide for the watcher");
+  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE connector = 'jira' AND workspace_id = '${s.wsA}'`), "broken", "reported for the group, for the watcher");
   // Reconnecting brings it back and the next sync works.
   assert.equal((await connectTool(admin, "jira")).to.search, "?connected=jira");
   assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
   assert.equal((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "jira").status, "ok");
-  assert.equal(await dbValue("SELECT status FROM connector_health WHERE connector = 'jira' AND workspace_id = '' AND org_id = (SELECT id FROM orgs WHERE name = 'Test Org')"), "ok", "reconnecting resolves it");
+  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE connector = 'jira' AND workspace_id = '${s.wsA}'`), "ok", "reconnecting resolves it");
   s.jira = jira.id;
   tools.state.jiraProjectPage = 50;
   tools.state.jiraIssuePage = 50;
 });
 
-test(`[${ENGINE}] connectors: plans limit how many tools (none, one, all) with an upgrade message; a Team Lead links only their own groups`, async () => {
-  // Starter (no connectors): refused before the tool's sign-in, with the plan's message.
+test(`[${ENGINE}] connectors: plans limit how many tool types (none, one, all) with an upgrade message; a Team Lead connects and links only for their own groups`, async () => {
+  // Starter (no connectors): allowing a tool type is refused with the plan's message.
   const st = client();
   assert.equal((await signUpAs(st, { org: "Connector Starter Co", name: "Sid Starter", email: "sid@connstarter.test", password: "correct horse battery", plan: "starter" })).status, 200);
-  const starter = await connectTool(st, "ado", "northwind");
-  assert.equal(starter.start.location, `${BASE}/connectors?error=1`);
-  assert.match(flashOf(starter.start), /Your Starter plan doesn't include connectors\. The Org Owner can move to a bigger plan on Usage & billing/);
-  // Team (one tool): the first connects, a second tool is refused; reconnecting the first still works.
+  const starter = await allowTool(st, "ado");
+  assert.equal(starter.status, 402);
+  assert.match(starter.body.error, /Your Starter plan doesn't include connectors\. The Org Owner can move to a bigger plan on Usage & billing/);
+  // Team (one tool type): the first is allowed, a second type is refused; allowing the first again still works.
   const t = client();
   assert.equal((await signUpAs(t, { org: "Connector Team Co", name: "Tia Team", email: "tia@connteam.test", password: "correct horse battery", plan: "team" })).status, 200);
-  assert.equal((await connectTool(t, "ado", "northwind")).to.search, "?connected=ado");
-  const second = await connectTool(t, "jira");
-  assert.match(flashOf(second.start), /Your Team plan allows 1 connector and you have 1\./);
-  assert.equal((await connectTool(t, "ado", "northwind")).to.search, "?connected=ado", "reconnecting doesn't count again");
+  assert.equal((await allowTool(t, "ado")).status, 200);
+  const second = await allowTool(t, "jira");
+  assert.equal(second.status, 402);
+  assert.match(second.body.error, /Your Team plan allows 1 connector and you have 1\./);
+  assert.deepEqual((await allowTool(t, "ado")).body.allowed, ["ado"], "allowing it again doesn't count again");
   const line = (await t("GET", "/api/billing")).body.limits.find((l) => l.key === "connectors");
   assert.deepEqual([line.used, line.limit], [1, 1]);
-  // Its tool is its own: the main org's links and items never show up there.
-  const theirs = (await t("GET", "/api/connectors")).body.connectors;
-  assert.deepEqual(theirs.map((c) => [c.kind, c.links.length]), [["ado", 0]]);
-  // A Team Lead links projects only to groups they belong to.
+  // A Team Lead connects an allowed tool for their own group (with the client's account), never for another group,
+  // and never a type that isn't allowed; however many groups connect it, it counts once.
   const lead = (await t("POST", "/api/users", { name: "Lars Lead", email: "lars@connteam.test", role: "Team Lead", workspaces: [] })).body;
   const ws1 = (await t("POST", "/api/workspaces", { name: "Lead's group", lead: lead.id })).body.id;
   const ws2 = (await t("POST", "/api/workspaces", { name: "Not the lead's group" })).body.id;
   const l = client();
   await firstSignIn(l, "lars@connteam.test", lead.tempPassword);
-  const ado = theirs[0].id;
-  assert.equal((await l("POST", "/api/connectors/links", { connector: ado, ws: ws2, project: "Data Platform" })).status, 404);
-  const ok = await l("POST", "/api/connectors/links", { connector: ado, ws: ws1, project: "Data Platform" });
+  assert.equal((await connectTool(l, "ado", "northwind", ws1)).to.search, "?connected=ado");
+  assert.match(flashOf((await connectTool(l, "ado", "northwind", ws2)).start), /Workspace not found/);
+  assert.match(flashOf((await connectTool(l, "jira", undefined, ws1)).start), /Jira isn't allowed in your organization yet\. Ask the Org Owner/);
+  assert.equal((await connectTool(t, "ado", "northwind", ws2)).to.search, "?connected=ado", "an admin connects for any group");
+  assert.deepEqual((await t("GET", "/api/billing")).body.limits.find((x) => x.key === "connectors").used, 1, "two groups' connections, one tool type");
+  // Its tools are its own: the main org's links and items never show up there.
+  const theirs = (await t("GET", "/api/connectors")).body.connectors;
+  assert.deepEqual(theirs.map((c) => [c.kind, c.workspaceId, c.links.length]).sort(), [["ado", ws1, 0], ["ado", ws2, 0]].sort());
+  const mine = (await l("GET", "/api/connectors")).body.connectors;
+  assert.deepEqual(mine.map((c) => c.workspaceId), [ws1], "the Team Lead sees only their group's connection");
+  const ado1 = mine[0].id, ado2 = theirs.find((c) => c.workspaceId === ws2).id;
+  assert.equal((await l("POST", "/api/connectors/links", { connector: ado2, ws: ws2, project: "Data Platform" })).status, 404);
+  assert.equal((await l("POST", "/api/connectors/links", { connector: ado1, ws: ws2, project: "Data Platform" })).status, 404, "their group's sign-in never feeds another group");
+  const ok = await l("POST", "/api/connectors/links", { connector: ado1, ws: ws1, project: "Data Platform" });
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
-  assert.equal((await l("DELETE", `/api/connectors/${ado}`)).status, 403, "only Org Owners/Admins disconnect");
-  assert.equal((await l("GET", "/api/connectors/start?kind=jira")).status, 403);
-  // Deleting the group removes its linked projects and their items; the tool stays connected.
+  assert.equal((await l("PUT", "/api/connectors/kinds", { kind: "jira", allowed: true })).status, 403, "only the Org Owner allows tool types");
+  assert.equal((await l("DELETE", `/api/connectors/${ado2}`)).status, 404, "nor disconnect another group's connection");
+  // Deleting the group removes its connection, linked projects and their items; the other group keeps its own.
   assert.equal((await t("DELETE", `/api/workspaces/${ws1}`, { confirm: "Lead's group" })).status, 200);
-  assert.equal(await rows("connector_links", "workspace_id", ws1), 0);
-  assert.equal(await rows("connector_items", "workspace_id", ws1), 0);
-  assert.equal((await t("GET", "/api/connectors")).body.connectors.length, 1);
+  for (const table of ["connectors", "connector_links", "connector_items"]) assert.equal(await rows(table, "workspace_id", ws1), 0, table);
+  assert.deepEqual((await t("GET", "/api/connectors")).body.connectors.map((c) => c.workspaceId), [ws2]);
+  // Stopping a type disconnects every group's connection of it.
+  const off = await allowTool(t, "ado", false);
+  assert.deepEqual([off.body.allowed, off.body.removed.groups], [[], ["Not the lead's group"]]);
+  assert.deepEqual((await t("GET", "/api/connectors")).body.connectors, []);
+  assert.match(JSON.stringify((await t("GET", "/api/audit")).body), /Stopped allowing Azure DevOps in the organization: disconnected it from 1 group/);
 });
 
 test(`[${ENGINE}] connectors: disconnecting removes the sign-in, every link and every imported item from answers`, async () => {
@@ -4583,7 +4631,7 @@ test(`[${ENGINE}] connectors: disconnecting removes the sign-in, every link and 
   assert.ok(!(await askA(s.asker, "payment gateway cutover firewall rule")).body.sources.some((x) => x.type === "workitem"));
   assert.deepEqual((await admin("GET", "/api/connectors")).body.connectors, []);
   assert.equal(await rows("connector_health", "org_id", org), 0, "nothing left for the broken-connector watcher");
-  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Azure DevOps \(northwind\): removed its sign-in, 1 linked project and 6 imported items/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Azure DevOps \(northwind\) from this group: removed its sign-in, 1 linked project and 6 imported items/);
 });
 
 test(`[${ENGINE}] connectors: GitHub connects through a GitHub App (PKCE, rotating tokens), pages through repositories and issues, and answers cite issues and pull requests`, async () => {
@@ -4620,7 +4668,7 @@ test(`[${ENGINE}] connectors: GitHub connects through a GitHub App (PKCE, rotati
   tools.state.githubEvilNext = false;
   tools.state.githubPage = 100;
   assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%githubat_%' OR attrs LIKE '%lena-fischer%'")), 0, "no tokens or item text in traces");
-  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Connected GitHub \(northwind-dev\), read-only/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Connected GitHub \(northwind-dev\) for this group, read-only/);
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Linked GitHub repository northwind\/store-pos/);
 });
 
@@ -4652,7 +4700,7 @@ test(`[${ENGINE}] connectors: GitHub syncs incrementally, waits out a short rate
   tools.expireAccessTokens();
   assert.match((await admin("POST", `/api/connectors/links/${s.ghLink}/sync`)).body.link.problem, /GitHub sign-in has expired or was revoked/);
   assert.equal((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "github").status, "expired");
-  assert.equal(await dbValue("SELECT status FROM connector_health WHERE connector = 'github' AND workspace_id = '' AND org_id = (SELECT id FROM orgs WHERE name = 'Test Org')"), "broken", "organization-wide for admins");
+  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE connector = 'github' AND workspace_id = '${s.wsA}'`), "broken", "for the group's managers");
   await dbExec(`UPDATE connector_links SET last_sync_at = '2026-01-01T00:00:00.000Z' WHERE id = '${s.ghLink}'`);
   const calls = tools.counts.api.github;
   await jobTick({ sweep: true, kinds: ["connectors.schedule", "connector.sync"] });
@@ -4724,21 +4772,18 @@ test(`[${ENGINE}] connectors: Confluence connects with the Jira app, reads a spa
   assert.deepEqual((await admin("DELETE", `/api/connectors/${ghId}`)).body, { links: 1, items: 5 });
   assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_type IN ('workitem', 'page') AND org_id = '${org}'`)), 0);
   assert.equal(await rows("connector_health", "org_id", org), 0);
-  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Confluence \(northwind\): removed its sign-in, 1 linked project and 3 imported items/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Confluence \(northwind\) from this group: removed its sign-in, 1 linked project and 3 imported items/);
   tools.state.confluenceSpacePage = 250;
   tools.state.confluencePage = 25;
 });
 
-test(`[${ENGINE}] connectors: Microsoft 365 connects (own tenant only, sealed), lists libraries, folders and OneDrive shares, reads Word, PDF, PowerPoint and text files by delta query, cites them with links, skips large files with a note, and handles 429, 410, lost access and revoked consent`, async () => {
+test(`[${ENGINE}] connectors: Microsoft 365 connects (the client's own Microsoft organization, sealed), lists libraries, folders and OneDrive shares, reads Word, PDF, PowerPoint and text files by delta query, cites them with links, skips large files with a note, and handles 429, 410, lost access and revoked consent`, async () => {
   const org = await dbValue("SELECT id FROM orgs WHERE name = 'Test Org'");
-  // Only the Microsoft organization this Sidekick organization linked may be connected.
+  // A group connects with the account its client gave it: the client's Microsoft organization, not this
+  // Sidekick organization's own (which may be linked for Microsoft sign-in).
   const own = await dbValue(`SELECT entra_tenant_id FROM orgs WHERE id = '${org}'`);
-  const linked = own || "aaaaaaaa-0000-4000-8000-00000000abcd";
-  if (!own) await dbExec(`UPDATE orgs SET entra_tenant_id = '${linked}' WHERE id = '${org}'`);
-  tools.world.m365.tenantId = "33333333-cccc-4ddd-8eee-000000000003";
-  const wrong = await connectTool(admin, "m365");
-  assert.match(flashOf(wrong.done ?? wrong.start), /belongs to Northwind Traders, not the Microsoft organization linked/);
-  assert.ok(!(await admin("GET", "/api/connectors")).body.connectors.some((x) => x.kind === "m365"), "nothing saved");
+  const linked = "33333333-cccc-4ddd-8eee-000000000003";
+  assert.notEqual(own, linked);
   tools.world.m365.tenantId = linked;
   const c = await connectTool(admin, "m365");
   assert.equal(c.to?.search, "?connected=m365", flashOf(c.done ?? c.start));
@@ -4819,7 +4864,7 @@ test(`[${ENGINE}] connectors: Microsoft 365 connects (own tenant only, sealed), 
   tools.expireAccessTokens();
   assert.match((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, /Microsoft 365 sign-in has expired or was revoked/);
   assert.deepEqual((({ status, links }) => [status, links[0].items])((await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "m365")), ["expired", 5]);
-  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE org_id = '${org}' AND connector = 'microsoft-365-files' AND workspace_id = ''`), "broken");
+  assert.equal(await dbValue(`SELECT status FROM connector_health WHERE org_id = '${org}' AND connector = 'microsoft-365-files' AND workspace_id = '${s.wsA}'`), "broken");
   assert.equal((await connectTool(admin, "m365")).to.search, "?connected=m365");
   assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
   // A OneDrive folder shared with the account.
@@ -4832,7 +4877,148 @@ test(`[${ENGINE}] connectors: Microsoft 365 connects (own tenant only, sealed), 
   assert.deepEqual((await admin("DELETE", `/api/connectors/${conn.id}`)).body, { links: 1, items: 1 });
   assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE title LIKE 'OneDrive file:%' AND org_id = '${org}'`)), 0);
   assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM connector_health WHERE org_id = '${org}' AND connector = 'microsoft-365-files'`)), 0);
-  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Microsoft 365 \(Northwind Traders\): removed its sign-in, 1 linked project and 1 imported item/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Microsoft 365 \(Northwind Traders\) from this group: removed its sign-in, 1 linked project and 1 imported item/);
   tools.state.graphDeltaPage = 200;
-  if (!own) await dbExec(`UPDATE orgs SET entra_tenant_id = NULL WHERE id = '${org}'`);
+  assert.equal(await dbValue(`SELECT entra_tenant_id FROM orgs WHERE id = '${org}'`), own, "the organization's own Microsoft link is untouched");
+});
+
+/* ---------- Connector permissions: the Org Owner approves, Team Leads link or ask (lib/connector-requests.ts) ---------- */
+
+test(`[${ENGINE}] connector requests: each role's part; a Team Lead asks, the Org Owner sees it on Home and approves (allowing the type), the Team Lead connects it for the group, declines carry a note, cancels and duplicates`, async () => {
+  // Fresh people for each role (earlier tests sign some of the shared ones out or change them).
+  const fresh = async (name, role, workspaces) => {
+    const email = `${name.split(" ")[0].toLowerCase()}.req@test.local`;
+    const u = await admin("POST", "/api/users", { name, email, role, workspaces });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    const c = client();
+    assert.equal((await firstSignIn(c, email, u.body.tempPassword)).status, 200);
+    return c;
+  };
+  const orgAdmin = await fresh("Oda Admin", "Org Admin", []);
+  const lead = await fresh("Tess Lead", "Team Lead", [s.wsA]);
+  const member = await fresh("Mo Member", "Member", [s.wsA]);
+  const viewer = await fresh("Val Viewer", "Viewer", [s.wsA]);
+  const billing = await fresh("Bo Billing", "Billing Admin", []);
+  // Start with Azure DevOps, Jira and Confluence not allowed.
+  for (const kind of ["ado", "jira", "confluence"]) assert.equal((await allowTool(admin, kind, false)).status, 200);
+  // What each role may do on the page.
+  const may = async (call) => (({ canToggle, canConnect, canRequest }) => [canToggle, canConnect, canRequest])((await call("GET", "/api/connectors")).body);
+  assert.deepEqual(await may(admin), [true, true, false], "Org Owner: allows tool types (and connects for any group)");
+  assert.deepEqual(await may(orgAdmin), [false, true, true], "Org Admin: connects for any group and asks, never allows types");
+  assert.deepEqual(await may(lead), [false, true, true], "Team Lead: connects for their groups and asks");
+  for (const [name, call] of [["member", member], ["viewer", viewer], ["billing", billing]]) assert.deepEqual(await may(call), [false, false, false], name);
+  // Only the Org Owner allows a type; nobody connects a type that isn't allowed.
+  for (const call of [orgAdmin, lead, member, viewer, billing]) assert.equal((await allowTool(call, "ado")).status, 403);
+  const adminOn = await connectTool(orgAdmin, "ado", "northwind");
+  assert.equal(adminOn.start.location, `${BASE}/connectors?error=1`);
+  assert.match(flashOf(adminOn.start), /Azure DevOps isn't allowed in your organization yet\. Ask the Org Owner for it on Connectors/);
+  // Members and Viewers can't ask; a Team Lead asks only for their own groups.
+  for (const call of [member, viewer]) assert.equal((await call("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA })).status, 403);
+  assert.equal((await lead("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsB })).status, 404);
+  assert.equal((await lead("POST", "/api/connectors/requests", { kind: "slack", ws: s.wsA })).status, 400);
+  const asked = await lead("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA, reason: "The cutover board lives in Azure DevOps." });
+  assert.equal(asked.status, 200, JSON.stringify(asked.body));
+  const req = asked.body.request;
+  assert.deepEqual([req.status, req.mine, req.canDecide, req.workspaceName, req.reason], ["pending", true, false, "Workspace A", "The cutover board lives in Azure DevOps."]);
+  assert.equal((await lead("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA })).status, 409, "no duplicate open request");
+  assert.equal((await orgAdmin("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA })).status, 409, "one open request per tool and group, whoever asks");
+  // The Org Owner sees it on Home at once ("Needs attention", Org Owners only) and on Connectors with Approve/Decline.
+  const ownerFinding = async () => (await admin("GET", "/api/findings")).body.findings.find((f) => f.kind === "connector_request" && /asks to use Azure DevOps/.test(f.title));
+  const f = await ownerFinding();
+  assert.ok(f, "a finding for the Org Owner");
+  assert.match(f.title, /Tess Lead asks to use Azure DevOps in “Workspace A”/);
+  assert.match(f.detail, /The cutover board lives in Azure DevOps/);
+  assert.equal(f.actionHref, "/connectors#requests");
+  assert.ok(f.canAct, "the Org Owner can snooze it");
+  for (const call of [orgAdmin, lead, member]) assert.ok(!(await call("GET", "/api/findings")).body.findings.some((x) => x.kind === "connector_request"), "only Org Owners see pending requests on Home");
+  assert.equal((await admin("GET", "/api/connectors")).body.requests.find((x) => x.id === req.id).canDecide, true);
+  assert.equal((await orgAdmin("GET", "/api/connectors")).body.requests.find((x) => x.id === req.id).canDecide, false, "Org Admins see requests but don't decide");
+  // Only the Org Owner decides.
+  for (const call of [orgAdmin, lead, member]) {
+    assert.equal((await call("POST", `/api/connectors/requests/${req.id}`, { action: "approve" })).status, 403);
+    assert.equal((await call("POST", `/api/connectors/requests/${req.id}`, { action: "decline" })).status, 403);
+  }
+  assert.equal((await admin("POST", `/api/connectors/requests/${req.id}`, { action: "maybe" })).status, 400);
+  // Approving allows the type for the organization (no sign-in for the Org Owner).
+  const ap = await admin("POST", `/api/connectors/requests/${req.id}`, { action: "approve" });
+  assert.deepEqual(ap.body, { approved: true });
+  assert.ok((await lead("GET", "/api/connectors")).body.allowed.includes("ado"));
+  const done = (await lead("GET", "/api/connectors")).body.requests.find((x) => x.id === req.id);
+  assert.deepEqual([done.status, done.decidedBy], ["approved", "Test Admin"]);
+  assert.equal((await admin("POST", `/api/connectors/requests/${req.id}`, { action: "decline" })).status, 409, "already decided");
+  assert.equal(await ownerFinding(), undefined, "the Org Owner's request finding is resolved");
+  const leadSees = (await lead("GET", "/api/findings")).body.findings.find((x) => x.kind === "connector_request");
+  assert.match(leadSees?.title ?? "", /Azure DevOps is allowed now: connect it for “Workspace A”/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Asked the Org Owner to allow Azure DevOps for this group/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Approved Tess Lead's request to use Azure DevOps/);
+  // A type that's allowed can't be asked for: connect it. The Team Lead connects it for their group (with the
+  // client's account), the "connect it" finding clears, and they link a project.
+  assert.match((await lead("POST", "/api/connectors/requests", { kind: "ado", ws: s.wsA })).body.error, /already allowed in your organization/);
+  assert.equal((await connectTool(lead, "ado", "northwind", s.wsA)).to.search, "?connected=ado");
+  const ado = (await lead("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "ado" && x.workspaceId === s.wsA);
+  assert.equal(ado.connectedBy, "Tess Lead");
+  const linked = await lead("POST", "/api/connectors/links", { connector: ado.id, ws: s.wsA, project: "Wave 2 Cutover" });
+  assert.equal(linked.status, 200, JSON.stringify(linked.body));
+  await jobTick({ sweep: true, kinds: ["watch.all", "watch.org"] });
+  assert.ok(!(await lead("GET", "/api/findings")).body.findings.some((x) => x.kind === "connector_request" && /allowed now/.test(x.title)), "cleared once connected");
+  // An Org Admin may reconnect any group's connection, but not stop the type.
+  assert.equal((await connectTool(orgAdmin, "ado", "northwind")).to.search, "?connected=ado");
+  assert.equal((await allowTool(orgAdmin, "ado", false)).status, 403);
+  // Declined with a note: the person who asked sees it on Connectors and Home.
+  const j = (await lead("POST", "/api/connectors/requests", { kind: "jira", ws: s.wsA })).body.request;
+  const declined = await admin("POST", `/api/connectors/requests/${j.id}`, { action: "decline", note: "We're moving off Jira this quarter." });
+  assert.deepEqual([declined.body.request.status, declined.body.request.note], ["declined", "We're moving off Jira this quarter."]);
+  const mine = (await lead("GET", "/api/connectors")).body.requests.find((x) => x.id === j.id);
+  assert.deepEqual([mine.status, mine.note, mine.decidedBy], ["declined", "We're moving off Jira this quarter.", "Test Admin"]);
+  const leadDecline = (await lead("GET", "/api/findings")).body.findings.find((x) => x.kind === "connector_request" && /Jira/.test(x.title));
+  assert.match(leadDecline?.title ?? "", /The request to use Jira in “Workspace A” was declined/);
+  assert.match(leadDecline?.detail ?? "", /moving off Jira this quarter/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Declined Tess Lead's request to use Jira \(with a note\)/);
+  // After a decline the group may ask again; the person who asked (or the Org Owner) may cancel, nobody else.
+  const again = (await lead("POST", "/api/connectors/requests", { kind: "jira", ws: s.wsA, reason: "The client changed their mind." })).body.request;
+  assert.equal(again.status, "pending");
+  assert.equal((await orgAdmin("POST", `/api/connectors/requests/${again.id}`, { action: "cancel" })).status, 403);
+  assert.equal((await member("POST", `/api/connectors/requests/${again.id}`, { action: "cancel" })).status, 403);
+  assert.equal((await lead("POST", `/api/connectors/requests/${again.id}`, { action: "cancel" })).body.request.status, "cancelled");
+  assert.ok(!(await admin("GET", "/api/findings")).body.findings.some((x) => x.kind === "connector_request" && /Jira/.test(x.title) && /asks/.test(x.title)), "a cancelled request leaves Home");
+  // An Org Admin asks for any group; allowing the type directly approves every pending request for it.
+  const forB = (await orgAdmin("POST", "/api/connectors/requests", { kind: "confluence", ws: s.wsB })).body.request;
+  const forA = (await lead("POST", "/api/connectors/requests", { kind: "confluence", ws: s.wsA })).body.request;
+  assert.equal((await allowTool(admin, "confluence")).status, 200);
+  const after = (await admin("GET", "/api/connectors")).body.requests;
+  assert.deepEqual([forB.id, forA.id].map((id) => after.find((x) => x.id === id).status), ["approved", "approved"]);
+  // Traced (counts only, never the reason), and turning a tool off keeps the requests as history.
+  assert.ok(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE name = 'Request a connector'")) >= 4);
+  assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%cutover board%' OR attrs LIKE '%moving off Jira%'")), 0);
+  const stop = await allowTool(admin, "ado", false);
+  assert.deepEqual(stop.body.removed.groups, ["Workspace A"], "stopping a type disconnects every group's connection of it");
+  assert.equal(stop.body.removed.links, 1);
+  await allowTool(admin, "confluence", false);
+  assert.ok(Number(await dbValue("SELECT COUNT(*) FROM connector_requests WHERE status = 'approved'")) >= 3, "history kept");
+});
+
+test(`[${ENGINE}] connector requests: plans without connectors can't ask (upgrade message); a full plan can ask, and approving shows the upgrade message`, async () => {
+  // A small org with someone who may ask: an Org Admin on Starter (no Team Leads there), the group's Team Lead on Team.
+  const orgWith = async (plan, role) => {
+    const o = client();
+    assert.equal((await signUpAs(o, { org: `Request ${plan} Co`, name: `Rae ${plan}`, email: `rae@req${plan}.test`, password: "correct horse battery", plan })).status, 200);
+    const u = (await o("POST", "/api/users", { name: `Lou ${plan}`, email: `lou@req${plan}.test`, role, workspaces: [] })).body;
+    assert.ok(u.id, JSON.stringify(u));
+    const ws = (await o("POST", "/api/workspaces", { name: `Group ${plan}`, ...(role === "Team Lead" ? { lead: u.id } : {}) })).body.id;
+    const l = client();
+    assert.equal((await firstSignIn(l, `lou@req${plan}.test`, u.tempPassword)).status, 200);
+    return { o, l, ws };
+  };
+  const st = await orgWith("starter", "Org Admin");
+  const no = await st.l("POST", "/api/connectors/requests", { kind: "jira", ws: st.ws });
+  assert.equal(no.status, 402);
+  assert.match(no.body.error, /Your Starter plan doesn't include connectors\. The Org Owner can move to a bigger plan/);
+  const team = await orgWith("team", "Team Lead");
+  assert.equal((await allowTool(team.o, "ado")).status, 200);
+  const ask = await team.l("POST", "/api/connectors/requests", { kind: "jira", ws: team.ws, reason: "Second tool" });
+  assert.equal(ask.status, 200, "a full plan may still ask: the Org Owner may upgrade");
+  const ap = await team.o("POST", `/api/connectors/requests/${ask.body.request.id}`, { action: "approve" });
+  assert.equal(ap.status, 402);
+  assert.match(ap.body.error, /Your Team plan allows 1 connector and you have 1\./);
+  assert.equal((await team.o("GET", "/api/connectors")).body.requests[0].status, "pending", "still waiting");
 });

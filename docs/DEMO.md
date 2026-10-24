@@ -34,9 +34,12 @@ operator, and the Org Owner of a second client), each with things to try. Stop t
 (the seed refuses while port 3330 is in use).
 
 **Connectors**: the launch config also starts a fake Azure DevOps, Jira, GitHub, Confluence and Microsoft 365
-(`app/scripts/fake-tools.mjs`, made-up Northwind projects and files) on port 3331, so Connectors shows all five tools
-connected: the "Wave 2 Cutover" board, the Jira project STORE, the GitHub repository `northwind/store-pos` (issues and pull
-requests), the Confluence space CUT (the cutover runbook, batch schedule and decision log, searched like documents) and the
+(`app/scripts/fake-tools.mjs`, made-up Northwind projects and files) on port 3331. The Org Owner allows four tool
+types (Azure DevOps, Jira, Confluence, and Microsoft 365, which Contoso's Team Lead asked for and the Org Owner
+approved); each group connected with its own client account: Contoso its Azure DevOps, Jira, Confluence and SharePoint,
+Litware its own separate Azure DevOps. **GitHub isn't allowed**, with Fabrikam's request declined (with a note) and
+Contoso's request waiting: sign in as the Org Owner to see it on Home and approve it, then as Contoso's Team Lead to
+connect GitHub for Contoso (the fake GitHub sign-in approves at once) and link `northwind/store-pos` (issues and pull requests). Linked: the "Wave 2 Cutover" board, the Jira project STORE, the Confluence space CUT (the cutover runbook, batch schedule and decision log, searched like documents) and the
 SharePoint folder "Store Operations › Documents › Wave 2 Cutover" (a Word cutover plan, a PDF go-live checklist, a
 PowerPoint steering deck and a text file; an 80 MB photo PDF shows as "1 not read") feed the Contoso group ("What's
 blocking the payment gateway cutover?", "How do we roll a store back?", "What budget did the steering committee

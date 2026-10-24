@@ -4,8 +4,9 @@
  * Connectors (/connectors): the tools Sidekick reads from. Uploads, transcript import and Teams (chats and channels
  * assigned on each group's page) work today, and so do **Azure DevOps Boards, Jira, GitHub Issues, Confluence and
  * Microsoft 365 files** (read-only, each with its own sign-in; the SharePoint and OneDrive tiles are the same
- * Microsoft 365 connector): their tiles show Connected / Needs attention / Sign-in expired / Ready to
- * connect and jump to their panel below (./tools.tsx: connect, health, linked projects). The other tools are planned. Says how many connectors
+ * Microsoft 365 connector): their tiles show Connected / Allowed / Needs attention / Sign-in expired / Requested /
+ * Not allowed and jump to their panel below (./tools.tsx: the Org Owner's allow switch, each group's connection,
+ * requests from Team Leads, health, linked projects). The other tools are planned. Says how many connectors
  * the organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me. Tile icons:
  * components/connector-icons.tsx.
  */
@@ -41,14 +42,14 @@ export default function ConnectorsPage() {
   const planText = included === undefined ? null
     : included === null ? `${yours} includes every connector.`
     : included === 0 ? `${yours} doesn't include connectors to other tools; Team includes one and Business all of them.`
-    : `${yours} includes ${included} connector${included === 1 ? "" : "s"} to another tool (Azure DevOps, Jira, GitHub, Confluence or Microsoft 365 files: SharePoint and OneDrive count as one); Business includes all of them.`;
+    : `${yours} allows ${included} type${included === 1 ? "" : "s"} of tool (Azure DevOps, Jira, GitHub, Confluence or Microsoft 365 files: SharePoint and OneDrive count as one); Business includes all of them.`;
   return (
     <>
       <div className="page-head">
         <div>
           <div className="eyebrow">Connectors</div>
           <h1>Give {BRAND.name} access to your tools</h1>
-          <p>Uploads, transcript import, Teams chats and channels, SharePoint and OneDrive files, Azure DevOps Boards, Jira, GitHub Issues and Confluence work today. Each tool connects with its own sign-in, read-only, and no passwords are stored. The other tools are planned.</p>
+          <p>Uploads, transcript import, Teams chats and channels, SharePoint and OneDrive files, Azure DevOps Boards, Jira, GitHub Issues and Confluence work today. The Org Owner chooses which tools the organization allows; each Team Lead then connects an allowed tool for their group with the account the client gives them (read-only, no passwords stored), or asks for one that isn&apos;t allowed. The other tools are planned.</p>
           {planText && <p className="muted">{planText}</p>}
         </div>
       </div>
@@ -67,7 +68,7 @@ export default function ConnectorsPage() {
               );
               // The connectable tools jump to their panel below (connect, health, linked projects).
               return a.tool ? (
-                <a key={a.name} href={`#tool-${a.tool}`} className={`app-tile${data?.connectors.some((c) => c.kind === a.tool) ? " on" : ""}`}>{inner}</a>
+                <a key={a.name} href={`#tool-${a.tool}`} className={`app-tile${data?.allowed.includes(a.tool) ? " on" : ""}`}>{inner}</a>
               ) : (
                 <div key={a.name} className={`app-tile${a.live ? " on" : ""}`} style={{ cursor: "default" }}>{inner}</div>
               );

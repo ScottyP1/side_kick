@@ -1,21 +1,28 @@
 /**
- * @file Connectors to outside tools: the framework that lets an organization connect Azure DevOps Boards, Jira,
- * GitHub Issues, Confluence or Microsoft 365 files (SharePoint, OneDrive) once, link projects (GitHub:
- * repositories, Confluence: spaces, Microsoft 365: libraries or folders) to groups, and keep their work items,
- * pages and files in each group's knowledge, **read-only**. The tools themselves are in lib/connector-ado.ts,
+ * @file Connectors to outside tools: the framework that lets each group connect Azure DevOps Boards, Jira,
+ * GitHub Issues, Confluence or Microsoft 365 files (SharePoint, OneDrive) with the account its client gave it, link
+ * projects (GitHub: repositories, Confluence: spaces, Microsoft 365: libraries or folders), and keep their work
+ * items, pages and files in that group's knowledge, **read-only**. The tools themselves are in lib/connector-ado.ts,
  * lib/connector-jira.ts, lib/connector-github.ts, lib/connector-confluence.ts and lib/connector-m365.ts
  * (`Provider`); the text Sidekick indexes for each item is in lib/connector-text.ts.
  *
  * Concepts
- * - **Connector** (`connectors` table): one per organization and tool. An Org Owner or Org Admin connects it
- *   with the tool's own sign-in (OAuth authorization code flow; Microsoft Entra ID for Azure DevOps and Microsoft
- *   365, Atlassian for Jira and Confluence, a GitHub App for GitHub). No passwords are ever stored. The access and refresh tokens are **sealed** (encrypted at rest with
- *   the `SIDEKICK_ENCRYPTION_KEY` envelope setup, lib/secret-box.ts) and refreshed shortly before they run out.
- *   When a refresh is refused (revoked, expired after long disuse) the connector turns **expired** and someone
- *   must reconnect; nothing is deleted.
+ * - **Allowed tool types** (`connector_kinds`): the Org Owner switches each tool type on or off for the
+ *   organization (`setKindAllowed`; no sign-in at this level). Turning one off disconnects every group's connection of
+ *   that type. Team Leads and Org Admins who need a type that's off **ask** for it (lib/connector-requests.ts);
+ *   allowing a type approves every pending request for it.
+ * - **Connector** (`connectors` table): one per **group** and allowed tool, connected by the group's Team Lead (or an
+ *   Org Owner/Admin, for any group) with the account the client provided, through the tool's own sign-in (OAuth
+ *   authorization code flow with PKCE; Microsoft Entra ID for Azure DevOps and Microsoft 365, Atlassian for Jira and
+ *   Confluence, a GitHub App for GitHub; one app registration per tool serves every group). Two groups using Jira
+ *   have two separate connections, usually to two different client sites. Members and Viewers never sign in to
+ *   tools: everyone in the group sees what the group's connection can read. No passwords are ever stored. The access and refresh tokens are **sealed** (encrypted at rest with
+ *   the `SIDEKICK_ENCRYPTION_KEY` envelope setup, lib/secret-box.ts, bound to the connector's id) and refreshed shortly before they run out.
+ *   When a refresh is refused (revoked, expired after long disuse) the connector turns **expired** and the group's
+ *   Team Lead or an admin must reconnect; nothing is deleted.
  * - **Link** (`connector_links`): one project (ADO), project key (Jira), repository (GitHub, "owner/name"),
- *   space key (Confluence) or SharePoint library / folder (Microsoft 365, "<drive id>[/<folder id>]") feeding one group. Org Owners/Admins
- *   and that group's Team Lead link and unlink (`requireManage`). Each link has an audience like documents
+ *   space key (Confluence) or SharePoint library / folder (Microsoft 365, "<drive id>[/<folder id>]") read through a
+ *   group's connector into that same group. Org Owners/Admins and that group's Team Lead link and unlink (`requireManage`). Each link has an audience like documents
  *   (internal by default; shareable ones may be used when client guests are present).
  * - **Items** (`connector_items`): the work items read from a linked project (title, type, state, assignee, due
  *   date, link, what blocks it, description, comments summary). Each is indexed through lib/search.ts as source
@@ -33,19 +40,20 @@
  * - **Health**: on the Connectors page (`connectorHealth`: last sync, last success, the last error in plain words,
  *   an expired sign-in; a link with no success for `STALE_HOURS` shows a problem), and for the "broken connector"
  *   watcher through lib/connector-health.ts: every sync reports its group's result (`reportConnectorHealth`, id
- *   "azure-devops", "jira", "github", "confluence" or "microsoft-365-files"), an expired sign-in is reported organization-wide, and reconnecting, unlinking or
+ *   "azure-devops", "jira", "github", "confluence" or "microsoft-365-files"), an expired sign-in is reported for its group, and reconnecting, unlinking or
  *   disconnecting clears it. `connectorProblems` lists everything broken across organizations (operators).
  * - **Rate limits**: a tool that says "slow down" (429, GitHub's 403 with `Retry-After` / `x-ratelimit-remaining:
  *   0`, or a 503 with `Retry-After` as Microsoft Graph sends) is waited for when the wait is short (`RATE_WAIT_MAX_SECONDS`, once per call); otherwise the sync stops
  *   with a plain "busy" problem saying when it may continue, the cursor already saved, and the next run resumes.
- * - **Plan limits**: the plan's `connectors` limit (lib/plans.ts: none, one tool, or all) is checked before
- *   a *new* tool is connected (`assertCanAdd(org, "connectors")`); reconnecting one never counts again, and a
- *   smaller plan keeps what's connected.
+ * - **Plan limits**: the plan's `connectors` limit (lib/plans.ts: none, one tool type, or all) counts the allowed
+ *   tool types and is checked before a *new* type is allowed (`assertCanAdd(org, "connectors")`); how many groups
+ *   connect it doesn't matter, and a smaller plan keeps what's allowed.
  * - **Disconnect** removes the tokens, every link and every imported item with its search entries (local and
  *   Azure). Unlinking a project removes that project's items. Deleting a group or organization does too.
  *
- * Walls: every query is scoped to the organization, and every group-level call goes through
- * `requireWorkspace`/`requireManage` first. Tokens never leave the server (never in a response, log or trace).
+ * Walls: every query is scoped to the organization, and every connector-level call checks the person may manage the
+ * connector's own group (`requireManage`), so one group's sign-in can never list, link, sync or feed another
+ * group. Tokens never leave the server (never in a response, log or trace).
  */
 import "server-only";
 import crypto from "node:crypto";
@@ -55,13 +63,13 @@ import { openSecret, sealSecret } from "./secret-box";
 import { indexText, removeIndexedMany } from "./search";
 import { span, spanAttrs } from "./trace";
 import { removeConnectorHealth, reportConnectorHealth } from "./connector-health";
-import { assertCanAdd } from "./limits";
 import { BRAND } from "./brand";
 import { ado, MAX_PER_SYNC as ADO_MAX } from "./connector-ado";
 import { jira } from "./connector-jira";
 import { github } from "./connector-github";
 import { confluence } from "./connector-confluence";
 import { m365 } from "./connector-m365";
+import { allowKind, requestsFor } from "./connector-requests";
 import { adoOrgName, ConnectorError, CONNECTOR_KINDS, fileText, isDoneState, isPageKind, KIND_LABEL, pageText, PROJECT_WORD, rateLimitWait, workItemText, workItemTitle, type ConnectorKind, type WorkItem } from "./connector-text";
 
 export { CONNECTOR_KINDS, KIND_LABEL, type ConnectorKind } from "./connector-text";
@@ -80,7 +88,7 @@ export const CONNECTOR_COOKIE = "sk_connector";
 
 /** A `connectors` row. Tokens are sealed; use `toolApi` to call the tool. */
 export type ConnectorRow = {
-  id: string; org_id: string; kind: ConnectorKind; status: "connected" | "expired"; account: string; account_name: string | null;
+  id: string; org_id: string; workspace_id: string; kind: ConnectorKind; status: "connected" | "expired"; account: string; account_name: string | null;
   api_base: string; web_base: string; access_token: string | null; refresh_token: string | null; token_expires_at: string | null;
   connected_by: string | null; connected_at: string; last_error: string | null; last_error_at: string | null; updated_at: string;
 };
@@ -150,7 +158,16 @@ const HEALTH: Record<ConnectorKind, { id: string; label: string }> = {
 };
 
 const expiredMessage = (kind: ConnectorKind) =>
-  `The ${KIND_LABEL[kind]} sign-in has expired or was revoked. An Org Owner or Org Admin needs to reconnect it on Connectors.`;
+  `The ${KIND_LABEL[kind]} sign-in has expired or was revoked. The group's Team Lead (or an admin) needs to reconnect it on Connectors.`;
+
+/** Why a tool type that's off can't be connected. */
+const notAllowedMessage = (kind: ConnectorKind) => `${KIND_LABEL[kind]} isn't allowed in your organization yet. Ask the Org Owner for it on Connectors.`;
+
+/** The tool types the organization allows (lib/connector-requests.ts `allowKind`, `setKindAllowed`). */
+export async function allowedKinds(orgId: string): Promise<ConnectorKind[]> {
+  return (await all<{ kind: ConnectorKind }>("SELECT kind FROM connector_kinds WHERE org_id = ? ORDER BY kind", orgId)).map((r) => r.kind).filter((k) => (CONNECTOR_KINDS as readonly string[]).includes(k));
+}
+const isAllowed = async (orgId: string, kind: ConnectorKind) => Boolean(await get("SELECT kind FROM connector_kinds WHERE org_id = ? AND kind = ?", orgId, kind));
 
 /** Seal-context per column and connector, so a sealed token copied onto another row won't open. */
 const ctx = (id: string, col: "access_token" | "refresh_token") => `connectors.${col}:${id}`;
@@ -274,12 +291,12 @@ function makeApi(kind: ConnectorKind, token: (force: boolean) => Promise<string>
 const refreshing = new Map<string, Promise<string>>();
 
 /** Marks a connector expired (once), with the plain reason, and tells the audit log. */
-async function markExpired(c: Pick<ConnectorRow, "id" | "org_id" | "kind">) {
+async function markExpired(c: Pick<ConnectorRow, "id" | "org_id" | "kind" | "workspace_id">) {
   const msg = expiredMessage(c.kind);
   const r = await run("UPDATE connectors SET status = 'expired', last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ? AND org_id = ? AND status <> 'expired'", msg, now(), now(), c.id, c.org_id);
-  if (r.changes) await auditAsSidekick(c.org_id, `The ${KIND_LABEL[c.kind]} sign-in expired or was revoked; syncing paused until someone reconnects it`, "Connectors");
-  // Organization-wide for the watcher: the org's admins are the ones who can reconnect.
-  await reportConnectorHealth({ orgId: c.org_id, connector: HEALTH[c.kind].id, label: HEALTH[c.kind].label, ok: false, message: msg, fixHref: "/connectors" });
+  if (r.changes) await auditAsSidekick(c.org_id, `The ${KIND_LABEL[c.kind]} sign-in expired or was revoked; syncing paused until someone reconnects it`, "Connectors", c.workspace_id);
+  // For the group's watcher finding: its Team Lead (and the admins) are the ones who can reconnect.
+  await reportConnectorHealth({ orgId: c.org_id, workspaceId: c.workspace_id, connector: HEALTH[c.kind].id, label: HEALTH[c.kind].label, ok: false, message: msg, fixHref: "/connectors" });
 }
 
 /**
@@ -287,7 +304,7 @@ async function markExpired(c: Pick<ConnectorRow, "id" | "org_id" | "kind">) {
  * otherwise a refreshed one (saved sealed, with Atlassian's rotated refresh token). One refresh at a time per
  * connector in this process. A refused refresh marks the connector expired.
  */
-async function connectorToken(c: Pick<ConnectorRow, "id" | "org_id" | "kind">, force: boolean): Promise<string> {
+async function connectorToken(c: Pick<ConnectorRow, "id" | "org_id" | "kind" | "workspace_id">, force: boolean): Promise<string> {
   const cur = await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ?", c.id, c.org_id);
   if (!cur || cur.status === "expired") throw new ConnectorError("auth", expiredMessage(c.kind));
   const soon = new Date(Date.now() + 60_000).toISOString();
@@ -340,31 +357,31 @@ function asHttp(e: unknown): never {
 const b64url = (b: Buffer) => b.toString("base64url");
 
 /**
- * Starts connecting a tool for the person's organization (Org Owner/Admin; the route checks the role). Refuses
- * when the tool's app isn't set up here (503), when a new tool would go past the plan's `connectors` limit
- * (402 with the upgrade message), and for ADO without a valid organization name. Saves a one-time state with
- * a PKCE verifier and returns the tool's sign-in address plus the state for the browser cookie.
+ * Starts connecting an allowed tool **for one group** (`ws`): its Team Lead, or an Org Owner/Admin for any group
+ * (`requireManage`). Refuses when the tool type isn't allowed in the organization (403: ask the Org Owner), when
+ * the tool's app isn't set up here (503), and for ADO without a valid organization name. Reconnecting the group's
+ * existing connection is the same call. Saves a one-time state with a PKCE verifier and the group, and returns the
+ * tool's sign-in address plus the state for the browser cookie.
  */
-export async function startConnect(req: Request, user: User, kindRaw: unknown, siteRaw: unknown): Promise<{ url: string; state: string }> {
+export async function startConnect(req: Request, user: User, kindRaw: unknown, siteRaw: unknown, wsRaw: unknown): Promise<{ url: string; state: string }> {
+  const ws = await requireManage(user, typeof wsRaw === "string" ? wsRaw : null);
   const kind = kindOf(kindRaw);
   const p = PROVIDERS[kind];
+  if (!(await isAllowed(user.org_id, kind))) throw new HttpError(403, notAllowedMessage(kind));
   if (!p.configured()) throw new HttpError(503, `Connecting ${KIND_LABEL[kind]} isn't set up on this ${BRAND.name} yet. The ${BRAND.name} team adds it (docs/RUNBOOKS.md).`);
-  // GitHub has no site to pick: the repositories come from the GitHub App's installations.
-  let site: string | null = kind !== "github" && typeof siteRaw === "string" && siteRaw.trim() ? siteRaw.trim().slice(0, 200) : null;
+  // GitHub has no site to pick: the repositories come from the GitHub App's installations. Microsoft 365: nothing to
+  // type either; the client's own Microsoft organization is whichever one the account signs in to.
+  let site: string | null = kind !== "github" && kind !== "m365" && typeof siteRaw === "string" && siteRaw.trim() ? siteRaw.trim().slice(0, 200) : null;
   if (kind === "ado") {
     site = adoOrgName(siteRaw);
     if (!site) throw new HttpError(400, "Type your Azure DevOps organization: the name after dev.azure.com/ (for example “northwind”).");
   }
-  // Microsoft 365: nothing to type; the organization's own Microsoft tenant (when it linked one) is the only one allowed.
-  if (kind === "m365") site = (await get<{ t: string | null }>("SELECT entra_tenant_id AS t FROM orgs WHERE id = ?", user.org_id))?.t ?? null;
-  const existing = await get<{ id: string }>("SELECT id FROM connectors WHERE org_id = ? AND kind = ?", user.org_id, kind);
-  if (!existing) await assertCanAdd(user.org_id, "connectors");
   const state = b64url(crypto.randomBytes(24));
   const verifier = b64url(crypto.randomBytes(32));
   await run("DELETE FROM connector_states WHERE expires_at < ?", now());
   await run(
-    "INSERT INTO connector_states (state, org_id, user_id, kind, verifier, site, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    state, user.org_id, user.id, kind, verifier, site, new Date(Date.now() + STATE_MINUTES * 60_000).toISOString(),
+    "INSERT INTO connector_states (state, org_id, user_id, kind, verifier, site, expires_at, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    state, user.org_id, user.id, kind, verifier, site, new Date(Date.now() + STATE_MINUTES * 60_000).toISOString(), ws,
   );
   const challenge = b64url(crypto.createHash("sha256").update(verifier).digest());
   return { url: p.authorizeUrl({ state, challenge, redirectUri: connectorRedirectUri(req) }), state };
@@ -372,16 +389,16 @@ export async function startConnect(req: Request, user: User, kindRaw: unknown, s
 
 /**
  * Finishes connecting: checks the state against the browser cookie (used once, 10 minutes), swaps the code for
- * tokens, checks which account/site they open, and saves the connector with the tokens sealed. Reconnecting the
- * same account replaces the tokens and resumes syncing; a different account is refused (disconnect first, so
- * the old account's items don't mix with the new). Only the person who started may finish, and only while
- * they're still an Org Owner/Admin. Audited.
- * @returns the tool that was connected
+ * tokens, checks which account/site they open, and saves the **group's** connector with the tokens sealed.
+ * Reconnecting the same account replaces the tokens and resumes syncing; a different account is refused (disconnect
+ * first, so the old account's items don't mix with the new). Only the person who started may finish, only while
+ * they may still manage that group and the tool type is still allowed. Audited in the group.
+ * @returns the tool that was connected and the group
  */
-export async function finishConnect(req: Request, cookieState: string | undefined): Promise<ConnectorKind> {
+export async function finishConnect(req: Request, cookieState: string | undefined): Promise<{ kind: ConnectorKind; ws: string }> {
   const q = new URL(req.url).searchParams;
   const state = q.get("state") ?? "";
-  const saved = state ? await get<{ state: string; org_id: string; user_id: string; kind: ConnectorKind; verifier: string; site: string | null; expires_at: string }>("SELECT * FROM connector_states WHERE state = ?", state) : undefined;
+  const saved = state ? await get<{ state: string; org_id: string; user_id: string; kind: ConnectorKind; verifier: string; site: string | null; expires_at: string; workspace_id: string | null }>("SELECT * FROM connector_states WHERE state = ?", state) : undefined;
   if (saved) await run("DELETE FROM connector_states WHERE state = ?", state);
   if (q.get("error")) {
     // Only the tool's error code is shown (never its free text: anyone can make a link to this address).
@@ -392,8 +409,10 @@ export async function finishConnect(req: Request, cookieState: string | undefine
   if (!saved || !code || !cookieState || cookieState !== state) throw new HttpError(400, "That link expired or was opened in a different browser. Start connecting again from Connectors.");
   if (saved.expires_at < now()) throw new HttpError(400, "Connecting took too long. Try again.");
   const user = await get<User>("SELECT * FROM users WHERE id = ? AND org_id = ?", saved.user_id, saved.org_id);
-  if (!user || !isAdmin(user)) throw new HttpError(403, "Only Org Owners and Org Admins can connect tools.");
+  if (!user) throw new HttpError(403, "Only the group's Team Lead or an admin can connect tools.");
+  const ws = await requireManage(user, saved.workspace_id);
   const kind = saved.kind;
+  if (!(await isAllowed(saved.org_id, kind))) throw new HttpError(403, notAllowedMessage(kind));
   const p = PROVIDERS[kind];
   return span("connector", `Connect ${KIND_LABEL[kind]}`, async () => {
     const tokens = await p.exchange(code, saved.verifier, connectorRedirectUri(req)).catch(() => ({ error: "unreachable" }));
@@ -403,11 +422,10 @@ export async function finishConnect(req: Request, cookieState: string | undefine
     }
     const api = makeApi(kind, async () => tokens.access);
     const acct = await p.account(api, saved.site).catch(asHttp);
-    const existing = await get<ConnectorRow>("SELECT * FROM connectors WHERE org_id = ? AND kind = ?", saved.org_id, kind);
+    const existing = await get<ConnectorRow>("SELECT * FROM connectors WHERE org_id = ? AND workspace_id = ? AND kind = ?", saved.org_id, ws, kind);
     if (existing && existing.account !== acct.account) {
-      throw new HttpError(409, `${KIND_LABEL[kind]} is already connected to ${existing.account_name ?? existing.account}. Disconnect it first to switch to ${acct.accountName}.`);
+      throw new HttpError(409, `${KIND_LABEL[kind]} is already connected to ${existing.account_name ?? existing.account} for this group. Disconnect it first to switch to ${acct.accountName}.`);
     }
-    if (!existing) await assertCanAdd(saved.org_id, "connectors");
     const id = existing?.id ?? newId();
     const sealedAccess = sealSecret(tokens.access, ctx(id, "access_token"));
     const sealedRefresh = tokens.refresh ? sealSecret(tokens.refresh, ctx(id, "refresh_token")) : null;
@@ -421,31 +439,40 @@ export async function finishConnect(req: Request, cookieState: string | undefine
       await run("UPDATE connector_links SET last_sync_at = NULL WHERE connector_id = ? AND org_id = ?", id, saved.org_id);
     } else {
       await run(
-        `INSERT INTO connectors (id, org_id, kind, status, account, account_name, api_base, web_base, access_token, refresh_token, token_expires_at, connected_by, connected_at, updated_at)
-         VALUES (?, ?, ?, 'connected', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        id, saved.org_id, kind, acct.account, acct.accountName, acct.apiBase, acct.webBase, sealedAccess, sealedRefresh, expires, user.name, now(), now(),
+        `INSERT INTO connectors (id, org_id, workspace_id, kind, status, account, account_name, api_base, web_base, access_token, refresh_token, token_expires_at, connected_by, connected_at, updated_at)
+         VALUES (?, ?, ?, ?, 'connected', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, saved.org_id, ws, kind, acct.account, acct.accountName, acct.apiBase, acct.webBase, sealedAccess, sealedRefresh, expires, user.name, now(), now(),
       );
     }
     spanAttrs({ kind, reconnect: Boolean(existing) });
-    await reportConnectorHealth({ orgId: saved.org_id, connector: HEALTH[kind].id, label: HEALTH[kind].label, ok: true, fixHref: "/connectors" });
-    await audit(user, `${existing ? "Reconnected" : "Connected"} ${KIND_LABEL[kind]} (${acct.accountName}), read-only`, "Connectors");
-    return kind;
+    await reportConnectorHealth({ orgId: saved.org_id, workspaceId: ws, connector: HEALTH[kind].id, label: HEALTH[kind].label, ok: true, fixHref: "/connectors" });
+    await audit(user, `${existing ? "Reconnected" : "Connected"} ${KIND_LABEL[kind]} (${acct.accountName}) for this group, read-only`, "Connectors", ws);
+    return { kind, ws };
   });
 }
 
-/** The organization's connector, or 404 (also for another organization's id). */
-async function ownConnector(orgId: string, id: unknown): Promise<ConnectorRow> {
-  const c = typeof id === "string" ? await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ?", id, orgId) : undefined;
+/**
+ * A connector the person may manage: in their organization, and its group one they manage (`requireManage`:
+ * 403 for Members, Viewers and Billing Admins, 404 for another organization's id or a group they aren't in).
+ */
+async function ownConnector(user: User, id: unknown): Promise<ConnectorRow> {
+  if (!isAdmin(user) && user.role !== "Team Lead") throw new HttpError(403, "Only the group's Team Lead or an admin can do this.");
+  const c = typeof id === "string" ? await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
   if (!c) throw new HttpError(404, "Connector not found.");
+  await requireManage(user, c.workspace_id).catch(() => { throw new HttpError(404, "Connector not found."); });
   return c;
 }
 
 /**
- * Disconnects a tool (Org Owner/Admin; the route checks the role): removes its tokens, every link and every
- * imported item with its search entries (local and Azure). Audited with the counts.
+ * Disconnects one group's connection (its Team Lead, or an Org Owner/Admin): removes its tokens, every linked
+ * project and every imported item with its search entries (local and Azure). Audited in the group with the counts.
  */
 export async function disconnect(user: User, id: unknown): Promise<{ links: number; items: number }> {
-  const c = await ownConnector(user.org_id, id);
+  return removeConnector(user, await ownConnector(user, id));
+}
+
+/** Removes a connector with its links, items, search entries and health (see `disconnect`). Audited. */
+async function removeConnector(user: User, c: ConnectorRow): Promise<{ links: number; items: number }> {
   return span("connector", `Disconnect ${KIND_LABEL[c.kind]}`, async () => {
     const items = await all<{ id: string }>("SELECT id FROM connector_items WHERE org_id = ? AND link_id IN (SELECT id FROM connector_links WHERE connector_id = ? AND org_id = ?)", user.org_id, c.id, user.org_id);
     const links = await all<{ id: string }>("SELECT id FROM connector_links WHERE connector_id = ? AND org_id = ?", c.id, user.org_id);
@@ -455,12 +482,45 @@ export async function disconnect(user: User, id: unknown): Promise<{ links: numb
       await run("DELETE FROM connector_links WHERE connector_id = ? AND org_id = ?", c.id, user.org_id);
       await run("DELETE FROM connectors WHERE id = ? AND org_id = ?", c.id, user.org_id);
       // Disconnected on purpose: nothing for the broken-connector watcher to report any more.
-      await run("DELETE FROM connector_health WHERE org_id = ? AND connector = ?", user.org_id, HEALTH[c.kind].id);
+      await run("DELETE FROM connector_health WHERE org_id = ? AND workspace_id = ? AND connector = ?", user.org_id, c.workspace_id, HEALTH[c.kind].id);
     });
     spanAttrs({ kind: c.kind, links: links.length, items: items.length });
-    await audit(user, `Disconnected ${KIND_LABEL[c.kind]} (${c.account_name ?? c.account}): removed its sign-in, ${links.length} linked project${links.length === 1 ? "" : "s"} and ${items.length} imported item${items.length === 1 ? "" : "s"}`, "Connectors");
+    await audit(user, `Disconnected ${KIND_LABEL[c.kind]} (${c.account_name ?? c.account}) from this group: removed its sign-in, ${links.length} linked project${links.length === 1 ? "" : "s"} and ${items.length} imported item${items.length === 1 ? "" : "s"}`, "Connectors", c.workspace_id);
     return { links: links.length, items: items.length };
   });
+}
+
+/**
+ * The Org Owner switches a tool type on or off for the organization (no sign-in at this level). On: within the
+ * plan's connectors limit (402 with the upgrade message), approving every pending request for it
+ * (lib/connector-requests.ts `allowKind`). Off: disconnects **every group's** connection of that type (tokens,
+ * links, imported items, search entries) and returns the groups affected. Audited, traced.
+ */
+export async function setKindAllowed(user: User, kindRaw: unknown, allowed: unknown): Promise<{ allowed: ConnectorKind[]; removed: { groups: string[]; links: number; items: number } }> {
+  if (user.role !== "Org Owner") throw new HttpError(403, "Only the Org Owner chooses which tools the organization allows.");
+  const kind = kindOf(kindRaw);
+  if (typeof allowed !== "boolean") throw new HttpError(400, "Say whether to allow it (true) or not (false).");
+  const removed = { groups: [] as string[], links: 0, items: 0 };
+  if (allowed) await allowKind(user, kind);
+  else {
+    await span("connector", `Stop allowing ${KIND_LABEL[kind]}`, async () => {
+      const conns = await all<ConnectorRow & { workspace_name: string }>(
+        "SELECT c.*, w.name AS workspace_name FROM connectors c JOIN workspaces w ON w.id = c.workspace_id AND w.org_id = c.org_id WHERE c.org_id = ? AND c.kind = ? ORDER BY w.name", user.org_id, kind,
+      );
+      for (const c of conns) {
+        const r = await removeConnector(user, c);
+        removed.groups.push(c.workspace_name);
+        removed.links += r.links;
+        removed.items += r.items;
+      }
+      // A connection whose group is gone can't remain either.
+      await run("DELETE FROM connectors WHERE org_id = ? AND kind = ?", user.org_id, kind);
+      const r = await run("DELETE FROM connector_kinds WHERE org_id = ? AND kind = ?", user.org_id, kind);
+      spanAttrs({ kind, groups: conns.length, links: removed.links, items: removed.items });
+      if (r.changes) await audit(user, `Stopped allowing ${KIND_LABEL[kind]} in the organization${conns.length ? `: disconnected it from ${conns.length} group${conns.length === 1 ? "" : "s"} (${removed.items} imported item${removed.items === 1 ? "" : "s"} removed)` : ""}`, "Connectors");
+    });
+  }
+  return { allowed: await allowedKinds(user.org_id), removed };
 }
 
 /* ---------------------------------------------------------------- */
@@ -468,12 +528,11 @@ export async function disconnect(user: User, id: unknown): Promise<{ links: numb
 /* ---------------------------------------------------------------- */
 
 /**
- * The projects the connected account can read in a tool (Org Owners/Admins and Team Leads: the people who may
- * link them). A tool problem becomes a plain 409/502.
+ * The projects a group's connected account can read in a tool (that group's Team Lead, or an Org Owner/Admin: the
+ * people who may link them). A tool problem becomes a plain 409/502.
  */
 export async function listProjects(user: User, connectorId: unknown): Promise<{ key: string; name: string }[]> {
-  if (!isAdmin(user) && user.role !== "Team Lead") throw new HttpError(403, "Only Org Owners, Org Admins and Team Leads can link projects to groups.");
-  const c = await ownConnector(user.org_id, connectorId);
+  const c = await ownConnector(user, connectorId);
   return span("connector", `List ${KIND_LABEL[c.kind]} projects`, async () => {
     const list = await PROVIDERS[c.kind].projects(toolApi(c), c).catch(asHttp);
     spanAttrs({ kind: c.kind, projects: list.length });
@@ -482,14 +541,17 @@ export async function listProjects(user: User, connectorId: unknown): Promise<{ 
 }
 
 /**
- * Links a project to a group (Org Owner/Admin, or the group's Team Lead: `requireManage`), then runs its first
- * sync straight away. The project must be one the connected account can read (checked against the tool's own
- * list, so a typo or a made-up key is refused). The same project can feed several groups (each keeps its own
- * copy, walled to that group). Audited. A failing first sync doesn't undo the link: its health shows why.
+ * Links a project to the group of the connector it's read through (Org Owner/Admin, or that group's Team Lead:
+ * `requireManage`), then runs its first sync straight away. `ws`, when given, must be the connector's own group: a
+ * group's sign-in never feeds another group (404). The project must be one the connected account can read (checked
+ * against the tool's own list, so a typo or a made-up key is refused). Audited. A failing first sync doesn't undo
+ * the link: its health shows why.
  */
 export async function linkProject(user: User, body: { connector?: unknown; ws?: unknown; project?: unknown; audience?: unknown }) {
-  const ws = await requireManage(user, typeof body.ws === "string" ? body.ws : null);
-  const c = await ownConnector(user.org_id, body.connector);
+  if (body.ws !== undefined) await requireManage(user, typeof body.ws === "string" ? body.ws : null);
+  const c = await ownConnector(user, body.connector);
+  if (body.ws !== undefined && body.ws !== c.workspace_id) throw new HttpError(404, "Connector not found.");
+  const ws = c.workspace_id;
   if (c.status === "expired") throw new HttpError(409, expiredMessage(c.kind));
   if (typeof body.project !== "string" || !body.project.trim()) throw new HttpError(400, `Pick a ${PROJECT_WORD[c.kind]} to link.`);
   const audience = body.audience === "shareable" ? "shareable" : "internal";
@@ -700,9 +762,9 @@ export type LinkHealth = {
   id: string; connectorId: string; kind: ConnectorKind; workspaceId: string; workspaceName: string; project: string; projectName: string;
   audience: "internal" | "shareable"; items: number; skipped: number; lastSyncAt: string | null; lastOkAt: string | null; syncing: boolean; problem: string | null;
 };
-/** One connected tool's health. `status`: ok, expired (reconnect), error (a project fails or is stale), waiting (no sync yet). */
+/** One group's connected tool's health. `status`: ok, expired (reconnect), error (a project fails or is stale), waiting (no sync yet). */
 export type ConnectorHealth = {
-  id: string; kind: ConnectorKind; label: string; account: string; accountName: string | null; status: "ok" | "expired" | "error" | "waiting";
+  id: string; kind: ConnectorKind; label: string; workspaceId: string; workspaceName: string; account: string; accountName: string | null; status: "ok" | "expired" | "error" | "waiting";
   problem: string | null; connectedBy: string | null; connectedAt: string; lastSyncAt: string | null; lastOkAt: string | null; links: LinkHealth[];
 };
 
@@ -736,12 +798,14 @@ async function linkHealth(orgId: string, linkId: string): Promise<LinkHealth> {
 }
 
 /**
- * The organization's connected tools with their health and linked projects, for the Connectors page and the
- * group page. `workspaceIds` limits the projects shown to those groups (pass the person's own groups; admins
- * see every group). Never includes tokens.
+ * The groups' connected tools with their health and linked projects, for the Connectors page and the group page.
+ * `workspaceIds` limits them to those groups (pass the person's own groups; admins see every group). Never
+ * includes tokens.
  */
 export async function connectorHealth(orgId: string, workspaceIds: string[] | null, at = new Date()): Promise<ConnectorHealth[]> {
-  const conns = await all<ConnectorRow>("SELECT * FROM connectors WHERE org_id = ? ORDER BY kind", orgId);
+  const conns = (await all<ConnectorRow & { workspace_name: string }>(
+    "SELECT c.*, w.name AS workspace_name FROM connectors c JOIN workspaces w ON w.id = c.workspace_id AND w.org_id = c.org_id WHERE c.org_id = ? ORDER BY c.kind, w.name", orgId,
+  )).filter((c) => !workspaceIds || workspaceIds.includes(c.workspace_id));
   const links = (await all<LinkJoin>(`${LINK_SELECT} WHERE l.org_id = ? ORDER BY w.name, l.project_name`, orgId))
     .filter((l) => !workspaceIds || workspaceIds.includes(l.workspace_id));
   return conns.map((c) => {
@@ -753,16 +817,25 @@ export async function connectorHealth(orgId: string, workspaceIds: string[] | nu
     const problem = c.status === "expired" ? (c.last_error ?? expiredMessage(c.kind))
       : broken.length ? `${broken.length} linked project${broken.length === 1 ? " has" : "s have"} a problem: ${broken[0].problem}` : null;
     return {
-      id: c.id, kind: c.kind, label: KIND_LABEL[c.kind], account: c.account, accountName: c.account_name, status, problem,
+      id: c.id, kind: c.kind, label: KIND_LABEL[c.kind], workspaceId: c.workspace_id, workspaceName: c.workspace_name, account: c.account, accountName: c.account_name, status, problem,
       connectedBy: c.connected_by, connectedAt: c.connected_at, lastSyncAt: tries.at(-1) ?? null, lastOkAt: okTimes.at(-1) ?? null, links: mine,
     };
   });
 }
 
-/** The Connectors page's view for one person: tools (health), their visible links, and what this server and plan allow. */
+/**
+ * The Connectors page's view for one person: the tool types the organization allows (`allowed`), the connections
+ * of the groups they can see (health and links), what this server has set up (`configured`), the requests they
+ * may see (lib/connector-requests.ts `requestsFor`), and what they may do: `canToggle` (Org Owner: allow or stop
+ * tool types, approve requests), `canConnect` (Org Owners/Admins for any group, Team Leads for their groups:
+ * connect, reconnect, disconnect, link), `canRequest` (Org Admins and Team Leads ask for a type that isn't allowed).
+ */
 export async function connectorsFor(user: User) {
   const ids = isAdmin(user) ? null : await workspaceIdsFor(user);
-  return { connectors: await connectorHealth(user.org_id, ids), configured: configuredKinds() };
+  return {
+    allowed: await allowedKinds(user.org_id), connectors: await connectorHealth(user.org_id, ids), configured: configuredKinds(), requests: await requestsFor(user),
+    canToggle: user.role === "Org Owner", canConnect: isAdmin(user) || user.role === "Team Lead", canRequest: user.role === "Org Admin" || user.role === "Team Lead",
+  };
 }
 
 /** One broken connector or linked project, across all organizations (see `connectorProblems`). */

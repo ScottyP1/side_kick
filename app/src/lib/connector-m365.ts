@@ -13,8 +13,9 @@
  *   Microsoft 365). App: `M365_CLIENT_ID` / `M365_CLIENT_SECRET` (an Entra app for "accounts in any organizational
  *   directory"; Cody may reuse the Microsoft sign-in app, but these must be set on purpose so the tile only says
  *   "Ready to connect" once the permissions exist).
- * - **Account** (the framework's "site"): the Microsoft organization (tenant) the token opens. When the Sidekick
- *   organization has linked its own Microsoft tenant (orgs.entra_tenant_id), only that tenant may be connected.
+ * - **Account** (the framework's "site"): the Microsoft organization (tenant) the token opens. A group connects with
+ *   the account its client gave it, usually in the client's own tenant, so any tenant may connect (lib/connectors.ts
+ *   passes no site; `account` still refuses a mismatch when a site is given).
  * - **Library or folder** (the framework's "project"): what gets linked to a group. Key `<drive id>` for a whole
  *   SharePoint document library, `<drive id>/<item id>` for one folder (a top-level folder of a library, or a
  *   OneDrive folder shared with the connecting account). Listed by `projects`: the sites the account can open
@@ -142,7 +143,7 @@ export const m365: Provider = {
     return { access: r.access_token, refresh: r.refresh_token ?? refreshToken, expiresIn: r.expires_in ?? 3600 };
   },
 
-  /** `site` is the organization's own Microsoft tenant id when it linked one (lib/connectors.ts `startConnect`). */
+  /** `site`, when given, is the only Microsoft tenant accepted (lib/connectors.ts passes none: any client tenant). */
   async account(api, site) {
     const r = await api(`${graphBase()}/organization?$select=id,displayName`, {}, { what: "your Microsoft organization" });
     const org = ((r.json as GraphList<{ id?: string; displayName?: string }>)?.value ?? [])[0];

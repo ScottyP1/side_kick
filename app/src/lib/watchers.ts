@@ -14,7 +14,8 @@
  *   the check stops finding it, it is **resolved automatically** ("fixed"). Something found again later reopens.
  * - **Who sees it** (`audience`): `members` (everyone in the group: action items, documents, unanswered questions),
  *   `managers` (the group's Team Leads and the org's admins: Teams chats, failed posts), `admins` (Org Owners and
- *   Org Admins: organization-wide things such as chats waiting to be assigned, groups without a Team Lead).
+ *   Org Admins: organization-wide things such as chats waiting to be assigned, groups without a Team Lead),
+ *   `owners` (Org Owners only: requests to turn a tool on, which only they approve).
  *   Workspace walls apply as everywhere (`workspaceIdsFor`): nobody sees findings of a group they can't open.
  * - **Acting**: the next step links to the page that fixes it. Managers (admins, and Team Leads for their groups)
  *   can **snooze** a finding for 7 days; it comes back if the problem is still there. Audited.
@@ -40,10 +41,11 @@ import { getChatSettings } from "./reminders";
 import { versionKey } from "./rank";
 import { tagSafe } from "./security";
 import { BRAND } from "./brand";
+import { KIND_LABEL as TOOL_LABEL, PROJECT_WORD, type ConnectorKind } from "./connector-text";
 import type { TeamsConversation } from "./teams/bot";
 
 /** The kinds of finding, one per watcher (chats have two: waiting to be assigned, and removed in Teams). */
-export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector"] as const;
+export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request"] as const;
 export type FindingKind = (typeof FINDING_KINDS)[number];
 
 /** Short plain names for each kind (pills on the page, Owner Console counts). */
@@ -58,9 +60,10 @@ export const KIND_LABEL: Record<FindingKind, string> = {
   no_lead: "No Team Lead",
   no_notes_chat: "No notes chat",
   broken_connector: "Connector not working",
+  connector_request: "Connector requests",
 };
 
-export type Audience = "members" | "managers" | "admins";
+export type Audience = "members" | "managers" | "admins" | "owners";
 export type Severity = "info" | "warn" | "bad";
 
 /** What a watcher returns for one problem it sees right now. */
@@ -412,14 +415,69 @@ const brokenConnector: Watcher = {
         kind: "broken_connector", workspaceId: c.workspace_id || null, subject: c.connector, audience: c.workspace_id ? "managers" : "admins", severity: "bad",
         title: `${c.label} isn't working`,
         detail: `${c.message ?? "It stopped working."} (since ${fmtDay(c.broken_since ?? c.checked_at)})`,
-        nextStep: `Reconnect it on the Connectors page (an admin of the other tool may need to approve ${BRAND.name} again).`,
+        nextStep: `Reconnect it on the Connectors page: the group's Team Lead signs in again with the client's account (an admin of the other tool may need to approve ${BRAND.name} again).`,
         actionHref: c.fix_href ?? "/connectors", actionLabel: "Fix connector", data: { connector: c.connector },
       } satisfies Fresh));
   },
 };
 
+/** How long an approved or declined connector request stays on Home for the group's managers. */
+const DECIDED_REQUEST_DAYS = 7;
+
+/**
+ * Requests to turn a tool on (lib/connector-requests.ts). A pending one is for the Org Owner (who approves);
+ * once decided, the group's managers hear how it went for a week: approved until the group connects that tool,
+ * declined with the Org Owner's note.
+ */
+const connectorRequests: Watcher = {
+  kind: "connector_request",
+  label: "Connector requests",
+  async check(o) {
+    const groups = new Map(o.groups.map((g) => [g.id, g.name]));
+    const rows = await all<{ id: string; kind: ConnectorKind; workspace_id: string; requester_name: string; reason: string | null; status: string; note: string | null; decided_by: string | null; created_at: string; linked: number | string }>(
+      `SELECT r.id, r.kind, r.workspace_id, r.requester_name, r.reason, r.status, r.note, r.decided_by, r.created_at,
+              (SELECT COUNT(*) FROM connectors c WHERE c.org_id = r.org_id AND c.workspace_id = r.workspace_id AND c.kind = r.kind) AS linked
+         FROM connector_requests r
+        WHERE r.org_id = ? AND (r.status = 'pending' OR (r.status IN ('approved', 'declined') AND r.decided_at >= ?))`,
+      o.orgId, daysAgo(o.at, DECIDED_REQUEST_DAYS),
+    );
+    const out: Fresh[] = [];
+    for (const r of rows) {
+      const group = groups.get(r.workspace_id);
+      if (!group) continue;
+      const tool = TOOL_LABEL[r.kind] ?? r.kind;
+      if (r.status === "pending") {
+        out.push({
+          kind: "connector_request", workspaceId: r.workspace_id, subject: r.id, audience: "owners", severity: "warn",
+          title: `${r.requester_name} asks to use ${tool} in ${quote(group, 60)}`,
+          detail: r.reason ? `Why: ${quote(r.reason, 200)} (asked ${fmtDay(r.created_at)})` : `No reason given (asked ${fmtDay(r.created_at)}).`,
+          nextStep: `Approve it to allow ${tool} in your organization (the group then connects it with its client's account, read-only), or decline it with a note.`,
+          actionHref: "/connectors#requests", actionLabel: "Review request",
+        });
+      } else if (r.status === "approved" && !Number(r.linked)) {
+        out.push({
+          kind: "connector_request", workspaceId: r.workspace_id, subject: r.id, audience: "managers", severity: "info",
+          title: `${tool} is allowed now: connect it for ${quote(group, 60)}`,
+          detail: `${r.decided_by ?? "The Org Owner"} approved ${r.requester_name}'s request.`,
+          nextStep: `Connect it on the Connectors page with the account the client gave you for ${BRAND.name}, then pick which ${PROJECT_WORD[r.kind]} feeds this group.`,
+          actionHref: `/connectors#tool-${r.kind}`, actionLabel: "Connect it",
+        });
+      } else if (r.status === "declined") {
+        out.push({
+          kind: "connector_request", workspaceId: r.workspace_id, subject: r.id, audience: "managers", severity: "info",
+          title: `The request to use ${tool} in ${quote(group, 60)} was declined`,
+          detail: r.note ? `${r.decided_by ?? "The Org Owner"}: ${quote(r.note, 200)}` : `${r.decided_by ?? "The Org Owner"} didn't add a note.`,
+          nextStep: "Talk to your Org Owner if you still need it; you can ask again on the Connectors page.",
+          actionHref: `/connectors#tool-${r.kind}`, actionLabel: "Open Connectors",
+        });
+      }
+    }
+    return out;
+  },
+};
+
 /** Every watcher, in the order they run. */
-export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector];
+export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests];
 
 /* ------------------------------------------------------------------ */
 /* Running the watchers and keeping findings up to date                */
@@ -432,6 +490,72 @@ type FindingRow = {
 };
 
 const dedupeKey = (f: Pick<Fresh, "kind" | "workspaceId" | "subject">) => `${f.kind}:${f.workspaceId ?? "org"}:${f.subject}`;
+
+/**
+ * Runs one watcher for an organization and brings its findings up to date (see `runWatchers`). Returns how many
+ * were opened and resolved, or null when the watcher failed (its findings are left as they were).
+ */
+async function applyWatcher(ctx: OrgCtx, w: Watcher, t: string): Promise<{ opened: number; resolved: number } | null> {
+  const orgId = ctx.orgId;
+  let fresh: Fresh[];
+  try {
+    fresh = await span("watch", `Watcher: ${w.label}`, () => w.check(ctx));
+  } catch (e) {
+    console.error(`Watcher ${w.kind} failed for org ${orgId}`, e);
+    return null;
+  }
+  let opened = 0;
+  let resolved = 0;
+  const keys = new Set<string>();
+  for (const f of fresh) {
+    const key = dedupeKey(f);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    const existing = await get<FindingRow>("SELECT * FROM findings WHERE org_id = ? AND dedupe_key = ?", orgId, key);
+    const fields = [f.audience, f.severity, f.title.slice(0, 200), f.detail?.slice(0, 600) ?? null, f.nextStep.slice(0, 400), f.actionHref, f.actionLabel, f.data ? JSON.stringify(f.data) : null] as const;
+    if (!existing) {
+      await run(
+        `INSERT INTO findings (id, org_id, workspace_id, kind, dedupe_key, audience, severity, status, title, detail, next_step, action_href, action_label, data_json, first_seen_at, last_seen_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (org_id, dedupe_key) DO NOTHING`,
+        newId(), orgId, f.workspaceId, f.kind, key, ...fields, t, t, t,
+      );
+      opened++;
+      continue;
+    }
+    const reopen = existing.status === "resolved" || (existing.status === "snoozed" && (existing.snoozed_until ?? "") <= t);
+    if (existing.status === "resolved") opened++;
+    await run(
+      `UPDATE findings SET audience = ?, severity = ?, title = ?, detail = ?, next_step = ?, action_href = ?, action_label = ?, data_json = ?,
+              last_seen_at = ?, updated_at = ?, status = ?, resolved_at = ?, snoozed_until = ?, snoozed_by = ?
+        WHERE id = ?`,
+      ...fields, t, t, reopen ? "open" : existing.status, reopen ? null : existing.resolved_at,
+      reopen ? null : existing.snoozed_until, reopen ? null : existing.snoozed_by, existing.id,
+    );
+  }
+  const stale = await all<{ id: string; dedupe_key: string }>("SELECT id, dedupe_key FROM findings WHERE org_id = ? AND kind = ? AND status <> 'resolved'", orgId, w.kind);
+  for (const s of stale.filter((x) => !keys.has(x.dedupe_key))) {
+    await run("UPDATE findings SET status = 'resolved', resolved_at = ?, updated_at = ?, snoozed_until = NULL WHERE id = ?", t, t, s.id);
+    resolved++;
+  }
+  return { opened, resolved };
+}
+
+/**
+ * Runs just one kind of watcher for an organization, straight away (instead of waiting for the 15-minute run),
+ * so something a person just did shows on Home at once: lib/connector-requests.ts calls it after a request is
+ * made, approved, declined or cancelled. System use only (no permission check); the org must be active.
+ */
+export async function runWatcherNow(orgId: string, kind: FindingKind, at = new Date()): Promise<void> {
+  const w = WATCHERS.find((x) => x.kind === kind);
+  const org = await get<{ status: string }>("SELECT status FROM orgs WHERE id = ?", orgId);
+  if (!w || !org || org.status === "Suspended") return;
+  const groups = await all<{ id: string; name: string }>(
+    `SELECT id, name FROM workspaces WHERE org_id = ? AND id NOT IN
+       (SELECT workspace_id FROM rolloffs WHERE org_id = ? AND scope = 'group' AND status IN ('scheduled', 'running') AND workspace_id IS NOT NULL)`,
+    orgId, orgId,
+  );
+  await applyWatcher({ orgId, groups, at, today: at.toISOString().slice(0, 10) }, w, at.toISOString());
+}
 
 /**
  * Runs every watcher for one organization and brings its findings up to date: new problems are opened, known ones
@@ -454,45 +578,13 @@ export async function runWatchers(orgId: string, at = new Date()): Promise<{ ope
   let failedWatchers = 0;
   const t = at.toISOString();
   for (const w of WATCHERS) {
-    let fresh: Fresh[];
-    try {
-      fresh = await span("watch", `Watcher: ${w.label}`, () => w.check(ctx));
-    } catch (e) {
+    const r = await applyWatcher(ctx, w, t);
+    if (!r) {
       failedWatchers++;
-      console.error(`Watcher ${w.kind} failed for org ${orgId}`, e);
       continue;
     }
-    const keys = new Set<string>();
-    for (const f of fresh) {
-      const key = dedupeKey(f);
-      if (keys.has(key)) continue;
-      keys.add(key);
-      const existing = await get<FindingRow>("SELECT * FROM findings WHERE org_id = ? AND dedupe_key = ?", orgId, key);
-      const fields = [f.audience, f.severity, f.title.slice(0, 200), f.detail?.slice(0, 600) ?? null, f.nextStep.slice(0, 400), f.actionHref, f.actionLabel, f.data ? JSON.stringify(f.data) : null] as const;
-      if (!existing) {
-        await run(
-          `INSERT INTO findings (id, org_id, workspace_id, kind, dedupe_key, audience, severity, status, title, detail, next_step, action_href, action_label, data_json, first_seen_at, last_seen_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (org_id, dedupe_key) DO NOTHING`,
-          newId(), orgId, f.workspaceId, f.kind, key, ...fields, t, t, t,
-        );
-        opened++;
-        continue;
-      }
-      const reopen = existing.status === "resolved" || (existing.status === "snoozed" && (existing.snoozed_until ?? "") <= t);
-      if (existing.status === "resolved") opened++;
-      await run(
-        `UPDATE findings SET audience = ?, severity = ?, title = ?, detail = ?, next_step = ?, action_href = ?, action_label = ?, data_json = ?,
-                last_seen_at = ?, updated_at = ?, status = ?, resolved_at = ?, snoozed_until = ?, snoozed_by = ?
-          WHERE id = ?`,
-        ...fields, t, t, reopen ? "open" : existing.status, reopen ? null : existing.resolved_at,
-        reopen ? null : existing.snoozed_until, reopen ? null : existing.snoozed_by, existing.id,
-      );
-    }
-    const stale = await all<{ id: string; dedupe_key: string }>("SELECT id, dedupe_key FROM findings WHERE org_id = ? AND kind = ? AND status <> 'resolved'", orgId, w.kind);
-    for (const s of stale.filter((x) => !keys.has(x.dedupe_key))) {
-      await run("UPDATE findings SET status = 'resolved', resolved_at = ?, updated_at = ?, snoozed_until = NULL WHERE id = ?", t, t, s.id);
-      resolved++;
-    }
+    opened += r.opened;
+    resolved += r.resolved;
   }
   // Findings of groups that are gone or ending are resolved too (nothing to do there any more).
   const orphans = await run(
@@ -518,10 +610,11 @@ export type FindingView = {
 };
 
 /**
- * Whether this person may see a finding: admins see every one in their org; others only findings of groups they
+ * Whether this person may see a finding: owners-audience ones only Org Owners; admins see every other one in their org; others only findings of groups they
  * belong to (`groups`), members-audience ones, plus managers-audience ones when they're a Team Lead.
  */
 function maySee(user: User, f: Pick<FindingRow, "workspace_id" | "audience">, groups: Set<string>): boolean {
+  if (f.audience === "owners") return user.role === "Org Owner";
   if (isAdmin(user)) return true;
   if (!f.workspace_id || !groups.has(f.workspace_id)) return false;
   return f.audience === "members" || (f.audience === "managers" && isLead(user));
@@ -529,7 +622,7 @@ function maySee(user: User, f: Pick<FindingRow, "workspace_id" | "audience">, gr
 
 /** Whether this person may snooze it: admins, or a Team Lead for a finding of a group they lead. */
 const mayAct = (user: User, f: Pick<FindingRow, "workspace_id" | "audience">, groups: Set<string>) =>
-  isAdmin(user) || (isLead(user) && !!f.workspace_id && groups.has(f.workspace_id) && f.audience !== "admins");
+  f.audience === "owners" ? user.role === "Org Owner" : isAdmin(user) || (isLead(user) && !!f.workspace_id && groups.has(f.workspace_id) && f.audience !== "admins");
 
 /**
  * The findings this person may see, in their organization only: open ones (and snoozed ones with `includeSnoozed`),

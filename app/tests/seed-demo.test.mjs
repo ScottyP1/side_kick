@@ -65,13 +65,13 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE owner IS NULL AND status != 'Done'") >= 5, "unowned action items");
   assert.ok(count("SELECT COUNT(*) FROM action_items WHERE status != 'Done' AND due_on < '2026-10-22'") >= 5, "overdue action items");
   assert.ok(count("SELECT COUNT(*) FROM answer_feedback WHERE vote < 0") >= 1 && count("SELECT COUNT(*) FROM answer_feedback WHERE vote > 0") >= 10, "👍 and 👎");
-  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 5, "Azure DevOps, Jira, GitHub, Confluence and Microsoft 365 connected");
-  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 6, "six linked projects, repositories, spaces and folders, synced");
+  assert.equal(count("SELECT COUNT(*) FROM connectors WHERE status = 'connected'"), 5, "Contoso's Azure DevOps, Jira, Confluence and Microsoft 365, and Litware's own Azure DevOps");
+  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 5, "five linked projects, spaces and folders, synced");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'page' AND title LIKE 'SharePoint file:%'") >= 5, "the SharePoint folder's files are searchable like documents");
   assert.equal(count("SELECT COUNT(*) FROM connector_items WHERE state = 'Skipped'"), 1, "one file too large to read, kept as a note");
   assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_error LIKE '%refused access%'"), 1, "one lost access since (for the broken-connector watcher)");
   assert.equal(count("SELECT COUNT(*) FROM connector_health WHERE status = 'broken' AND connector = 'azure-devops' AND workspace_id != ''"), 1);
-  assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'workitem'") >= 13, "their work items (with GitHub's issues and pull requests) are searchable");
+  assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'workitem'") >= 10, "their work items are searchable");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'page'") >= 3, "the Confluence space's pages are searchable like documents");
   assert.ok(count("SELECT COUNT(*) FROM support_tickets") >= 5 && count("SELECT COUNT(*) FROM support_messages WHERE author_kind = 'staff'") >= 3, "tickets with replies");
   assert.ok(count("SELECT COUNT(*) FROM insights") >= 10, "knowledge maps");
@@ -82,10 +82,21 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.equal(count("SELECT COUNT(*) FROM subscriptions WHERE status = 'past_due'"), 1);
   assert.equal(count("SELECT COUNT(*) FROM platform_admins"), 1, "the Owner Console account");
   // The watchers ran once on the job queue and found something of every kind at Northwind.
-  for (const kind of ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector"]) {
+  for (const kind of ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request"]) {
     assert.ok(count(`SELECT COUNT(*) FROM findings WHERE org_id = ${northwind} AND kind = ? AND status = 'open'`, kind) >= 1, `a "${kind}" finding`);
   }
   assert.equal(count("SELECT COUNT(*) FROM jobs WHERE status = 'dead'"), 0, "no job gave up");
+  // Allow → connect per group → request: four tool types allowed (Microsoft 365 through a request), connections per
+  // group (Azure DevOps in Contoso and, separately, Litware), GitHub not allowed with one request declined (with a
+  // note) and one waiting for the Org Owner.
+  assert.equal(count(`SELECT COUNT(*) FROM connector_kinds WHERE org_id = ${northwind}`), 4);
+  assert.equal(count(`SELECT COUNT(*) FROM connectors WHERE org_id = ${northwind} AND kind = 'ado'`), 2, "two groups, two Azure DevOps connections");
+  assert.equal(count(`SELECT COUNT(*) FROM connector_links l JOIN connectors c ON c.id = l.connector_id WHERE l.workspace_id <> c.workspace_id`), 0, "every link is read through its own group's connection");
+  assert.equal(count(`SELECT COUNT(*) FROM connector_kinds WHERE org_id = ${northwind} AND kind = 'github'`), 0, "GitHub isn't allowed");
+  for (const [kind, status] of [["m365", "approved"], ["github", "declined"], ["github", "pending"]]) {
+    assert.equal(count(`SELECT COUNT(*) FROM connector_requests WHERE org_id = ${northwind} AND kind = ? AND status = ?`, kind, status), 1, `${kind} ${status}`);
+  }
+  assert.equal(count(`SELECT COUNT(*) FROM connector_requests WHERE status = 'declined' AND note IS NOT NULL`), 1, "the decline has a note");
   // Automatic notes: meetings captured from Teams, one waiting for a group, one skipped, decisions saved to knowledge.
   assert.ok(count("SELECT COUNT(*) FROM meetings WHERE source = 'teams'") >= 4, "meetings captured from Teams");
   assert.equal(count(`SELECT COUNT(*) FROM auto_meetings WHERE org_id = ${northwind} AND enabled = 1`), 1);
@@ -93,7 +104,7 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.equal(count("SELECT COUNT(*) FROM graph_meetings WHERE status = 'skipped'"), 1);
   assert.equal(count("SELECT COUNT(*) FROM items WHERE pinned = 1 AND saved_by IS NOT NULL"), 2, "two decisions saved to knowledge");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_id LIKE 'saved:%'") >= 2, "and searchable");
-  assert.match(out, /findings for Northwind's Org Owner \(10 kinds/);
+  assert.match(out, /findings for Northwind's Org Owner \(11 kinds/);
   // Starter is 15 people: Tailspin sits one below.
   assert.equal(count("SELECT COUNT(*) FROM users WHERE org_id = (SELECT id FROM orgs WHERE name = 'Tailspin Partners')"), 14);
   // The private files exist, are only readable by this user, and hold every login.

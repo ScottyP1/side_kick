@@ -1099,3 +1099,25 @@ test(`[${engine}] connector health: broken keeps its first date until it works a
   await ch.removeConnectorHealth(org, "azure-devops", "ws-1");
   assert.deepEqual(await ch.brokenConnectors(org), []);
 });
+
+test(`[${engine}] connectors move from one per organization into groups (CONNECTOR_GROUP_MIGRATION)`, async () => {
+  const org = db.newId(), wsA = db.newId(), wsB = db.newId(), c1 = db.newId(), c2 = db.newId();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Legacy Connector Co", db.now());
+  for (const [id, name] of [[wsA, "A"], [wsB, "B"]]) await db.run("INSERT INTO workspaces (id, org_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)", id, org, name, "#000", db.now());
+  // As before Oct 24, 2026: connectors without a group (Azure DevOps linked in two groups, Jira linked nowhere).
+  for (const [id, kind] of [[c1, "ado"], [c2, "jira"]]) {
+    await db.run("INSERT INTO connectors (id, org_id, kind, status, account, api_base, web_base, access_token, connected_by, connected_at, updated_at) VALUES (?, ?, ?, 'connected', 'acct', 'x', 'y', 'enc1.t', 'Olivia', ?, ?)", id, org, kind, db.now(), db.now());
+  }
+  await db.run("INSERT INTO connector_links (id, org_id, connector_id, workspace_id, project, project_name, created_at) VALUES (?, ?, ?, ?, 'P1', 'P1', '2026-01-01')", db.newId(), org, c1, wsA);
+  const lB = db.newId();
+  await db.run("INSERT INTO connector_links (id, org_id, connector_id, workspace_id, project, project_name, created_at) VALUES (?, ?, ?, ?, 'P2', 'P2', '2026-01-02')", lB, org, c1, wsB);
+  await db.run("INSERT INTO connector_items (id, org_id, workspace_id, link_id, external_id, title, url, synced_at) VALUES (?, ?, ?, ?, '1', 't', 'u', ?)", db.newId(), org, wsB, lB, db.now());
+  for (let i = 0; i < 2; i++) for (const sql of db.CONNECTOR_GROUP_MIGRATION) await db.run(sql); // harmless twice
+  assert.deepEqual((await db.all("SELECT kind FROM connector_kinds WHERE org_id = ? ORDER BY kind", org)).map((r) => r.kind), ["ado", "jira"], "both stay allowed");
+  const conns = await db.all("SELECT id, workspace_id, status, access_token FROM connectors WHERE org_id = ? ORDER BY workspace_id = ?", org, wsB);
+  assert.equal(conns.length, 2, "Jira (no links) is gone, Azure DevOps is in both groups");
+  assert.deepEqual([conns[0].id, conns[0].workspace_id, conns[0].status, conns[0].access_token], [c1, wsA, "connected", "enc1.t"], "the first group keeps the sign-in");
+  assert.deepEqual([conns[1].workspace_id, conns[1].status, conns[1].access_token], [wsB, "expired", null], "the other group signs in again");
+  assert.equal((await db.get("SELECT connector_id FROM connector_links WHERE id = ?", lB)).connector_id, conns[1].id, "its link moved to its own connection");
+  assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM connector_items WHERE link_id = ?", lB)).n), 1, "its items stay");
+});

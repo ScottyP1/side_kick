@@ -351,7 +351,11 @@ says which case it was:
 ## Connector apps (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365)
 
 Sidekick's connectors (docs/guide/connect-devops-jira.md, code in `app/src/lib/connectors.ts`) need one app
-registration per tool (Jira and Confluence share one Atlassian app). **Only Cody creates these** (with his own personal accounts, never a client's), and the
+registration per tool (Jira and Confluence share one Atlassian app). **One registration serves every customer and
+every group**: since Oct 24, 2026 each group connects with the account its client gave it (so two groups using Jira
+sign in to two different client sites through the same Sidekick app), and the customer's Org Owner only chooses which
+tool types are allowed. The apps must therefore accept accounts from any organization (multitenant / any Atlassian
+site / any GitHub organization that installs the app). **Only Cody creates these** (with his own personal accounts, never a client's), and the
 secrets go straight into Key Vault; they are never pasted into chat, a ticket or the repo. Until an app exists, its
 tile says "Not set up yet" and nothing else changes. Use the live address for `<site>` (SIDEKICK_PUBLIC_URL).
 
@@ -469,20 +473,23 @@ Azure or Entra is changed by Claude or by the app.
    Until both are set, the SharePoint and OneDrive tiles say "Not set up yet".
 5. Check (made-up data only): in the Sidekick Labs Microsoft 365 trial, make a SharePoint site "Sidekick test" with
    a folder holding a made-up Word file and PDF, then on the live portal **Connectors → Microsoft 365 files**,
-   Connect with your Sidekick Labs account, link the folder to a test group and ask about a file (the answer cites
-   "SharePoint file: …" with an Open in SharePoint link). If the Sidekick organization linked its Microsoft tenant
-   (Settings → Microsoft sign-in), only accounts from that tenant can connect.
+   allow it (Org Owner), then **Connect Microsoft 365 files for a group** with your Sidekick Labs account, link the
+   folder and ask about a file (the answer cites "SharePoint file: …" with an Open in SharePoint link). Any Microsoft
+   work account can connect a group (normally one the client provides, in the client's own tenant); it doesn't
+   have to be the tenant the Sidekick organization linked for sign-in.
 
 Costs: none from Microsoft, Atlassian or GitHub for these apps. Each sync is a few API calls per linked project every 15
 minutes (no AI calls; items only cost AI when someone asks).
 
 ## Connector problems
 
-What the customer sees on **Connectors** and what to do (an Org Owner/Admin of theirs does the fixing; you only
-help):
+What the customer sees on **Connectors** and what to do (the group's Team Lead, or an Org Owner/Admin of theirs,
+does the fixing; you only help). Connections are per group: one group's problem never affects another's.
 - **Sign-in expired**: their refresh was refused (the person who connected left, their password/MFA changed in a
-  way that revoked tokens, an admin removed the app, or 90 days without any sync). They press **Reconnect** and
-  sign in again. Nothing was deleted.
+  way that revoked tokens, the client removed the account or the app, or 90 days without any sync). The group's Team
+  Lead presses **Reconnect** and signs in again with the client's account. Nothing was deleted. After the Oct 24,
+  2026 move to per-group connections, a group that shared an organization-wide connection with another group shows
+  "Connections are per group now: sign in again for this group" once: same fix.
 - **"refused access to the project …"**: the connected account lost access to that project. Reconnect with an
   account that can open it, or unlink the project.
 - **"couldn't find …"**: the project or organization was renamed or deleted. Unlink it and link the new one.
@@ -490,10 +497,11 @@ help):
   down or rate limiting (GitHub allows 5,000 calls an hour per signed-in person; Microsoft Graph throttles per
   tenant and app); it carries on from where it stopped on the next sync by itself. If every customer shows it,
   check the tool's status page.
+- **"isn't allowed in your organization yet"** when connecting: their Org Owner hasn't allowed that tool type
+  (Connectors → the tool's switch), or switched it off. A Team Lead can press **Request**.
 - **Microsoft 365: "need admin approval" when connecting** (`consent_required` / `access_denied`): their Microsoft
   admin hasn't approved Sidekick reading SharePoint (Sites.Read.All). The admin connects once themselves, or uses
-  the admin consent link above. **"belongs to …, not the Microsoft organization linked"**: they signed in with an
-  account from a different Microsoft tenant than the one their Sidekick organization linked.
+  the admin consent link above (for a client's tenant, the client's admin).
 - **Microsoft 365: "N not read"** on a linked folder: files over 25 MB (or password-protected / damaged ones) are
   kept as a note with a link, not read. Expected; they can save a smaller copy. Spreadsheets, images and videos are
   ignored on purpose.

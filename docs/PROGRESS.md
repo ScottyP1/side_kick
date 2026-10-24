@@ -1,6 +1,6 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 22, 2026 (checkpoint before a fresh coordinating session). Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Roadmap & queue** just below.
+> Last updated: October 23, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Start with **Roadmap & queue** just below.
 
 ## Roadmap & queue (checkpoint Oct 22, 2026)
 The single list of what's done, in flight and next. A coordinating session reviews and merges PRs (Cody asked it to; it waits for GitHub's `test` check, then merges); **merges to `main` deploy automatically** (only merged PRs with a green test deploy; health-checked with automatic rollback). Run at most ~3 sessions at once. Each worktree runs tests on its own `TEST_PORT` / `TEST_MT_PORT` / `TEST_DATABASE_URL`.
@@ -37,16 +37,25 @@ The single list of what's done, in flight and next. A coordinating session revie
 
 **Scale readiness (Oct 23, roadmap item 6, PR open)**: load world (`npm --prefix app run load:world`: 100 companies, 10,002 groups, 50,010 people, 358k passages, 300k traces, local Postgres in 94 s) + load test (`load:test`, fake Claude ~1.5 s, Teams via the local path, `--noisy`, `--app` for before/after). Fixed: missing indexes (Groups page p99 64 s → 0.7 s; same list on both engines, tested), one-group `canSeeWorkspace` check, job queue 4 lanes + fair per company (≤2 running each; watchers reached 100/100 companies in 2 min, was 15), stale-doc AI checks side by side, fair Claude turns per company (`lib/fair-limiter.ts`: 24 at once per copy, 6 per company, people before background; noisy company: others' errors 49% → 0%), hourly batched retention (`lib/retention.ts`, job `data.retention`; trace prune no longer deadlocks), pool wait timeout, paged Azure re-index, `SIDEKICK_SLOW_QUERY_MS`. Results: `docs/SCALE.md`. Azure plan with costs (Basic search ~$75 first, then B2s, 2–4 copies, D2ds_v5, S1; ~$500–600/month at 100 companies): `docs/HOSTING.md` → Scaling up, steps in `docs/RUNBOOKS.md`. Nothing changed in Azure.
 
+**Live since the Oct 22 checkpoint (Oct 23, all merged and deployed)**
+- Demo world `npm run seed:demo` (#51), pitch folder reorganized (`~/Desktop/Sidekick Pitch/README.md`).
+- Installable web app (#50); connector tiles with real GitHub/Jira/Confluence logos + phone fixes from a full page sweep (#52); phone navigation: floating tab bar + top menu (#53).
+- Job queue + watchers (#54, checked live: heartbeat every 30 s, tick locked to outsiders).
+- Connectors: Azure DevOps + Jira, read-only (#55). **Needs Cody's app registrations** before customers can connect.
+- Meetings wave: automatic notes via Microsoft Graph, Save to knowledge, Teams tab, "Add a past or outside meeting" (#56, checked live). **Needs Cody's Microsoft setup** before it captures real meetings.
+- Scale readiness: load test on 100 companies / 10,000 groups, indexes, fair queue, per-company Claude turns, retention clean-up (#57; results in `docs/SCALE.md`, costed Azure plan in `docs/HOSTING.md` → Scaling up, nothing changed in Azure).
+
 **Next, in this order**
-1. Finish the demo world PR + pitch folder reorganization (above).
-2. **Installable web app** (PWA: own window/icon, Add to Home Screen). *Built, PR open (branch `claude/epic-wing-fab9f1`)*: manifest `app/manifest.ts` + `lib/pwa.ts` (start /home, scope "/" because portal pages share no folder; only portal + sign-in pages offer install, website and Owner Console don't), icons `public/app-icons/` (script `scripts/app-icons.mjs`), iPhone tags, quiet Install hint on /help, **no service worker** (Chrome/Edge/Safari don't need one; nothing signed-in cached; CSP unchanged). Guide `docs/guide/install-app.md` (also in the help center). Not yet tried on a real iPhone (Microsoft sign-in inside a home-screen app is the thing to check).
-3. **Job queue + watchers** ("always on"). *Built, PR open (branch `claude/priceless-lichterman-9fba9f`)*: see "Job queue + watchers" below.
-4. **Meetings wave**: automatic notes via Graph after every Teams meeting (within meeting hours), notes chat per group, "save to knowledge" cards, Sidekick as a Teams tab/personal app (also unlocks meeting chats), rename import to "Add a past or outside meeting". *Built, PR open (see "Meetings wave" above); live needs Cody's Microsoft setup (RUNBOOKS).*
-5. **Connectors**: Azure DevOps Boards, then Jira. *Built, PR open (see above)*; next: Cody's app registrations, then GitHub Issues / Confluence on the same framework.
-6. **Scale readiness**: *Built, PR open*: see "Scale readiness" above. Azure steps wait for Cody (they cost money).
-7. Later: official logos on the Connectors page for Microsoft 365, Salesforce and ServiceNow once we have their permission (partner programs; today plain icons, `components/connector-icons.tsx`); live meetings (Enterprise), Teams Store, real brand + domain, Stripe, optional staging site in Azure (~$10–15/month).
+1. Cody's setup steps below (meetings, connectors), then a real end-to-end test with Jojo Boom + User2.
+2. More connectors on the same framework: GitHub Issues, Confluence, then Microsoft 365 files (SharePoint/OneDrive).
+3. Later: official logos for Microsoft 365, Salesforce and ServiceNow once permitted (today plain icons, `components/connector-icons.tsx`); live meetings (Enterprise); Teams Store; real brand + domain; Stripe; optional staging site in Azure (~$10–15/month).
 
 **Cody's to-dos** (only he can do these)
+- **Connector apps** (Azure DevOps + Jira): docs/RUNBOOKS.md → Connector apps (secrets go to Key Vault, never in chat).
+- **Search tier**: Azure AI Search Free → Basic (~$75/month) before the first real customer (`docs/HOSTING.md` → Scaling up step 1). Say yes and the coordinator walks you through it.
+- Passkey or authenticator app on your portal account; create the live Owner Console account (one-time setup code: the coordinator asks before setting it); one live sign-in + one question to confirm the Key Vault move.
+- Optional: add `sslmode=verify-full` to the database connection secret in Key Vault (silences a harmless log warning).
+- Mark the GitGuardian finding on #51 as a false positive too (a variable named password, not a secret).
 - **Automatic meeting notes + Teams tab** (after the meetings-wave PR merges): follow docs/RUNBOOKS.md → Automatic meeting notes (check Teams API metering, Graph permissions + consent, Expose an API, `New-CsApplicationAccessPolicy`, transcription on, upload Teams package 1.4.0, test with Jojo Boom + User2).
 - Teams cleanup: remove the old Sidekick apps (Manage your apps, the Project team, Wave 2 cutover chat, Teams admin center), check the tenant's **chat** resource-specific consent setting, then upload `teams/build/sidekick-teams-live.zip` once to the org catalog.
 - Manual security checks from #21: MFA everywhere (Microsoft, GitHub, Anthropic), an Anthropic monthly spend limit, `app/.env.local` not synced to iCloud/Dropbox.

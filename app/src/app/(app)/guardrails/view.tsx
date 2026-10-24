@@ -2,8 +2,11 @@
 
 /**
  * Guardrails (/guardrails): the rules Sidekick follows in every answer, in the portal and in Teams.
- * - Everyone sees the locked floor, which org-wide switches are on, the custom rules, and (for workspaces
- *   they can see) what's in force in each workspace.
+ * - Org Owners and Org Admins only (like GET /api/guardrails). Everyone else gets a short message pointing to
+ *   "Rules Sidekick follows" on Help & support (components/rules-summary.tsx, GET /api/rules), which lists the
+ *   locked rules and the switches in plain words without custom rule text.
+ * - Admins see the locked floor, which org-wide switches are on, the custom rules, and what's in force in each
+ *   workspace.
  * - Only the Org Owner can flip an organization switch. Org Owners and Org Admins can make one workspace
  *   stricter (extra switches, never fewer), write custom rules (org-wide or per workspace; rules that
  *   would loosen the guardrails are refused with the reason), see each rule's history, and use the
@@ -13,6 +16,7 @@
  * Every change is audited. See lib/guardrails.ts and /api/guardrails.
  */
 
+import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, Modal, Pill, Spinner, Switch, fmtTime, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
@@ -41,7 +45,15 @@ type Rules = {
 type TestResult = { allowed: boolean; rule: string | null; label: string | null; checker: "local" | "claude"; message: string | null; draft: boolean; locked?: boolean };
 type Version = { version: number; text: string; change: string; by: string | null; at: string };
 
+/** The page: Org Owners and Org Admins get the guardrails; everyone else is pointed to "Rules Sidekick follows". */
 export default function GuardrailsPage() {
+  const { me } = useApp();
+  if (!me.user.admin) return <div className="callout bad">Only Org Owners and Org Admins can manage guardrails. See the rules {BRAND.name} follows on <Link href="/help#rules">Help &amp; support</Link>.</div>;
+  return <GuardrailsAdmin />;
+}
+
+/** The full Guardrails page for Org Owners and Org Admins. */
+function GuardrailsAdmin() {
   const toast = useToast();
   const reportError = useReportError();
   const [r, setR] = useState<Rules | null>(null);

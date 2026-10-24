@@ -60,7 +60,7 @@ export default function OverviewPage() {
         </div>
         <div className="actions">
           {/* Only roles that can change workspace content import meetings (canEdit in lib/auth.ts). */}
-          {!["Viewer", "Billing Admin"].includes(me.user.role) && <Link className="btn" href="/meetings">Import meeting</Link>}
+          {me.user.role !== "Viewer" && <Link className="btn" href="/meetings">Import meeting</Link>}
           <Link className="btn primary" href="/knowledge">Ask {BRAND.name}</Link>
         </div>
       </div>
@@ -83,7 +83,7 @@ export default function OverviewPage() {
           <span className="v">{s?.openActions ?? "—"}</span>
           <span className={`d ${s?.noOwner ? "down" : "muted"}`}>{s?.noOwner ? `${s.noOwner} without an owner` : "All have owners"}</span>
         </Link>
-        <Link className="kpi" href={["Org Owner", "Org Admin", "Billing Admin"].includes(me.user.role) ? "/usage" : "/knowledge"} style={{ textDecoration: "none" }}>
+        <Link className="kpi" href={me.user.admin ? "/usage" : "/knowledge"} style={{ textDecoration: "none" }}>
           <span className="eyebrow">Documents</span>
           <span className="v">{s?.documents ?? "—"}</span>
           <span className="d muted">{s ? `${s.spendScope === "org" ? "AI spend this month" : "Your AI use this month"}: ${usd(s.spendMonth)}` : "AI spend this month: —"}</span>

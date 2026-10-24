@@ -180,7 +180,7 @@ for (let o = 0; o < ORGS; o++) {
   const nPeople = Math.max(8, Math.round(nGroups * 5));
   const people = [];
   for (let u = 0; u < nPeople; u++) {
-    const role = u === 0 ? "Org Owner" : u < 3 ? "Org Admin" : u === 3 ? "Billing Admin" : u % 9 === 0 ? "Team Lead" : u % 7 === 0 ? "Viewer" : "Member";
+    const role = u === 0 ? "Org Owner" : u < 4 ? "Org Admin" : u % 9 === 0 ? "Team Lead" : u % 7 === 0 ? "Viewer" : "Member";
     const uid = id();
     const name = `${pick(FIRST)} ${pick(LAST)}`;
     people.push({ id: uid, role, name });
@@ -199,7 +199,7 @@ for (let o = 0; o < ORGS; o++) {
     await p(S.workspaces, [wsId, orgId, `${pick(COMPANY_A)} ${topics[0]} ${g + 1}`, `LT-${o + 1}-${g + 1}`, pick(COLORS), `${pick(COMPANY_A)} Ltd`, ago(200, 60)]);
   }
   // Memberships: everyone except owner/admins/billing is in 1-4 groups; signed-in ones always include group 0..3.
-  const nonAdmins = people.filter((x) => !["Org Owner", "Org Admin", "Billing Admin"].includes(x.role));
+  const nonAdmins = people.filter((x) => !["Org Owner", "Org Admin"].includes(x.role));
   for (const [i, u] of nonAdmins.entries()) {
     const set = new Set();
     set.add(groups[i % groups.length].id);

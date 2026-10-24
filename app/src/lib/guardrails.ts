@@ -250,6 +250,31 @@ export async function listRules(orgId: string, workspaceId: string | null): Prom
   return rows.map((r) => ({ id: r.id, workspaceId: r.workspace_id, text: r.text, version: Number(r.version), updatedBy: r.updated_by, updatedAt: r.updated_at }));
 }
 
+/**
+ * "Rules Sidekick follows" (Help & support, GET /api/rules): what everyone may know about the guardrails, in plain
+ * words. The locked rules (`FLOOR`), each organization switch with on/off only, and how many extra rules apply
+ * without their text: the organization's own custom rules, and with `workspaceId` (already checked against the
+ * workspace wall by the caller) that group's extra switches plus its custom rules. Custom rule text, who changed
+ * what and how often rules fired stay on the Guardrails page, which is for Org Owners and Org Admins.
+ */
+export async function rulesInForce(orgId: string, workspaceId: string | null) {
+  const settings = await getGuardSettings(orgId);
+  const keys = Object.keys(SWITCHES) as SwitchKey[];
+  const count = async (sql: string, ...params: string[]) => (await get<{ n: number }>(sql, ...params))?.n ?? 0;
+  let group: { extraRules: number } | null = null;
+  if (workspaceId) {
+    const extras = await getWorkspaceExtras(orgId, workspaceId);
+    const extraSwitches = keys.filter((k) => extras[k] && !settings[k]).length;
+    group = { extraRules: extraSwitches + (await count("SELECT COUNT(*) AS n FROM guard_custom_rules WHERE org_id = ? AND workspace_id = ? AND active = 1", orgId, workspaceId)) };
+  }
+  return {
+    locked: FLOOR.map((f) => ({ label: f.label, help: f.help })),
+    switches: keys.map((k) => ({ label: SWITCHES[k].label, help: SWITCHES[k].help, on: settings[k] })),
+    orgRules: await count("SELECT COUNT(*) AS n FROM guard_custom_rules WHERE org_id = ? AND workspace_id IS NULL AND active = 1", orgId),
+    group,
+  };
+}
+
 /** Every version of one custom rule, newest first (including its removal). Scoped to the org; 404 if not found. */
 export async function ruleHistory(orgId: string, ruleId: string) {
   const rule = await get<{ id: string }>("SELECT id FROM guard_custom_rules WHERE id = ? AND org_id = ?", ruleId, orgId);

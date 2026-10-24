@@ -9,6 +9,8 @@
  * requests from Team Leads, health, linked projects). The other tools are planned. Says how many connectors
  * the organization's plan includes (lib/plans.ts `connectors`: none, one, or all), from /api/me. Tile icons:
  * components/connector-icons.tsx.
+ * Who: Org Owners/Admins and Team Leads (like GET /api/connectors). Members and Viewers get a message instead: each
+ * group's page lists the tools that feed it ("Sources").
  */
 
 import { useApp } from "@/components/shell";
@@ -34,7 +36,15 @@ const APPS: { name: string; g: string; mono: string; bg: string; fg?: string; de
 ];
 const GROUPS = ["Available now", "Microsoft 365", "Engineering", "Work & docs", "Business apps"];
 
+/** The page: Org Owners/Admins and Team Leads get the connectors; Members and Viewers a pointer to their group's sources. */
 export default function ConnectorsPage() {
+  const { me } = useApp();
+  if (!me.user.admin && !me.user.lead) return <div className="callout bad">Only Org Owners, Org Admins and Team Leads can open Connectors. Each group&apos;s page shows which tools feed it.</div>;
+  return <Connectors />;
+}
+
+/** Connectors for Org Owners/Admins and Team Leads. */
+function Connectors() {
   const { me } = useApp();
   const { data, load } = useConnectors();
   const included = me.plan?.connectors;

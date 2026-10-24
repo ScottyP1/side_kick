@@ -5,14 +5,16 @@
  * - **Session**: after sign-in the browser gets an `sk_session` cookie holding a random token. The
  *   database stores only a hash of it, so a leaked database can't be used to sign in. Sessions last 7 days.
  * - **Roles** decide what a user may do inside their org:
- *   - Org Owner / Org Admin: everything, including users, workspaces, Teams links and settings.
+ *   - Org Owner / Org Admin: everything, including users, workspaces, Teams links, settings and Usage &
+ *     billing (only the Org Owner pays, changes the plan or cancels: `BILLING_ROLES` in lib/billing.ts).
  *   - Team Lead: a Member who also runs the people side of the workspaces they belong to (the ones they
  *     lead): adds people to those workspaces (as Member or Viewer), takes them off again, and links Teams
  *     chats to them. A Team Lead can't create workspaces or organizations, change roles, remove anyone
  *     from the organization, or see or touch any other workspace. Only Org Owners/Admins make Team Leads.
- *   - Billing Admin: usage and billing, but can't change content.
  *   - Member: works inside the workspaces they belong to (upload, import meetings, ask).
  *   - Viewer: read-only inside their workspaces.
+ *   There used to be a Billing Admin role; it was retired in October 2026 (lib/db.ts `DATA_MIGRATIONS`
+ *   turned everyone who had it into a Member and told the Org Owner).
  * - **Workspace walls**: a user only ever sees the workspaces they're a member of (admins see all in
  *   their org). Every API route that touches workspace data calls `requireWorkspace` first.
  * - **Audit log**: important actions are recorded with `await audit()` and shown on Security & audit.
@@ -48,7 +50,7 @@ export const SESSION_COOKIE = "sk_session";
 const SESSION_DAYS = 7;
 
 /** Every role a portal user can have, from most to least access. */
-export const ROLES = ["Org Owner", "Org Admin", "Team Lead", "Billing Admin", "Member", "Viewer"] as const;
+export const ROLES = ["Org Owner", "Org Admin", "Team Lead", "Member", "Viewer"] as const;
 export type Role = (typeof ROLES)[number];
 
 /** The signed-in portal user, as API routes see them. */
@@ -218,7 +220,7 @@ export async function requireUser(roles?: readonly Role[], opts: { allowPendingP
 
 /**
  * The refusal for someone whose role isn't in `roles`, naming who can do it, e.g. "Only the Org Owner can do
- * this." or "Only Org Owners, Org Admins and Billing Admins can do this. Ask one of them."
+ * this." or "Only Org Owners and Org Admins can do this. Ask one of them."
  */
 export function onlyRolesMessage(roles: readonly Role[]): string {
   if (roles.length === 1 && roles[0] === "Org Owner") return "Only the Org Owner can do this. Ask them if you need it.";
@@ -249,8 +251,8 @@ export const isAdmin = (u: User) => u.role === "Org Owner" || u.role === "Org Ad
 export const isLead = (u: User) => u.role === "Team Lead";
 /** Roles a Team Lead may give people they add to their workspaces. */
 export const LEAD_ASSIGNABLE_ROLES: readonly Role[] = ["Member", "Viewer"];
-/** Everyone except Viewers and Billing Admins can change workspace content. */
-export const canEdit = (u: User) => u.role !== "Viewer" && u.role !== "Billing Admin";
+/** Everyone except Viewers can change workspace content. */
+export const canEdit = (u: User) => u.role !== "Viewer";
 
 // Workspace walls: admins see every workspace in their org; everyone else only the ones they belong to.
 export async function workspaceIdsFor(user: User): Promise<string[]> {

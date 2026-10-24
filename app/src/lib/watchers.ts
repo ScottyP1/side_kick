@@ -15,7 +15,8 @@
  * - **Who sees it** (`audience`): `members` (everyone in the group: action items, documents, unanswered questions),
  *   `managers` (the group's Team Leads and the org's admins: Teams chats, failed posts), `admins` (Org Owners and
  *   Org Admins: organization-wide things such as chats waiting to be assigned, groups without a Team Lead),
- *   `owners` (Org Owners only: requests to turn a tool on, which only they approve).
+ *   `owners` (Org Owners only: requests to turn a tool on, which only they approve, and a role Sidekick changed for
+ *   them, `role_changed`, e.g. a retired Billing Admin).
  *   Workspace walls apply as everywhere (`workspaceIdsFor`): nobody sees findings of a group they can't open.
  * - **Acting**: the next step links to the page that fixes it. Managers (admins, and Team Leads for their groups)
  *   can **snooze** a finding for 7 days; it comes back if the problem is still there. Audited.
@@ -45,7 +46,7 @@ import { KIND_LABEL as TOOL_LABEL, PROJECT_WORD, type ConnectorKind } from "./co
 import type { TeamsConversation } from "./teams/bot";
 
 /** The kinds of finding, one per watcher (chats have two: waiting to be assigned, and removed in Teams). */
-export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request"] as const;
+export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "role_changed"] as const;
 export type FindingKind = (typeof FINDING_KINDS)[number];
 
 /** Short plain names for each kind (pills on the page, Owner Console counts). */
@@ -61,6 +62,7 @@ export const KIND_LABEL: Record<FindingKind, string> = {
   no_notes_chat: "No notes chat",
   broken_connector: "Connector not working",
   connector_request: "Connector requests",
+  role_changed: "Role changed",
 };
 
 export type Audience = "members" | "managers" | "admins" | "owners";
@@ -421,6 +423,30 @@ const brokenConnector: Watcher = {
   },
 };
 
+/** How long a "role changed" notice stays on the Org Owner's Home unless they act on it first. */
+export const ROLE_NOTICE_DAYS = 14;
+
+/**
+ * Notices that Sidekick changed someone's role (written once by a data migration in lib/db.ts, e.g. when the Billing
+ * Admin role was retired). This watcher only keeps each one open: while the person is still a Member and for
+ * `ROLE_NOTICE_DAYS`; it resolves once the Org Owner gives them another role, they leave, or the time is up.
+ */
+const roleChanged: Watcher = {
+  kind: "role_changed",
+  label: "Roles Sidekick changed",
+  async check(o) {
+    const rows = await all<{ subject: string; title: string; detail: string | null; next_step: string }>(
+      `SELECT u.id AS subject, f.title, f.detail, f.next_step FROM findings f JOIN users u ON f.dedupe_key = 'role_changed:org:' || u.id
+        WHERE f.org_id = ? AND f.kind = 'role_changed' AND f.status <> 'resolved' AND u.org_id = f.org_id AND u.role = 'Member' AND f.first_seen_at > ?`,
+      o.orgId, daysAgo(o.at, ROLE_NOTICE_DAYS),
+    );
+    return rows.map((r) => ({
+      kind: "role_changed", workspaceId: null, subject: r.subject, audience: "owners", severity: "info",
+      title: r.title, detail: r.detail, nextStep: r.next_step, actionHref: "/users", actionLabel: "Open Users & access",
+    } satisfies Fresh));
+  },
+};
+
 /** How long an approved or declined connector request stays on Home for the group's managers. */
 const DECIDED_REQUEST_DAYS = 7;
 
@@ -477,7 +503,7 @@ const connectorRequests: Watcher = {
 };
 
 /** Every watcher, in the order they run. */
-export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests];
+export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests, roleChanged];
 
 /* ------------------------------------------------------------------ */
 /* Running the watchers and keeping findings up to date                */
@@ -620,7 +646,7 @@ function maySee(user: User, f: Pick<FindingRow, "workspace_id" | "audience">, gr
   return f.audience === "members" || (f.audience === "managers" && isLead(user));
 }
 
-/** Whether this person may snooze it: admins, or a Team Lead for a finding of a group they lead. */
+/** Whether this person may snooze it: Org Owners for owners-audience ones; otherwise admins, or a Team Lead for a finding of a group they lead. */
 const mayAct = (user: User, f: Pick<FindingRow, "workspace_id" | "audience">, groups: Set<string>) =>
   f.audience === "owners" ? user.role === "Org Owner" : isAdmin(user) || (isLead(user) && !!f.workspace_id && groups.has(f.workspace_id) && f.audience !== "admins");
 

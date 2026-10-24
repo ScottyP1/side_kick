@@ -7,8 +7,8 @@
  * - **Setup checks** (`setupChecks`): read-only lookups done in code before Claude is asked, within what this
  *   person may see: are Teams chats linked to their groups (and waiting to be assigned), is message tracking on
  *   in each group chat or channel, is anything paused or turned off for the organization (and is the plan
- *   read-only), are any plan limits near or at their maximum, the AI credit level (amounts only for Org Owners,
- *   Org Admins and Billing Admins), and recent errors by reference code (the whole organization's for admins,
+ *   read-only), are any plan limits near or at their maximum, the AI credit level (amounts only for Org Owners
+ *   and Org Admins), and recent errors by reference code (the whole organization's for admins,
  *   their own for everyone else; a code quoted in the message is looked up too). Claude gets the results as
  *   data, the browser shows them under "What I checked", and a ticket made from the conversation carries them.
  * - **Safe fixes behind Confirm** (`checkFix`): Claude may propose one fix from a short list (open a page, turn
@@ -58,7 +58,7 @@ export type Check = {
   errors?: { ref: string; what: string; at: string; status: number | null }[];
 };
 
-const ROLE_SEES_CREDIT = ["Org Owner", "Org Admin", "Billing Admin"];
+const ROLE_SEES_CREDIT = ["Org Owner", "Org Admin"];
 const REF = /\b[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}\b/g;
 
 /**

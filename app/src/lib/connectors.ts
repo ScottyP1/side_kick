@@ -453,7 +453,7 @@ export async function finishConnect(req: Request, cookieState: string | undefine
 
 /**
  * A connector the person may manage: in their organization, and its group one they manage (`requireManage`:
- * 403 for Members, Viewers and Billing Admins, 404 for another organization's id or a group they aren't in).
+ * 403 for Members and Viewers, 404 for another organization's id or a group they aren't in).
  */
 async function ownConnector(user: User, id: unknown): Promise<ConnectorRow> {
   if (!isAdmin(user) && user.role !== "Team Lead") throw new HttpError(403, "Only the group's Team Lead or an admin can do this.");

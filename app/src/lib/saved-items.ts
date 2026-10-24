@@ -34,7 +34,7 @@ type ItemRow = { id: string; org_id: string; workspace_id: string; kind: string;
 /**
  * Saves (or unsaves) one meeting item to the group's knowledge. `actor` is who clicked (a portal user or a Teams
  * person acting in the chat's group); the caller has already checked they may use `workspaceId`
- * (`requireWorkspace`, or the chat's own link). Viewers and Billing Admins can't (403). With `guestsOnly` (a Teams
+ * (`requireWorkspace`, or the chat's own link). Viewers can't (403). With `guestsOnly` (a Teams
  * chat with client guests) only items from meetings that had guests are found. Idempotent; audited when it
  * changes. Returns the item's new state.
  */

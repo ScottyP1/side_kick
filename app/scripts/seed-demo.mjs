@@ -373,14 +373,15 @@ async function phaseA() {
     const r = await owner("POST", "/api/users", { name: p.name, email: p.email, role });
     world.users[p.email] = { ...p, id: r.id, temp: r.tempPassword };
   }
-  // The login accounts (and every Team Lead, who sign in to do their group's work) choose their own password.
+  // The login accounts (and every Team Lead, and other named people the story signs in as, such as Hannah Brooks who
+  // files the invoice ticket) choose their own password: their login's, or the shared one for everyone else.
   const leadPw = (secrets.leadPassword ??= newPassword());
   saveSecrets();
   for (const p of people) {
     if (p.role === "Org Owner") continue;
     if (!p.key && p.role !== "Team Lead") continue;
     const call = client(p.name);
-    await firstSignIn(call, p.email, world.users[p.email].temp, p.key ? PW[p.key] : leadPw);
+    await firstSignIn(call, p.email, world.users[p.email].temp, PW[p.key] ?? leadPw);
     if (p.key) sessions[p.key] = call;
     world.users[p.email].session = call;
   }

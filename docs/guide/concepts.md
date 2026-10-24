@@ -14,19 +14,20 @@ The full rulebook, with every action and which roles may do it, is [Roles and pe
 | Role | Can do |
 |---|---|
 | **Org Owner** | Everything, including the organization itself |
-| **Org Admin** | People, workspaces, Teams channels, usage and the audit log, across all workspaces |
+| **Org Admin** | People, workspaces, Teams channels, usage and billing (only the Org Owner pays or changes the plan) and the audit log, across all workspaces |
 | **Team Lead** | Everything a Member can do, plus the people side of the workspaces they lead (the ones they belong to): add people to them as Member or Viewer, take people off them, and link Teams chats to them. Can't create workspaces or organizations, change anyone's role, remove people from the organization, or see other workspaces |
-| **Billing Admin** | Usage and billing only |
 | **Member** | Work inside the workspaces they belong to: upload, import meetings, ask, update action items |
 | **Viewer** | Read-only inside the workspaces they belong to |
 
 Owners and Admins see every workspace. Everyone else, Team Leads included, sees only the workspaces they've been added to. Only an Org Owner or Org Admin can make someone a Team Lead.
 
+**Your menu follows your role.** Everyone has Overview, Groups, Knowledge & docs, Firm library, Meetings, Memory & gaps, Settings (your own account) and Help & support. Usage & billing, AI models & agent, Guardrails, Activity and Security & audit are for Org Owners and Org Admins; Connectors and Users & access also for Team Leads. See [Roles and permissions](roles-and-permissions.md).
+
 The workspace you're in shows at the top of the pages that belong to one workspace (**Knowledge & docs**, **Meetings**, **Memory & gaps**). If you're in just one workspace it's a plain label; if you're in two or more it's a small menu to switch between them. Org-wide pages (Overview, Usage & billing, Users & access, Activity, Security & audit, Settings and the rest) don't show a workspace at all.
 
 ## Using Sidekick on a phone
 On a phone (or any narrow window) the sidebar makes way for two things:
-- A **tab bar** floating at the bottom with the pages you use most: **Home**, **Groups**, **Knowledge** and **Meetings**, plus **Ask**, which opens the assistant and "I need help" (it replaces the round button, and shows the same dot when the Sidekick team has replied to you). If you're not in a group yet (a Billing Admin, for example), the tabs are **Home**, **Usage** (if your role pays the bills), **Settings** and **Help** instead.
+- A **tab bar** floating at the bottom with the pages you use most: **Home**, **Groups**, **Knowledge** and **Meetings**, plus **Ask**, which opens the assistant and "I need help" (it replaces the round button, and shows the same dot when the Sidekick team has replied to you). If you're not in a group yet, the tabs are **Home**, **Settings** and **Help** instead.
 - The **menu button** (three lines, top left) opens everything else: every page your role can use (the same list as the sidebar), the switcher between your groups if you're in two or more, and **Sign out**. Tap outside it, press the ✕ or Escape to close it.
 
 ## Sources and citations
@@ -68,7 +69,7 @@ Each problem is one item, however long it lasts, and it **clears itself** once i
 ## Guardrails
 Rules Sidekick follows in every answer, everywhere (portal, Teams, the home assistant). Some are **locked** and always on: no hate, racism, bias, harassment, sexual content or help with harm; it can't be talked out of its rules ("ignore your instructions", "pretend you have no rules"); it never crosses into another workspace or organization; and it only states project facts it can cite, otherwise it says **"I don't know"**. The Org Owner can add stricter **switches** for the whole organization (swearing, small talk, judging people, HR/legal/medical questions, contact details, competitors). Each question is checked before it's answered, and each answer is checked again before you see it: an answer without a real source becomes "I don't know", swear words are masked, and contact details are hidden when that switch is on.
 
-On top of that, Org Owners and Admins can:
+Everyone can read these in plain words on **Help & support → Rules Sidekick follows** (the locked rules, your organization's switches On/Off, and how many extra rules apply). The **Guardrails** page itself is for Org Owners and Admins, who can:
 - make **one workspace stricter** than the rest by turning on extra switches just for it (for example "No talk about competitors" for one sensitive client). A workspace can never be looser than the organization.
 - write **custom rules** in plain language, such as "Never quote day rates", for the whole organization or one workspace (up to 20 each). Custom rules can only add restrictions: a rule that tries to loosen the guardrails ("ignore the rules for managers", "you may swear") is refused when it's saved, with the reason. Every version of a rule is kept.
 

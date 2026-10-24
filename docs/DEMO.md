@@ -29,7 +29,7 @@ prints the expected cost, about $3–4, and asks first); `--port <n>` (default 3
 In Claude Code: preview **`sidekick-demo`** (or `sidekick-demo-pg` after a Postgres seed) from `.claude/launch.json`.
 It runs on **http://localhost:3330** with `app/.demo-data`, fake Claude, the reminder timer off and every outside
 service blanked. Sign in at `/login` (portal) or `/owner/login` (Owner Console) with the accounts in
-`app/.demo-logins.md`: one per role (Org Owner, Org Admin, Billing Admin, Team Lead, Member, Viewer, the Owner Console
+`app/.demo-logins.md`: one per role (Org Owner, Org Admin, Team Lead, Member, Viewer, the Owner Console
 operator, and the Org Owner of a second client), each with things to try. Stop the demo copy before seeding again
 (the seed refuses while port 3330 is in use).
 
@@ -57,7 +57,7 @@ post notes to the simulated Teams chats, which aren't running: a harmless "Teams
 
 | | |
 |---|---|
-| **Northwind Consulting** (Business plan, test mode) | 1 Org Owner, 3 Org Admins, 1 Billing Admin, 10 Team Leads, 80 Members, 20 Viewers |
+| **Northwind Consulting** (Business plan, test mode) | 1 Org Owner, 4 Org Admins (Hannah Brooks looks after billing), 10 Team Leads, 80 Members, 20 Viewers |
 | **10 groups** (+ 1 new) | One per engagement, each with a Team Lead and members (plus a new bid team with no Team Lead yet, for Needs attention). Contoso reuses `samples/contoso/`; the other nine are generated from a profile each in `app/scripts/demo-world.mjs` |
 | **Per group** | 7–8 documents (SOW, runbook, RAID log, architecture, status report, internal staffing note, glossary), 5–8 meeting transcripts imported through the normal import with notes (decisions, action items with owners and dates, open questions, risks; for Contoso, Fabrikam and Litware the latest two are marked as **captured from Teams** by automatic notes, which is on for Northwind, with one meeting waiting for a group and one skipped on the Meetings page, and two Contoso decisions saved to knowledge), a tracked Teams chat, questions with 👍/👎, a knowledge map with gaps, reminder states |
 | **Firm library** | Expense policy v3 (replaces v2), travel, rate card, data handling, information security, RAID-log standard, status-report template |

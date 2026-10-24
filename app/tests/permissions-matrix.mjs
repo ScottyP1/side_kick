@@ -9,11 +9,11 @@
  * roles get a 400/404 instead of changing anything, except the harmless reads. `skipAllowed` rows only
  * check that the other roles are refused (running them would disconnect or change real settings).
  *
- * Roles: owner = Org Owner, admin = Org Admin, lead = Team Lead, billing = Billing Admin, member = Member,
- * viewer = Viewer. Team Leads, Billing Admins, Members and Viewers are in workspace A only; Org Owners and
+ * Roles: owner = Org Owner, admin = Org Admin, lead = Team Lead, member = Member, viewer = Viewer (the Billing
+ * Admin role was retired in October 2026). Team Leads, Members and Viewers are in workspace A only; Org Owners and
  * Org Admins see every workspace.
  */
-export const EVERYONE = ["owner", "admin", "lead", "billing", "member", "viewer"];
+export const EVERYONE = ["owner", "admin", "lead", "member", "viewer"];
 const ADMINS = ["owner", "admin"];
 const MANAGERS = ["owner", "admin", "lead"];
 const EDITORS = ["owner", "admin", "lead", "member"];
@@ -26,7 +26,8 @@ export const MATRIX = [
   { what: "List the workspaces they can see", method: "GET", url: () => "/api/workspaces", allow: EVERYONE },
   { what: "See live status on the home page (names: admins only)", method: "GET", url: () => "/api/activity?view=live", allow: EVERYONE },
   { what: "Use the home assistant", method: "POST", url: () => "/api/assistant", body: { message: "" }, allow: EVERYONE },
-  { what: "See the guardrails in force", method: "GET", url: () => "/api/guardrails", allow: EVERYONE },
+  { what: "See the rules Sidekick follows (Help & support)", method: "GET", url: (s) => `/api/rules?ws=${s.wsA}`, allow: EVERYONE },
+  { what: "Open Guardrails (switches, custom rules and their text, how often rules fired)", method: "GET", url: () => "/api/guardrails", allow: ADMINS },
   { what: "See Microsoft sign-in status", method: "GET", url: () => "/api/auth/microsoft", allow: EVERYONE },
   // Inside a workspace they belong to (read)
   { what: "Read documents in their workspaces", method: "GET", url: (s) => `/api/docs?ws=${s.wsA}`, allow: EVERYONE },
@@ -35,7 +36,9 @@ export const MATRIX = [
   { what: "Ask Sidekick questions", method: "POST", url: (s) => "/api/ask", body: (s) => ({ ws: s.wsA, question: "" }), allow: EVERYONE },
   { what: "Rate answers 👍/👎", method: "POST", url: () => "/api/feedback", body: (s) => ({ ws: s.wsA, questionId: NOPE, vote: "up" }), allow: EVERYONE },
   { what: "See the firm library", method: "GET", url: () => "/api/firm", allow: EVERYONE },
-  { what: "See which tool types are allowed, their groups' connections and linked projects", method: "GET", url: () => "/api/connectors", allow: EVERYONE },
+  { what: "See which tools feed their group (its page's Sources line)", method: "GET", url: (s) => `/api/workspaces/${s.wsA}/sources`, allow: EVERYONE },
+  { what: "Open Connectors: which tool types are allowed, their groups' connections and linked projects", method: "GET", url: () => "/api/connectors", allow: MANAGERS },
+  { what: "See a group's last 30 days (Team Leads: their own groups)", method: "GET", url: (s) => `/api/workspaces/${s.wsA}/usage`, allow: MANAGERS },
   { what: "See Needs attention for their groups", method: "GET", url: () => "/api/findings", allow: EVERYONE },
   // Change workspace content
   { what: "Upload documents", method: "POST", url: () => "/api/docs", form: (s) => ({ ws: s.wsA }), allow: EDITORS },
@@ -50,10 +53,10 @@ export const MATRIX = [
   { what: "Resolve or dismiss knowledge gaps", method: "POST", url: () => "/api/gaps", body: {}, allow: EDITORS },
   { what: "Snooze a Needs attention item", method: "POST", url: () => "/api/findings", body: { id: NOPE, action: "snooze" }, allow: MANAGERS },
   // Money
-  { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ["owner", "admin", "billing"] },
-  { what: "See the plan and subscription", method: "GET", url: () => "/api/billing", allow: ["owner", "admin", "billing"] },
-  { what: "Export usage per group (CSV, for chargeback)", method: "GET", url: () => "/api/usage/export?months=1", allow: ["owner", "admin", "billing"] },
-  { what: "Pay, change the plan or extra groups, or cancel it", method: "POST", url: () => "/api/billing", body: { action: "nope" }, allow: ["owner", "billing"] },
+  { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ADMINS },
+  { what: "See the plan and subscription", method: "GET", url: () => "/api/billing", allow: ADMINS },
+  { what: "Export usage per group (CSV, for chargeback)", method: "GET", url: () => "/api/usage/export?months=1", allow: ADMINS },
+  { what: "Pay, change the plan or extra groups, or cancel it", method: "POST", url: () => "/api/billing", body: { action: "nope" }, allow: ["owner"] },
   // Running the organization
   { what: "Create workspaces", method: "POST", url: () => "/api/workspaces", body: {}, allow: ADMINS },
   { what: "Rename a workspace or change its engagement code", method: "PATCH", url: () => `/api/workspaces/${NOPE}`, body: {}, allow: ADMINS },

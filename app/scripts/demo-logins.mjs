@@ -71,25 +71,22 @@ ${row("Org Admin (runs people, groups and Teams day to day)", p("orgAdmin").name
   "**Firm library**: add or replace a policy (Expense policy v3 replaced v2).",
   "**Guardrails**: you can make a group stricter and write custom rules; the company-wide switches show as On/Off only (\"Set by your Org Owner\").",
   "**Activity** and **Security & audit**: traces from the seeding, sign-ins, every change.",
-])}
-${row("Billing Admin (pays, changes no content)", p("billingAdmin").name, p("billingAdmin").email, passwords.billingAdmin, "No groups (sees the menu, but no client work)", [
-  "**Usage & billing**: the whole company's AI spend, the plan, extra groups, the 80% credit notice. Change the plan in test mode.",
-  "**Groups**: empty, because a Billing Admin isn't in any group. Asking for a group's address directly says \"not found\".",
-  "**Users & access**, **Activity**, **Security & audit** aren't in the menu; opening /audit shows who can use it.",
-  "**Help & support → My tickets**: your invoice PO ticket with the Sidekick team's reply.",
+  "**Usage & billing**: the whole company's AI spend, the plan and the 80% credit notice; only the Org Owner can pay or change the plan (\"Only the Org Owner can…\"). Hannah Brooks, another Org Admin, looks after billing and has the invoice PO ticket.",
 ])}
 ${row("Team Lead (runs the people side of their group)", p("teamLead").name, p("teamLead").email, passwords.teamLead, group("contoso"), [
   "**Groups → Contoso**: your one group; People tab shows emails (you manage it). Add a Member or Viewer; you can't add an Org Admin or take yourself off.",
   "**Users & access**: only the people in your group, and only the Member and Viewer roles.",
+  "**Groups → Contoso → Overview**: the **Last 30 days** card (questions, answers, meetings, documents, Contoso's share of the AI use; no prices) and the **Sources** line. Opening another group's numbers by address says \"not found\".",
   "**Teams chats** tab: two linked chats (one with client guests: answers there use only Shareable documents). Change reminders for the team chat.",
   "**Meetings**: eight Contoso meetings with notes, decisions and action items; mark an item Done.",
-  "**Usage & billing**, **Activity**, **Guardrails** switches: not yours (the page says who can).",
+  "**Connectors** is in your menu (link a tool's project to Contoso); **Usage & billing**, **AI models & agent**, **Guardrails**, **Activity** aren't (typing the address shows who can use it).",
 ])}
 ${row("Member (does the client work)", p("member").name, p("member").email, passwords.member, `${group("contoso")} and ${group("litware")}`, [
   "Top bar: switch between your two groups; you never see the other eight.",
   "**Knowledge & docs**: upload a document, ask a question, rate an answer 👍/👎.",
   "**Meetings**: import \`samples/Contoso - Sprint 14 planning.vtt\` again, or update an action item.",
-  "**Users & access** isn't in your menu; the Groups page has no New group button.",
+  "Your menu has only the client-work pages plus Settings (**My account**: password, two-step, sessions) and Help. No Users & access, Connectors, Guardrails or AI models & agent; the Groups page has no New group button.",
+  "**Groups → Contoso**: the **Sources** line shows which tools feed it. **Help & support → Rules Sidekick follows**: the locked rules and your organization's switches, On/Off.",
   "**Help & support → My tickets**: your resolved ticket about a long transcript.",
 ])}
 ${row("Viewer (reads and asks, changes nothing)", p("viewer").name, p("viewer").email, passwords.viewer, `${group("contoso")} and ${group("fabrikam")}`, [

@@ -24,7 +24,8 @@
  * - **Leaving**: canceling starts the organization's roll-off (lib/rolloff.ts): full use until the end of
  *   what was paid for, then `ORG_GRACE_DAYS` read-only with export, then everything is deleted. Paying
  *   again before then stops it (`recordPayment`).
- * - **Who**: Org Owners and Billing Admins manage the plan (`BILLING_ROLES`); the Sidekick team can set any
+ * - **Who**: Org Owners and Org Admins see Usage & billing; only the Org Owner manages the plan (`BILLING_ROLES`:
+ *   pays, changes it or the extra groups, cancels); the Sidekick team can set any
  *   plan or status from the Owner Console (`setByOwner`). Every change is in the client's audit log.
  */
 import "server-only";
@@ -34,8 +35,10 @@ import { accessFor, EXTRA_GROUP, limitsWithExtras, MAX_EXTRA_GROUPS, monthlyPric
 import { cancelOrgRolloff, scheduleOrgRolloff, ORG_GRACE_DAYS } from "./rolloff";
 import { BRAND } from "./brand";
 
-/** Roles that may pay, change the plan or cancel (others may still see the plan on Usage & billing). */
-export const BILLING_ROLES: readonly Role[] = ["Org Owner", "Billing Admin"];
+/** Roles that may pay, change the plan or cancel (Org Admins may still see the plan on Usage & billing). */
+export const BILLING_ROLES: readonly Role[] = ["Org Owner"];
+/** Roles that may see Usage & billing, the AI credit and its notices: Org Owners and Org Admins. */
+export const BILLING_VIEW_ROLES: readonly Role[] = ["Org Owner", "Org Admin"];
 
 /** A subscription row. Dates are ISO strings; null when they don't apply to the status. */
 export type Subscription = {
@@ -236,7 +239,7 @@ const priceLine = (plan: PlanId, extras: number) => `${planWithExtras(planById(p
 
 /**
  * "Pay (test mode)" on the checkout page: pays for `plan` (and `extras` extra groups, if given; otherwise
- * the ones already on the subscription) through the provider. Org Owners and Billing Admins only (checked
+ * the ones already on the subscription) through the provider. The Org Owner only (checked
  * by the route). Refuses a plan the organization has outgrown.
  */
 export async function pay(user: User, plan: PlanId, extras?: number) {

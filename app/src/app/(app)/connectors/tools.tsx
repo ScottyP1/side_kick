@@ -114,7 +114,7 @@ function PlanNote() {
   return (
     <div className="callout">
       {me.plan?.connectors === 0 ? `Your ${me.plan?.name ?? ""} plan doesn't include connectors to other tools.` : `Your ${me.plan?.name ?? ""} plan includes ${me.plan?.connectors} connected tool${me.plan?.connectors === 1 ? "" : "s"}, already in use.`}{" "}
-      {["Org Owner", "Billing Admin"].includes(me.user.role) ? <a href="/usage">Upgrade on Usage &amp; billing</a> : "An Org Owner or Billing Admin can upgrade on Usage & billing."}
+      {me.user.role === "Org Owner" ? <a href="/usage">Upgrade on Usage &amp; billing</a> : "The Org Owner can upgrade on Usage & billing."}
     </div>
   );
 }

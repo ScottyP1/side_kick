@@ -44,7 +44,7 @@ export default function MeetingsPage() {
   const [err, setErr] = useState("");
   const [form, setForm] = useState({ title: "", held_at: new Date().toISOString().slice(0, 10), external: false, text: "" });
   const [file, setFile] = useState<File | null>(null);
-  const canEdit = !["Viewer", "Billing Admin"].includes(me.user.role);
+  const canEdit = me.user.role !== "Viewer";
 
   const load = useCallback(async () => {
     if (!ws) return;

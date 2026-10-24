@@ -138,7 +138,7 @@ const optionText = (o: GroupOption) => `${planWithExtras(planById(o.plan)!, o.ex
 
 /**
  * The plain "how to get more groups" sentence for a self-service plan: the cheaper of adding extra groups or
- * upgrading first, both with their monthly price, e.g. "An Org Owner or Billing Admin can add 2 extra groups
+ * upgrading first, both with their monthly price, e.g. "The Org Owner can add 2 extra groups
  * (Starter + 2 extra groups for $457 a month), or move to Team for $699 a month on Usage & billing."
  */
 export function groupOptionsText(o: ReturnType<typeof groupOptions>, extras: number): string {
@@ -147,7 +147,7 @@ export function groupOptionsText(o: ReturnType<typeof groupOptions>, extras: num
   const upLine = o.upgrade ? `move to ${optionText(o.upgrade)}` : null;
   const lines = !upLine ? [extraLine] : o.cheaper === "extra" ? [extraLine, upLine] : [upLine, extraLine];
   const text = lines.join(", or ");
-  return `An Org Owner or Billing Admin can ${text} on Usage & billing.`;
+  return `The Org Owner can ${text} on Usage & billing.`;
 }
 
 const fmt = (key: LimitKey, n: number) => (key === "meetingHours" || key === "liveMeetingHours" ? `${Math.round(n * 10) / 10}` : String(n));
@@ -171,7 +171,7 @@ export async function assertCanAdd(orgId: string, key: Exclude<LimitKey, "aiCred
     ? ` and ${fmt(key, used)} ${used === 1 ? "hour is" : "hours are"} used; this one is about ${fmt(key, amount)} ${amount === 1 ? "hour" : "hours"}`
     : used ? ` and you have ${used}` : "";
   const how = plan?.selfService
-    ? "An Org Owner or Billing Admin can move to a bigger plan on Usage & billing."
+    ? "The Org Owner can move to a bigger plan on Usage & billing."
     : `Contact the ${BRAND.name} team to raise it.`;
   const keep = key === "meetingHours" || key === "liveMeetingHours" ? " Meeting hours start again on the 1st of next month." : "";
   // Groups on a self-service plan: say exactly what would make room, cheapest first, with the prices
@@ -211,7 +211,7 @@ export class FeatureError extends HttpError {
  * Call it only where the feature is *newly* used (turning reminders on for a chat, making someone Team
  * Lead, …), never for what already exists, so a smaller plan switches nothing off. The message names the
  * plan that includes it and who can move to it, e.g. "Your Starter plan doesn't include Team Leads. Team
- * ($699 / month) and up include it: an Org Owner or Billing Admin can move to Team on Usage & billing."
+ * ($699 / month) and up include it: the Org Owner can move to Team on Usage & billing."
  */
 export async function assertFeature(orgId: string, key: FeatureKey) {
   const { plan } = await orgPlan(orgId);
@@ -219,7 +219,7 @@ export async function assertFeature(orgId: string, key: FeatureKey) {
   const needed = planWithFeature(key);
   const label = FEATURE_LABEL[key];
   const how = needed.selfService && plan?.selfService
-    ? `${needed.name} (${priceText(needed)}) and up include it: an Org Owner or Billing Admin can move to ${needed.name} on Usage & billing.`
+    ? `${needed.name} (${priceText(needed)}) and up include it: the Org Owner can move to ${needed.name} on Usage & billing.`
     : `${needed.name} includes it: contact the ${BRAND.name} team.`;
   throw new FeatureError(key, `Your ${plan!.name} plan doesn't include ${label}. ${how} Anything already set up keeps working.`, needed.id);
 }

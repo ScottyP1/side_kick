@@ -1,6 +1,6 @@
 # Roles and permissions
 
-Every person in a Sidekick organization has exactly one of six roles. The role decides **what they can do**;
+Every person in a Sidekick organization has exactly one of five roles. The role decides **what they can do**;
 the workspaces they're added to decide **which client work they can see**. This page is the rulebook.
 
 <!-- help-center:skip -->
@@ -13,86 +13,108 @@ every row below against the real app for every role, so the page and the code ca
 | Role | In one line | Sees which workspaces |
 |---|---|---|
 | **Org Owner** | Runs the whole organization, including sign-in and the company-wide guardrails. One per organization. | All |
-| **Org Admin** | Runs people, workspaces and Teams links day to day. | All |
+| **Org Admin** | Runs people, workspaces and Teams links day to day, and sees Usage & billing (only the Org Owner pays or changes the plan). | All |
 | **Team Lead** | A Member who also runs the people side of the workspaces they lead: adds Members and Viewers, takes them off, links Teams chats. Made by Org Owners/Admins. | Only ones they're added to (the ones they lead) |
-| **Billing Admin** | Watches usage and AI spend, and pays for, changes or cancels the plan. Changes no content. | Only ones they're added to (usually none) |
 | **Member** | Does the client work: uploads, adds meetings, asks, updates action items, saves decisions to knowledge. | Only ones they're added to |
 | **Viewer** | Reads and asks, never changes anything. | Only ones they're added to |
 
 Separately, the **Sidekick team** uses the **Owner Console** (its own accounts, not a role in any
 organization) to set up client organizations and watch platform health. It never sees client documents.
 
+**There's no Billing Admin role any more** (retired in October 2026): only Org Owners and Org Admins see
+billing. Anyone who was a Billing Admin became a **Member** with no groups, the change is on Security & audit,
+and the Org Owner sees a note on Home ("… was a Billing Admin and is now a Member") for two weeks, or until
+they give that person another role. Make them an **Org Admin** if they should keep seeing billing.
+
+## What's in each person's menu
+
+Everyone gets the pages for the client work: **Overview**, **Groups**, **Knowledge & docs**, **Firm library**
+(read-only unless you're an admin), **Meetings**, **Memory & gaps**, **Settings** and **Help & support**.
+
+- **Org Owners and Org Admins** also get **Usage & billing**, **AI models & agent**, **Guardrails**, **Activity**
+  and **Security & audit**, and Settings shows the **company settings** (Microsoft sign-in, two-step sign-in for
+  everyone, branding, export and roll-offs) as well as **My account**.
+- **Team Leads** also get **Connectors** and **Users & access** (for the groups they lead).
+- **Members and Viewers**: Settings is just **My account**. Each group's page shows which tools feed it
+  ("Sources"), and **Help & support** lists the rules Sidekick follows.
+
+Typing the address of a page that isn't in your menu shows a short message saying who can use it.
+
 ## Who can do what
 
 ✓ = allowed. Workspace actions also need the person to be in that workspace (Org Owners and Org Admins
 are in all of them). Anything not allowed is refused with a message naming who can do it, e.g. "Only the
-Org Owner can do this" or "Only Org Owners, Org Admins and Billing Admins can do this". Pages a role can't
-use (Usage & billing, Activity, Security & audit) show the same kind of message instead of their content.
+Org Owner can do this" or "Only Org Owners and Org Admins can do this". Pages a role can't
+use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Security & audit) show the same kind of message instead of their content.
 
-| What | Org Owner | Org Admin | Team Lead | Billing Admin | Member | Viewer |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| **Everyone signed in** | | | | | | |
-| See the home page, their profile and their groups (workspaces) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See who's in their groups (emails: admins and the group's Team Lead only) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See live status on the home page (names of who's active: admins only) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Use the home assistant (it only offers actions their role allows) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See the guardrails in force | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Inside their workspaces: read** | | | | | | |
-| Read documents, meetings, notes and the knowledge map | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Ask Sidekick questions (portal and Teams), with follow-ups | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Rate answers 👍/👎 (portal and Teams) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See the firm library (the organization's policies and standards) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See which tool types the organization allows (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365), their groups' connections, health and linked projects (nobody but the connecting Team Lead or admin ever signs in to a tool) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Inside their workspaces: change** | | | | | | |
-| Upload, rename or delete documents | ✓ | ✓ | ✓ | | ✓ | |
-| Add a past or outside meeting, reprocess or delete meetings | ✓ | ✓ | ✓ | | ✓ | |
-| Save a meeting's decisions, requirements, risks and facts to knowledge (portal, Teams card and tab) | ✓ | ✓ | ✓ | | ✓ | |
-| See the automatic-notes panel and their groups' captured Teams meetings | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See skipped Teams meetings and pick the group for one several groups were in | ✓ | ✓ | ✓ (own groups) | | | |
-| Update action items (portal and Teams card buttons) | ✓ | ✓ | ✓ | | ✓ | |
-| Refresh the knowledge map, resolve or dismiss gaps | ✓ | ✓ | ✓ | | ✓ | |
-| See Needs attention for their groups: action items, unanswered questions, out-of-date documents | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See Needs attention about their groups' Teams chats (posts failing, Sidekick removed, no notes chat) | ✓ | ✓ | ✓ (own groups) | | | |
-| See organization-wide Needs attention (chats waiting, groups without a Team Lead, connectors) | ✓ | ✓ | | | | |
-| See Needs attention about a tool request for their groups (approved: connect it; declined, with the note) | ✓ | ✓ | ✓ (own groups) | | | |
-| Snooze a Needs attention item for a week | ✓ | ✓ | ✓ (own groups' items) | | | |
-| **Money** | | | | | | |
-| See their own AI use this month on the home page | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See Usage & billing and the whole company's AI spend | ✓ | ✓ | | ✓ | | |
-| See the plan and subscription (on Usage & billing) | ✓ | ✓ | | ✓ | | |
-| Export usage per group as CSV (AI cost by engagement code, for chargeback) | ✓ | ✓ | | ✓ | | |
-| See the AI credit notice (80% used, used up) | ✓ | ✓ | | ✓ | | |
-| Pay for the plan, change it or its extra groups, or cancel it | ✓ | | | ✓ | | |
-| **Running the organization** | | | | | | |
-| Create groups (workspaces), picking their client, Team Lead (Team plan and up) and first members | ✓ | ✓ | | | | |
-| Rename a group, change its client or engagement code, delete it (and everything in it) | ✓ | ✓ | | | | |
-| End a group when the engagement ends (read-only, deleted on a date) or cancel that | ✓ | ✓ | | | | |
-| Export a group, or the whole organization's data, as a zip | ✓ | ✓ | | | | |
-| See roll-offs and download deletion certificates | ✓ | ✓ | | | | |
-| Add, change or delete firm library documents | ✓ | ✓ | | | | |
-| Turn automatic notes after Teams meetings on or off, check now, try a skipped meeting again | ✓ | ✓ | | | | |
-| Connect an allowed tool for a group with the account the client gave them, reconnect or disconnect the group's connection | ✓ | ✓ | ✓ (own groups) | | | |
-| Link projects through a group's connection (repositories, spaces, libraries), sync now or unlink | ✓ | ✓ | ✓ (own groups) | | | |
-| Ask the Org Owner to allow a tool type for their group (with a reason), see the request's status, cancel their own | | ✓ | ✓ (own groups) | | | |
-| See every request to allow a tool type | ✓ | ✓ | ✓ (own groups') | | | |
-| See answer quality (👍/👎 and "I don't know" counts, no text) | ✓ | ✓ | | | | |
-| Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | | |
-| Change roles, remove people from the organization | ✓ | ✓ | | | | |
-| Link, change or unlink Teams channels and chats (turning reminders on: Team plan and up) | ✓ | ✓ | ✓ (own workspaces) | | | |
-| Add Sidekick to a Teams chat (anyone else: Sidekick leaves) | ✓ | ✓ | ✓ | | | |
-| See and assign Teams chats waiting to be assigned (portal only) | ✓ | ✓ | ✓ (chats they added, to own groups) | | | |
-| Remove Sidekick from a Teams chat | ✓ | ✓ | ✓ (own groups' chats, or waiting chats they added) | | | |
-| Import people from Microsoft 365 | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | | |
-| `@Sidekick add` / `remove @name` in a linked Teams chat | ✓ | ✓ | ✓ (Members and Viewers, that chat's workspace if they lead it) | | | |
-| Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval) | ✓ | ✓ | | | | |
-| See the audit log and Activity (traces, performance) | ✓ | ✓ | | | | |
-| Change branding (logo, brand color) | ✓ | ✓ | | | | |
-| Make a workspace's guardrails stricter, write custom rules (Team plan and up), use "Test it" | ✓ | ✓ | | | | |
-| **Org Owner only** | | | | | | |
-| Turn company-wide guardrail switches on or off | ✓ | | | | | |
-| Connect, require (Business plan and up) or disconnect Microsoft sign-in | ✓ | | | | | |
-| Allow or stop a tool type for the organization (a switch on Connectors, no sign-in; stopping disconnects every group's connection of it; within the plan's connectors) | ✓ | | | | | |
-| Approve (allows the type) or decline (with a note) a request to allow a tool type; see pending requests on Home | ✓ | | | | | |
+| What | Org Owner | Org Admin | Team Lead | Member | Viewer |
+|---|:-:|:-:|:-:|:-:|:-:|
+| **Everyone signed in** | | | | | |
+| See the home page, their profile and their groups (workspaces) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See who's in their groups (emails: admins and the group's Team Lead only) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See live status on the home page (names of who's active: admins only) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Use the home assistant (it only offers actions their role allows) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See the rules Sidekick follows (Help & support: locked rules, the organization's switches On/Off, how many extra rules apply, no rule text) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Settings → My account: password, two-step sign-in, where they're signed in | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Inside their workspaces: read** | | | | | |
+| Read documents, meetings, notes and the knowledge map | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Ask Sidekick questions (portal and Teams), with follow-ups | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Rate answers 👍/👎 (portal and Teams) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See the firm library (the organization's policies and standards) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See which tools feed their group (the group page's Sources line: tool, name, last sync) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Open Connectors: which tool types the organization allows, their groups' connections, health and linked projects (only the connecting Team Lead or admin ever signs in to a tool) | ✓ | ✓ | ✓ (own groups) | | |
+| See a group's last 30 days on its page (questions, answers, meetings, documents, share of AI use) | ✓ | ✓ | ✓ (own groups) | | |
+| **Inside their workspaces: change** | | | | | |
+| Upload, rename or delete documents | ✓ | ✓ | ✓ | ✓ | |
+| Add a past or outside meeting, reprocess or delete meetings | ✓ | ✓ | ✓ | ✓ | |
+| Save a meeting's decisions, requirements, risks and facts to knowledge (portal, Teams card and tab) | ✓ | ✓ | ✓ | ✓ | |
+| See the automatic-notes panel and their groups' captured Teams meetings | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See skipped Teams meetings and pick the group for one several groups were in | ✓ | ✓ | ✓ (own groups) | | |
+| Update action items (portal and Teams card buttons) | ✓ | ✓ | ✓ | ✓ | |
+| Refresh the knowledge map, resolve or dismiss gaps | ✓ | ✓ | ✓ | ✓ | |
+| See Needs attention for their groups: action items, unanswered questions, out-of-date documents | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See Needs attention about their groups' Teams chats (posts failing, Sidekick removed, no notes chat) | ✓ | ✓ | ✓ (own groups) | | |
+| See organization-wide Needs attention (chats waiting, groups without a Team Lead, connectors) | ✓ | ✓ | | | |
+| See Needs attention about a tool request for their groups (approved: connect it; declined, with the note) | ✓ | ✓ | ✓ (own groups) | | |
+| Snooze a Needs attention item for a week | ✓ | ✓ | ✓ (own groups' items) | | |
+| **Money** | | | | | |
+| See their own AI use this month on the home page | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See Usage & billing and the whole company's AI spend | ✓ | ✓ | | | |
+| See the plan and subscription (on Usage & billing) | ✓ | ✓ | | | |
+| Export usage per group as CSV (AI cost by engagement code, for chargeback) | ✓ | ✓ | | | |
+| See the AI credit notice (80% used, used up) | ✓ | ✓ | | | |
+| Pay for the plan, change it or its extra groups, or cancel it | ✓ | | | | |
+| See the note that Sidekick changed someone's role (a retired Billing Admin is now a Member) | ✓ | | | | |
+| **Running the organization** | | | | | |
+| Create groups (workspaces), picking their client, Team Lead (Team plan and up) and first members | ✓ | ✓ | | | |
+| Rename a group, change its client or engagement code, delete it (and everything in it) | ✓ | ✓ | | | |
+| End a group when the engagement ends (read-only, deleted on a date) or cancel that | ✓ | ✓ | | | |
+| Export a group, or the whole organization's data, as a zip | ✓ | ✓ | | | |
+| See roll-offs and download deletion certificates | ✓ | ✓ | | | |
+| Add, change or delete firm library documents | ✓ | ✓ | | | |
+| Turn automatic notes after Teams meetings on or off, check now, try a skipped meeting again | ✓ | ✓ | | | |
+| Connect an allowed tool for a group with the account the client gave them, reconnect or disconnect the group's connection | ✓ | ✓ | ✓ (own groups) | | |
+| Link projects through a group's connection (repositories, spaces, libraries), sync now or unlink | ✓ | ✓ | ✓ (own groups) | | |
+| Ask the Org Owner to allow a tool type for their group (with a reason), see the request's status, cancel their own | | ✓ | ✓ (own groups) | | |
+| See every request to allow a tool type | ✓ | ✓ | ✓ (own groups') | | |
+| See answer quality (👍/👎 and "I don't know" counts, no text) | ✓ | ✓ | | | |
+| Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | |
+| Change roles, remove people from the organization | ✓ | ✓ | | | |
+| Link, change or unlink Teams channels and chats (turning reminders on: Team plan and up) | ✓ | ✓ | ✓ (own workspaces) | | |
+| Add Sidekick to a Teams chat (anyone else: Sidekick leaves) | ✓ | ✓ | ✓ | | |
+| See and assign Teams chats waiting to be assigned (portal only) | ✓ | ✓ | ✓ (chats they added, to own groups) | | |
+| Remove Sidekick from a Teams chat | ✓ | ✓ | ✓ (own groups' chats, or waiting chats they added) | | |
+| Import people from Microsoft 365 | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | |
+| `@Sidekick add` / `remove @name` in a linked Teams chat | ✓ | ✓ | ✓ (Members and Viewers, that chat's workspace if they lead it) | | |
+| Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval) | ✓ | ✓ | | | |
+| See the audit log and Activity (traces, performance) | ✓ | ✓ | | | |
+| Change branding (logo, brand color) | ✓ | ✓ | | | |
+| Make a workspace's guardrails stricter, write custom rules (Team plan and up), use "Test it" | ✓ | ✓ | | | |
+| **Org Owner only** | | | | | |
+| Turn company-wide guardrail switches on or off | ✓ | | | | |
+| Connect, require (Business plan and up) or disconnect Microsoft sign-in | ✓ | | | | |
+| Allow or stop a tool type for the organization (a switch on Connectors, no sign-in; stopping disconnects every group's connection of it; within the plan's connectors) | ✓ | | | | |
+| Approve (allows the type) or decline (with a note) a request to allow a tool type; see pending requests on Home | ✓ | | | | |
 
 ## Rules that always hold
 
@@ -126,12 +148,12 @@ use (Usage & billing, Activity, Security & audit) show the same kind of message 
   organization, create workspaces, or open admin pages.
 - **AI use is personal unless you handle billing.** Every AI call is recorded with the person it was for
   (in the portal, or from a linked Microsoft account in Teams). Members and Viewers see only their own;
-  Org Owners, Org Admins and Billing Admins see the company total. Work Sidekick does on its own, and
+  Org Owners and Org Admins see the company total. Work Sidekick does on its own, and
   questions from Teams guests, count only toward the company total.
 - **A lapsed plan makes everything read-only, for every role.** When a free trial ends unpaid, a failed
   payment isn't fixed within 7 days, or a canceled plan runs out, everyone can still sign in and see
   everything, but nothing can be added or changed and Sidekick doesn't answer (portal, Teams, assistant).
-  Org Owners and Billing Admins can still pay, which turns everything back on.
+  The Org Owner can still pay, which turns everything back on.
 - **Client guests** in a Teams chat only ever get answers from Shareable documents, whatever the asker's role.
 - **Same rules everywhere.** The portal, Teams and the home assistant use the same checks; the assistant
   never offers an action the role can't do, and the server refuses it again if it tried.

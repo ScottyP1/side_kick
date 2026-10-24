@@ -1,6 +1,6 @@
 /**
  * GET /api/overview: numbers for the portal home page across the workspaces this user can see.
- * AI use this month: roles that may see usage and billing (Org Owner, Org Admin, Billing Admin) get the
+ * AI use this month: roles that may see usage and billing (Org Owner, Org Admin) get the
  * whole organization's total (`spendScope: "org"`); everyone else gets only the calls made for them,
  * in the portal or from a linked Teams account (`spendScope: "you"`).
  */
@@ -14,7 +14,7 @@ export const GET = handle(async () => {
   const ph = ids.length ? ids.map(() => "?").join(",") : "''";
   const one = async (sql: string) => ((await get<{ n: number }>(sql.replace("__WS__", ph), ...ids))?.n ?? 0);
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-  const wholeOrg = isAdmin(user) || user.role === "Billing Admin";
+  const wholeOrg = isAdmin(user);
   const mine = (await get<{ cost: number; calls: number }>(
     `SELECT COALESCE(SUM(cost_usd), 0) AS cost, COUNT(*) AS calls FROM usage_events WHERE org_id = ? AND created_at >= ?${wholeOrg ? "" : " AND user_id = ?"}`,
     ...(wholeOrg ? [user.org_id, monthStart] : [user.org_id, monthStart, user.id]),

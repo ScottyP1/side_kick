@@ -635,6 +635,35 @@ function migrate(conn: DatabaseSync) {
   conn.exec("CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key)");
   // Watchers: when someone removed Sidekick from a chat in Teams (and who), and the last post that reached it.
   for (const col of ["removed_at", "removed_by", "last_post_ok_at"]) if (!has("teams_conversations", col)) conn.exec(`ALTER TABLE teams_conversations ADD COLUMN ${col} TEXT`);
+  // Scale readiness (docs/SCALE.md): indexes for per-group lists and counts, per-person lookups and the retention
+  // clean-up (lib/retention.ts), found with the load test on 10,000 groups. Same list as db/schema.postgres.sql.
+  for (const sql of [
+    "CREATE INDEX IF NOT EXISTS workspaces_org ON workspaces(org_id, name)",
+    "CREATE INDEX IF NOT EXISTS workspace_members_user ON workspace_members(user_id)",
+    "CREATE INDEX IF NOT EXISTS users_org ON users(org_id, role)",
+    "CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id)",
+    "CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires_at)",
+    "CREATE INDEX IF NOT EXISTS documents_ws ON documents(workspace_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS documents_org ON documents(org_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS meetings_ws ON meetings(workspace_id, held_at)",
+    "CREATE INDEX IF NOT EXISTS meetings_org ON meetings(org_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS items_meeting ON items(meeting_id, kind)",
+    "CREATE INDEX IF NOT EXISTS items_org_kind ON items(org_id, kind, created_at)",
+    "CREATE INDEX IF NOT EXISTS items_ws ON items(workspace_id, kind)",
+    "CREATE INDEX IF NOT EXISTS action_items_meeting ON action_items(meeting_id)",
+    "CREATE INDEX IF NOT EXISTS action_items_ws ON action_items(workspace_id, status)",
+    "CREATE INDEX IF NOT EXISTS action_items_org ON action_items(org_id, status, due_on)",
+    "CREATE INDEX IF NOT EXISTS questions_ws ON questions(workspace_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS questions_org ON questions(org_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS audit_log_org_time ON audit_log(org_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS audit_log_time ON audit_log(created_at)",
+    "CREATE INDEX IF NOT EXISTS traces_time ON traces(started_at)",
+    "CREATE INDEX IF NOT EXISTS usage_events_time ON usage_events(created_at)",
+    "CREATE INDEX IF NOT EXISTS chat_messages_time ON chat_messages(sent_at)",
+    "CREATE INDEX IF NOT EXISTS app_errors_time ON app_errors(created_at)",
+    "CREATE INDEX IF NOT EXISTS guard_events_time ON guard_events(created_at)",
+    "CREATE INDEX IF NOT EXISTS teams_conversations_org ON teams_conversations(org_id, workspace_id)",
+  ]) conn.exec(sql);
 }
 
 /**
@@ -711,7 +740,13 @@ async function postgresDriver(): Promise<Driver> {
   const url = process.env.DATABASE_URL ?? "";
   const pool = new pg.Pool({
     connectionString: url,
+    // Connections per app copy. Azure's B1ms allows ~50 in all, so 10 leaves room for 3-4 copies plus admin tools;
+    // raise it only together with a bigger database tier (docs/SCALE.md, docs/HOSTING.md → Scaling up).
     max: Number(process.env.DATABASE_POOL_MAX || 10),
+    // When every connection is busy, a query waits at most this long for one, then fails with a clear error
+    // (a reference code for the person) instead of hanging the request (DATABASE_POOL_WAIT_MS, default 15 s).
+    connectionTimeoutMillis: Number(process.env.DATABASE_POOL_WAIT_MS || 15_000),
+    idleTimeoutMillis: 30_000, // give idle connections back to the database after 30 s
     allowExitOnIdle: true, // scripts and tests can exit without closing the pool
     // Azure Database for PostgreSQL requires encrypted (TLS) connections, checked against its certificate.
     // A database on this same machine (localhost, or a local socket) is the only exception.
@@ -792,13 +827,25 @@ export const now = () => new Date().toISOString();
 /** A database row with unknown columns. Pass a type to `all`/`get` to describe the columns instead. */
 export type Row = Record<string, unknown>;
 
+/**
+ * Slow-query log (SIDEKICK_SLOW_QUERY_MS, off by default): prints any query that took longer than that many ms, with
+ * its SQL text only (values are never printed, so no client data reaches the log). Used by the load test
+ * (docs/SCALE.md) and handy in production for a while after a change.
+ */
+const SLOW_QUERY_MS = Number(process.env.SIDEKICK_SLOW_QUERY_MS || 0);
+function timeQuery(sql: string, t0: number) {
+  const ms = performance.now() - t0;
+  countDbQuery(ms);
+  if (SLOW_QUERY_MS > 0 && ms >= SLOW_QUERY_MS) console.warn(`[slow query] ${Math.round(ms)} ms: ${sql.replace(/\s+/g, " ").trim().slice(0, 400)}`);
+}
+
 /** Runs a SELECT and returns every matching row. Values go in `params`, matched to `?` in order. */
 export async function all<T = Row>(sql: string, ...params: Param[]): Promise<T[]> {
   const t0 = performance.now();
   try {
     return (await (await driver()).query(sql, params)) as T[];
   } finally {
-    countDbQuery(performance.now() - t0);
+    timeQuery(sql, t0);
   }
 }
 /** Runs a SELECT and returns the first row, or `undefined` if nothing matched. */
@@ -811,7 +858,7 @@ export async function run(sql: string, ...params: Param[]): Promise<{ changes: n
   try {
     return await (await driver()).exec(sql, params);
   } finally {
-    countDbQuery(performance.now() - t0);
+    timeQuery(sql, t0);
   }
 }
 /**

@@ -500,3 +500,30 @@ CREATE INDEX IF NOT EXISTS teams_post_failures_conv ON teams_post_failures(conve
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS removed_at TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS removed_by TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS last_post_ok_at TEXT;
+-- Scale readiness (docs/SCALE.md): indexes for per-group lists and counts, per-person lookups, and the retention
+-- clean-up (lib/retention.ts), found with the load test (scripts/load-test.mjs) on 10,000 groups.
+CREATE INDEX IF NOT EXISTS workspaces_org ON workspaces(org_id, name);
+CREATE INDEX IF NOT EXISTS workspace_members_user ON workspace_members(user_id);
+CREATE INDEX IF NOT EXISTS users_org ON users(org_id, role);
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS documents_ws ON documents(workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS documents_org ON documents(org_id, created_at);
+CREATE INDEX IF NOT EXISTS meetings_ws ON meetings(workspace_id, held_at);
+CREATE INDEX IF NOT EXISTS meetings_org ON meetings(org_id, created_at);
+CREATE INDEX IF NOT EXISTS items_meeting ON items(meeting_id, kind);
+CREATE INDEX IF NOT EXISTS items_org_kind ON items(org_id, kind, created_at);
+CREATE INDEX IF NOT EXISTS items_ws ON items(workspace_id, kind);
+CREATE INDEX IF NOT EXISTS action_items_meeting ON action_items(meeting_id);
+CREATE INDEX IF NOT EXISTS action_items_ws ON action_items(workspace_id, status);
+CREATE INDEX IF NOT EXISTS action_items_org ON action_items(org_id, status, due_on);
+CREATE INDEX IF NOT EXISTS questions_ws ON questions(workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS questions_org ON questions(org_id, created_at);
+CREATE INDEX IF NOT EXISTS audit_log_org_time ON audit_log(org_id, created_at);
+CREATE INDEX IF NOT EXISTS audit_log_time ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS traces_time ON traces(started_at);
+CREATE INDEX IF NOT EXISTS usage_events_time ON usage_events(created_at);
+CREATE INDEX IF NOT EXISTS chat_messages_time ON chat_messages(sent_at);
+CREATE INDEX IF NOT EXISTS app_errors_time ON app_errors(created_at);
+CREATE INDEX IF NOT EXISTS guard_events_time ON guard_events(created_at);
+CREATE INDEX IF NOT EXISTS teams_conversations_org ON teams_conversations(org_id, workspace_id);

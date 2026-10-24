@@ -343,3 +343,47 @@ help):
 - Customers also get a **Needs attention** finding ("Connector not working") from the broken-connector watcher. To
   see every broken connector across clients: `connectorProblems()` in `app/src/lib/connectors.ts`; the syncs run as
   `connector.sync` jobs (Owner Console → Job queue).
+
+## Scaling up (the plan in docs/HOSTING.md → Scaling up)
+Each step costs money: only with Cody's go-ahead. Do them in order and watch for a day after each one
+(Owner Console → Performance and Job queue; Azure Monitor CPU and connections). Signs it's time are in
+the HOSTING table; the load test numbers behind them are in docs/SCALE.md.
+
+**1. Search to Basic.** Azure portal → AI Search → create `sidekick-search-basic` (Basic, same region as
+the database) → copy its admin key into Key Vault `sidekick-kv` as `azure-search-api-key`, set
+`AZURE_SEARCH_ENDPOINT` on the Container App to the new address, restart. The new index is empty, so
+the first question after the restart starts copying every passage into it (`reindexAzure` in
+`app/src/lib/search.ts`, a few sources at a time; embeddings cost about $0.02 per million words, so
+cents today and roughly $50–60 once at 10,000 busy groups). Answers keep working meanwhile. Delete the
+Free service a week later.
+
+**2. Database to B2s (later D2ds_v5).** Portal → `sidekick-labs-db` → Compute + storage → pick the size →
+Save. It restarts (a minute or two of "very busy" errors), so do it in the evening. Afterwards set the
+server parameter `max_connections` to the new size's default (a resize doesn't change it), and
+`DATABASE_POOL_MAX=20` on the Container App. Storage only grows, never shrinks: keep 32 GB until 80% full.
+
+**3. Several app copies with auto-scaling.** Container App → Scale → min replicas 2, max 4, rule "HTTP
+scaling, 50 concurrent requests". Resources → 1 vCPU / 2 GiB. Check: copies × `DATABASE_POOL_MAX` stays
+under the database's connections (B1ms: 35), and 24 × copies Claude calls at once fits the Anthropic
+limits. Nothing else changes: the job queue and the heartbeat already run safely on every copy. Sessions
+live in the database, so people stay signed in whichever copy answers.
+
+**4. Scale to zero (only if wanted).** Set `SIDEKICK_SCHEDULER=off` and `SIDEKICK_TICK_SECRET`, and create
+the Container Apps job from docs/HOSTING.md → Scheduled work. Without it, nothing runs the reminders
+and watchers while no copy is up.
+
+**Undo.** Each step can be reversed in the same place (the database can go down a size; search back to
+Free only if the passages fit, which they won't after real use).
+
+## Slow pages or "AI is very busy"
+1. Owner Console → **Performance**: which requests are slow, and is it database time or AI time?
+   Activity traces show `db_ms` per request and `queued_ms` on AI steps (time spent waiting for a turn).
+2. Database time high: set `SIDEKICK_SLOW_QUERY_MS=300` on the Container App for a day; the log then shows
+   the slow queries (SQL only, never values). Fix with an index (both schemas: `app/src/lib/db.ts` and
+   `app/db/schema.postgres.sql`) or step 2 of Scaling up.
+3. AI steps waiting (`queued_ms` in the seconds) for one company only: that company is at its
+   per-company limit (`SIDEKICK_CLAUDE_ORG_CONCURRENCY`, 6): expected, and it protects everyone else. For
+   every company: the per-copy limit (`SIDEKICK_CLAUDE_CONCURRENCY`) or Anthropic's own rate limit; check
+   the Anthropic Console's usage page before raising the setting.
+4. Job queue behind (Owner Console → Job queue, oldest wait over 15 minutes): add copies (step 3) or raise
+   `SIDEKICK_JOB_CONCURRENCY` to 8.

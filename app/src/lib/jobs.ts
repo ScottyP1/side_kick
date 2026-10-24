@@ -25,7 +25,13 @@
  *   `every:<kind>:<slot>`, so every app copy can try and only one job per slot exists.
  * - **Heartbeat**: `runWorker` is called by the in-app timer (src/instrumentation.ts → POST /api/jobs/tick every
  *   30 s) or by an external scheduler. It enqueues due recurring jobs, then claims and runs due jobs until it runs
- *   out of jobs or time.
+ *   out of jobs or time, several at once (`SIDEKICK_JOB_CONCURRENCY` lanes, default 4), so one slow job (a watcher
+ *   run waiting on Claude) doesn't hold up the rest.
+ * - **Fairness between companies** (docs/SCALE.md): a worker looks only at the oldest one or two due jobs of each
+ *   organization, and skips organizations that already have `SIDEKICK_JOB_ORG_CONCURRENCY` jobs running (default 2).
+ *   So a company with a thousand queued jobs gets its turn like everyone else instead of filling every lane. The
+ *   cap is checked when claiming, so with several app copies it can be passed briefly by a job or two (soft cap).
+ *   System sweeps (no organization) are not capped.
  * - **Tracing**: every job run is its own trace (channel "system", kind "job") under the job's organization, so it
  *   shows on that organization's Activity page and the home orb. System sweeps without an org aren't saved as
  *   traces (Activity is per organization); their per-org work opens its own traces.
@@ -102,6 +108,12 @@ const WORKER_ID = `${os.hostname().slice(0, 40)}:${process.pid}:${crypto.randomB
 
 const DEFAULT_LEASE_MS = 5 * 60_000;
 const DEFAULT_ATTEMPTS = 5;
+/** Jobs one heartbeat runs at the same time (SIDEKICK_JOB_CONCURRENCY, default 4, 1–32). */
+export const JOB_CONCURRENCY = Math.min(32, Math.max(1, Number(process.env.SIDEKICK_JOB_CONCURRENCY || 4)));
+/** Jobs of one organization that may run at the same time (SIDEKICK_JOB_ORG_CONCURRENCY, default 2). */
+export const JOB_ORG_CONCURRENCY = Math.max(1, Number(process.env.SIDEKICK_JOB_ORG_CONCURRENCY || 2));
+/** How many of each organization's oldest due jobs a claim looks at (the round-robin window). */
+const PER_ORG_CANDIDATES = 2;
 
 /**
  * The wait before attempt `attempts + 1` after a failure: 30 s doubled each time, at most an hour, plus up to
@@ -158,20 +170,33 @@ const inClaimTx = <T>(fn: () => Promise<T>): Promise<T> => (DIALECT === "postgre
 const CLAIMABLE = "((status = 'queued' AND run_at <= ?) OR (status = 'running' AND locked_until < ?))";
 
 /**
- * Claims the next due job for `workerId` (oldest `run_at` first), or returns null. A running job whose lease ran
- * out is taken over; if it had no attempts left it's marked dead instead. The claim is one compare-and-set
- * update, so two workers can never both get the same job.
+ * Claims the next due job for `workerId`, or returns null. Fair between organizations: the candidates are each
+ * organization's oldest `PER_ORG_CANDIDATES` due jobs (system jobs count as one more "organization"), minus
+ * organizations already running `orgCap` jobs, oldest `run_at` first. A running job whose lease ran out is taken
+ * over; if it had no attempts left it's marked dead instead. The claim is one compare-and-set update, so two workers
+ * can never both get the same job.
  */
-export async function claimNext(workerId = WORKER_ID, at = new Date(), opts: { kinds?: string[] } = {}): Promise<Job | null> {
+export async function claimNext(workerId = WORKER_ID, at = new Date(), opts: { kinds?: string[]; orgCap?: number } = {}): Promise<Job | null> {
   const t = at.toISOString();
   const kindFilter = opts.kinds?.length ? `AND kind IN (${opts.kinds.map(() => "?").join(", ")})` : "";
+  const orgCap = opts.orgCap ?? JOB_ORG_CONCURRENCY;
   for (let round = 0; round < 5; round++) {
     // Postgres: lock a few candidates and skip rows another worker is looking at, all in one short transaction.
     // SQLite: one writer at a time, so a plain read followed by the compare-and-set below is enough.
     const claimed = await inClaimTx<Job | null | "retry">(async () => {
+      // Window functions work on both engines; FOR UPDATE applies to the outer rows only (Postgres allows that).
       const candidates = await all<Job>(
-        `SELECT * FROM jobs WHERE ${CLAIMABLE} ${kindFilter} ORDER BY run_at LIMIT 5${DIALECT === "postgres" ? " FOR UPDATE SKIP LOCKED" : ""}`,
-        t, t, ...(opts.kinds ?? []),
+        `SELECT * FROM jobs WHERE id IN (
+            SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (PARTITION BY COALESCE(org_id, '') ORDER BY run_at, id) AS rn
+                FROM jobs WHERE ${CLAIMABLE} ${kindFilter}
+            ) per_org WHERE rn <= ${PER_ORG_CANDIDATES}
+          )
+          AND (org_id IS NULL OR org_id NOT IN (
+            SELECT org_id FROM jobs WHERE status = 'running' AND locked_until >= ? AND org_id IS NOT NULL GROUP BY org_id HAVING COUNT(*) >= ?
+          ))
+          ORDER BY run_at LIMIT 5${DIALECT === "postgres" ? " FOR UPDATE SKIP LOCKED" : ""}`,
+        t, t, ...(opts.kinds ?? []), t, orgCap,
       );
       if (!candidates.length) return null;
       for (const c of candidates) {
@@ -252,24 +277,48 @@ export async function runClaimed(job: Job, workerId = WORKER_ID): Promise<{ ok: 
 export type WorkerReport = { ran: number; failed: number; counts: Record<string, number> };
 
 /**
- * The heartbeat: enqueues due recurring jobs (all of them now with `sweep`), then claims and runs due jobs one at a
- * time until none are left, `maxJobs` ran or `maxMs` passed. `kinds` limits both to those kinds. Safe to call from
- * every app copy at once.
+ * The heartbeat: enqueues due recurring jobs (all of them now with `sweep`), then claims and runs due jobs in
+ * `concurrency` lanes at once (default `JOB_CONCURRENCY`) until none are left, `maxJobs` were claimed or `maxMs`
+ * passed (jobs already running then finish). Claims are fair between organizations (see `claimNext`). `kinds`
+ * limits both to those kinds. Safe to call from every app copy at once.
  */
-export async function runWorker(opts: { maxJobs?: number; maxMs?: number; sweep?: boolean; workerId?: string; kinds?: string[] } = {}): Promise<WorkerReport> {
+export async function runWorker(opts: { maxJobs?: number; maxMs?: number; sweep?: boolean; workerId?: string; kinds?: string[]; concurrency?: number } = {}): Promise<WorkerReport> {
   const started = Date.now();
   const report: WorkerReport = { ran: 0, failed: 0, counts: {} };
   await enqueueRecurring(new Date(), { force: opts.sweep, kinds: opts.kinds });
   const maxJobs = opts.maxJobs ?? 200;
   const maxMs = opts.maxMs ?? 50_000;
-  while (report.ran < maxJobs && Date.now() - started < maxMs) {
-    const job = await claimNext(opts.workerId ?? WORKER_ID, new Date(), { kinds: opts.kinds });
-    if (!job) break;
-    const out = await runClaimed(job, opts.workerId ?? WORKER_ID);
-    report.ran++;
-    if (!out.ok) report.failed++;
-    for (const [k, v] of Object.entries(out.result ?? {})) report.counts[k] = (report.counts[k] ?? 0) + v;
-  }
+  let claimed = 0;
+  let working = 0; // lanes claiming or running a job right now
+  // A lane that finds nothing waits while another lane is still claiming or running (that job may queue more, like
+  // the watchers' fan-out, free its organization's turn, or simply hold the rows this lane skipped as locked), and
+  // stops once nothing is due and no lane is working.
+  const lane = async () => {
+    while (claimed < maxJobs && Date.now() - started < maxMs) {
+      claimed++;
+      working++;
+      const job = await claimNext(opts.workerId ?? WORKER_ID, new Date(), { kinds: opts.kinds }).catch((e) => {
+        working--;
+        throw e;
+      });
+      if (!job) {
+        claimed--;
+        working--;
+        if (!working) break;
+        await new Promise((r) => setTimeout(r, 100));
+        continue;
+      }
+      try {
+        const out = await runClaimed(job, opts.workerId ?? WORKER_ID);
+        report.ran++;
+        if (!out.ok) report.failed++;
+        for (const [k, v] of Object.entries(out.result ?? {})) report.counts[k] = (report.counts[k] ?? 0) + v;
+      } finally {
+        working--;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, opts.concurrency ?? JOB_CONCURRENCY) }, lane));
   return report;
 }
 

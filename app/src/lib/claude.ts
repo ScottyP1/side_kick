@@ -24,6 +24,13 @@
  *   cache write costs 1.25x. Prompts shorter than the model's minimum cacheable length (about 1-4k tokens)
  *   simply aren't cached. Cache reads are recorded per call (`usage_events.cache_read_tokens`) and shown
  *   per client and model in the Owner Console.
+ * - **Fair turns between companies** (`AI_LIMITS`, lib/fair-limiter.ts): live calls take a turn first. At most
+ *   `SIDEKICK_CLAUDE_CONCURRENCY` calls run at once per app copy (default 24) and at most
+ *   `SIDEKICK_CLAUDE_ORG_CONCURRENCY` for one organization (default 6); when calls have to wait, turns go round the
+ *   waiting organizations in turn, and calls a person waits on go before background ones (the watchers' checks and
+ *   reminder wording). So one company asking hundreds of questions at once can't use up the API's rate limit for
+ *   everyone. A call that waits over `SIDEKICK_CLAUDE_WAIT_MS` (default 45 s) gets the "very busy" message. The
+ *   wait is recorded on the step (`queued_ms`). Details and numbers: docs/SCALE.md.
  * - **Batch API** for work nobody waits for (`queueStructured` + `runBatches`): daily reminder digests are
  *   sent as one Message Batch per timer tick and collected on a later tick, at half the price. Anything a
  *   person is waiting for (answers, notes, the knowledge map button, the assistant) stays a live call.
@@ -47,6 +54,7 @@ import { assertEnabled } from "./owner";
 import { span, spanAttrs, traceUserId } from "./trace";
 import { addSpend, creditGate } from "./credit";
 import { BRAND } from "./brand";
+import { FairLimiter, LimiterBusyError } from "./fair-limiter";
 
 // One place to choose models. Defaults to Claude Opus 5.5 everywhere; override per feature in .env.local
 // (e.g. SIDEKICK_MODEL_ASK=claude-sonnet-5-5) to trade quality for cost. In step 2 this client is swapped
@@ -90,6 +98,15 @@ const PRICES: Record<string, { in: number; out: number; cacheRead: number }> = {
  * Claude, so the automated tests are free, fast and predictable. It can never switch on in production.
  */
 export const FAKE_CLAUDE = process.env.SIDEKICK_FAKE_CLAUDE === "1" && process.env.NODE_ENV !== "production";
+/** Test mode only: how long a fake call takes on average (SIDEKICK_FAKE_CLAUDE_MS, default 0 = instant). */
+const FAKE_LATENCY_MS = FAKE_CLAUDE ? Math.max(0, Number(process.env.SIDEKICK_FAKE_CLAUDE_MS || 0)) : 0;
+/**
+ * Test mode only: how many fake calls may be in flight at once before more are refused as "rate limited", like the
+ * real account's limit shared by every customer (SIDEKICK_FAKE_CLAUDE_CAPACITY, default 0 = unlimited). The load
+ * test uses it to show whether one company can crowd out the others.
+ */
+const FAKE_CAPACITY = FAKE_CLAUDE ? Math.max(0, Number(process.env.SIDEKICK_FAKE_CLAUDE_CAPACITY || 0)) : 0;
+let fakeInFlight = 0;
 
 /**
  * Canned, schema-shaped outputs for test mode. A content containing "__FAIL__" makes the call fail, so
@@ -102,6 +119,16 @@ export const FAKE_CLAUDE = process.env.SIDEKICK_FAKE_CLAUDE === "1" && process.e
 async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: string, attempt = 0): Promise<unknown> {
   // "__BUSY_<n>__": the first n attempts fail like an overloaded API (529), so tests can check the retries.
   if (attempt < Number(content.match(/__BUSY_(\d+)__/)?.[1] ?? 0)) throw new FakeBusyError();
+  // For the load test (scripts/load-test.mjs): SIDEKICK_FAKE_CLAUDE_CAPACITY refuses calls beyond that many at once
+  // as "rate limited", and SIDEKICK_FAKE_CLAUDE_MS answers after about that long (±50%), like the real API, so
+  // calls overlap and the per-organization turns in `structured` matter.
+  if (FAKE_CAPACITY > 0 && fakeInFlight >= FAKE_CAPACITY) throw new FakeBusyError();
+  fakeInFlight++;
+  try {
+    if (FAKE_LATENCY_MS > 0) await new Promise((r) => setTimeout(r, FAKE_LATENCY_MS * (0.5 + Math.random())));
+  } finally {
+    fakeInFlight--;
+  }
   const cost = Number(content.match(/__SPEND_(\d+(?:\.\d+)?)__/)?.[1] ?? 0);
   await run(
     `INSERT INTO usage_events (org_id, workspace_id, user_id, feature, model, input_tokens, output_tokens, cost_usd, latency_ms, ok, error, payer, created_at)
@@ -436,10 +463,35 @@ export async function structured<S extends z.ZodType>(
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
 ): Promise<z.infer<S>> {
   const model = await gateFor(feature, ctx, opts.content);
-  return span("ai", SPAN_NAMES[feature], () => structuredCall(feature, ctx, opts, model), {
-    model: FAKE_CLAUDE ? "fake-claude" : model, effort: opts.effort ?? "medium", ...(model !== MODELS[feature] ? { essentials: true } : {}),
-  });
+  let queuedMs = 0;
+  try {
+    return await AI_LIMITS.run(
+      ctx.orgId ?? "sidekick",
+      () => span("ai", SPAN_NAMES[feature], () => structuredCall(feature, ctx, opts, model), {
+        model: FAKE_CLAUDE ? "fake-claude" : model, effort: opts.effort ?? "medium", queued_ms: queuedMs, ...(model !== MODELS[feature] ? { essentials: true } : {}),
+      }),
+      { priority: BACKGROUND_FEATURES.has(feature) ? 1 : 0, onWait: (ms) => (queuedMs = ms) },
+    );
+  } catch (e) {
+    if (e instanceof LimiterBusyError) throw Object.assign(new AiBusyError(), { cause: e });
+    throw e;
+  }
 }
+
+/**
+ * Turns for live Claude calls, fair between organizations (see "Fair turns between companies" above). One per app
+ * copy, shared across module reloads in development.
+ */
+declare global {
+  var __sidekickAiLimits: FairLimiter | undefined;
+}
+export const AI_LIMITS = (globalThis.__sidekickAiLimits ??= new FairLimiter({
+  max: Math.max(1, Number(process.env.SIDEKICK_CLAUDE_CONCURRENCY || 24)),
+  perKey: Math.max(1, Number(process.env.SIDEKICK_CLAUDE_ORG_CONCURRENCY || 6)),
+  maxWaitMs: Math.max(1000, Number(process.env.SIDEKICK_CLAUDE_WAIT_MS || 45_000)),
+}));
+/** Features nobody is waiting on right now: they wait behind calls a person is waiting for. */
+const BACKGROUND_FEATURES = new Set<Feature>(["watch", "remind"]);
 
 /**
  * The checks before any Claude work, live or batched: the kill switches and per-client restrictions

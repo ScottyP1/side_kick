@@ -142,21 +142,35 @@ export async function setAudience(sourceId: string, audience: string) {
 
 /**
  * Copies every local passage into Azure, grouped by source. Runs automatically the first time Azure is
- * used with an empty index (so switching Azure on just works), and can be run again to rebuild it.
- * Returns how many sources were copied.
+ * used with an empty index (so switching Azure on, or moving to a new search service, just works), and can be
+ * run again to rebuild it. Reads `REINDEX_PAGE` sources at a time (in source id order), so it works however big
+ * the index is (10,000 groups is millions of passages; docs/SCALE.md). Returns how many sources were copied.
  */
 export async function reindexAzure(): Promise<number> {
-  const rows = await all<{ text: string; title: string; loc: string; source_type: string; source_id: string; workspace_id: string; org_id: string; audience: string }>(
-    "SELECT text, title, loc, source_type, source_id, workspace_id, org_id, audience FROM passages ORDER BY source_id, rowid",
-  );
-  const bySource = new Map<string, typeof rows>();
-  for (const r of rows) bySource.set(r.source_id, [...(bySource.get(r.source_id) ?? []), r]);
-  for (const [sourceId, ps] of bySource) {
-    const f = ps[0];
-    await azureIndex({ orgId: f.org_id, workspaceId: f.workspace_id, sourceType: f.source_type, sourceId, title: f.title, audience: f.audience, pieces: ps.map((p) => ({ text: p.text, loc: p.loc })) });
+  type Row = { text: string; title: string; loc: string; source_type: string; source_id: string; workspace_id: string; org_id: string; audience: string };
+  let after = "";
+  let copied = 0;
+  for (;;) {
+    const ids = (await all<{ source_id: string }>(
+      "SELECT DISTINCT source_id FROM passages WHERE source_id > ? ORDER BY source_id LIMIT ?", after, REINDEX_PAGE,
+    )).map((r) => r.source_id);
+    if (!ids.length) return copied;
+    after = ids[ids.length - 1];
+    const rows = await all<Row>(
+      `SELECT text, title, loc, source_type, source_id, workspace_id, org_id, audience FROM passages WHERE source_id IN (${ids.map(() => "?").join(",")}) ORDER BY source_id, rowid`,
+      ...ids,
+    );
+    const bySource = new Map<string, Row[]>();
+    for (const r of rows) bySource.set(r.source_id, [...(bySource.get(r.source_id) ?? []), r]);
+    for (const [sourceId, ps] of bySource) {
+      const f = ps[0];
+      await azureIndex({ orgId: f.org_id, workspaceId: f.workspace_id, sourceType: f.source_type, sourceId, title: f.title, audience: f.audience, pieces: ps.map((p) => ({ text: p.text, loc: p.loc })) });
+      copied++;
+    }
   }
-  return bySource.size;
 }
+/** Sources read per round by `reindexAzure`. */
+const REINDEX_PAGE = 200;
 
 declare global {
   var __sidekickAzureBackfill: Promise<void> | undefined;

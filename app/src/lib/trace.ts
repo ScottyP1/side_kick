@@ -67,7 +67,8 @@ declare global {
 // must see the same "current trace", or steps recorded by one copy would be lost.
 const store = (globalThis.__sidekickTraceStore ??= new AsyncLocalStorage<Ctx>());
 const newId = () => crypto.randomBytes(8).toString("hex");
-const RETENTION_DAYS = 30;
+/** Traces and their steps are kept this many days (deleted by the hourly clean-up, lib/retention.ts). */
+export const TRACE_RETENTION_DAYS = 30;
 
 /** Fills in who and where, as soon as it's known (after sign-in, after the workspace check). */
 export function traceScope(scope: { orgId?: string | null; workspaceId?: string | null; actor?: string | null; userId?: string | null }) {
@@ -182,7 +183,7 @@ export async function withTrace<T>(
   }
 }
 
-/** Writes a finished trace and its spans (only traces that belong to an org), and prunes old ones. */
+/** Writes a finished trace and its spans (only traces that belong to an org). Old ones go in lib/retention.ts. */
 async function saveTrace(t: TraceState) {
   if (!t.orgId) return;
   try {
@@ -198,11 +199,6 @@ async function saveTrace(t: TraceState) {
         "INSERT INTO trace_spans (trace_id, span_id, parent_id, kind, name, start_ms, duration_ms, status, error, attrs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         t.id, s.id, s.parentId, s.kind, s.name, s.start, s.duration, s.status, s.error ?? null, JSON.stringify(s.attrs),
       );
-    }
-    if (Math.random() < 0.02) {
-      const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400_000).toISOString();
-      await run("DELETE FROM trace_spans WHERE trace_id IN (SELECT id FROM traces WHERE started_at < ?)", cutoff);
-      await run("DELETE FROM traces WHERE started_at < ?", cutoff);
     }
   } catch (e) {
     console.error("Couldn't save trace", e);

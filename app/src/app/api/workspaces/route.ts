@@ -46,10 +46,13 @@ export const GET = handle(async () => {
     user.org_id, ...ids,
   );
   const ending = await endingGroups(user.org_id);
+  // Grouped once (not filtered per group): a big organization has over a thousand groups.
+  const leadsBy = new Map<string, { id: string; name: string }[]>();
+  for (const l of leads) leadsBy.set(l.workspace_id, [...(leadsBy.get(l.workspace_id) ?? []), { id: l.id, name: l.name }]);
   return {
     workspaces: workspaces.map((w) => {
       const r = ending.get(w.id);
-      return { ...w, leads: leads.filter((l) => l.workspace_id === w.id).map(({ id, name }) => ({ id, name })), ending: r ? { deleteOn: r.delete_on, requestedBy: r.requested_by } : null };
+      return { ...w, leads: leadsBy.get(w.id) ?? [], ending: r ? { deleteOn: r.delete_on, requestedBy: r.requested_by } : null };
     }),
   };
 });

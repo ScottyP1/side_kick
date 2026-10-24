@@ -18,7 +18,9 @@
     "reset-password": "node --no-warnings scripts/reset-password.mjs",
     "helpbot:check": "node scripts/helpbot-check.mjs",
     "eval:answers": "node --no-warnings scripts/answer-eval.mjs",
-    "seed:demo": "node --no-warnings --conditions=react-server --import ./tests/register-ts.mjs scripts/seed-demo.mjs"
+    "seed:demo": "node --no-warnings --conditions=react-server --import ./tests/register-ts.mjs scripts/seed-demo.mjs",
+    "load:world": "node scripts/load-world.mjs",
+    "load:test": "node scripts/load-test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

@@ -82,7 +82,7 @@ export default function FeaturesPage() {
                 )}
                 {g.id === "admin" && (
                   <div style={{ marginBottom: 28 }}>
-                    <ProductShot name="portal-connectors" frame="laptop" alt={`The ${BRAND.name} Connectors page: Azure DevOps, GitHub, Jira and Confluence connected read-only, business apps planned, and the connected tools with their health.`} caption="Connectors: Azure DevOps, Jira, GitHub and Confluence, read-only. Made-up example data." />
+                    <ProductShot name="portal-connectors" frame="laptop" alt={`The ${BRAND.name} Connectors page: GitHub, Jira and Confluence connected read-only, Azure DevOps connected with a project that needs attention, business apps planned, and the connected tools with their health.`} caption="Connectors: Azure DevOps, Jira, GitHub and Confluence, read-only. Made-up example data." />
                   </div>
                 )}
                 <div className="site-grid">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>

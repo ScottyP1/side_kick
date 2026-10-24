@@ -5,7 +5,7 @@
 // http://localhost:3330, fake Claude); never the live site.
 // Needs: the demo world seeded and its copy running, Google Chrome, the pitch pack's _build/node_modules
 // (playwright-core) and Python with Pillow. Demo passwords are read from app/.demo-logins.json, never printed.
-// Usage: node app/scripts/site-shots/demo-shots.cjs
+// Usage: node app/scripts/site-shots/demo-shots.cjs [name ...]   (no names = all shots)
 const path = require("path"); const fs = require("fs"); const os = require("os"); const { execFileSync } = require("child_process");
 const PITCH = path.join(os.homedir(), "Desktop/Sidekick Pitch/_build");
 const { chromium } = require(path.join(PITCH, "node_modules/playwright-core"));
@@ -15,14 +15,16 @@ const PASS = JSON.parse(fs.readFileSync(path.join(APP, ".demo-logins.json"), "ut
 const USERS = { teamLead: "priya.raman@northwind.example", orgOwner: "olivia.bennett@northwind.example" };
 const OUT = path.join(APP, "public/site");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "site-demo-shots-"));
+const ONLY = process.argv.slice(2);
 
-const SHOTS = [
+const ALL_SHOTS = [
   { name: "portal-meeting", role: "teamLead", url: "/meetings", open: "Contoso – Sprint 14 planning" },
   { name: "portal-meetings-auto", role: "teamLead", url: "/meetings" },
   { name: "portal-attention", role: "teamLead", url: "/home", scrollTo: /Needs attention/ },
   { name: "portal-connectors", role: "orgOwner", url: "/connectors", scrollTo: /^Engineering$/ },
   { name: "phone-meeting", role: "teamLead", url: "/meetings", open: "Contoso – Sprint 14 planning", phone: true },
 ];
+const SHOTS = ONLY.length ? ALL_SHOTS.filter((s) => ONLY.includes(s.name)) : ALL_SHOTS;
 
 (async () => {
   const browser = await chromium.launch({ channel: "chrome" });

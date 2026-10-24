@@ -23,8 +23,8 @@ export type Group = {
   ending?: { deleteOn: string; requestedBy: string } | null;
 };
 
-/** A person in the organization as GET /api/users returns them. */
-export type OrgPerson = { id: string; name: string; email: string; role: string; microsoft: number; workspaces: string[] };
+/** A person in the organization as GET /api/users (or a group's `members?candidates=1`, without `workspaces`) returns them. */
+export type OrgPerson = { id: string; name: string; email: string; role: string; microsoft: number; workspaces?: string[] };
 
 /** Up to two initials for an avatar ("Priya Natarajan" → "PN"). */
 export const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();

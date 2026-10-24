@@ -1190,6 +1190,19 @@ test(`[${ENGINE}] groups: members see who's in their group; admins and its Team 
   assert.equal((await member("POST", `/api/workspaces/${s.wsA}/members`, { users: [id("bea@test.local")] })).status, 403);
   assert.equal((await viewer("DELETE", `/api/workspaces/${s.wsA}/members?user=${id("member@test.local")}`)).status, 403);
 
+  // The "Add people" picker: the lead of A is offered the org's Members and Viewers who aren't in A yet
+  // (Bea, who is only in B, included), never admins or other Team Leads, and only for groups they lead.
+  const offered = await lead("GET", `/api/workspaces/${s.wsA}/members?candidates=1`);
+  assert.equal(offered.status, 200, JSON.stringify(offered.body));
+  assert.ok(offered.body.candidates.some((p) => p.email === "bea@test.local"), "Bea (not in A yet) is offered, with her email");
+  assert.ok(offered.body.candidates.every((p) => p.role === "Member" || p.role === "Viewer"), "only roles a Team Lead can add");
+  const inA = new Set(seen.body.members.map((m) => m.id));
+  assert.ok(offered.body.candidates.every((p) => !inA.has(p.id)), "nobody already in the group");
+  const allOffered = (await admin("GET", `/api/workspaces/${s.wsA}/members?candidates=1`)).body.candidates;
+  assert.ok(allOffered.some((p) => p.role === "Team Lead"), "admins are offered every role, other Team Leads included");
+  assert.equal((await member("GET", `/api/workspaces/${s.wsA}/members?candidates=1`)).status, 403, "Members don't manage people");
+  assert.equal((await lead("GET", `/api/workspaces/${s.wsG}/members?candidates=1`)).status, 404, "another lead's group");
+  assert.equal((await lead("GET", `/api/workspaces/${s.wsB}/members?candidates=1`)).status, 404, "a group they aren't in");
   // The lead of A adds a Member, can't add an Org Owner or touch a group they don't lead.
   assert.equal((await lead("POST", `/api/workspaces/${s.wsA}/members`, { users: [] })).status, 400);
   assert.equal((await lead("POST", `/api/workspaces/${s.wsA}/members`, { users: [(await admin("GET", "/api/me")).body.user.id] })).status, 403);
@@ -1530,6 +1543,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await other("GET", `/api/workspaces/${s.wsB}/members`)).status, 404);
   assert.equal((await other("POST", `/api/workspaces/${s.wsB}/members`, { users: [(await other("GET", "/api/me")).body.user.id] })).status, 404);
   assert.equal((await other("DELETE", `/api/workspaces/${s.wsB}/members?user=${s.bea}`)).status, 404);
+  assert.equal((await other("GET", `/api/workspaces/${s.wsB}/members?candidates=1`)).status, 404, "no candidate list for another org's group");
   assert.equal((await other("POST", "/api/workspaces", { name: "Steal", lead: s.bea })).status, 404, "can't make someone from another org a lead");
   // Roll-off and export: another org can't export, end or keep workspace B, or see this org's roll-offs.
   assert.equal((await other("GET", `/api/workspaces/${s.wsB}/export`)).status, 404);
@@ -1540,6 +1554,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.ok(!/ZEBRA|B secrets|Workspace B/.test(String(theirExport.body)), "an organization's export holds only its own groups");
   assert.deepEqual((await other("GET", "/api/rolloffs")).body.rolloffs, []);
   const theirWs = (await other("POST", "/api/workspaces", { name: "Leak WS" })).body.id;
+  assert.ok(!/admin@test\.local|bea@test\.local|lead@test\.local/.test(JSON.stringify((await other("GET", `/api/workspaces/${theirWs}/members?candidates=1`)).body)), "their Add people picker never offers this org's people");
   assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "vault code ZEBRA-7731" })));
   // From a Teams chat linked to workspace A.
   const before = sent.length;

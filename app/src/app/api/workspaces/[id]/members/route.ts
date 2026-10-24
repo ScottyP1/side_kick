@@ -2,7 +2,8 @@
  * GET/POST/DELETE /api/workspaces/:id/members: who is in a group (workspace), add people already in the
  * organization to it, or take someone off it.
  * Who: anyone in the group can see its people (emails only for those who manage it); Org Owners and Org
- * Admins, and the group's Team Lead, add and remove. A Team Lead may only add or remove Members and
+ * Admins, and the group's Team Lead, add and remove, and may ask for `?candidates=1`: the organization's
+ * people who aren't in the group yet and whom the caller may add (for a Team Lead, Members and Viewers only). A Team Lead may only add or remove Members and
  * Viewers, and can't take themselves off. Groups of another organization, or ones the caller can't see,
  * are 404. Every change is audited.
  *
@@ -21,9 +22,29 @@ async function groupName(user: User, id: string): Promise<string> {
   return (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", id, user.org_id))!.name;
 }
 
-/** The group's people, Team Leads first. `canManage` says whether the caller may add or remove people. */
-export const GET = handle(async (_req: Request, { params }: Ctx) => {
+/**
+ * The group's people, Team Leads first. `canManage` says whether the caller may add or remove people.
+ * With `?candidates=1` (managers only, else 403): `{ candidates }`, the people of the caller's organization
+ * not in the group yet that the caller may add. Org Owners and Org Admins get everyone else; a Team Lead gets
+ * only Members and Viewers (the roles they can add), never admins, Billing Admins or other Team Leads.
+ * This is the "Add people" picker's list: GET /api/users only shows a Team Lead the people already in their
+ * groups, so it can't offer anyone new to the group.
+ */
+export const GET = handle(async (req: Request, { params }: Ctx) => {
   const user = await requireUser();
+  if (new URL(req.url).searchParams.get("candidates")) {
+    const ws = await requireManage(user, (await params).id);
+    const roles = isAdmin(user) ? null : LEAD_ASSIGNABLE_ROLES;
+    const candidates = await all<Person>(
+      `SELECT u.id, u.name, u.email, u.role, CASE WHEN u.entra_oid IS NULL THEN 0 ELSE 1 END AS microsoft
+         FROM users u
+        WHERE u.org_id = ? AND NOT EXISTS (SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = ? AND wm.user_id = u.id)
+          ${roles ? `AND u.role IN (${roles.map(() => "?").join(",")})` : ""}
+        ORDER BY u.name`,
+      user.org_id, ws, ...(roles ?? []),
+    );
+    return { candidates };
+  }
   const ws = await requireWorkspace(user, (await params).id);
   const canManage = isAdmin(user) || isLead(user);
   const people = await all<Person>(

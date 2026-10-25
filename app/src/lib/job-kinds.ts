@@ -33,8 +33,9 @@
  * Meetings that record and transcribe by themselves (lib/auto-record.ts), only where an Org Owner/Admin opted in:
  * - `meetings.record` (30 min): enqueues `meetings.record.org` for every organization with automatic notes and
  *   automatic recording both on (key per org and slot).
- * - `meetings.record.org`: reads the next 7 days of the org's people's Teams meetings and turns on automatic
- *   recording for those that are clearly one group's, once each. Counts: `recordingsOn`, `meetingsChecked`.
+ * - `meetings.record.org` (payload `{ recheck }`: true from the switch and Check now, to look again at meetings left
+ *   alone): reads the next 7 days of the org's people's Teams meetings and turns on automatic recording for those
+ *   that are clearly one group's, once each. Counts: `recordingsOn`, `meetingsChecked`.
  *
  * "Turn on transcription" reminder (lib/call-nudge.ts):
  * - `calls.watch` (1 min): reads the call events of watched Teams group chats (orgs with automatic notes on) and posts
@@ -206,9 +207,9 @@ defineJob("meetings.record.org", {
   label: "Turn on automatic recording for a group's Teams meetings",
   maxAttempts: 4,
   leaseMs: 15 * MIN,
-  run: async ({ job }) => {
+  run: async ({ job, payload }) => {
     if (!job.org_id) return;
-    const r = await scanOrg(job.org_id);
+    const r = await scanOrg(job.org_id, new Date(), { recheck: payload.recheck === true });
     return { recordingsOn: r.turnedOn, meetingsChecked: r.checked };
   },
 });

@@ -11,7 +11,9 @@
  *   (`/users/{id}`) and its sign-in name or mail matched to a Sidekick person (lib/directory.ts `linkByDirectory`:
  *   same organization, same tenant, never a guest). A match saves the account id on them, audited once. Lookups
  *   are cached for one run (`DirectoryCache`) and capped per meeting. Invitees from another tenant, guests and phone
- *   callers are never matched.
+ *   callers are never matched. A caller that already recognised people another way passes their Sidekick user ids
+ *   (`knownUserIds`): lib/auto-record.ts does, for calendar invitees matched by email, because a meeting made in
+ *   Outlook may list no attendees and people who never signed in with Microsoft have no account id to look up.
  * - **The rule** (`matchGroup`), in order:
  *   1. the group whose linked Teams chat is the meeting's own chat;
  *   2. the group with the most of its people in the meeting, at least two (the organizer breaks a tie);
@@ -133,12 +135,13 @@ async function titleHint(orgId: string, title: string | null | undefined, among:
 /**
  * Works out which group a meeting belongs to (the rule in the file comment). `organizer` and `attendees` are the
  * meeting's people as Graph lists them; `title` is the meeting subject for the title hint (leave it out to skip the
- * hint). `cache` keeps directory lookups for one run. Called by lib/meetings-graph.ts (`fetchTranscript`) and,
- * through `pickGroup`, by lib/auto-record.ts.
+ * hint). `cache` keeps directory lookups for one run. `knownUserIds` adds Sidekick people of `orgId` the caller already
+ * recognised (each counts once, also toward the headcount; ids of other organizations match no group). Called by
+ * lib/meetings-graph.ts (`fetchTranscript`) and, through `pickGroup`, by lib/auto-record.ts.
  */
 export async function matchGroup(
   orgId: string,
-  m: { chatId: string | null; organizer: Participant; attendees: Participant[]; title?: string | null; cache?: DirectoryCache },
+  m: { chatId: string | null; organizer: Participant; attendees: Participant[]; title?: string | null; cache?: DirectoryCache; knownUserIds?: string[] },
 ): Promise<GroupMatch> {
   if (m.chatId) {
     const ws = await groupOfChat(orgId, m.chatId);
@@ -146,9 +149,10 @@ export async function matchGroup(
   }
   const everyone = [m.organizer, ...m.attendees];
   // Everyone in the meeting, from any tenant (phone callers and guests without an id count once each).
-  const headcount = new Set(everyone.map((p, i) => (isOid(p.oid) ? p.oid.toLowerCase() : `#${i}`))).size;
   const people = await knownPeople(orgId, everyone, m.cache);
-  const userIds = [...new Set(people.values())];
+  const extra = (m.knownUserIds ?? []).filter((id) => ![...people.values()].includes(id));
+  const headcount = new Set([...everyone.map((p, i) => (isOid(p.oid) ? p.oid.toLowerCase() : `#${i}`)), ...extra.map((id) => `u:${id}`)]).size;
+  const userIds = [...new Set([...people.values(), ...extra])].slice(0, 300);
   if (!userIds.length) return { kind: "none" };
   const rows = await all<{ workspace_id: string; user_id: string }>(
     `SELECT wm.workspace_id, wm.user_id FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id
@@ -182,8 +186,8 @@ export async function matchGroup(
  */
 export async function pickGroup(
   orgId: string,
-  m: { chatId: string | null; organizerOid: string; attendeeOids: string[]; title?: string | null },
+  m: { chatId: string | null; organizerOid: string; attendeeOids: string[]; title?: string | null; knownUserIds?: string[] },
 ): Promise<{ workspaceId: string } | { candidates: string[] } | null> {
-  const r = await matchGroup(orgId, { chatId: m.chatId, organizer: { oid: m.organizerOid }, attendees: m.attendeeOids.map((oid) => ({ oid })), title: m.title });
+  const r = await matchGroup(orgId, { chatId: m.chatId, organizer: { oid: m.organizerOid }, attendees: m.attendeeOids.map((oid) => ({ oid })), title: m.title, knownUserIds: m.knownUserIds });
   return r.kind === "group" ? { workspaceId: r.workspaceId } : r.kind === "tie" ? { candidates: r.candidates } : null;
 }

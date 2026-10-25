@@ -1273,7 +1273,7 @@ test(`[${ENGINE}] meetings that record by themselves: clearly one group's meetin
   const cancelled = schedule("cancelled", { organizer: OID.lou, emails: ["mo@a.test"], event: { isCancelled: true } });
   const later = schedule("later", { organizer: OID.lou, emails: ["mo@a.test"], inDays: 10 });
   assert.equal((await ann("POST", "/api/meetings/auto", { action: "check" })).status, 200);
-  // (Check now runs at most once a minute, and the switch above already asked this minute: sweep instead.)
+  // Check now and the 30-minute scan run together: each meeting is still claimed, set and audited once.
   await drain({ sweep: true });
   // The calendar is read for the next 7 days, in UTC, keeping to the fields Sidekick needs.
   const read = calendarReads.find((c) => c.organizer === OID.lou);
@@ -1301,7 +1301,7 @@ test(`[${ENGINE}] meetings that record by themselves: clearly one group's meetin
   assert.equal(await scalar(`SELECT workspace_id FROM meeting_autorecord WHERE online_meeting_id = '${linked}'`), s.w2);
   // Audited per meeting, traced, and the scan's own status is clean.
   const audit = JSON.stringify((await ann("GET", "/api/audit")).body);
-  assert.match(audit, /Turned on automatic recording and transcription for the Teams meeting “Planned plan”/);
+  assert.equal((audit.match(/Turned on automatic recording and transcription for the Teams meeting “Planned plan”/g) ?? []).length, 1, "audited once");
   assert.doesNotMatch(audit, /Planned client|Planned minority/);
   assert.notEqual(await scalar("SELECT COUNT(*) FROM trace_spans WHERE name = 'Turn on automatic recording for a Teams meeting'"), "0");
   assert.notEqual(await scalar("SELECT COUNT(*) FROM trace_spans WHERE name = 'Read upcoming Teams meetings'"), "0");
@@ -1317,7 +1317,7 @@ test(`[${ENGINE}] meetings that record by themselves: clearly one group's meetin
   s.recordSkipped = client;
 });
 
-test(`[${ENGINE}] meetings that record by themselves: an organizer turning it off stays off; skipped ones are looked at again after a day; off stops reading`, async () => {
+test(`[${ENGINE}] meetings that record by themselves: an organizer turning it off stays off; skipped ones are looked at again later; off stops reading`, async () => {
   // Lou switches recording off again in Meeting options: Sidekick doesn't turn it back on.
   MEETINGS.get(s.plan).body.recordAutomatically = false;
   const before = patches.length;
@@ -1346,4 +1346,28 @@ test(`[${ENGINE}] meetings that record by themselves: an organizer turning it of
   assert.deepEqual(b.upcoming, []);
   assert.deepEqual(b.failed, []);
   assert.equal(await scalar(`SELECT COUNT(*) FROM meeting_autorecord WHERE org_id <> (SELECT org_id FROM users WHERE email = 'ann@a.test')`), "0");
+});
+
+test(`[${ENGINE}] meetings that record by themselves: invitees who never signed in with Microsoft count by email (live case, Oct 25)`, async () => {
+  // Like Cody's live meeting: the organizer (Quinn, in W1 and W2) has a Microsoft account id; the two invitees are W1
+  // people with no Microsoft account id in Sidekick, invited by email in another case; the meeting lists no attendees.
+  for (const [name, email] of [["Jo Noid", "jo.noid@a.test"], ["Oz Noid", "oz.noid@a.test"]]) {
+    const u = await ann("POST", "/api/users", { name, email, role: "Member", workspaces: [s.w1] });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+  }
+  const live = schedule("live", { organizer: OID.quinn, emails: ["JO.NOID@A.test", "Oz.Noid@A.Test", "quinn.other-address@a.test"], event: { organizer: { emailAddress: { address: "quinn.other-address@a.test" } } } });
+  const unknown = schedule("unknowns", { organizer: OID.quinn, emails: ["jo.noid@a.test", "who1@a.test", "who2@a.test", "who3@a.test"] });
+  // Turning the switch back on scans at once and looks again at meetings it left alone before.
+  assert.equal((await ann("PUT", "/api/meetings/auto", { autoRecord: true })).status, 200);
+  await drain();
+  assert.equal(patched(live), 1, "two of W1's people invited by email plus the organizer: W1's meeting");
+  assert.equal(await scalar(`SELECT workspace_id FROM meeting_autorecord WHERE online_meeting_id = '${live}'`), s.w1);
+  assert.equal(patched(unknown), 0, "Quinn and Jo are 2 of 5 invited: not most of the meeting");
+  assert.match(await scalar(`SELECT reason FROM meeting_autorecord WHERE online_meeting_id = '${unknown}'`), /Fewer than half/);
+  // Admins and leads see how many upcoming meetings were left alone and why (no titles); Members don't.
+  const st = (await ann("GET", "/api/meetings/auto")).body.autoRecord;
+  assert.ok(st.skipped.some((k) => /Fewer than half/.test(k.reason) && k.count >= 1), JSON.stringify(st.skipped));
+  assert.ok(!JSON.stringify(st.skipped).includes("Planned"), "no titles");
+  assert.deepEqual((await mo("GET", "/api/meetings/auto")).body.autoRecord.skipped, []);
+  assert.equal((await ann("PUT", "/api/meetings/auto", { autoRecord: false })).status, 200);
 });

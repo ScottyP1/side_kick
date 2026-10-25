@@ -624,7 +624,8 @@ CREATE TABLE IF NOT EXISTS call_watch (
   conversation_id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, checked_at TEXT NOT NULL, error TEXT
 );
 -- Meetings that record and transcribe by themselves (lib/auto-record.ts): one row per organization and Teams meeting
--- (join_key = hash of its join link; a recurring series is one row). status set | already | skipped | failed; a set
+-- (join_key = hash of its join link; a recurring series is one row). status set | already | skipped | failed | checking
+-- (one scan's claim while it looks at the meeting); a set
 -- meeting is never changed again. title only for set, already and failed rows (the group's own meetings).
 CREATE TABLE IF NOT EXISTS meeting_autorecord (
   org_id TEXT NOT NULL REFERENCES orgs(id), join_key TEXT NOT NULL, online_meeting_id TEXT, organizer_oid TEXT NOT NULL,

@@ -76,9 +76,17 @@ Everyone in a group sees that group's upcoming meetings that will record, under 
 - Only while automatic notes are on for your organization, and only in group chats assigned to a group (not channels or 1:1 chats).
 - The card is the same fixed text everywhere and says nothing about the group's work, so it's fine in chats with client guests.
 
-**Switching them off:** reminders are **on** for every group to start with. The group's **Team Lead** (or an Org Owner or Org Admin) can switch them off or on:
+**Switching them off:** reminders (for calls and scheduled meetings) are **on** for every group to start with. The group's **Team Lead** (or an Org Owner or Org Admin) can switch them off or on:
 - in the portal: the group → **Teams chats** → **Transcription reminders**, or
 - in one of the group's chats: `@Sidekick stop transcription reminders` (or `start transcription reminders`).
+
+**Scheduled meetings: Sidekick reminds you too.** A scheduled Teams meeting that doesn't record by itself gets the same kind of reminder, about **two minutes after it starts**, so your team never finds out afterwards that nothing was captured:
+
+- **Which meetings**: the scheduled Teams meetings your groups' people organize that are **clearly one group's** (its chat is linked to the group, or most of the people invited are one group's people, at least two). Meetings several groups share equally, and meetings of nobody's group, get nothing: Sidekick never guesses.
+- **Where the card goes**: if Sidekick is in the meeting's own chat (for example someone added the Sidekick tab to the meeting), the card goes there, as soon as it sees the meeting's call running for two minutes with nobody transcribing or recording. If Sidekick isn't in the meeting's chat, it can't see the call, so it posts in the **group's notes chat** instead, naming the meeting: *"The Teams meeting “Weekly sync” started a few minutes ago and I can't see whether it's being transcribed…"* (only in a chat without client guests). If Teams already lists a transcript for the meeting, Sidekick says nothing.
+- **Nothing is posted** when the meeting records by itself (an organizer chose *Record and transcribe automatically*, or Sidekick set it for you, above), when the group switched transcription reminders off, on the chat's quiet days, or more than 30 minutes after the start.
+- **Once per meeting.** Each occurrence of a recurring meeting can get its own reminder.
+- It uses the same switch as the call reminders (**Transcription reminders** on the group's **Teams chats** tab, or `@Sidekick stop transcription reminders`), and needs the same Microsoft approval as *Group meetings record and transcribe by themselves*: reading calendars and Teams meetings. Until a Microsoft admin approves that, the **Teams chats** tab says so under the switch. Sidekick reads only the next two hours of your groups' people's calendars (times, subject, invitees and the Teams link, never the invitation text).
 
 Members and Viewers see the setting but can't change it. Each change is in the audit log, and so is each reminder Sidekick posts ("Reminded … to start transcription"). The **Teams chats** tab also shows the latest reminder. If Microsoft doesn't let Sidekick see the calls in a chat, the tab names that chat. This means Teams didn't grant Sidekick its chat-reading permission there (the *resource-specific consent* for chats). Your Microsoft admin checks the tenant's chat consent setting (`Set-MgBetaChatRscConfiguration`; the default `ManagedByMicrosoft` may not allow it, `EnabledForAllApps` does). Then remove Sidekick from that chat in Teams and add it again, because the permission is granted when Sidekick is added.
 

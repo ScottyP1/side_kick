@@ -24,6 +24,9 @@
  *   group's Team Lead or an Org Owner/Admin (`requireManage`); audited.
  * - **Can't read a chat**: Graph refusing a chat (403: the permission wasn't granted there, e.g. Sidekick was added
  *   with an old package) is remembered per chat (`call_watch.error`) and shown on the Teams chats tab; never silent.
+ * - **Scheduled meetings**: the group's scheduled Teams meetings get the same reminder from lib/meeting-nudge.ts,
+ *   under the same switch (in the meeting's chat when Sidekick is there, else in the group's notes chat). Its
+ *   problems (Microsoft refusing the calendar read) and its latest reminder show in `callNudgeStatus` too.
  * - **Walls**: everything is per organization and group; the card is fixed text (no Claude, no group content), so it's
  *   safe in a chat with client guests.
  *
@@ -74,8 +77,10 @@ export type CallNudgeStatus = {
   autoNotes: boolean;
   /** Names of the group's chats Graph won't let Sidekick read (so no nudges there). */
   unreadable: string[];
-  /** The latest nudge in one of the group's chats. */
+  /** The latest nudge in one of the group's chats, or for one of its scheduled meetings (`chat` names the meeting then). */
   last: { chat: string; at: string } | null;
+  /** Why Sidekick can't see the organization's scheduled Teams meetings (lib/meeting-nudge.ts), or null. */
+  scheduledProblem: string | null;
 };
 
 /**
@@ -86,7 +91,8 @@ export async function callNudgeStatus(orgId: string, workspaceId: string): Promi
   const ws = await get<{ call_nudge: number | null; call_nudge_by: string | null; call_nudge_at: string | null }>(
     "SELECT call_nudge, call_nudge_by, call_nudge_at FROM workspaces WHERE id = ? AND org_id = ?", workspaceId, orgId,
   );
-  const autoNotes = Boolean((await get<{ enabled: number }>("SELECT enabled FROM auto_meetings WHERE org_id = ?", orgId))?.enabled);
+  const auto = await get<{ enabled: number; remind_error: string | null }>("SELECT enabled, remind_error FROM auto_meetings WHERE org_id = ?", orgId);
+  const autoNotes = Boolean(auto?.enabled);
   const unreadable = (await all<{ name: string | null }>(
     `SELECT c.name FROM call_watch s JOIN teams_conversations c ON c.id = s.conversation_id
       WHERE s.org_id = ? AND c.org_id = ? AND c.workspace_id = ? AND s.error IS NOT NULL AND c.removed_at IS NULL ORDER BY c.name`,
@@ -97,13 +103,21 @@ export async function callNudgeStatus(orgId: string, workspaceId: string): Promi
       WHERE n.org_id = ? AND n.workspace_id = ? AND n.status = 'nudged' ORDER BY n.nudged_at DESC LIMIT 1`,
     orgId, workspaceId,
   );
+  const lastMeeting = await get<{ title: string | null; nudged_at: string }>(
+    "SELECT title, nudged_at FROM meeting_nudges WHERE org_id = ? AND workspace_id = ? AND status = 'nudged' ORDER BY nudged_at DESC LIMIT 1",
+    orgId, workspaceId,
+  );
+  const last = lastMeeting && (!lastRow || lastMeeting.nudged_at > lastRow.nudged_at)
+    ? { chat: `the meeting “${lastMeeting.title ?? "Teams meeting"}”`, at: lastMeeting.nudged_at }
+    : lastRow ? { chat: lastRow.name ?? "Teams chat", at: lastRow.nudged_at } : null;
   return {
     enabled: ws?.call_nudge !== 0,
     changedBy: ws?.call_nudge_by ?? null,
     changedAt: ws?.call_nudge_at ?? null,
     autoNotes,
     unreadable,
-    last: lastRow ? { chat: lastRow.name ?? "Teams chat", at: lastRow.nudged_at } : null,
+    last,
+    scheduledProblem: autoNotes ? auto?.remind_error ?? null : null,
   };
 }
 
@@ -144,11 +158,11 @@ export async function callNudgeFromTeams(actor: User, workspaceId: string, group
   if (action === "off") {
     if (!on) return `Transcription reminders are already off for ${groupName}.`;
     await saveSwitch(actor, workspaceId, false, " (from Teams)");
-    return `Done ✓ I won't remind ${groupName}'s chats to start transcription any more. Remember to click Start transcription yourselves, or there won't be notes. Say “@${BRAND.name} start transcription reminders” to turn them back on.`;
+    return `Done ✓ I won't remind ${groupName}'s chats and meetings to start transcription any more. Remember to click Start transcription yourselves, or there won't be notes. Say “@${BRAND.name} start transcription reminders” to turn them back on.`;
   }
   if (on) return `Transcription reminders are already on for ${groupName}.`;
   await saveSwitch(actor, workspaceId, true, " (from Teams)");
-  return `Done ✓ When a call starts in ${groupName}'s chats and nobody has started transcription after about two minutes, I'll post a short reminder.`;
+  return `Done ✓ When a call starts in ${groupName}'s chats, or one of its scheduled Teams meetings starts, and nobody has started transcription after about two minutes, I'll post a short reminder.`;
 }
 
 /* ------------------------------------------------------------------ */

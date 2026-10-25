@@ -57,7 +57,7 @@ const header = (eyebrow: string, title: string): Block[] => [
 const plain = (s: string) => s.replace(/[#*_`>|]+/g, " ").replace(/\s+/g, " ").trim();
 
 /** One cited source, as returned by `ask()` in sidekick.ts. `origin` "firm" = the org's firm library. */
-export type CardSource = { id: string; title: string; loc: string | null; type: string; excerpt: string; origin?: "group" | "firm"; outdated?: string | null; url?: string | null };
+export type CardSource = { id: string; title: string; loc: string | null; type: string; excerpt: string; origin?: "group" | "firm"; outdated?: string | null; url?: string | null; appliesTo?: number };
 
 /**
  * The button title for a cited connector source, from its title: "Open #4821" (Azure DevOps), "Open CUT-12"
@@ -93,7 +93,7 @@ export function answerCard(question: string, answer: { found: boolean; answer: s
   if (answer.sources.length) {
     body.push(text("Sources", { weight: "Bolder", spacing: "Large", separator: true }));
     for (const s of answer.sources) {
-      const origin = s.origin === "firm" ? "Firm policy · " : "";
+      const origin = s.origin === "firm" ? `Firm policy${s.appliesTo ? ` (${s.appliesTo === 1 ? "this group only" : `${s.appliesTo} groups`})` : ""} · ` : "";
       body.push({
         type: "Container",
         spacing: "Small",

@@ -22,7 +22,8 @@ import { BRAND } from "@/lib/brand";
 import type { FeatureKey } from "@/lib/plans";
 import { isActive, navFor, phoneTabs, type NavGroup, type NavItem } from "@/lib/portal-nav";
 
-export type Workspace = { id: string; name: string; code: string | null; color: string };
+/** A group the person can open: `client` is who the engagement is for (e.g. "Litware"), shown on upload targets. */
+export type Workspace = { id: string; name: string; code: string | null; color: string; client?: string | null };
 export type Me = {
   /** `needsTwoStep`: the organization requires two-step sign-in and this person hasn't set it up yet. */
   user: { id: string; name: string; email: string; role: string; mustChangePassword: boolean; needsTwoStep?: boolean; admin: boolean; lead?: boolean };

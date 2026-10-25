@@ -84,6 +84,7 @@ export const FAQ: readonly FaqItem[] = [
     a: [
       `Every company's ${BRAND.name} is completely separate: nothing is shared between organizations. Inside a company, each client group is walled off too: searches are limited to the group before anything is ranked, and each Teams chat belongs to exactly one group.`,
       "Org Owners and Org Admins see every group; everyone else, Team Leads included, sees only the groups they've been added to. Automated tests check these walls on every change.",
+      `Uploads say which group they go to, and a file that looks like another client's (their name or engagement code) is held, unused, until someone keeps it or moves it to the right group. The firm library holds client material back the same way, and a firm document can be limited to chosen groups.`,
     ],
     topics: ["security"],
     guide: "/docs/concepts#how-your-data-is-protected",

@@ -43,6 +43,8 @@ export const MATRIX = [
   // Change workspace content
   { what: "Upload documents", method: "POST", url: () => "/api/docs", form: (s) => ({ ws: s.wsA }), allow: EDITORS },
   { what: "Change or delete a document", method: "DELETE", url: () => `/api/docs/${NOPE}`, allow: EDITORS },
+  { what: "Keep or move a held document (may be another client's)", method: "POST", url: () => `/api/docs/${NOPE}`, body: { action: "keep" }, allow: EDITORS },
+  { what: "Confirm a flagged document belongs in its group", method: "POST", url: () => `/api/docs/${NOPE}`, body: { action: "review" }, allow: MANAGERS },
   { what: "Add a past or outside meeting", method: "POST", url: () => "/api/meetings", form: (s) => ({ ws: s.wsA }), allow: EDITORS },
   { what: "Save a meeting item to knowledge", method: "PATCH", url: () => `/api/items/${NOPE}`, body: { saved: true }, allow: EDITORS },
   { what: "See the automatic-notes panel", method: "GET", url: () => "/api/meetings/auto", allow: EVERYONE },
@@ -75,6 +77,7 @@ export const MATRIX = [
   { what: "Ask the Org Owner to allow a tool type for their group (Team Leads: their groups)", method: "POST", url: () => "/api/connectors/requests", body: {}, allow: MANAGERS },
   { what: "List a connected tool's projects (to link one)", method: "GET", url: () => `/api/connectors/${NOPE}/projects`, allow: MANAGERS },
   { what: "Change or delete a firm library document", method: "DELETE", url: () => `/api/firm/${NOPE}`, allow: ADMINS },
+  { what: "Keep, limit or move a held firm library document", method: "POST", url: () => `/api/firm/${NOPE}`, body: { action: "keep" }, allow: ADMINS },
   { what: "See answer quality (👍/👎 counts)", method: "GET", url: () => "/api/feedback", allow: ADMINS },
   { what: "Download a deletion certificate", method: "GET", url: () => `/api/rolloffs/${NOPE}/certificate`, allow: ADMINS },
   // People and Teams links: admins everywhere, Team Leads only in the workspaces they lead (the walls test that part)

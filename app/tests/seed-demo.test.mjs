@@ -57,7 +57,12 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.equal(count("SELECT COUNT(*) FROM meetings WHERE status != 'Ready'"), 0, "every meeting imported");
   assert.ok(count("SELECT COUNT(*) FROM meetings") >= 50);
   assert.equal(count("SELECT COUNT(*) FROM meetings WHERE summary LIKE 'Test summary%'"), 0, "realistic notes, not fake Claude's");
-  assert.equal(count("SELECT COUNT(*) FROM documents WHERE status != 'Ready'"), 0, "every document indexed");
+  assert.equal(count("SELECT COUNT(*) FROM documents WHERE status != 'Ready'"), 1, "every document indexed but the held one");
+  // Upload guard: a Litware file held in Contoso (not indexed), a firm standard for two groups, a client checklist held in the firm library.
+  assert.equal(count("SELECT COUNT(*) FROM documents d JOIN workspaces w ON w.id = d.workspace_id WHERE d.status = 'Held' AND w.name LIKE 'Contoso%' AND d.guard_json LIKE '%Litware%'"), 1);
+  assert.equal(count("SELECT COUNT(*) FROM passages WHERE source_id IN (SELECT id FROM documents WHERE status = 'Held')"), 0, "held documents aren't searchable");
+  assert.equal(count("SELECT COUNT(*) FROM firm_doc_groups g JOIN firm_docs f ON f.id = g.firm_doc_id WHERE f.applies_to = 'some'"), 2, "a firm standard for two groups");
+  assert.equal(count("SELECT COUNT(*) FROM firm_docs WHERE status = 'Held' AND guard_json LIKE '%Contoso%'"), 1, "a client checklist held in the firm library");
   assert.ok(count("SELECT COUNT(*) FROM chat_messages") >= 100, "tracked Teams chat messages");
   assert.ok(count("SELECT COUNT(*) FROM teams_conversations WHERE guests = 1") >= 1, "a chat with client guests");
   assert.ok(count("SELECT COUNT(*) FROM firm_docs WHERE superseded_by IS NOT NULL") >= 1, "a superseded firm policy");
@@ -82,7 +87,7 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.equal(count("SELECT COUNT(*) FROM subscriptions WHERE status = 'past_due'"), 1);
   assert.equal(count("SELECT COUNT(*) FROM platform_admins"), 1, "the Owner Console account");
   // The watchers ran once on the job queue and found something of every kind at Northwind.
-  for (const kind of ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request"]) {
+  for (const kind of ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "misfiled_doc"]) {
     assert.ok(count(`SELECT COUNT(*) FROM findings WHERE org_id = ${northwind} AND kind = ? AND status = 'open'`, kind) >= 1, `a "${kind}" finding`);
   }
   assert.equal(count("SELECT COUNT(*) FROM jobs WHERE status = 'dead'"), 0, "no job gave up");
@@ -104,7 +109,7 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.equal(count("SELECT COUNT(*) FROM graph_meetings WHERE status = 'skipped'"), 1);
   assert.equal(count("SELECT COUNT(*) FROM items WHERE pinned = 1 AND saved_by IS NOT NULL"), 2, "two decisions saved to knowledge");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_id LIKE 'saved:%'") >= 2, "and searchable");
-  assert.match(out, /findings for Northwind's Org Owner \(11 kinds/);
+  assert.match(out, /findings for Northwind's Org Owner \(12 kinds/);
   // Starter is 15 people: Tailspin sits one below.
   assert.equal(count("SELECT COUNT(*) FROM users WHERE org_id = (SELECT id FROM orgs WHERE name = 'Tailspin Partners')"), 14);
   // The private files exist, are only readable by this user, and hold every login.

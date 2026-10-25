@@ -924,6 +924,9 @@ function migrate(conn: DatabaseSync) {
   // Meetings that record by themselves (lib/auto-record.ts): the organization's switch (0/1), who and when, and the last scan.
   if (!has("auto_meetings", "auto_record")) conn.exec("ALTER TABLE auto_meetings ADD COLUMN auto_record INTEGER NOT NULL DEFAULT 0");
   for (const col of ["auto_record_by", "auto_record_at", "record_checked_at", "record_error"]) if (!has("auto_meetings", col)) conn.exec(`ALTER TABLE auto_meetings ADD COLUMN ${col} TEXT`);
+  // Meeting matching couldn't read the directory (people added by email can't be recognised): the plain message
+  // and since when, shown on the Meetings panel; cleared once a lookup works (lib/meeting-group.ts noteDirectory).
+  for (const col of ["directory_error", "directory_error_at"]) if (!has("auto_meetings", col)) conn.exec(`ALTER TABLE auto_meetings ADD COLUMN ${col} TEXT`);
   // Scale readiness (docs/SCALE.md): indexes for per-group lists and counts, per-person lookups and the retention
   // clean-up (lib/retention.ts), found with the load test on 10,000 groups. Same list as db/schema.postgres.sql.
   for (const sql of [

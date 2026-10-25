@@ -73,7 +73,7 @@ import { processMeeting } from "./sidekick";
 import { postMeetingNotes } from "./teams/bot";
 import { remindAfterMeeting } from "./reminders";
 import { BRAND } from "./brand";
-import { isOid, knownPeople, matchGroup, sameTenant, type DirectoryCache, type Participant } from "./meeting-group";
+import { isOid, knownPeople, matchGroup, noteDirectory, sameTenant, type DirectoryCache, type Participant } from "./meeting-group";
 
 /** The Graph resource for every scheduled-meeting transcript in a tenant (one subscription per organization). */
 export const TRANSCRIPTS_RESOURCE = "communications/onlineMeetings/getAllTranscripts";
@@ -197,8 +197,8 @@ const plainError = (e: unknown) => (e instanceof HttpError ? e.message : `Checki
  * managers of that group, its people who aren't in the group yet (`newcomers`, each with Add to group).
  */
 export async function autoNotesStatus(orgId: string, opts: { workspaceIds: string[]; manager: boolean; admin?: boolean }) {
-  const row = await get<{ enabled: number; changed_by: string | null; changed_at: string | null; last_poll_at: string | null; last_ok_at: string | null; last_error: string | null; last_error_at: string | null }>(
-    "SELECT enabled, changed_by, changed_at, last_poll_at, last_ok_at, last_error, last_error_at FROM auto_meetings WHERE org_id = ?", orgId,
+  const row = await get<{ enabled: number; changed_by: string | null; changed_at: string | null; last_poll_at: string | null; last_ok_at: string | null; last_error: string | null; last_error_at: string | null; directory_error: string | null }>(
+    "SELECT enabled, changed_by, changed_at, last_poll_at, last_ok_at, last_error, last_error_at, directory_error FROM auto_meetings WHERE org_id = ?", orgId,
   );
   const sub = await get<{ expires_at: string }>("SELECT expires_at FROM graph_subscriptions WHERE org_id = ? ORDER BY expires_at DESC LIMIT 1", orgId);
   const rows = await all<GraphMeeting>(
@@ -252,6 +252,8 @@ export async function autoNotesStatus(orgId: string, opts: { workspaceIds: strin
     lastError: row?.last_error ?? null,
     /** The last error is a Microsoft permission not approved: the page links to Settings → Microsoft permissions. */
     permissionMissing: Boolean(row?.last_error && [NOT_APPROVED, TRANSCRIPT_DENIED, ADHOC_DENIED].includes(row.last_error)),
+    // Email matching blocked by a missing directory permission (lib/meeting-group.ts `noteDirectory`): managers only.
+    directoryProblem: opts.manager ? row?.directory_error ?? null : null,
     instant: Boolean(sub && sub.expires_at > now()),
     recent,
   };
@@ -668,10 +670,13 @@ async function linkOrganizersByEmail(orgId: string, tenant: string): Promise<voi
       try {
         await linkByEmail(orgId, tenant, u, `Microsoft account linked when ${BRAND.name} looked for their Teams meetings by their email`);
       } catch (e) {
-        // Best effort: polling goes on without them, and they're tried again next poll.
-        if (!(e instanceof ConsentNeededError)) console.error("Looking up a meeting organizer by email failed", e instanceof Error ? e.message : e);
+        // Best effort: polling goes on without them, and they're tried again next poll. A missing directory
+        // permission is shown on the Meetings panel.
+        if (e instanceof ConsentNeededError) await noteDirectory(orgId, false);
+        else console.error("Looking up a meeting organizer by email failed", e instanceof Error ? e.message : e);
         return;
       }
+      await noteDirectory(orgId, true);
       await run(
         `INSERT INTO graph_poll_cursors (org_id, organizer_oid, polled_until) VALUES (?, ?, ?) ON CONFLICT (org_id, organizer_oid) DO NOTHING`,
         orgId, `lookup:${u.id}`, now(),
@@ -834,6 +839,7 @@ async function newcomersFor(orgId: string, tenant: string, workspaceId: string, 
     } catch (e) {
       if (!(e instanceof ConsentNeededError)) throw e;
       directoryOk = false;
+      await noteDirectory(orgId, false);
     }
   }
   return out;

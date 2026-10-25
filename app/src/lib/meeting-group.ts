@@ -29,7 +29,7 @@
  *   in the tenant the organization is connected to.
  */
 import "server-only";
-import { all, get } from "./db";
+import { all, get, run } from "./db";
 import { ConsentNeededError, linkByDirectory } from "./directory";
 import { entraConfigured } from "./entra";
 import { tenantOfOrg } from "./tenants";
@@ -96,10 +96,14 @@ export async function knownPeople(orgId: string, participants: Participant[], ca
       try {
         found = await linkByDirectory(orgId, tenant, oid, `Microsoft account linked when ${BRAND.name} recognised them in a Teams meeting by their email`);
       } catch (e) {
-        // The directory permission isn't approved yet: stop looking, match by saved account ids only.
-        if (e instanceof ConsentNeededError) break;
+        // The directory permission isn't approved yet: stop looking, match by saved account ids only, and say so.
+        if (e instanceof ConsentNeededError) {
+          await noteDirectory(orgId, false);
+          break;
+        }
         throw e;
       }
+      if (looked === 1) await noteDirectory(orgId, true);
       cache.set(oid, found?.id ?? null);
       if (found) {
         out.set(oid, found.id);
@@ -109,6 +113,24 @@ export async function knownPeople(orgId: string, participants: Participant[], ca
     spanAttrs({ looked, linked });
   });
   return out;
+}
+
+/** What the Meetings panel says while the directory permission is missing (see `noteDirectory`). */
+export const DIRECTORY_NEEDED = `${BRAND.name} can't recognise people who were added by email and haven't signed in with Microsoft yet, so meetings with them may wait under Pick a group. A Microsoft admin needs to approve reading your directory: Settings → Microsoft permissions → Approve ${BRAND.name} for your organization.`;
+
+/**
+ * Records whether the organization's directory could be read for meeting matching (`auto_meetings.directory_error`):
+ * `false` when Microsoft refused (the "Read all users' full profiles" permission isn't approved), `true` after a
+ * lookup went through, which clears it. Shown to Org Owners/Admins and Team Leads on the Meetings panel, so missing
+ * email matching never fails silently. Writes only when the state changes. Never throws.
+ */
+export async function noteDirectory(orgId: string, ok: boolean): Promise<void> {
+  await run(
+    ok
+      ? "UPDATE auto_meetings SET directory_error = NULL, directory_error_at = NULL WHERE org_id = ? AND directory_error IS NOT NULL"
+      : "UPDATE auto_meetings SET directory_error = ?, directory_error_at = ? WHERE org_id = ? AND directory_error IS NULL",
+    ...(ok ? [orgId] : [DIRECTORY_NEEDED, new Date().toISOString(), orgId]),
+  ).catch((e) => console.error("Couldn't record the directory check", e));
 }
 
 /** The group whose linked Teams chat is `chatId` (and isn't ending), if any. */

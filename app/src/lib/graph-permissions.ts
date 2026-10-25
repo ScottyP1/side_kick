@@ -154,9 +154,10 @@ type Refusal = { ids: string[]; at: string | null; reason: string };
 /** Refusals the features recorded (see the file header), with when they happened. */
 async function recordedRefusals(orgId: string, tenant: string | null): Promise<Refusal[]> {
   const out: Refusal[] = [];
-  const m = await get<{ last_error: string | null; last_error_at: string | null; record_error: string | null; record_checked_at: string | null }>(
-    "SELECT last_error, last_error_at, record_error, record_checked_at FROM auto_meetings WHERE org_id = ?", orgId,
+  const m = await get<{ last_error: string | null; last_error_at: string | null; record_error: string | null; record_checked_at: string | null; directory_error: string | null; directory_error_at: string | null }>(
+    "SELECT last_error, last_error_at, record_error, record_checked_at, directory_error, directory_error_at FROM auto_meetings WHERE org_id = ?", orgId,
   );
+  if (m?.directory_error) out.push({ ids: ["User.Read.All"], at: m.directory_error_at, reason: "Microsoft refused reading your directory to recognise people in meetings" });
   if (m?.last_error === NOT_APPROVED) out.push({ ids: APP_PERMISSIONS.map((p) => p.id), at: m.last_error_at, reason: "Microsoft refused automatic notes: not approved at all" });
   if (m?.last_error === TRANSCRIPT_DENIED) out.push({ ids: ["OnlineMeetingTranscript.Read.All", "OnlineMeetings.Read.All"], at: m.last_error_at, reason: "Microsoft refused reading meeting transcripts" });
   if (m?.last_error === ADHOC_DENIED) out.push({ ids: ["CallTranscripts.Read.All"], at: m.last_error_at, reason: "Microsoft refused reading Meet now call transcripts" });

@@ -136,6 +136,47 @@ test(`[${engine}] "@Sidekick post meeting notes here": the command words`, async
   }
 });
 
+test(`[${engine}] transcription reminder: call events from chat messages, when a call is due, the command words`, async () => {
+  const r = await import("../src/lib/call-nudge-rules.ts");
+  const at = new Date("2026-10-25T15:00:00Z");
+  const ago = (min) => new Date(at.getTime() - min * 60_000).toISOString();
+  const ev = (kind, callId, min) => ({ createdDateTime: ago(min), messageType: "systemEventMessage", eventDetail: { "@odata.type": `#microsoft.graph.${kind}EventMessageDetail`, callId } });
+  const calls = r.callsFromMessages([
+    { createdDateTime: ago(1), messageType: "message", eventDetail: null },
+    ev("callStarted", "a", 3),
+    ev("callStarted", "b", 5), ev("callTranscript", "b", 4),
+    ev("callStarted", "c", 6), ev("callEnded", "c", 1),
+    ev("callStarted", "d", 1),
+    ev("callStarted", "e", 45),
+    ev("callRecording", "f", 2),
+    ev("chatRenamed", "g", 2),
+    ev("callStarted", "a", 2), // a repeated start: the earliest counts
+    { createdDateTime: ago(3), eventDetail: { "@odata.type": "#microsoft.graph.callStartedEventMessageDetail" } }, // no call id
+  ]);
+  const by = Object.fromEntries(calls.map((c) => [c.callId, c]));
+  assert.deepEqual(Object.keys(by).sort(), ["a", "b", "c", "d", "e", "f"]);
+  assert.equal(by.a.startedAt, ago(3));
+  assert.equal(by.b.transcribing, true);
+  assert.equal(by.c.ended, true);
+  assert.equal(by.f.startedAt, null);
+  assert.equal(r.nudgeDue(by.a, at), true, "2+ minutes, nothing started: due");
+  assert.equal(r.nudgeDue(by.b, at), false, "transcript seen");
+  assert.equal(r.nudgeDue(by.c, at), false, "call ended");
+  assert.equal(r.nudgeDue(by.d, at), false, "only a minute in");
+  assert.equal(r.nudgeDue(by.e, at), false, "too old to bother");
+  assert.equal(r.recentCall(by.e, at), false);
+  assert.equal(r.nudgeDue(by.f, at), false, "no start seen");
+  for (const t of ["stop transcription reminders", "Stop transcription reminders.", "turn off transcription reminders here", "no more transcription nudges", "mute the transcript reminders please"]) {
+    assert.equal(r.parseNudgeCommand(t), "off", t);
+  }
+  for (const t of ["start transcription reminders", "Turn on transcription reminders again", "enable transcription nudges"]) {
+    assert.equal(r.parseNudgeCommand(t), "on", t);
+  }
+  for (const t of ["how do I stop transcription?", "stop transcription", "what are transcription reminders", "start transcription reminders for the client and summarise risks", ""]) {
+    assert.equal(r.parseNudgeCommand(t), null, `a question, not a command: ${t}`);
+  }
+});
+
 test(`[${engine}] "Meeting notes go to": the default chat and the card's footer`, async () => {
   const r = await import("../src/lib/notes-chat-rules.ts");
   const c = (id, name, guests = 0, kind = "groupChat") => ({ id, name, kind, guests });

@@ -1699,6 +1699,14 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await lead("PUT", `/api/workspaces/${s.wsB}/notes-chats`, { none: true })).status, 404, "a Team Lead can't choose for another group");
   assert.equal((await member("PUT", `/api/workspaces/${s.wsA}/notes-chats`, { none: true })).status, 403);
   assert.equal((await viewer("PUT", `/api/workspaces/${s.wsA}/notes-chats`, { none: true })).status, 403);
+  // "Transcription reminders" (lib/call-nudge.ts): everyone in the group reads the switch; only its Team Lead or an admin
+  // changes it; nobody outside it sees or changes it.
+  assert.equal((await member("GET", `/api/workspaces/${s.wsA}/call-nudge`)).body.canManage, false);
+  assert.equal((await member("GET", `/api/workspaces/${s.wsB}/call-nudge`)).status, 404);
+  assert.equal((await other("GET", `/api/workspaces/${s.wsB}/call-nudge`)).status, 404, "another organization gets not found");
+  assert.equal((await other("PUT", `/api/workspaces/${s.wsB}/call-nudge`, { enabled: false })).status, 404);
+  assert.equal((await lead("PUT", `/api/workspaces/${s.wsB}/call-nudge`, { enabled: false })).status, 404, "a Team Lead can't switch another group's");
+  assert.equal((await member("PUT", `/api/workspaces/${s.wsA}/call-nudge`, { enabled: false })).status, 403);
   // "Send test message": the group's managers only, and only into this group's own chats.
   assert.equal((await other("POST", `/api/workspaces/${s.wsB}/notes-chats/test`, { chatId: "x" })).status, 404, "another organization gets not found");
   assert.equal((await lead("POST", `/api/workspaces/${s.wsB}/notes-chats/test`, { chatId: "x" })).status, 404, "a Team Lead can't post for another group");

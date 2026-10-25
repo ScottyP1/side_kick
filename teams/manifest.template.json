@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
   "manifestVersion": "1.30",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "id": "{{BOT_ID}}",
   "developer": {
     "name": "{{BRAND_NAME}}",
@@ -32,7 +32,8 @@
             { "title": "add", "description": "Add someone to this workspace: add @name (Team Lead or Org Admin)" },
             { "title": "remove", "description": "Take someone off this workspace: remove @name (Team Lead or Org Admin)" },
             { "title": "post meeting notes here", "description": "Send this group's meeting notes to this chat (Team Lead or admin)" },
-            { "title": "stop posting notes here", "description": "Stop sending this group's meeting notes to this chat (Team Lead or admin)" }
+            { "title": "stop posting notes here", "description": "Stop sending this group's meeting notes to this chat (Team Lead or admin)" },
+            { "title": "stop transcription reminders", "description": "No more 'turn on transcription' reminders in this group's calls (Team Lead or admin)" }
           ]
         }
       ]

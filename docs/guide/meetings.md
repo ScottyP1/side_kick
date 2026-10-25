@@ -11,7 +11,7 @@ There are two ways meetings get to Sidekick:
 ### Turning it on (Org Owners and Org Admins)
 1. Connect Sidekick to your Microsoft 365 organization: **Settings → Microsoft sign-in**.
 2. A Microsoft admin of your organization approves Sidekick to read meeting and call transcripts, once for the whole organization, and allows Sidekick in Teams' meeting settings, including turning on **Transcript API access** (Microsoft Graph access to transcripts, off by default in new Microsoft 365 organizations). Your IT team has the exact steps from the Sidekick team.
-3. Make sure Teams records transcripts for your meetings (Teams meeting policy: transcription on). Sidekick can only write notes for meetings that have a transcript.
+3. Make sure Teams records transcripts for your meetings (Teams meeting policy: transcription on). Sidekick can only write notes for meetings that have a transcript. See [Getting a transcript every time](#getting-a-transcript-every-time) below.
 4. On **Meetings**, press **Turn on** under *Automatic notes after Teams meetings*.
 
 Sidekick then checks for new meetings straight away. With everything approved, new meetings usually arrive within minutes of ending (otherwise at the latest every 15 minutes). **Check now** looks again immediately. **Turn off** stops new meetings from being captured; meetings already captured stay.
@@ -19,7 +19,7 @@ Sidekick then checks for new meetings straight away. With everything approved, n
 If something is missing (for example the transcript permission isn't approved yet), the panel says so in plain words. Fix it and press **Check now**.
 
 ### Meet now in a group chat
-Pressing **Meet now** (the camera button) inside a Teams group chat starts a call that Microsoft keeps apart from scheduled meetings. Sidekick picks those up too: turn on transcription during the call as usual, and when it ends the notes land in the group that chat is linked to and are posted to the group's notes chat. A call started in a chat that isn't linked to a group goes to the group whose people spoke in it (at least two of them), like a scheduled meeting.
+Pressing **Meet now** (the camera button) inside a Teams group chat starts a call that Microsoft keeps apart from scheduled meetings. Sidekick picks those up too: turn on transcription during the call as usual (Sidekick reminds you if nobody has after two minutes: see [Getting a transcript every time](#getting-a-transcript-every-time)), and when it ends the notes land in the group that chat is linked to and are posted to the group's notes chat. A call started in a chat that isn't linked to a group goes to the group whose people spoke in it (at least two of them), like a scheduled meeting.
 
 Microsoft needs a separate approval for these calls (*Read all call transcripts*). If your organization approved Sidekick before October 2026, the Meetings page says *"approve the new call transcripts permission"*: a Microsoft admin presses **Users & access → Approve Sidekick for your organization** once more. Scheduled meetings keep working meanwhile, and calls from the last day are still picked up once it's approved.
 
@@ -38,6 +38,26 @@ Each captured meeting's length counts toward your plan's **meeting hours** this 
 ### What you see on the Meetings page
 - Captured meetings have a **Teams** tag, and the meeting page says *captured from Microsoft Teams*.
 - The panel lists recent Teams meetings with their status: **Writing notes**, **Notes written**, **Pick a group**, **Skipped** (with the reason) or **Failed** (with **Try again**). Members see the meetings of their own groups; Org Owners, Org Admins and Team Leads also see skipped ones and the ones waiting for a group.
+
+## Getting a transcript every time
+Teams only makes a transcript when someone starts transcription, and people forget. Two things help.
+
+**Scheduled meetings: let them transcribe by themselves.** Your Microsoft admin turns on the **automatic recording option** in the Teams meeting policy (PowerShell: `Set-CsTeamsMeetingPolicy -Identity Global -AutoRecording Enabled`; transcription must be on too). Organizers then see **Record and transcribe automatically** in the meeting's **Meeting options**. They choose **Transcribe only** (a transcript, no video) or **Record and transcribe**. This doesn't need Teams Premium. It's **Off for each new meeting** until the organizer picks it: Microsoft has no setting that turns it on for everyone. With **Teams Premium**, your admin can make a meeting template that has it switched on and locked. Organizations that never want video recordings can also turn meeting recording off in the policy. From December 2026 Teams then offers organizers only **Transcribe only** or Off.
+
+**Calls in a chat (Meet now, or the call button): Sidekick reminds you.** These calls have no meeting options, so nothing can start transcription by itself. When a call starts in one of a group's Teams chats and nobody has started transcription after about **two minutes**, Sidekick posts one short card in that chat:
+
+> **Turn on transcription?** This call isn't being transcribed yet. So I can write the meeting notes afterwards, turn it on: **More (…) → Record and transcribe → Start transcription**. If someone already started it, ignore this.
+
+- Once per call, and at most once every 30 minutes per chat, so a call that's restarted doesn't get a second card.
+- Not on the chat's **quiet days** when reminders are on there.
+- Only while automatic notes are on for your organization, and only in group chats assigned to a group (not channels or 1:1 chats).
+- The card is the same fixed text everywhere and says nothing about the group's work, so it's fine in chats with client guests.
+
+**Switching them off:** reminders are **on** for every group to start with. The group's **Team Lead** (or an Org Owner or Org Admin) can switch them off or on:
+- in the portal: the group → **Teams chats** → **Transcription reminders**, or
+- in one of the group's chats: `@Sidekick stop transcription reminders` (or `start transcription reminders`).
+
+Members and Viewers see the setting but can't change it. Each change is in the audit log, and so is each reminder Sidekick posts ("Reminded … to start transcription"). The **Teams chats** tab also shows the latest reminder. If Microsoft doesn't let Sidekick see the calls in a chat, the tab names that chat. This means Teams didn't grant Sidekick its chat-reading permission there (the *resource-specific consent* for chats). Your Microsoft admin checks the tenant's chat consent setting (`Set-MgBetaChatRscConfiguration`; the default `ManagedByMicrosoft` may not allow it, `EnabledForAllApps` does). Then remove Sidekick from that chat in Teams and add it again, because the permission is granted when Sidekick is added.
 
 ## Add a past or outside meeting
 **Meetings → Add a past or outside meeting.** Upload the transcript (a Teams `.vtt` file, a Word file, or paste the text), give it a title and date, and tick **Client guests attended** if the client was there. Notes are usually ready in 20–60 seconds.

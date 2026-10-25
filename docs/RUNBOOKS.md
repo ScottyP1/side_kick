@@ -313,6 +313,11 @@ Changes can take up to 30 minutes to apply. Customers' Teams admins (usually on 
 `Connect-MicrosoftTeams; New-CsApplicationAccessPolicy -Identity Sidekick-Meetings -AppIds '<Entra app id>'; Grant-CsApplicationAccessPolicy -PolicyName Sidekick-Meetings -Global; Set-CsTeamsMeetingConfiguration -Identity Global -EnableGraphTranscriptAccess $true -EnableAttributedTranscripts $true`
 (send them this section). Sidekick can only write notes for meetings with a transcript.
 
+Since Oct 25, 2026 the script also sets **`-AutoRecording Enabled`** in the Global meeting policy (see "Meetings that
+transcribe by themselves" below), and takes `-NoVideoRecording` for organizations that want transcripts but never
+video. It prints each value it set, and warns if custom meeting policies exist (people assigned one don't get the
+Global settings).
+
 ### 5. New Teams package (version 1.4.0: Meetings tab, chat/channel/meeting tab)
 ```bash
 npm --prefix app run teams:package
@@ -332,6 +337,99 @@ in chats, channels and meetings.
    in the group's notes chat. Click **Save to knowledge** on the decision.
 5. In Teams, open Sidekick → **Meetings**: the tab shows the group, the meeting and its action items without asking
    to sign in.
+
+### 7. Meetings that transcribe by themselves (scheduled meetings)
+People forget **Start transcription**, and without a transcript there are no notes. What Microsoft offers (checked on
+Microsoft Learn, Oct 25, 2026):
+
+| Setting | What it does | Licence | Status |
+| --- | --- | --- | --- |
+| `Set-CsTeamsMeetingPolicy -AutoRecording Enabled` | Shows organizers the **Record and transcribe automatically** meeting option. It is **Off** for each meeting until the organizer turns it on. There is no admin setting that turns it on by default. | Standard Teams (no Premium) | Confirmed (Learn: "Manage Teams meeting auto recording", May 2026) |
+| **Transcribe only** (same meeting option) | Organizers choose Off / Record and transcribe / **Transcribe only** when scheduling. Transcribe only makes a transcript and no video. Needs `AllowTranscription` on and `AutoRecording` Enabled. | Standard Teams (no Premium) | Rolled out May–June 2026 (Microsoft message center). The Learn pages don't mention it yet. |
+| `AllowCloudRecording $false` (script `-NoVideoRecording`) | Nobody can record video. With MC1508234 / RM570468 (Targeted Release early Nov, worldwide early–mid Dec 2026), organizers see only the choices their policy allows: recording off + transcription on = **Transcribe only** or Off. | Standard Teams | Confirmed in MC1508234. Changing it is a choice for each customer: it also stops manual recordings. |
+| Teams Premium **meeting template** with the option on and locked | Every meeting made from the template transcribes with nothing to click. | **Teams Premium** for each organizer | Confirmed (Learn). Organizers still have to pick the template. |
+| Graph `onlineMeeting.recordAutomatically` | Turns on automatic recording (video and transcript) for one meeting. Graph has no "transcribe only" property. | Standard. Needs `OnlineMeetings.ReadWrite.All` (a write permission Sidekick doesn't have). | Confirmed in the Graph reference (v1.0 and beta). **Not built**: see the follow-up below. |
+| Meet now and calls in a chat | None of the above applies. They have no meeting options. | n/a | Assumed from the docs (the auto-recording page covers meetings, webinars and town halls only). Sidekick's reminder (below) covers these. |
+
+**So, without Premium:** run the script (it sets `AutoRecording Enabled`), then tell organizers to pick
+**Transcribe only** in *Meeting options → Record and transcribe automatically* when they schedule a group's meetings.
+Customer admins without PowerShell: Teams admin center → Meetings → Meeting policies → Global → *Recording &
+transcription*: **Transcription** On. For **Auto recording**, Microsoft documents only PowerShell or a template:
+`Set-CsTeamsMeetingPolicy -Identity Global -AutoRecording Enabled`.
+
+**Follow-up (not built):** when Sidekick sees a scheduled meeting whose chat is linked to a group, it could set
+`recordAutomatically: true` with `PATCH /users/{organizer}/onlineMeetings/{id}`. That needs the application permission
+`OnlineMeetings.ReadWrite.All` (admin consent) and the access policy. It records video as well as the transcript,
+because Graph has no transcribe-only property, so we'd want each customer's agreement first.
+
+### 8. "Turn on transcription?" reminders in calls (Meet now, calls in a group chat)
+`lib/call-nudge.ts`. When a call starts in a group chat linked to a group, and after about 2 minutes the chat shows
+no transcript or recording event for that call, Sidekick posts one card there: *"Turn on transcription? … More (…) →
+Record and transcribe → Start transcription …"*, with how to stop these. It posts once per call and at most once per
+chat every 30 minutes. It posts nothing on the chat's quiet days if reminders are on there. It only runs while
+automatic notes are on. Each group can switch it off: group → **Teams chats** → **Transcription reminders**, or
+`@Sidekick stop transcription reminders` / `start transcription reminders` in the chat (Team Lead or admin, audited).
+
+- **How it sees calls:** Teams posts call events (`callStartedEventMessageDetail`, `callEndedEventMessageDetail`,
+  `callTranscriptEventMessageDetail`, `callRecordingEventMessageDetail`) as system messages in the chat. Every minute
+  the job `calls.watch` reads each watched chat's latest 25 messages:
+  `GET /v1.0/chats/{id}/messages?$top=25&$orderby=createdDateTime desc` with `Prefer: include-unknown-enum-members`.
+  Bots aren't sent call events for group chats: Teams' meetingStart/End bot events cover only scheduled and channel
+  meetings (Learn, "Meeting apps APIs").
+- **Permission:** `ChatMessage.Read.Chat` (application, resource-specific consent). It has been in the Teams package
+  since 1.1.0, and Teams grants it in each chat when Sidekick is added there. **No new permission and no re-upload are
+  needed for the reminders.** Package **1.6.0** only adds "stop transcription reminders" to Sidekick's command menu
+  (the command works without it). Re-upload it whenever convenient: `npm --prefix app run teams:package`, then Teams
+  admin center → Manage apps → Sidekick → Upload file.
+- **Confirmed in the docs:** app-only list messages accepts `ChatMessage.Read.Chat` as the least-privileged permission
+  and returns system messages with `eventDetail`. Call events exist for chats. Without the Prefer header they come back
+  as `messageType: unknownFutureValue` (Sidekick reads `eventDetail` either way).
+- **Assumed, check live:** (1) The transcript event's timing. Microsoft doesn't say if it's posted when transcription
+  starts or only when the transcript is ready, so the card says "if someone already started it, ignore this". (2) The
+  Oct 25 probe got a 403 from app-only `GET /chats/{id}/messages`. That was probably a chat without Sidekick in it, so
+  no permission had been granted there. A chat Graph refuses is listed on the group's Teams chats tab ("can't see calls
+  in …"). See the next item for the cause and the fix.
+- **Sidekick can't see calls in a chat (403, no RSC grant).** Seen live on Oct 25 in the Wave 2 cutover chat. Sidekick
+  is installed and answering there, but app-only `GET /chats/{id}/messages` said "Resource specific consent grants on
+  the request ''": no grant for that chat reached the token.
+  - **Ruled out: app id mismatch.** The live package 1.5.0 names the same app (`ba9f8d71…`) as the bot, in
+    `webApplicationInfo`, and as the Graph token's client.
+  - **Likely causes, in order:**
+    1. **The tenant's chat RSC setting.** It's `ManagedByMicrosoft` by default: "can be changed at any time at
+       Microsoft's discretion" (Learn, *Grant RSC permissions*). Under that setting Microsoft may not let chat members
+       consent to `ChatMessage.Read.Chat`, so the app installs without the grant. It could also be `DisabledForAllApps`.
+    2. **An older install in that chat.** A chat keeps the Sidekick version it was added with until someone updates the
+       app there, and consent covers that version's permissions.
+  - **Check:** `pwsh -File app/scripts/check-chat-rsc.ps1 -ChatId '<chat id>'` as a Global Administrator, using Graph
+    PowerShell's browser sign-in (az tokens don't carry these scopes). It prints:
+    - the chat RSC setting (inferred from the authorization policy's `permissionGrantPoliciesAssigned`)
+    - Sidekick's grants in the chat (`GET /beta/chats/{id}/permissionGrants`)
+    - the version installed in the chat versus the org catalog
+
+    Not yet run. The same two GETs work in Graph Explorer.
+  - **Fix:** run the script again with `-EnableChatRsc` (runs `Set-MgBetaChatRscConfiguration -State EnabledForAllApps`,
+    as documented on Learn), then **remove Sidekick from the chat and add it again**. Consent happens on install, and
+    the Teams chats tab clears within a minute.
+    - Trade-off: `EnabledForAllApps` lets chat members consent to RSC for **any** allowed app, not just Sidekick. The
+      tenant's app permission policies still decide which apps can be installed at all.
+    - If only the version was old, re-adding is enough.
+  - **Not recommended: `Chat.Read.WhereInstalled`** (application permission, admin-consented once, no per-chat consent):
+    - It reads **every message in every chat where Sidekick is installed** across the tenant, so customers' admins must
+      trust Sidekick tenant-wide, a harder sell than per-chat consent.
+    - In app-only use without RSC it's a Teams **protected API**: Microsoft's approval form must be filled in first.
+      Vendors report reviews taking up to two weeks, and each customer tenant is listed.
+    - Only worth it if a customer's policy blocks chat RSC entirely.
+  - **Not built:** Sidekick could upgrade itself in a chat with `consentedPermissionSet` through
+    `POST /chats/{id}/installedApps/{id}/upgrade`. That needs a new application permission,
+    `TeamsAppInstallation.ReadWriteAndConsentSelfForChat.All`; the `ReadWriteSelf…` permission Sidekick already has
+    can't consent to RSC.
+- **Live check:** in a linked group chat, start **Meet now** with Jojo and User2 and don't transcribe. Within about
+  3 minutes the card appears, Activity shows "Transcription reminder", and the audit log has "Reminded … to start
+  transcription". In a second call, start transcription at once: no card (unless the transcript event only appears at
+  the end, which tells us assumption 1).
+- **Cost:** one Graph read per watched chat per minute. Microsoft's "Metered APIs" page (updated Apr 2026) says
+  Teams APIs stopped being metered on Aug 25, 2025, so these reads cost nothing. The limit to watch is Graph
+  throttling: a 429 stops that organization's check until the next minute.
 
 ### When it stops working
 - **Panel says Sidekick can't read transcripts / isn't approved**: steps 1 and 3 (consent, or the access policy

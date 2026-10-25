@@ -11,6 +11,16 @@ export type ChangelogEntry = { date: string; label: string; title: string; chang
 /** Every release, newest first. */
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-25",
+    label: "October 25, 2026",
+    title: "A nudge to start transcription",
+    changes: [
+      `When a call starts in one of a group's Teams chats (Meet now or the call button) and nobody has started transcription after about two minutes, ${BRAND.name} posts one short reminder showing where the button is. No transcript means no notes.`,
+      `On for every group to start with. The Team Lead switches it on the group's Teams chats tab, or types “@${BRAND.name} stop transcription reminders” in the chat.`,
+      "For scheduled meetings, the help center explains the Teams option that makes them transcribe by themselves (Transcribe only), with no Teams Premium needed.",
+    ],
+  },
+  {
     date: "2026-10-24",
     label: "October 24, 2026",
     title: "Documents land where they belong",

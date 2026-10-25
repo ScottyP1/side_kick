@@ -30,6 +30,10 @@
  * - `meetings.notes` (payload `{ meetingId }`; key per meeting): writes the notes and posts them to Teams once.
  *   Counts: `notesWritten`, `notesPosted`.
  *
+ * "Turn on transcription" reminder (lib/call-nudge.ts):
+ * - `calls.watch` (1 min): reads the call events of watched Teams group chats (orgs with automatic notes on) and posts
+ *   the nudges that are due. Counts: `callsSeen`, `nudged`, `chatsUnreadable`.
+ *
  * Adding one (e.g. item 4's meeting transcripts from Microsoft Graph): `defineJob("meetings.fetch", { label, run })`
  * here, then `enqueue("meetings.fetch", { orgId, payload: { meetingId }, key: \`meeting:${id}\` })` where it starts.
  * Keep payloads to ids, make `run` safe to repeat, and return a few counts.
@@ -46,6 +50,7 @@ import { dueConnectorLinks, syncDueLink } from "./connectors";
 import { HttpError } from "./auth";
 import { pruneOldData } from "./retention";
 import { autoNotesOrgs, ensureSubscription, fetchTranscript, markFetchFailed, pollOrg, writeNotes } from "./meetings-graph";
+import { watchCalls } from "./call-nudge";
 
 const MIN = 60_000;
 /** How often the watchers run for each organization. */
@@ -77,8 +82,11 @@ defineJob("jobs.prune", {
   label: "Clear out old jobs",
   everyMs: 6 * 60 * MIN,
   run: async () => {
-    const failures = await run("DELETE FROM teams_post_failures WHERE created_at < ?", new Date(Date.now() - 30 * 86400_000).toISOString());
-    return { pruned: (await pruneJobs()) + failures.changes };
+    const monthAgo = new Date(Date.now() - 30 * 86400_000).toISOString();
+    const failures = await run("DELETE FROM teams_post_failures WHERE created_at < ?", monthAgo);
+    // Calls seen for the transcription reminder are only needed while the call lasts; a month is plenty.
+    const calls = await run("DELETE FROM call_nudges WHERE created_at < ?", monthAgo);
+    return { pruned: (await pruneJobs()) + failures.changes + calls.changes };
   },
 });
 defineJob("data.retention", {
@@ -172,6 +180,15 @@ defineJob("meetings.notes", {
     const r = await writeNotes(job.org_id, String(payload.meetingId ?? ""));
     return { notesWritten: r.written, notesPosted: r.posted };
   },
+});
+
+// "Turn on transcription" reminder (lib/call-nudge.ts): every minute, so a call is nudged 2–3 minutes after it starts.
+defineJob("calls.watch", {
+  label: "Remind Teams calls to start transcription",
+  everyMs: MIN,
+  maxAttempts: 1,
+  leaseMs: 5 * MIN,
+  run: async () => watchCalls(),
 });
 
 /**

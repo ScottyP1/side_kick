@@ -12,8 +12,11 @@
  * - **Teams chats**: **Meeting notes go to** (which chats get the group's meeting notes: one, several, or none; the
  *   group's Team Lead and Org Owners/Admins choose, everyone else sees it read-only; GET/PUT
  *   /api/workspaces/:id/notes-chats, lib/notes-chats.ts), then the chats assigned to the group with their settings
- *   (reminders, tracking, client guests; components/chat-settings.tsx), unassign, and assigning a chat with the code
- *   Sidekick shows in Teams. Opening the page at `#chats` (the "Pick the notes chat" finding) starts on this tab;
+ *   (reminders, tracking, client guests; components/chat-settings.tsx), unassign, and **Assign a chat**: in an
+ *   organization tied to its Microsoft tenant, the chats waiting to be assigned (name, who added Sidekick and when,
+ *   who's in it; GET /api/teams-links?members=1), with the link code only under "Linking a chat from another
+ *   organization?"; otherwise the code Sidekick shows in Teams. Opening the page at `#chats` (the "Pick the notes
+ *   chat" finding) starts on this tab;
  * - **Documents**: what Sidekick answers from, with a link to Knowledge & docs to upload;
  * - **Settings** (Org Owners/Admins): name, client, engagement code, **Export** (zip of everything in it),
  *   **End this group** (engagement over: read-only now, deleted on a date, with a deletion certificate;
@@ -38,6 +41,8 @@ type TeamsLink = {
   id: string; kind: string; name: string | null; guests: number; linked_at: string; last_seen_at: string; workspace_id: string; workspace: string;
   settings: ChatSettings; lastReminder: LastReminder; savedMessages: number;
 };
+/** A chat waiting to be assigned, as GET /api/teams-links?members=1 returns it (`members`: names from Teams, or null). */
+type WaitingChat = { id: string; kind: string; name: string | null; added_by: string | null; created_at: string; waiting_since: string | null; leaves_at: string; members?: string[] | null };
 /** "Meeting notes go to" for this group, as GET /api/workspaces/:id/notes-chats returns it (lib/notes-chats.ts `NotesPlan`). */
 type NotesPlan = {
   mode: "chosen" | "none" | "unset"; chosenBy: string | null; chosenAt: string | null;
@@ -58,6 +63,7 @@ export default function GroupView() {
   const [members, setMembers] = useState<Member[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [links, setLinks] = useState<TeamsLink[]>([]);
+  const [picker, setPicker] = useState(false);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [notes, setNotes] = useState<NotesPlan | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
@@ -78,7 +84,10 @@ export default function GroupView() {
             setMembers(m.members);
             setCanManage(m.canManage);
           }),
-          api<{ links: TeamsLink[] }>("/api/teams-links").then((l) => setLinks(l.links.filter((x) => x.workspace_id === id))),
+          api<{ links: TeamsLink[]; picker?: boolean }>("/api/teams-links").then((l) => {
+            setLinks(l.links.filter((x) => x.workspace_id === id));
+            setPicker(!!l.picker);
+          }),
           api<{ docs: Doc[] }>(`/api/docs?ws=${encodeURIComponent(id)}`).then((d) => setDocs(d.docs)),
           api<NotesPlan>(`/api/workspaces/${encodeURIComponent(id)}/notes-chats`).then(setNotes),
         ]).then(() => undefined);
@@ -131,7 +140,7 @@ export default function GroupView() {
       {tab === "overview" && canManage && <Activity id={group.id} />}
       {tab === "overview" && <Overview group={group} members={members} links={links} docs={docs} go={setTab} openDocs={openDocs} />}
       {tab === "people" && <People group={group} members={members} canManage={canManage} reload={load} />}
-      {tab === "chats" && <Chats group={group} links={links} notes={notes} canManage={canManage} reload={load} />}
+      {tab === "chats" && <Chats group={group} links={links} notes={notes} canManage={canManage} picker={picker} reload={load} />}
       {tab === "docs" && <Docs docs={docs} openDocs={openDocs} />}
       {tab === "settings" && me.user.admin && (
         <Settings group={group} onSaved={async () => { await reload(); await load(); toast("Group updated."); }} onChanged={async () => { await reload(); await load(); }} onDeleted={async () => { await reload(); router.push("/workspaces"); }} />
@@ -401,19 +410,46 @@ function NotesGoTo({ group, plan, canManage, reload }: { group: Group; plan: Not
   );
 }
 
-/** "Meeting notes go to", then the Teams chats assigned to this group, their settings, and assigning one with a code. */
-function Chats({ group, links, notes, canManage, reload }: { group: Group; links: TeamsLink[]; notes: NotesPlan | null; canManage: boolean; reload: () => Promise<void> }) {
+/**
+ * "Meeting notes go to", then the Teams chats assigned to this group, their settings, and assigning one: from the
+ * chats waiting to be assigned when `picker` (the organization is tied to its Microsoft tenant, so Sidekick hands
+ * out no codes in group chats), with the code box tucked under a disclosure for other organizations' chats and
+ * 1:1 chats; otherwise with the code Sidekick shows in Teams.
+ */
+function Chats({ group, links, notes, canManage, picker, reload }: { group: Group; links: TeamsLink[]; notes: NotesPlan | null; canManage: boolean; picker: boolean; reload: () => Promise<void> }) {
   const toast = useToast();
   const reportError = useReportError();
   const [settingsFor, setSettingsFor] = useState<TeamsLink | null>(null);
   const [linking, setLinking] = useState(false);
   const [form, setForm] = useState({ code: "", guests: false });
+  const [waiting, setWaiting] = useState<WaitingChat[] | null>(null);
+  const [pick, setPick] = useState("");
   const [error, setError] = useState("");
 
+  // Opens "Assign a chat" and loads the chats waiting to be assigned (with who's in them) where they apply.
+  const open = () => {
+    setForm({ code: "", guests: false });
+    setPick("");
+    setError("");
+    setWaiting(picker ? null : []);
+    setLinking(true);
+    if (picker) {
+      api<{ waiting: WaitingChat[] }>("/api/teams-links?members=1").then((r) => {
+        setWaiting(r.waiting);
+        if (r.waiting.length === 1) setPick(r.waiting[0].id);
+      }, (e) => {
+        setWaiting([]);
+        reportError(e);
+      });
+    }
+  };
+  // A picked waiting chat wins; otherwise the code.
+  const usingCode = !pick;
   const link = async () => {
     setError("");
     try {
-      const r = await api<{ name: string | null }>("/api/teams-links", { method: "POST", json: { ...form, ws: group.id } });
+      const json = usingCode ? { code: form.code, guests: form.guests, ws: group.id } : { id: pick, guests: form.guests, ws: group.id };
+      const r = await api<{ name: string | null }>("/api/teams-links", { method: "POST", json });
       setLinking(false);
       await reload();
       toast(`Assigned “${r.name ?? "Teams chat"}” to ${group.name}. ${BRAND.name} confirmed it in Teams.`);
@@ -449,10 +485,10 @@ function Chats({ group, links, notes, canManage, reload }: { group: Group; links
             <h2>Teams chats</h2>
             <span className="muted" style={{ fontSize: 12.5 }}>In these chats {BRAND.name} answers from {group.name} only. Choose per chat whether it reads every message and sends reminders.</span>
           </div>
-          {canManage && <button className="btn" onClick={() => { setForm({ code: "", guests: false }); setError(""); setLinking(true); }}><Icon n="plus" />Assign a chat</button>}
+          {canManage && <button className="btn" onClick={open}><Icon n="plus" />Assign a chat</button>}
         </div>
         {!links.length ? (
-          <div className="empty"><span>{canManage ? `No chats yet. Add ${BRAND.name} to your team's Teams chat, mention it with “link”, then assign the chat here with the code it shows.` : "No chats yet. The group's Team Lead assigns Teams chats here."}</span></div>
+          <div className="empty"><span>{!canManage ? "No chats yet. The group's Team Lead assigns Teams chats here." : picker ? `No chats yet. Add ${BRAND.name} to your team's Teams chat, then assign it here with Assign a chat.` : `No chats yet. Add ${BRAND.name} to your team's Teams chat, mention it with “link”, then assign the chat here with the code it shows.`}</span></div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -495,12 +531,53 @@ function Chats({ group, links, notes, canManage, reload }: { group: Group; links
       </div>
       {settingsFor && <ChatSettingsModal chat={settingsFor} onClose={() => setSettingsFor(null)} onSaved={() => reload().catch(reportError)} />}
       {linking && (
-        <Modal title={`Assign a Teams chat to ${group.name}`} onClose={() => setLinking(false)} footer={<><button className="btn" onClick={() => setLinking(false)}>Cancel</button><button className="btn primary" disabled={!form.code.trim()} onClick={link}>Assign</button></>}>
-          <p className="muted" style={{ marginTop: 0 }}>In Teams, add {BRAND.name} to the chat or channel and mention it with “link”. It replies with an 8-character code.</p>
-          <div className="field">
-            <label htmlFor="lcode">Code from Teams</label>
-            <input id="lcode" className="input mono" placeholder="ABCD-2345" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} autoFocus />
-          </div>
+        <Modal title={`Assign a Teams chat to ${group.name}`} onClose={() => setLinking(false)} footer={<><button className="btn" onClick={() => setLinking(false)}>Cancel</button><button className="btn primary" disabled={usingCode ? !form.code.trim() : false} onClick={link}>Assign</button></>}>
+          {picker && (
+            <>
+              <p className="muted" style={{ marginTop: 0 }}>Chats {BRAND.name} was added to in Teams that aren&apos;t assigned to a group yet. Assigned means {BRAND.name} reads every message there and answers from {group.name} only.</p>
+              {waiting === null ? (
+                <p className="muted">Loading chats waiting to be assigned…</p>
+              ) : !waiting.length ? (
+                <div className="empty" style={{ padding: 16 }}><span>No chats are waiting. Add {BRAND.name} to the chat in Teams first; it will show up here.</span></div>
+              ) : (
+                <div role="radiogroup" aria-label="Chats waiting to be assigned" style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+                  {waiting.map((w) => (
+                    <button key={w.id} className="choice" role="radio" aria-checked={pick === w.id} onClick={() => setPick(pick === w.id ? "" : w.id)}>
+                      <span className="radio" />
+                      <span>
+                        <b>{w.name ?? "Teams chat"}</b> <Pill nodot>{w.kind === "channel" ? "Channel" : "Group chat"}</Pill>
+                        <br />
+                        <span className="muted" style={{ fontSize: 12.5 }}>
+                          Added by {w.added_by ?? "someone in Teams"} on {fmtDate(w.waiting_since ?? w.created_at)} · {BRAND.name} leaves it on {fmtDate(w.leaves_at)} if nobody assigns it
+                        </span>
+                        {w.members && w.members.length > 0 && (
+                          <><br /><span className="muted" style={{ fontSize: 12.5 }}>In the chat: {w.members.join(", ")}</span></>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {picker ? (
+            <details style={{ marginBottom: 12 }}>
+              <summary className="muted" style={{ cursor: "pointer" }}>Linking a chat from another organization?</summary>
+              <p className="muted">For a 1:1 chat, or a chat in a Microsoft organization that isn&apos;t yours: mention {BRAND.name} there with “link”. It replies with an 8-character code.</p>
+              <div className="field">
+                <label htmlFor="lcode">Code from Teams</label>
+                <input id="lcode" className="input mono" placeholder="ABCD-2345" value={form.code} onChange={(e) => { setPick(""); setForm({ ...form, code: e.target.value }); }} />
+              </div>
+            </details>
+          ) : (
+            <>
+              <p className="muted" style={{ marginTop: 0 }}>In Teams, add {BRAND.name} to the chat or channel and mention it with “link”. It replies with an 8-character code.</p>
+              <div className="field">
+                <label htmlFor="lcode">Code from Teams</label>
+                <input id="lcode" className="input mono" placeholder="ABCD-2345" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} autoFocus />
+              </div>
+            </>
+          )}
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
             <input type="checkbox" checked={form.guests} onChange={(e) => setForm({ ...form, guests: e.target.checked })} />
             People from the client are in this chat (answer from Shareable documents only, and don&apos;t post notes from internal meetings)

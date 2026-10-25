@@ -13,7 +13,13 @@ Sidekick works inside Microsoft Teams group chats, channels and 1:1 chats. It an
 
 **Who can add Sidekick:** only Team Leads and admins. If anyone else adds it, Sidekick posts "Only a Team Lead or admin can add me to a chat, so I'm leaving" and removes itself. A chat nobody assigns within 7 days is left too, with a short goodbye.
 
-If your organization hasn't connected Microsoft sign-in to Sidekick yet (and in 1:1 chats), Sidekick shows an 8-character **link code** instead, which a Team Lead or admin enters on the group's page (**Teams chats → Assign a chat**).
+**"I don't know you in Sidekick yet."** Sidekick recognises you by your Microsoft account. If an admin added you on Users & access with your work email, Sidekick matches you by that email the first time you add it to a chat (when your organization approved Sidekick reading its directory). If it still can't place you, it says "I don't know you in Sidekick yet. Ask your Sidekick admin to add you, then sign in to the Sidekick portal with Microsoft once and add me again." It doesn't leave: once you're set up, mention @Sidekick in that chat (or remove it and add it again) and it continues as a normal add.
+
+**Removed it and added it back?** Removing Sidekick from a chat in Teams makes it forget a chat that wasn't assigned yet; adding it again starts afresh, so the chat shows up under **Assign a chat** again.
+
+**Assigning it in the portal:** on the group's page, **Teams chats → Assign a chat** lists the chats waiting to be assigned (the chat's name, who added Sidekick and when, and who's in it). Pick one and click **Assign**. Nothing listed? Add Sidekick to the chat in Teams first; it shows up there. A Team Lead sees the chats they added; Org Owners and Org Admins see all of them.
+
+If your organization hasn't connected Microsoft sign-in to Sidekick yet (and in 1:1 chats, or a chat in another company's Microsoft 365), Sidekick shows an 8-character **link code** instead, which a Team Lead or admin enters on the group's page (**Teams chats → Assign a chat**; with Microsoft sign-in connected it's under **Linking a chat from another organization?**).
 
 **Your organization isn't on Sidekick yet?** Sidekick replies "Sidekick isn't set up for your organization yet" with a link to sign up, and reads or keeps nothing from that chat.
 

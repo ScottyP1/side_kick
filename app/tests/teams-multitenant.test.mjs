@@ -6,7 +6,9 @@
  * - chats waiting to be assigned show only to their own org, and only the allowed roles can assign them;
  * - the link code still works as a fallback, but only within the org's own tenant;
  * - `@Sidekick add/remove @name` in Teams: who may, who can be added, auditing;
- * - directory import with a fake Microsoft Graph: admin approval, consent-needed message, rules, isolation.
+ * - directory import with a fake Microsoft Graph: admin approval, consent-needed message, rules, isolation;
+ * - who added Sidekick: a Team Lead never signed in with Microsoft is recognised by email (Graph), someone unknown
+ *   gets "I don't know you in Sidekick yet", and removing + re-adding Sidekick clears a stuck "leaving" chat.
  * The main suite (tests/api.test.mjs) runs single-tenant mode and checks it behaves as before.
  *
  * Nothing real is touched: its own data folder or the TEST_DATABASE_URL database (wiped first), fake Claude,
@@ -48,7 +50,15 @@ const ROSTER = {
   "29:ann": { id: "29:ann", name: "Ann Owner", aadObjectId: "oid-ann", email: "ann@a.test", tenantId: TA, userRole: "user" },
   "29:mo": { id: "29:mo", name: "Mo Member", aadObjectId: "oid-mo", email: "mo@a.test", tenantId: TA, userRole: "user" },
 };
+// Chats Sidekick is no longer in (Teams answers 403 "BotNotInConversationRoster" for their member list).
+const GONE = new Set();
 const connector = http.createServer((req, res) => {
+  const roster = decodeURIComponent(req.url).match(/\/v3\/conversations\/([^/]+)\/members\/?$/);
+  if (req.method === "GET" && roster) {
+    const gone = GONE.has(roster[1]);
+    res.writeHead(gone ? 403 : 200, { "content-type": "application/json" });
+    return void res.end(JSON.stringify(gone ? { error: { code: "BotNotInConversationRoster", message: "The bot is not part of the conversation roster." } } : Object.values(ROSTER).filter((p) => p.userRole === "user")));
+  }
   const member = decodeURIComponent(req.url).match(/\/v3\/conversations\/[^/]+\/members\/(.+)$/);
   if (req.method === "GET" && member) {
     const p = ROSTER[member[1]];
@@ -91,6 +101,8 @@ const TEAMS_APP_ID = "sidekick-test-app";
 // Where Sidekick is installed (chat or team id → Graph installations), and where it removed itself from.
 const INSTALLED = new Map();
 const removedFrom = [];
+// Chats where Microsoft refuses Sidekick's self-removal (as if that permission weren't approved).
+const DENY_SELF_REMOVAL = new Set();
 // Each tenant's directory.
 const DIRECTORY = {
   [TA]: [
@@ -143,6 +155,7 @@ const microsoft = http.createServer((req, res) => {
       const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "");
       if (!consented.has(tid)) return send(403, { error: { code: "Forbidden" } });
       const where = decodeURIComponent(apps[2]);
+      if (DENY_SELF_REMOVAL.has(where)) return send(403, { error: { code: "Forbidden" } });
       const list = INSTALLED.get(where) ?? [];
       if (req.method === "GET") return send(200, { value: list });
       if (req.method === "DELETE") {
@@ -246,6 +259,7 @@ const install = (conv, from) => {
   return toBot(activity(TA, conv, { type: "installationUpdate", action: "add", from }));
 };
 const LOU = { id: "29:lou", name: "Lou Lead", aadObjectId: "oid-lou" };
+const MO = { id: "29:mo", name: "Mo Member", aadObjectId: "oid-mo" };
 const ANN = { id: "29:ann", name: "Ann Owner", aadObjectId: "oid-ann" };
 const toBot = (a) => fetch(`${BASE}/api/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(a) });
 
@@ -392,12 +406,22 @@ test(`[${ENGINE}] multi-tenant: a company that hasn't signed up gets the sign-up
 });
 
 test(`[${ENGINE}] chat picker: only leads and admins add Sidekick; it waits silently for its own org and is assigned only in the portal`, async () => {
-  // Someone who isn't a Team Lead or admin adds Sidekick: a short card, and Sidekick marks the chat to leave.
+  // A Member (not a Team Lead or admin) adds Sidekick: a short card, and Sidekick marks the chat to leave.
   const REFUSED = "19:refused@thread.v2";
   const f0 = sent.length;
-  await install(REFUSED, { id: "29:gina", name: "Gina Adder", aadObjectId: "oid-gina" });
+  await install(REFUSED, MO);
   await waitFor(REFUSED, /Only a Team Lead or admin can add me to a chat, so I'm leaving/, f0);
   s.refused = REFUSED;
+  // Someone Sidekick doesn't know (and the directory can't be read yet): a plain "I don't know you", no leaving
+  // for good, and the chat isn't waiting to be assigned.
+  const UNKNOWN = "19:stranger@thread.v2";
+  const u0 = sent.length;
+  await install(UNKNOWN, { id: "29:gina", name: "Gina Adder", aadObjectId: "oid-gina" });
+  const unknownCard = await waitFor(UNKNOWN, /I don't know you in Sidekick yet/, u0);
+  assert.match(unknownCard, /Ask your Sidekick admin to add you, then sign in to the Sidekick portal with Microsoft once and add me again/);
+  assert.doesNotMatch(unknownCard, /I'm leaving/);
+  assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:stranger@thread.v2' AND leaving = 'unknown'"), 1);
+  s.unknown = UNKNOWN;
 
   // The Team Lead adds Sidekick: one notice, no buttons, no code.
   const CHAT = "19:wave2@thread.v2";
@@ -427,6 +451,7 @@ test(`[${ENGINE}] chat picker: only leads and admins add Sidekick; it waits sile
   assert.ok(mine.leaves_at > mine.created_at);
   assert.ok((await waitingFor(lou)).some((w) => w.id === CHAT), "the Team Lead who added it sees it");
   assert.ok(!(await waitingFor(ann)).some((w) => w.id === REFUSED));
+  assert.ok(!(await waitingFor(ann)).some((w) => w.id === UNKNOWN), "nor a chat whose adder Sidekick doesn't know");
   assert.deepEqual(await waitingFor(mo), [], "a Member doesn't");
   assert.deepEqual(await waitingFor(bob), [], "another org never does");
   // An admin adds Sidekick to another chat: the lead doesn't see that one.
@@ -620,6 +645,125 @@ test(`[${ENGINE}] leaving chats: removed from the portal, refused installs and c
   assert.ok(out.leftChats >= 2, JSON.stringify(out));
   assert.ok(removedFrom.includes(s.refused), "the refused install is gone");
   assert.ok(removedFrom.includes(s.other), "the unassigned chat is left");
+  assert.ok(removedFrom.includes(s.unknown), "so is a chat held for an unknown adder, after the same wait");
   assert.match(sentTo(s.other, f), /Nobody assigned this chat to a group in the Sidekick portal within 7 days, so I'm leaving/);
   assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE id IN ('19:refused@thread.v2', '19:admins-chat@thread.v2')"), 0);
+});
+
+/** Waits until a SQL count reaches `n` (the bot works after answering Teams). */
+async function countBecomes(sql, n, ms = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if ((await count(sql)) === n) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.equal(await count(sql), n, sql);
+}
+
+test(`[${ENGINE}] who added Sidekick: a Team Lead not linked to Microsoft yet is recognised by email; nobody matching gets a plain answer`, async () => {
+  // Tenant A's directory can be read now (approved in the directory test).
+  assert.ok(consented.has(TA));
+  const grace = client();
+  // Grace was added on Users & access with her work email (other capitals than Microsoft's) and never used Microsoft sign-in.
+  const g = await ann("POST", "/api/users", { name: "Grace Kim", email: "Grace.Kim@a.test", role: "Team Lead", workspaces: [s.w1] });
+  assert.equal(g.status, 200, JSON.stringify(g.body));
+  await firstSignIn(grace, "grace.kim@a.test", g.body.tempPassword);
+  DIRECTORY[TA].push({ id: guid("oid-grace"), displayName: "Grace Kim", mail: "grace.kim@a.test", userPrincipalName: "grace.kim@a.test", userType: "Member", accountEnabled: true });
+  DIRECTORY[TA].push({ id: guid("oid-hana"), displayName: "Hana Ito", mail: "hana@a.test", userPrincipalName: "hana@a.test", userType: "Member", accountEnabled: true });
+  const GRACE = { id: "29:grace", name: "Grace Kim", aadObjectId: guid("oid-grace") };
+
+  // Grace adds Sidekick to a new group chat: her Microsoft account is linked, and it's a normal add.
+  const CHAT = "19:litware-data@thread.v2";
+  const f = sent.length;
+  await install(CHAT, GRACE);
+  await waitFor(CHAT, /not set up for this chat yet/, f);
+  assert.doesNotMatch(sentTo(CHAT, f), /Only a Team Lead|don't know you/);
+  assert.equal((await ann("GET", "/api/users")).body.users.find((u) => u.email === "grace.kim@a.test").microsoft, 1, "her Microsoft account is linked now");
+  assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Grace Kim.*Microsoft account linked when they added Sidekick to a Teams chat/);
+  const waiting = (await grace("GET", "/api/teams-links?members=1")).body;
+  const mine = waiting.waiting.find((w) => w.id === CHAT);
+  assert.ok(mine, "Grace sees the chat she added under waiting");
+  assert.equal(waiting.picker, true, "the org is tied to its tenant: chats are assigned from the waiting list");
+  assert.equal(mine.added_by, "Grace Kim");
+  assert.ok(Array.isArray(mine.members) && mine.members.includes("Maria Lopez"), JSON.stringify(mine));
+  assert.ok(!("service_url" in mine), "no Teams addresses in the answer");
+  assert.ok((await ann("GET", "/api/teams-links")).body.waiting.some((w) => w.id === CHAT), "and so does the Org Owner");
+  assert.deepEqual((await bob("GET", "/api/teams-links")).body.waiting, [], "another org never does");
+  assert.equal((await grace("POST", "/api/teams-links", { id: CHAT, ws: s.w1 })).status, 200, "Grace assigns it");
+
+  // Someone in the directory with no Sidekick account: the plain answer, nothing linked, not waiting.
+  const HANA = { id: "29:hana", name: "Hana Ito", aadObjectId: guid("oid-hana") };
+  const HCHAT = "19:hana@thread.v2";
+  const h = sent.length;
+  await install(HCHAT, HANA);
+  await waitFor(HCHAT, /I don't know you in Sidekick yet\. Ask your Sidekick admin to add you/, h);
+  assert.ok(!(await ann("GET", "/api/teams-links")).body.waiting.some((w) => w.id === HCHAT));
+  // Ann adds Hana as a Team Lead; when Hana mentions Sidekick there, she's recognised and the chat starts afresh.
+  assert.equal((await ann("POST", "/api/users", { name: "Hana Ito", email: "hana@a.test", role: "Team Lead", workspaces: [s.w1] })).status, 200);
+  const h2 = sent.length;
+  await toBot(activity(TA, HCHAT, { type: "message", from: HANA, text: "<at>Sidekick</at> hello", entities: [atSidekick] }));
+  await waitFor(HCHAT, /not set up for this chat yet/, h2);
+  const hw = (await ann("GET", "/api/teams-links")).body.waiting.find((w) => w.id === HCHAT);
+  assert.equal(hw?.added_by, "Hana Ito");
+  s.grace = { client: grace, from: GRACE };
+});
+
+test(`[${ENGINE}] stuck chats: Microsoft refuses the self-removal, admins see it, and removing + re-adding Sidekick starts afresh`, async () => {
+  const { client: grace, from: GRACE } = s.grace;
+  // A Member adds Sidekick; Microsoft refuses its self-removal, so the chat stays marked "leaving".
+  const STUCK = "19:stuck@thread.v2";
+  DENY_SELF_REMOVAL.add(STUCK);
+  const f = sent.length;
+  await install(STUCK, MO);
+  await waitFor(STUCK, /Only a Team Lead or admin can add me to a chat, so I'm leaving/, f);
+  await countBecomes("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:stuck@thread.v2' AND leaving = 'installer' AND leave_error = 'consent'", 1);
+  // Admins see it under Needs attention, with the Microsoft permission to approve; a Team Lead doesn't.
+  await tick(); // runs the watchers (and retries the removal, refused again)
+  let finding;
+  for (let i = 0; i < 40 && !finding; i++) {
+    finding = (await ann("GET", "/api/findings")).body.findings?.find((x) => x.kind === "self_removal");
+    if (!finding) await new Promise((r) => setTimeout(r, 250));
+  }
+  assert.ok(finding, "the Org Owner sees the finding");
+  assert.match(finding.detail, /TeamsAppInstallation\.ReadWriteSelfForChat\.All/);
+  assert.equal(finding.actionHref, "/users");
+  assert.ok(!(await grace("GET", "/api/findings")).body.findings.some((x) => x.kind === "self_removal"), "admins only");
+
+  // Grace removes Sidekick in Teams and adds it back: the chat waits to be assigned again, for her and the Org Owner.
+  await toBot(activity(TA, STUCK, { type: "installationUpdate", action: "remove", from: GRACE }));
+  await countBecomes("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:stuck@thread.v2'", 0);
+  DENY_SELF_REMOVAL.delete(STUCK);
+  const r = sent.length;
+  await install(STUCK, GRACE);
+  await waitFor(STUCK, /not set up for this chat yet/, r);
+  assert.ok((await grace("GET", "/api/teams-links")).body.waiting.some((w) => w.id === STUCK), "Grace sees it waiting");
+  assert.ok((await ann("GET", "/api/teams-links")).body.waiting.some((w) => w.id === STUCK), "so does the Org Owner");
+  assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:stuck@thread.v2' AND leaving IS NULL AND added_by_oid IS NOT NULL"), 1);
+
+  // A re-add straight over a chat still marked leaving (no removal in between) also starts afresh.
+  const AGAIN = "19:again@thread.v2";
+  DENY_SELF_REMOVAL.add(AGAIN);
+  await install(AGAIN, MO);
+  await countBecomes("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:again@thread.v2' AND leave_error = 'consent'", 1);
+  await install(AGAIN, GRACE);
+  await countBecomes("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:again@thread.v2' AND leaving IS NULL AND leave_error IS NULL", 1);
+  assert.ok((await grace("GET", "/api/teams-links")).body.waiting.some((w) => w.id === AGAIN));
+
+  // Teams may report the removal as a member change instead: same result.
+  const MEMBER = "19:member-change@thread.v2";
+  DENY_SELF_REMOVAL.add(MEMBER);
+  await install(MEMBER, MO);
+  await countBecomes("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:member-change@thread.v2' AND leave_error = 'consent'", 1);
+  await toBot(activity(TA, MEMBER, { type: "conversationUpdate", membersRemoved: [{ id: "bot", name: "Sidekick" }], channelData: { tenant: { id: TA } } }));
+  await countBecomes("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:member-change@thread.v2'", 0);
+
+  // The leaving timer stops retrying a chat Teams says Sidekick isn't in any more.
+  const LEFT = "19:already-left@thread.v2";
+  DENY_SELF_REMOVAL.add(LEFT);
+  await install(LEFT, MO);
+  await countBecomes("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:already-left@thread.v2' AND leave_error = 'consent'", 1);
+  GONE.add(LEFT);
+  await tick();
+  assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:already-left@thread.v2'"), 0);
+  assert.ok(!removedFrom.includes(LEFT), "nothing to remove");
 });

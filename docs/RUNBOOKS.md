@@ -21,6 +21,7 @@ operations review is in `docs/security/`.
 | A customer's connector shows "Sign-in expired" or a problem | [Connector problems](#connector-problems) |
 | Reminders/watchers stopped, Owner Console → Job queue shows a backlog, stuck or dead jobs | [Job queue stuck](#job-queue-stuck) |
 | Setting up automatic meeting notes and the Teams tab, or they stopped working | [Automatic meeting notes](#automatic-meeting-notes-microsoft-setup) |
+| "Sidekick isn't allowed to remove itself from Teams chats" under Needs attention, or a Teams chat never shows as waiting | [Teams self-removal](#teams-sidekick-cant-remove-itself-from-chats) |
 
 ## Roll back a bad deploy
 
@@ -278,6 +279,32 @@ in chats, channels and meetings.
   `webApplicationInfo.resource`; `accessTokenAcceptedVersion` 2; the scope and client ids).
 - **The tab says you don't have an account**: the person must exist in Sidekick and sign in with Microsoft once
   (there's no matching by email).
+
+## Teams: Sidekick can't remove itself from chats
+
+**What you see:** Home → Needs attention (Org Owners/Admins): "Sidekick isn't allowed to remove itself from
+Teams chats", naming the chats. Sidekick tried to leave them (a Member added it, nobody assigned the chat
+within 7 days, or someone pressed Remove in the portal) but Microsoft refused. Sidekick reads and answers
+nothing there meanwhile and retries every hour.
+
+**Fix (once per tenant, a Microsoft admin):**
+1. Entra admin center (entra.microsoft.com) → **App registrations** → the Sidekick app (the bot's app id,
+   `CLIENT_ID`) → **API permissions** → **Add a permission** → Microsoft Graph → **Application permissions**:
+   `TeamsAppInstallation.ReadWriteSelfForChat.All` and `TeamsAppInstallation.ReadWriteSelfForTeam.All`
+   (if they aren't listed yet).
+2. **Grant admin consent for <tenant>** on the same page, and check both show "Granted". (For a customer
+   tenant in multi-tenant mode: Users & access → **Approve Sidekick for your organization** does the same.)
+3. Wait for the next hourly retry (or Owner Console → Job queue → run `teams.leave`): Sidekick leaves those
+   chats and the finding clears itself.
+
+**Or by hand:** remove Sidekick from the chat in Teams (chat → ⋯ → Manage apps → Sidekick → Remove). Teams
+tells Sidekick, which forgets the chat; added back by a Team Lead, it waits to be assigned again.
+
+**Related (found in a live walkthrough):** someone added on Users & access by email who never signed in with
+Microsoft is now recognised when they add Sidekick (matched by their Microsoft email, needs the directory
+permission `User.Read.All` approved). If that isn't approved, or nobody matches, Sidekick says "I don't know
+you in Sidekick yet…": sign in to the portal with Microsoft once, then mention @Sidekick in the chat (or add it
+again).
 
 ## Microsoft 365 trial ending Nov 14, 2026
 

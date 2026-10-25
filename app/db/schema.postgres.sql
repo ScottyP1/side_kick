@@ -245,6 +245,7 @@ ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS waiting_since TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS team_aad_id TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leaving TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leave_tried_at TEXT;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS leave_error TEXT;
 -- Self-service sign-up attempts (lib/signup.ts), for the per-IP sign-up limit. Kept one day.
 CREATE TABLE IF NOT EXISTS signup_attempts (
   id TEXT PRIMARY KEY, ip TEXT, created_at TEXT NOT NULL

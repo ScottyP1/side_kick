@@ -7,6 +7,9 @@
  *   added Sidekick and when, `leaves_at` = when Sidekick leaves if nobody assigns it): Org Owners/Admins see
  *   all of them, a Team Lead only the ones they added, and assigns those to the groups they lead. Assigning
  *   turns on reading every message (assigned means full access) and Sidekick says so in the chat.
+ *   `?members=1` adds each waiting chat's `members` (names from Teams' roster, null if Teams can't be asked),
+ *   for the group page's "Assign a chat" dialog. `picker` says whether this org is tied to a Microsoft tenant
+ *   (then chats are assigned from the waiting list and Sidekick hands out no codes in group chats).
  * - **Link code** (`{ code, ws }`): for chats where the picker doesn't apply (a tenant not tied to the org,
  *   1:1 chats). In multi-tenant mode the chat must belong to the org's own Microsoft tenant.
  * Removing Sidekick from a chat altogether: POST /api/teams-links/remove.
@@ -19,18 +22,19 @@ import { handle, readJson, requireText } from "@/lib/api";
 import { audit, HttpError, isAdmin, isLead, requireManage, requireUser, workspaceIdsFor, type User } from "@/lib/auth";
 import { all, get, now, run } from "@/lib/db";
 import { assignedCard, helpCard } from "@/lib/teams/cards";
-import { normalizeCode, postCard, type TeamsConversation } from "@/lib/teams/bot";
+import { chatMemberNames, normalizeCode, postCard, type TeamsConversation } from "@/lib/teams/bot";
 import { WAITING_DAYS } from "@/lib/teams/install";
 import { CHAT_RETENTION_DAYS, forgetChat, getChatSettings, lastRuns, saveChatSettings } from "@/lib/reminders";
 import { tenantMode, tenantOfOrg } from "@/lib/tenants";
 import { BRAND } from "@/lib/brand";
 
 // Teams channels and chats linked to the workspaces this user can see.
-export const GET = handle(async () => {
+export const GET = handle(async (req: Request) => {
   const user = await requireUser();
-  const waiting = await waitingChats(user);
+  const waiting = await waitingChats(user, new URL(req.url).searchParams.get("members") === "1");
+  const picker = !!(await tenantOfOrg(user.org_id));
   const ids = await workspaceIdsFor(user);
-  if (!ids.length) return { links: [], waiting };
+  if (!ids.length) return { links: [], waiting, picker };
   const links = await all<{ id: string; workspace_id: string }>(
     `SELECT t.id, t.kind, t.name, t.guests, t.linked_at, t.last_seen_at, t.workspace_id, w.name AS workspace
        FROM teams_conversations t JOIN workspaces w ON w.id = t.workspace_id
@@ -44,6 +48,7 @@ export const GET = handle(async () => {
   );
   return {
     waiting,
+    picker,
     links: await Promise.all(
       links.map(async (l) => ({ ...l, settings: await getChatSettings(l), lastReminder: runs.get(l.id) ?? null, savedMessages: tracked.find((t) => t.conversation_id === l.id)?.n ?? 0 })),
     ),
@@ -51,7 +56,7 @@ export const GET = handle(async () => {
 });
 
 /** One chat waiting to be assigned, as GET returns it. */
-type Waiting = { id: string; kind: string; name: string | null; added_by: string | null; created_at: string; waiting_since: string | null; last_seen_at: string };
+type Waiting = { id: string; kind: string; name: string | null; added_by: string | null; created_at: string; waiting_since: string | null; last_seen_at: string; service_url: string };
 
 /**
  * The SQL condition for "waits to be assigned in this tenant": unlinked, not 1:1, Sidekick not leaving. A Team
@@ -69,16 +74,21 @@ async function waitingScope(user: User): Promise<{ sql: string; params: string[]
 
 /**
  * The chats and channels this person may assign: all waiting ones for Org Owners/Admins, the ones they added
- * for a Team Lead, none for anyone else. `leaves_at` is when Sidekick leaves if nobody assigns the chat.
+ * for a Team Lead, none for anyone else. `leaves_at` is when Sidekick leaves if nobody assigns the chat. With
+ * `withMembers`, the names of the people in each chat (asked from Teams, at most 20 chats, null when unavailable).
  */
-async function waitingChats(user: User) {
+async function waitingChats(user: User, withMembers = false) {
   const scope = await waitingScope(user);
   if (!scope) return [];
   const rows = await all<Waiting>(
-    `SELECT id, kind, name, added_by, created_at, waiting_since, last_seen_at FROM teams_conversations WHERE ${scope.sql} ORDER BY created_at DESC LIMIT 100`,
+    `SELECT id, kind, name, added_by, created_at, waiting_since, last_seen_at, service_url FROM teams_conversations WHERE ${scope.sql} ORDER BY created_at DESC LIMIT 100`,
     ...scope.params,
   );
-  return rows.map((r) => ({ ...r, leaves_at: new Date(new Date(r.waiting_since ?? r.created_at).getTime() + WAITING_DAYS * 86400_000).toISOString() }));
+  return Promise.all(rows.map(async ({ service_url, ...r }, i) => ({
+    ...r,
+    leaves_at: new Date(new Date(r.waiting_since ?? r.created_at).getTime() + WAITING_DAYS * 86400_000).toISOString(),
+    ...(withMembers ? { members: i < 20 ? await chatMemberNames({ id: r.id, service_url }) : null } : {}),
+  })));
 }
 
 // Link a Teams channel/chat to a workspace: assign a waiting chat by id, or use the code Sidekick showed in Teams.

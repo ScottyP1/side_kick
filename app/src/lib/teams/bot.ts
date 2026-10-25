@@ -52,7 +52,7 @@ import { CHAT_FOLLOWUP_MINUTES } from "../conversations";
 import { recordFeedback } from "../feedback";
 import { failureReason, span, traceFailed, traceScope, withTrace } from "../trace";
 import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, noticeCard, notSetUpCard, REMIND_PREFIX, unknownTenantCard, VERBS, type ActionItemInput } from "./cards";
-import { leaveChat, mayAddSidekick, WAITING_DAYS } from "./install";
+import { holdForUnknownAdder, leaveChat, mayAddSidekick, recognizeAdder, reopenChat, UNKNOWN_ADDER, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
 import { recordChatMessage, reminderAction } from "../reminders";
@@ -173,7 +173,10 @@ export type TeamsConversation = {
   waiting_since?: string | null;
   /** The channel's team as a Microsoft 365 group id (Graph needs it to remove Sidekick from a team). */
   team_aad_id?: string | null;
-  /** Set while Sidekick is leaving this chat ("installer", "stale", "removed"); it's ignored meanwhile. */
+  /**
+   * Set while Sidekick is leaving this chat ("installer", "stale", "removed"), or holds it because it didn't know
+   * who added it ("unknown", lib/teams/install.ts); it's ignored meanwhile. Cleared when Sidekick is added again.
+   */
   leaving?: string | null;
   leave_tried_at?: string | null;
   /** Someone removed Sidekick from this chat in Teams (when, and their Teams name); cleared when it's added back. */
@@ -404,15 +407,77 @@ async function mentionedPeople(a: InboundActivity, conv: TeamsConversation): Pro
   { people: unique.length });
 }
 
+/**
+ * Sidekick was removed from a chat (or uninstalled from a team) in Teams. A linked chat keeps its link, marked
+ * removed, so the group's managers see it (watcher "removed from a chat") and can add Sidekick back or unlink it;
+ * nothing is posted there meanwhile. A chat that wasn't assigned to a group, or that Sidekick was leaving anyway
+ * (`leaving`: a refused or unknown adder, never assigned, removal Graph refused), is simply forgotten, so the
+ * leaving timer stops trying and adding Sidekick back starts afresh.
+ */
+async function sidekickRemoved(activity: InboundActivity) {
+  const conv = await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", baseConversationId(activity.conversation.id));
+  if (!conv) return;
+  if (!conv.workspace_id || conv.leaving) return void (await run("DELETE FROM teams_conversations WHERE id = ?", conv.id));
+  traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
+  await run("UPDATE teams_conversations SET removed_at = ?, removed_by = ? WHERE id = ?", now(), (activity.from.name ?? "Someone in Teams").slice(0, 120), conv.id);
+  await audit({ org_id: conv.org_id!, name: activity.from.name ?? "Someone in Teams" }, `Removed ${BRAND.name} from Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}” in Teams`, "Access", conv.workspace_id);
+}
+
+/** The Teams connector for a saved chat, or null when it can't be asked (local Playground against a remote service). */
+async function connectorFor(conv: Pick<TeamsConversation, "service_url">) {
+  if (!conv.service_url || (PLAYGROUND_MODE && !isLocalUrl(conv.service_url))) return null;
+  return (await teams()).app.api.clone({ serviceUrl: conv.service_url });
+}
+
+/**
+ * Whether Sidekick is still in this chat, by asking Teams for the chat's members: false only when Teams clearly
+ * says it isn't (403 "bot not in the conversation", 404 for a chat that's gone), null when it can't tell. Used by
+ * the leaving timer (lib/teams/install.ts) so it stops retrying chats Sidekick already left. Never throws.
+ */
+export async function stillInChat(conv: Pick<TeamsConversation, "id" | "service_url" | "kind" | "team_aad_id">): Promise<boolean | null> {
+  try {
+    const api = await connectorFor(conv);
+    if (!api) return null;
+    await span("teams", "Check Sidekick is still in the Teams chat", () => api.conversations.getMembers(conv.id));
+    return true;
+  } catch (e) {
+    const res = (e as { response?: { status?: number; data?: { error?: { code?: string } } } }).response;
+    if (res?.status === 404 || (res?.status === 403 && /NotInConversation|NotPartOfConversation/i.test(res.data?.error?.code ?? ""))) return false;
+    return null;
+  }
+}
+
+/**
+ * The display names of the people in a chat (Teams' roster, at most 12), for the portal's "Assign a chat" list;
+ * null when Teams can't be asked or takes over 4 seconds. Only names: nothing is stored. Never throws.
+ */
+export async function chatMemberNames(conv: Pick<TeamsConversation, "id" | "service_url">): Promise<string[] | null> {
+  try {
+    const api = await connectorFor(conv);
+    if (!api) return null;
+    // At most 4 seconds, so a slow Teams never holds up the portal page.
+    const members = await span("teams", "List the people in a Teams chat", () =>
+      Promise.race([api.conversations.getMembers(conv.id), new Promise<null>((r) => setTimeout(() => r(null), 4000))]));
+    return Array.isArray(members) ? members.map((m) => m.name ?? "").filter(Boolean).slice(0, 12) : null;
+  } catch (e) {
+    console.error("Couldn't list the people in a Teams chat", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Activity handlers                                                   */
 /* ------------------------------------------------------------------ */
 
 /**
  * Wires up what Sidekick does for each kind of Teams activity:
- * - `install.add`: Sidekick was added to a channel/chat → the help card if it's already linked; otherwise, where
- *   the picker rules apply, the "not set up yet" notice if a Team Lead or admin added it (or Sidekick leaves),
- *   else the link code.
+ * - `install.add`: Sidekick was added (or added back) to a channel/chat → the chat starts afresh (`reopenChat`),
+ *   then the help card if it's already linked; otherwise, where the picker rules apply, the person who added it is
+ *   recognised (`recognizeAdder`, linking their Microsoft account by email if needed): "I don't know you in
+ *   Sidekick yet" if nobody matches, the "not set up yet" notice for a Team Lead or admin, Sidekick leaves for
+ *   anyone else; else the link code.
+ * - `install.remove`, or a `conversationUpdate` listing Sidekick in `membersRemoved`: Sidekick was removed in Teams
+ *   (`sidekickRemoved`).
  * - `channelRenamed`: a channel's new name, so the portal shows it.
  * - `message`: someone mentioned Sidekick (or started with "@Sidekick" typed as plain text) → commands
  *   (`help`, `link`, `add @name`, `remove @name`) or a question to answer; other messages in tracked chats are only saved.
@@ -424,31 +489,28 @@ function registerHandlers(app: App) {
   app.on("install.add", async ({ activity, send }) => {
     const gate = await tenantGate(activity);
     if (!gate.ok) return void (await send(signupCard()));
-    const conv = await touchConversation(activity, { name: activity.from.name ?? "Someone in Teams", oid: activity.from.aadObjectId ?? null });
+    const addedBy = { name: activity.from.name ?? "Someone in Teams", oid: activity.from.aadObjectId ?? null };
+    let conv = await touchConversation(activity, addedBy);
+    // Added (back): the chat starts afresh, even if Sidekick was on its way out of it before.
+    await reopenChat(conv.id, addedBy);
     // Added back after someone removed it: the chat works again (and the watcher's finding resolves).
     if (conv.removed_at) await run("UPDATE teams_conversations SET removed_at = NULL, removed_by = NULL WHERE id = ?", conv.id);
+    conv = { ...conv, leaving: null, removed_at: null };
     if (conv.workspace_id) return void (await send(helpCard(await workspaceName(conv))));
-    // Only a Team Lead or admin of the tenant's org may add Sidekick to a chat; anyone else, Sidekick leaves.
-    if (usesPicker(conv, gate.org) && !(await mayAddSidekick(gate.org!.id, activity.from.aadObjectId))) {
+    if (usesPicker(conv, gate.org)) {
       traceScope({ orgId: gate.org!.id });
-      after(() => leaveChat(conv, "installer").then(() => undefined, (e) => console.error("Couldn't leave the Teams chat", e)));
-      return;
+      // Someone Sidekick can't place yet (not linked, no matching email): say how to fix it, don't leave for good.
+      if ((await recognizeAdder(gate.org!.id, conv.tenant_id, activity.from.aadObjectId)) === "unknown") return void (await holdForUnknownAdder(conv));
+      // Only a Team Lead or admin of the tenant's org may add Sidekick to a chat; anyone else, Sidekick leaves.
+      if (!(await mayAddSidekick(gate.org!.id, activity.from.aadObjectId))) {
+        after(() => leaveChat(conv, "installer").then(() => undefined, (e) => console.error("Couldn't leave the Teams chat", e)));
+        return;
+      }
     }
     await send(await unlinkedCard(conv, gate.org));
   });
 
-  // Someone removed Sidekick from a chat (or uninstalled it from a team) in Teams. A linked chat keeps its link, marked
-  // removed, so the group's managers see it (watcher "removed from a chat") and can add Sidekick back or unlink it;
-  // nothing is posted there meanwhile. A chat that wasn't assigned to a group is simply forgotten. When Sidekick
-  // removed itself (`leaving`), leaveChat already handles the record.
-  app.on("install.remove", async ({ activity }) => {
-    const conv = await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", baseConversationId(activity.conversation.id));
-    if (!conv || conv.leaving) return;
-    if (!conv.workspace_id) return void (await run("DELETE FROM teams_conversations WHERE id = ?", conv.id));
-    traceScope({ orgId: conv.org_id, workspaceId: conv.workspace_id, actor: activity.from.name ?? "Teams user" });
-    await run("UPDATE teams_conversations SET removed_at = ?, removed_by = ? WHERE id = ?", now(), (activity.from.name ?? "Someone in Teams").slice(0, 120), conv.id);
-    await audit({ org_id: conv.org_id!, name: activity.from.name ?? "Someone in Teams" }, `Removed ${BRAND.name} from Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}” in Teams`, "Access", conv.workspace_id);
-  });
+  app.on("install.remove", async ({ activity }) => sidekickRemoved(activity));
 
   // A channel was renamed: Teams says so to the team's bot, with the channel's id and new name.
   app.on("channelRenamed", async ({ activity }) => {
@@ -456,6 +518,13 @@ function registerHandlers(app: App) {
     const team = activity.channelData?.team?.name;
     if (!channel?.id || !channel.name || !team) return;
     await run("UPDATE teams_conversations SET name = ? WHERE id = ?", `${team} › ${channel.name}`, channel.id);
+  });
+
+  // Teams may also report a removal as a member change: Sidekick itself among `membersRemoved`.
+  app.on("conversationUpdate", async ({ activity, next }) => {
+    const removed = (activity.membersRemoved ?? []).some((m) => !!m.id && m.id === activity.recipient?.id);
+    if (removed) return void (await sidekickRemoved(activity));
+    await next();
   });
 
   // In channels and group chats Teams only delivers messages that @mention Sidekick; in 1:1 chats, every message.
@@ -474,7 +543,16 @@ function registerHandlers(app: App) {
       return;
     }
     const conv = await touchConversation(activity);
-    // Sidekick is on its way out of this chat (refused installer, never assigned, removed): ignore everything.
+    // Held because Sidekick didn't know who added it: someone who may add Sidekick (and is now recognised, e.g.
+    // after signing in to the portal with Microsoft) mentioning it starts the chat afresh, as if they added it.
+    if (conv.leaving === UNKNOWN_ADDER && gate.org && !conv.workspace_id && (mentionsSidekick(activity) || startsWithPlainMention(activity.text))) {
+      if ((await recognizeAdder(gate.org.id, conv.tenant_id, activity.from.aadObjectId)) !== "unknown" && (await mayAddSidekick(gate.org.id, activity.from.aadObjectId))) {
+        await reopenChat(conv.id, { name: activity.from.name ?? "Someone in Teams", oid: activity.from.aadObjectId ?? null });
+        return void (await send(notSetUpCard(conv.kind, WAITING_DAYS)));
+      }
+      return;
+    }
+    // Sidekick is on its way out of this chat (refused installer, never assigned, removed, unknown adder): ignore everything.
     if (conv.leaving) return;
     // A chat linked (by code, before multi-tenant) to another org than the one its tenant belongs to is left alone.
     if (tenantMode() === "multi" && conv.org_id && gate.org && conv.org_id !== gate.org.id) {

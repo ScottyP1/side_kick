@@ -46,7 +46,7 @@ import { BRAND } from "./brand";
 import { KIND_LABEL as TOOL_LABEL, PROJECT_WORD, type ConnectorKind } from "./connector-text";
 
 /** The kinds of finding, one per watcher (chats have two: waiting to be assigned, and removed in Teams). */
-export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "role_changed", "misfiled_doc"] as const;
+export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "self_removal", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "role_changed", "misfiled_doc"] as const;
 export type FindingKind = (typeof FINDING_KINDS)[number];
 
 /** Short plain names for each kind (pills on the page, Owner Console counts). */
@@ -55,6 +55,7 @@ export const KIND_LABEL: Record<FindingKind, string> = {
   failed_replies: "Teams posts failing",
   chat_waiting: "Chats waiting",
   chat_removed: "Removed from a chat",
+  self_removal: "Can't leave Teams chats",
   overdue_items: "Overdue action items",
   unowned_items: "Action items without an owner",
   stale_doc: "Document may be out of date",
@@ -185,6 +186,33 @@ const chatsWaiting: Watcher = {
       detail: `${rows.slice(0, 3).map((r) => quote(chatName(r), 50)).join(", ")}${rows.length > 3 ? ` and ${rows.length - 3} more` : ""}. ${BRAND.name} reads nothing there until it's assigned, and leaves a chat after 7 days (the first on ${fmtDay(new Date(leaves).toISOString())}).`,
       nextStep: "Assign each chat to its group on the Groups page (or remove it), so answers and notes reach the right team.",
       actionHref: "/workspaces", actionLabel: "Assign chats", data: { chats: rows.length },
+    }];
+  },
+};
+
+/**
+ * Chats Sidekick tried to leave (refused adder, never assigned, removed in the portal) but Microsoft refused,
+ * because the organization's Microsoft admin hasn't approved Sidekick removing itself from chats
+ * (`leave_error = 'consent'`, set by lib/teams/install.ts). One finding for the organization, for admins, with
+ * the exact Microsoft permission (the steps are in docs/RUNBOOKS.md, "Teams: Sidekick can't remove itself from
+ * chats"). It clears once Sidekick has left those chats or someone removed it in Teams.
+ */
+const selfRemovalDenied: Watcher = {
+  kind: "self_removal",
+  label: "Can't remove itself from Teams chats",
+  async check(o) {
+    const rows = await all<{ id: string; name: string | null; kind: string }>(
+      `SELECT c.id, c.name, c.kind FROM teams_conversations c JOIN orgs o ON o.entra_tenant_id = c.tenant_id
+        WHERE o.id = ? AND c.leaving IS NOT NULL AND c.leave_error = 'consent' ORDER BY c.leave_tried_at`,
+      o.orgId,
+    );
+    if (!rows.length) return [];
+    return [{
+      kind: "self_removal", workspaceId: null, subject: "", audience: "admins", severity: "warn",
+      title: `${BRAND.name} isn't allowed to remove itself from Teams chats`,
+      detail: `It should have left ${rows.slice(0, 3).map((r) => quote(chatName(r), 50)).join(", ")}${rows.length > 3 ? ` and ${rows.length - 3} more` : ""}, but Microsoft refused: your Microsoft admin hasn't approved the permission “TeamsAppInstallation.ReadWriteSelfForChat.All” (and “…ReadWriteSelfForTeam.All” for channels). ${BRAND.name} reads and answers nothing there meanwhile.`,
+      nextStep: `A Microsoft admin approves it once: Users & access → Approve ${BRAND.name} for your organization (or in the Entra admin center: App registrations → ${BRAND.name} → API permissions → Grant admin consent). ${BRAND.name} then leaves those chats within the hour. Or remove ${BRAND.name} from them in Teams yourself.`,
+      actionHref: "/users", actionLabel: "Approve in Microsoft", data: { chats: rows.length, runbook: "docs/RUNBOOKS.md#teams-sidekick-cant-remove-itself-from-chats" },
     }];
   },
 };
@@ -568,7 +596,7 @@ const misfiledDocs: Watcher = {
 };
 
 /** Every watcher, in the order they run. */
-export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests, roleChanged, misfiledDocs];
+export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, selfRemovalDenied, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests, roleChanged, misfiledDocs];
 
 /* ------------------------------------------------------------------ */
 /* Running the watchers and keeping findings up to date                */

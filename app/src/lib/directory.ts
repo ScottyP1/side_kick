@@ -165,8 +165,11 @@ const graphGet = <T>(tenantId: string, path: string, headers: Record<string, str
 /* Directory people                                                    */
 /* ------------------------------------------------------------------ */
 
-/** A person in the customer's Microsoft 365 directory, as Sidekick uses them. */
-export type DirectoryPerson = { id: string; name: string; email: string; jobTitle: string | null; guest: boolean };
+/**
+ * A person in the customer's Microsoft 365 directory, as Sidekick uses them. `email` is their mail (or their
+ * sign-in name when they have no mailbox); `upn` is their Microsoft sign-in name (userPrincipalName).
+ */
+export type DirectoryPerson = { id: string; name: string; email: string; upn: string; jobTitle: string | null; guest: boolean };
 
 type GraphUser = { id: string; displayName?: string; mail?: string | null; userPrincipalName?: string; jobTitle?: string | null; userType?: string; accountEnabled?: boolean };
 const SELECT = "id,displayName,mail,userPrincipalName,jobTitle,userType,accountEnabled";
@@ -174,6 +177,7 @@ const toPerson = (u: GraphUser): DirectoryPerson => ({
   id: u.id,
   name: u.displayName || u.mail || u.userPrincipalName || "Unnamed",
   email: (u.mail || u.userPrincipalName || "").toLowerCase(),
+  upn: (u.userPrincipalName || "").toLowerCase(),
   jobTitle: u.jobTitle ?? null,
   guest: u.userType === "Guest",
 });

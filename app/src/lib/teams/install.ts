@@ -6,6 +6,18 @@
  *   side, so the bot checks it: when Sidekick is added to a group chat or a team, the person who added it
  *   (`activity.from.aadObjectId`, signed by Microsoft) must be a Team Lead, Org Admin or Org Owner of the org
  *   tied to that tenant. Anyone else gets a short card and Sidekick removes itself.
+ * - **Recognising the adder** (`recognizeAdder`): Sidekick knows a Microsoft account once its id is saved on a
+ *   Sidekick person (`users.entra_oid`, from a Microsoft sign-in or a directory import). Someone an admin added on
+ *   Users & access by email who never signed in with Microsoft isn't linked yet, so Sidekick looks the account up
+ *   in the tenant's directory (Graph `/users/{id}`, the org's own tenant only) and links it to the Sidekick person
+ *   whose email matches its sign-in name or mail (case-insensitive), as a first Microsoft sign-in would.
+ * - **Unknown adder** (`holdForUnknownAdder`): when nobody in Sidekick matches (or the directory can't be read),
+ *   Sidekick says "I don't know you in Sidekick yet…", ignores the chat (`leaving = 'unknown'`, never shown as
+ *   waiting) but doesn't leave for good: once that person can be recognised, mentioning Sidekick or adding it again
+ *   starts over; a chat still held after 7 days is left like any unassigned chat.
+ * - **Removed in Teams, added back**: a removal (lib/teams/bot.ts) forgets a chat that wasn't assigned or that
+ *   Sidekick was leaving, and adding Sidekick again starts afresh (`reopenChat`: not leaving, a new 7-day wait, the
+ *   new adder), so it shows under "Waiting to be assigned" again.
  * - **Assigned only in the portal.** An unassigned chat waits ("Waiting to be assigned") until a Team Lead or
  *   admin assigns it to a group (workspace). Until then Sidekick reads, saves and answers nothing there.
  * - **Leaving after 7 days.** A chat still unassigned 7 days after Sidekick was added (or unassigned) is left
@@ -15,8 +27,9 @@
  *   `/teams/{group id}/installedApps/...` for a channel's team), with the application permissions
  *   `TeamsAppInstallation.ReadWriteSelfForChat.All` / `ReadWriteSelfForTeam.All` ("self": Sidekick can only
  *   add or remove itself), approved by the customer's Microsoft admin with the rest (lib/directory.ts).
- *   If Graph refuses (approval missing), the chat is marked `leaving`: Sidekick ignores it from then on and the
- *   timer tries again every hour.
+ *   If Graph refuses (approval missing), the chat is marked `leaving`: Sidekick ignores it from then on, the
+ *   timer tries again every hour, and admins see a "Needs attention" finding naming the Microsoft approval
+ *   (lib/watchers.ts `self_removal`). The timer stops trying once Teams says Sidekick isn't in the chat any more.
  *
  * Single-tenant mode with a tenant that isn't tied to an org (the live site today) keeps the old link-code
  * flow and never leaves on its own.
@@ -24,12 +37,13 @@
 import "server-only";
 import { audit, HttpError, type User } from "../auth";
 import { all, get, now, run } from "../db";
-import { graphCall } from "../directory";
+import { ConsentNeededError, graphCall } from "../directory";
 import { forgetChat } from "../reminders";
 import { span } from "../trace";
 import { noticeCard } from "./cards";
-import { postCard, type TeamsConversation } from "./bot";
+import { postCard, stillInChat, type TeamsConversation } from "./bot";
 import { BRAND } from "../brand";
+import { directoryPerson } from "../directory";
 
 /** How long a chat may wait to be assigned before Sidekick leaves it. */
 export const WAITING_DAYS = 7;
@@ -42,6 +56,12 @@ const retryMs = () => (Number.isFinite(testMs("SIDEKICK_LEAVE_RETRY_MS")) ? test
 /** Why Sidekick leaves a chat (stored in `teams_conversations.leaving` while it's pending). */
 export type LeaveReason = "installer" | "stale" | "removed";
 
+/**
+ * The `leaving` value for a chat added by someone Sidekick doesn't know yet (`holdForUnknownAdder`): ignored and
+ * not waiting, but Sidekick hasn't left; it reopens when that person is recognised.
+ */
+export const UNKNOWN_ADDER = "unknown";
+
 /** The Teams app id (the manifest's `id`, which is the bot's Microsoft App ID). */
 const teamsAppId = () => (process.env.TEAMS_APP_ID || process.env.CLIENT_ID || "").toLowerCase();
 
@@ -53,6 +73,67 @@ export async function mayAddSidekick(orgId: string, objectId: string | undefined
   if (!objectId) return false;
   const u = await get<{ role: string }>("SELECT role FROM users WHERE org_id = ? AND entra_oid = ?", orgId, objectId);
   return !!u && ["Org Owner", "Org Admin", "Team Lead"].includes(u.role);
+}
+
+/**
+ * Who added Sidekick, as Sidekick sees them:
+ * - `known`: their Microsoft account is already saved on a Sidekick person of the org;
+ * - `linked`: it wasn't, but a Sidekick person of the org who isn't linked to another Microsoft account has the
+ *   email Microsoft 365 lists for it (sign-in name or mail, case-insensitive), so the account is saved on that
+ *   person now (audited), exactly as their first Microsoft sign-in would;
+ * - `unknown`: neither, or the directory couldn't be read (the Microsoft admin hasn't approved it yet).
+ * Only ever looks in `tenantId`, the Microsoft tenant tied to `orgId`, so it never links across organizations.
+ * Called by the bot when Sidekick is added to a chat, and when someone mentions it in a held chat.
+ */
+export async function recognizeAdder(orgId: string, tenantId: string | null, objectId: string | undefined): Promise<"known" | "linked" | "unknown"> {
+  if (!objectId) return "unknown";
+  if (await get("SELECT 1 AS ok FROM users WHERE org_id = ? AND entra_oid = ?", orgId, objectId)) return "known";
+  if (!tenantId || (await get<{ entra_tenant_id: string | null }>("SELECT entra_tenant_id FROM orgs WHERE id = ?", orgId))?.entra_tenant_id !== tenantId) return "unknown";
+  return span("microsoft", "Recognise who added Sidekick", async () => {
+    let person;
+    try {
+      person = await directoryPerson(tenantId, objectId);
+    } catch (e) {
+      console.error(`Couldn't look up who added ${BRAND.name} in Microsoft 365`, e instanceof Error ? e.message : e);
+      return "unknown";
+    }
+    if (!person || person.guest) return "unknown";
+    const emails = [...new Set([person.upn, person.email].filter(Boolean))];
+    if (!emails.length) return "unknown";
+    const user = await get<{ id: string; org_id: string; name: string }>(
+      `SELECT id, org_id, name FROM users WHERE org_id = ? AND entra_oid IS NULL AND lower(email) IN (${emails.map(() => "?").join(",")}) ORDER BY created_at LIMIT 1`,
+      orgId, ...emails,
+    );
+    if (!user) return "unknown";
+    // "AND entra_oid IS NULL": a sign-in at the same moment wins.
+    const done = await run("UPDATE users SET entra_oid = ? WHERE id = ? AND entra_oid IS NULL", objectId, user.id);
+    if (!done.changes) return "unknown";
+    await audit(user, `Microsoft account linked when they added ${BRAND.name} to a Teams chat`, "Sign-in");
+    return "linked";
+  });
+}
+
+/**
+ * Someone Sidekick doesn't know added it to a chat (`recognizeAdder` said `unknown`): says so plainly and how to
+ * fix it, and holds the chat (`leaving = 'unknown'`): nothing is read, saved or answered, it doesn't wait to be
+ * assigned, and Sidekick stays (so the person can try again without anyone removing it). `reopenChat` ends the hold.
+ */
+export async function holdForUnknownAdder(conv: TeamsConversation): Promise<void> {
+  await run("UPDATE teams_conversations SET leaving = ?, leave_tried_at = NULL WHERE id = ? AND workspace_id IS NULL", UNKNOWN_ADDER, conv.id);
+  await postCard(conv, noticeCard("I don't know you yet", `I don't know you in ${BRAND.name} yet. Ask your ${BRAND.name} admin to add you, then sign in to the ${BRAND.name} portal with Microsoft once and add me again.`))
+    .catch((e) => console.error("Couldn't post the unknown-adder notice in Teams", e));
+}
+
+/**
+ * Sidekick was added (again) to a chat, or a held chat's adder is now recognised: the chat starts afresh. Not
+ * leaving any more, a new 7-day wait, and `by` recorded as the person who added it (so they see it under
+ * "Waiting to be assigned"). An assigned chat keeps its group.
+ */
+export async function reopenChat(convId: string, by: { name: string; oid: string | null }): Promise<void> {
+  await run(
+    "UPDATE teams_conversations SET leaving = NULL, leave_tried_at = NULL, leave_error = NULL, added_by = ?, added_by_oid = COALESCE(?, added_by_oid), waiting_since = CASE WHEN workspace_id IS NULL THEN ? ELSE waiting_since END WHERE id = ?",
+    by.name.slice(0, 120), by.oid, now(), convId,
+  );
 }
 
 type Installation = { id: string; teamsApp?: { id?: string; externalId?: string }; teamsAppDefinition?: { teamsAppId?: string } };
@@ -100,7 +181,7 @@ export async function leaveChat(conv: TeamsConversation, reason: LeaveReason, op
   return span("microsoft", `Remove ${BRAND.name} from a Teams chat`, async () => {
     // Portal removal: ask Graph first, so a refusal leaves everything as it was and the person sees why.
     const installation = opts.strict ? await findInstallation(conv) : undefined;
-    if (!conv.leaving) {
+    if (!conv.leaving || conv.leaving === UNKNOWN_ADDER) {
       const [title, body] = FAREWELL[reason](opts.by?.name);
       await postCard(conv, noticeCard(title, body)).catch((e) => console.error("Couldn't post the goodbye in Teams", e));
     }
@@ -115,7 +196,14 @@ export async function leaveChat(conv: TeamsConversation, reason: LeaveReason, op
       if (id) await removeInstallation(conv, id);
     } catch (e) {
       if (opts.strict) throw e;
+      // Teams says Sidekick isn't in the chat any more (removed by hand, chat deleted): nothing left to remove.
+      if ((await stillInChat(conv)) === false) {
+        await run("DELETE FROM teams_conversations WHERE id = ?", conv.id);
+        return true;
+      }
       console.error(`Couldn't remove ${BRAND.name} from Teams chat ${conv.id} yet`, e instanceof Error ? e.message : e);
+      // "consent": Microsoft refused (the self-removal permission isn't approved), which admins see as a finding.
+      await run("UPDATE teams_conversations SET leave_error = ? WHERE id = ?", e instanceof ConsentNeededError ? "consent" : "other", conv.id);
       return false;
     }
     await run("DELETE FROM teams_conversations WHERE id = ?", conv.id);
@@ -125,7 +213,8 @@ export async function leaveChat(conv: TeamsConversation, reason: LeaveReason, op
 
 /**
  * Run by the job queue (`teams.leave`, every 5 minutes): leaves chats in tied tenants that have waited more than 7 days without being
- * assigned, and retries removals Graph refused earlier (at most once an hour per chat). Returns how many chats
+ * assigned (including chats held for an unknown adder), and retries removals Graph refused earlier (at most once
+ * an hour per chat; a chat Teams says Sidekick is no longer in is forgotten instead). Returns how many chats
  * Sidekick left. Each chat is handled on its own, so one failure doesn't stop the others.
  */
 export async function leaveStaleChats(): Promise<number> {
@@ -134,14 +223,15 @@ export async function leaveStaleChats(): Promise<number> {
   const due = await all<TeamsConversation>(
     `SELECT c.* FROM teams_conversations c JOIN orgs o ON o.entra_tenant_id = c.tenant_id
       WHERE c.workspace_id IS NULL AND c.kind <> 'personal'
-        AND ((c.leaving IS NULL AND c.waiting_since IS NOT NULL AND c.waiting_since < ?) OR (c.leaving IS NOT NULL AND c.leave_tried_at <= ?))
+        AND (((c.leaving IS NULL OR c.leaving = ?) AND c.waiting_since IS NOT NULL AND c.waiting_since < ?) OR (c.leaving IS NOT NULL AND c.leaving <> ? AND c.leave_tried_at <= ?))
       LIMIT 50`,
-    cutoff, retry,
+    UNKNOWN_ADDER, cutoff, UNKNOWN_ADDER, retry,
   );
   let left = 0;
   for (const conv of due) {
     try {
-      if (await leaveChat(conv, (conv.leaving as LeaveReason | null) ?? "stale")) left++;
+      const reason = conv.leaving && conv.leaving !== UNKNOWN_ADDER ? (conv.leaving as LeaveReason) : "stale";
+      if (await leaveChat(conv, reason)) left++;
       else await run("UPDATE teams_conversations SET leave_tried_at = ? WHERE id = ?", now(), conv.id);
     } catch (e) {
       console.error(`Couldn't leave Teams chat ${conv.id}`, e);

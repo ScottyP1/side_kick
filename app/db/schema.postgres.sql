@@ -593,6 +593,9 @@ ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS waiting_kind TEXT;
 ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS picked_by TEXT;
 ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS pick_note TEXT;
 ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS newcomers TEXT;
+-- Meeting matching couldn't read the directory (people added by email can't be recognised); cleared once it can.
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS directory_error TEXT;
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS directory_error_at TEXT;
 -- Scale readiness: Graph subscriptions are looked up per organization (renewals, notes status).
 CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at);
 -- Upload guard (lib/upload-guard.ts): held documents (status 'Held', text in held_text until kept or moved), what

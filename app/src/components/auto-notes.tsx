@@ -44,7 +44,7 @@ type AutoRecord = {
   skipped?: { reason: string; count: number }[];
   failed: { title: string; reason: string | null }[];
 };
-type Status = { enabled: boolean; connected: boolean; changedBy: string | null; lastCheckAt: string | null; lastError: string | null; instant: boolean; recent: Recent[]; autoRecord?: AutoRecord };
+type Status = { enabled: boolean; connected: boolean; changedBy: string | null; lastCheckAt: string | null; lastError: string | null; directoryProblem?: string | null; instant: boolean; recent: Recent[]; autoRecord?: AutoRecord };
 
 const STATUS_PILL: Record<Recent["status"], { label: string; kind: "good" | "info" | "warn" | "bad" | "hand" }> = {
   captured: { label: "Writing notes", kind: "info" },
@@ -122,6 +122,9 @@ export function AutoNotesPanel({ role, onOpen }: { role: string; onOpen: (meetin
           <div className="callout"><Icon n="alert" /><div>Connect {BRAND.name} to your Microsoft 365 organization first (Settings → Microsoft sign-in). A Microsoft admin then approves meeting transcripts once.</div></div>
         )}
         {s.enabled && s.lastError && manager && <div className="callout bad"><Icon n="alert" /><div>{s.lastError}</div></div>}
+        {s.enabled && s.directoryProblem && manager && (
+          <div className="callout"><Icon n="alert" /><div>{s.directoryProblem}{admin && <> <a href="/users">Open Users &amp; access</a></>}</div></div>
+        )}
         {manager && waiting.map((r) => (
           <div key={r.id} className="callout">
             <Icon n="users" />

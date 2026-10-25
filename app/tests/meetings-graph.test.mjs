@@ -128,6 +128,7 @@ const chatReads = []; // every GET /chats/{id}/messages
 // Each tenant's people directory (GET /users/{id or sign-in name}): { tenant, id, upn, mail, name, userType }.
 const DIRECTORY = [];
 const dirCalls = []; // every directory lookup: { tid, key }
+const directoryDenied = new Set(); // tenants whose directory permission isn't approved (403 on /users/{id})
 const EVENTS = []; // calendar events: { organizer, event } (lib/auto-record.ts reads calendarView)
 const recordApproved = new Set(); // tenants that approved Calendars.ReadBasic.All + OnlineMeetings.ReadWrite.All
 const patches = []; // every PATCH of an online meeting: { organizer, id, body }
@@ -212,6 +213,7 @@ const microsoft = http.createServer((req, res) => {
     if (dirUser && req.method === "GET") {
       const key = dirUser[1].toLowerCase();
       dirCalls.push({ tid, key });
+      if (directoryDenied.has(tid)) return send(403, { error: { code: "Authorization_RequestDenied", message: "Insufficient privileges to complete the operation." } });
       const u = DIRECTORY.find((d) => d.tenant === tid && (d.id === key || d.upn.toLowerCase() === key));
       if (!u) return send(404, { error: { code: "Request_ResourceNotFound" } });
       return send(200, { id: u.id, displayName: u.name, mail: u.mail, userPrincipalName: u.upn, userType: u.userType ?? "Member", accountEnabled: true });
@@ -1006,6 +1008,23 @@ test(`[${ENGINE}] notes prompt: commitments however phrased become action items 
     "Mo Member: Could you get the load numbers to Pat before the review?",
     "Mo Member: The vendor contract is a mess. Leave it with me.",
   ]);
+});
+
+test(`[${ENGINE}] directory permission missing: email matching can't run, so the Meetings panel says so (managers only) until it works again`, async () => {
+  directoryDenied.add(TA);
+  addMeeting("nodir", { organizer: OID.lou, attendees: [OID.mo, OID.outsider] });
+  await drain({ sweep: true });
+  assert.ok((await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.some((m) => m.title === "Meeting nodir"), "matching by saved account ids still works");
+  const forAnn = (await ann("GET", "/api/meetings/auto")).body;
+  assert.match(forAnn.directoryProblem ?? "", /approve reading your directory/);
+  assert.match((await lou("GET", "/api/meetings/auto")).body.directoryProblem ?? "", /added by email/, "a Team Lead sees it too");
+  assert.equal((await mo("GET", "/api/meetings/auto")).body.directoryProblem, null, "a Member doesn't");
+  assert.equal((await bob("GET", "/api/meetings/auto")).body.directoryProblem ?? null, null, "another org doesn't");
+  // Approved: the next lookup works and the notice goes away.
+  directoryDenied.delete(TA);
+  addMeeting("dirok", { organizer: OID.lou, attendees: [OID.mo, OID.outsider] });
+  await drain({ sweep: true });
+  assert.equal((await ann("GET", "/api/meetings/auto")).body.directoryProblem, null);
 });
 
 test(`[${ENGINE}] isolation: another organization sees none of Org A's Teams meetings or switches`, async () => {

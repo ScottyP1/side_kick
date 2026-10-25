@@ -794,11 +794,17 @@ test("connectors: Microsoft 365 helpers: file cards, skipped notes, Graph links 
 
 const jobs = await import("../src/lib/jobs.ts");
 const { spawn } = await import("node:child_process");
+const { existsSync, mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+const { join } = await import("node:path");
+const { tmpdir } = await import("node:os");
 
-/** Runs tests/queue-worker.mjs as its own process (same engine settings as this one) and returns its report. */
-function workerProcess(id) {
+/**
+ * Runs tests/queue-worker.mjs as its own process (same engine settings as this one) and returns its report. The
+ * worker waits in `barrier` (a folder) until the test writes a "go" file there, so several start together.
+ */
+function workerProcess(id, barrier) {
   return new Promise((resolve, reject) => {
-    const p = spawn(process.execPath, ["--no-warnings", "--conditions=react-server", "--import", "./tests/register-ts.mjs", "tests/queue-worker.mjs", id], { env: process.env, stdio: ["ignore", "pipe", "inherit"] });
+    const p = spawn(process.execPath, ["--no-warnings", "--conditions=react-server", "--import", "./tests/register-ts.mjs", "tests/queue-worker.mjs", id, barrier], { env: process.env, stdio: ["ignore", "pipe", "inherit"] });
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.on("exit", (code) => (code === 0 ? resolve(JSON.parse(out.trim().split("\n").pop())) : reject(new Error(`worker ${id} exited ${code}`))));
@@ -807,10 +813,22 @@ function workerProcess(id) {
 
 test(`[${engine}] job queue: four worker processes at once run each of 60 jobs exactly once`, async () => {
   await db.run("CREATE TABLE IF NOT EXISTS test_job_runs (job_id TEXT NOT NULL, worker TEXT NOT NULL)");
+  await db.run("DELETE FROM test_job_runs");
   jobs.defineJob("test.record", { label: "Test: record a run", run: async () => ({ recorded: 1 }) });
   const ids = [];
   for (let i = 0; i < 60; i++) ids.push((await jobs.enqueue("test.record", { payload: { i } })).id);
-  const reports = await Promise.all(["w1", "w2", "w3", "w4"].map(workerProcess));
+  // All four load first and wait at a barrier, then start claiming together (see tests/queue-worker.mjs).
+  const barrier = mkdtempSync(join(tmpdir(), "sidekick-queue-"));
+  const names = ["w1", "w2", "w3", "w4"];
+  const running = Promise.all(names.map((w) => workerProcess(w, barrier)));
+  running.catch(() => {});
+  for (let waited = 0; !names.every((w) => existsSync(join(barrier, `${w}.ready`))); waited += 20) {
+    assert.ok(waited < 60_000, "every worker process started");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  writeFileSync(join(barrier, "go"), "");
+  const reports = await running;
+  rmSync(barrier, { recursive: true, force: true });
   assert.equal(reports.reduce((s, r) => s + r.ran, 0), 60, JSON.stringify(reports));
   const runs = await db.all(`SELECT job_id, COUNT(*) AS n FROM test_job_runs WHERE job_id IN (${ids.map(() => "?").join(", ")}) GROUP BY job_id`, ...ids);
   assert.equal(runs.length, 60, "every job ran");
@@ -953,19 +971,26 @@ test(`[${engine}] job queue: fair between companies (a flood from one doesn't ho
 });
 
 test(`[${engine}] job queue: one heartbeat runs several jobs at once, and waits for jobs that queue more`, async () => {
-  jobs.defineJob("test.slow", { label: "Test: slow", run: async () => (await new Promise((r) => setTimeout(r, 300)), { slow: 1 }) });
+  // Each slow job waits (up to 5 s) until all four have started, so they can only finish quickly if they truly ran
+  // side by side: proven from what the jobs saw, not from a wall-clock limit a busy machine might miss.
+  let started = 0;
+  let together = 0;
+  jobs.defineJob("test.slow", { label: "Test: slow", run: async () => {
+    started++;
+    for (let waited = 0; started < 4 && waited < 5000; waited += 10) await new Promise((r) => setTimeout(r, 10));
+    if (started >= 4) together++;
+    return { slow: 1 };
+  } });
   jobs.defineJob("test.fanout", { label: "Test: fan out", run: async () => {
     await new Promise((r) => setTimeout(r, 100));
     for (let i = 0; i < 4; i++) await jobs.enqueue("test.slow", { orgId: null });
     return { fanned: 1 };
   } });
   await jobs.enqueue("test.fanout");
-  const t0 = Date.now();
   const r = await jobs.runWorker({ kinds: ["test.fanout", "test.slow"], concurrency: 4 });
-  const ms = Date.now() - t0;
   assert.equal(r.counts.fanned, 1);
   assert.equal(r.counts.slow, 4, "the jobs the first one queued ran in the same heartbeat");
-  assert.ok(ms < 1100, `4 slow jobs ran side by side (${ms} ms, one after another would be 1,300+)`);
+  assert.equal(together, 4, "all 4 slow jobs were running at the same time");
 });
 
 const { FairLimiter, LimiterBusyError } = await import("../src/lib/fair-limiter.ts");

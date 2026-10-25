@@ -87,6 +87,16 @@ h3{font-size:14px;font-weight:600}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);min-width:0}
 .panel-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .panel-b{padding:16px}
+/* A panel's action row (Save etc.): its own band under the content, so buttons never touch the options or the edge. */
+.panel-f{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--line)}
+/* "Meeting notes go to" (group page → Teams chats): one bordered, roomy option per chat. */
+.notes-opts{display:grid;gap:10px}
+.notes-opt{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.notes-opt.on{border-color:color-mix(in srgb,var(--accent) 55%,var(--line));background:var(--accent-soft)}
+.notes-opt label{display:flex;gap:10px;align-items:flex-start;flex:1;min-width:0;font-weight:400;cursor:pointer}
+.notes-opt input[type=checkbox]{margin-top:3px;flex:none}
+.notes-opt .meta{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
+@media (max-width:560px){.notes-opt{flex-wrap:wrap;gap:10px}.notes-opt label{flex-basis:100%}.notes-opt>.btn{margin-left:26px}}
 .grid{display:grid;gap:16px}
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .g3{grid-template-columns:repeat(3,minmax(0,1fr))}

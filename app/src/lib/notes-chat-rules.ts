@@ -1,6 +1,7 @@
 /**
  * @file The plain rules behind "Meeting notes go to" (lib/notes-chats.ts): which chat is the default while nobody chose,
- * and the meeting card's "Notes posted to …" footer. No database or network here, so tests/db.test.mjs calls them directly.
+ * the meeting card's "Notes posted to …" footer, and the "@Sidekick post meeting notes here" command words. No database
+ * or network here, so tests/db.test.mjs calls them directly.
  */
 
 /** A linked chat as these rules see it. */
@@ -39,3 +40,17 @@ export function postedToLine(posted: PostedChat[], viewerHasGuests: boolean): st
   return names.length === 1 ? `Notes posted to ${names[0]} only.` : `Notes posted to: ${names.join(", ")}.`;
 }
 
+/**
+ * Recognises the notes command in what someone wrote after @mentioning Sidekick: `"here"` for "post meeting notes
+ * here" and close variants ("notes here", "send meeting notes here", "put the notes here"), `"stop"` for "stop posting
+ * notes here" ("don't post notes here", "no notes here"), else null (an ordinary question). Pure; tested directly.
+ */
+export function parseNotesCommand(text: string): "here" | "stop" | null {
+  const t = text.toLowerCase().replace(/[’']/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim()
+    .replace(/^(please |hey |ok |okay )+/, "").replace(/( please| thanks| thank you)+$/, "");
+  if (/^(post|send|put|share|drop) (the |our |all |any )?(meeting )?notes (in |to )?here$/.test(t) || /^(the |our )?(meeting )?notes (go )?here$/.test(t)) return "here";
+  if (/^(stop|quit) (posting|sending|putting|sharing) (the |our )?(meeting )?notes (in |to )?here$/.test(t)
+    || /^(dont|do not|no more|never) (post|send|put|share) (the |our |any )?(meeting )?notes (in |to )?here( any more| anymore)?$/.test(t)
+    || /^no (more )?(meeting )?notes here$/.test(t)) return "stop";
+  return null;
+}

@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
   "manifestVersion": "1.30",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "id": "{{BOT_ID}}",
   "developer": {
     "name": "{{BRAND_NAME}}",
@@ -30,7 +30,9 @@
             { "title": "help", "description": "What {{BRAND_SHORT}} can do here" },
             { "title": "link", "description": "Get the code to link this chat to a workspace" },
             { "title": "add", "description": "Add someone to this workspace: add @name (Team Lead or Org Admin)" },
-            { "title": "remove", "description": "Take someone off this workspace: remove @name (Team Lead or Org Admin)" }
+            { "title": "remove", "description": "Take someone off this workspace: remove @name (Team Lead or Org Admin)" },
+            { "title": "post meeting notes here", "description": "Send this group's meeting notes to this chat (Team Lead or admin)" },
+            { "title": "stop posting notes here", "description": "Stop sending this group's meeting notes to this chat (Team Lead or admin)" }
           ]
         }
       ]

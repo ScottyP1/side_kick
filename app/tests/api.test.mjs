@@ -46,6 +46,11 @@ const connector = http.createServer((req, res) => {
     res.writeHead(500, { "content-type": "application/json" });
     return void res.end(JSON.stringify({ error: { code: "ServiceError", message: "Teams is unavailable" } }));
   }
+  // A chat's roster (the notes picker's member counts): three people in every chat.
+  if (req.method === "GET" && /^\/v3\/conversations\/[^/]+\/members\/?$/.test(decodeURIComponent(req.url).split("?")[0])) {
+    res.writeHead(200, { "content-type": "application/json" });
+    return void res.end(JSON.stringify([{ id: "29:a", name: "A" }, { id: "29:b", name: "B" }, { id: "29:c", name: "C" }]));
+  }
   if (req.method === "GET" && decodeURIComponent(req.url).startsWith(`/v3/teams/${TEAM.id}`)) {
     res.writeHead(200, { "content-type": "application/json" });
     const conversations = [{ id: TEAM.id }, { id: "19:cutover@thread.tacv2", name: "Cutover" }];
@@ -1690,6 +1695,11 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await lead("PUT", `/api/workspaces/${s.wsB}/notes-chats`, { none: true })).status, 404, "a Team Lead can't choose for another group");
   assert.equal((await member("PUT", `/api/workspaces/${s.wsA}/notes-chats`, { none: true })).status, 403);
   assert.equal((await viewer("PUT", `/api/workspaces/${s.wsA}/notes-chats`, { none: true })).status, 403);
+  // "Send test message": the group's managers only, and only into this group's own chats.
+  assert.equal((await other("POST", `/api/workspaces/${s.wsB}/notes-chats/test`, { chatId: "x" })).status, 404, "another organization gets not found");
+  assert.equal((await lead("POST", `/api/workspaces/${s.wsB}/notes-chats/test`, { chatId: "x" })).status, 404, "a Team Lead can't post for another group");
+  assert.equal((await member("POST", `/api/workspaces/${s.wsA}/notes-chats/test`, { chatId: "x" })).status, 403);
+  assert.equal((await admin("POST", `/api/workspaces/${s.wsA}/notes-chats/test`, { chatId: "x" })).status, 404, "never a chat outside the group");
   // A group's last 30 days: its Team Lead and admins only, never another group's (or organization's) numbers.
   const mine = await lead("GET", `/api/workspaces/${s.wsA}/usage`);
   assert.equal(mine.status, 200, JSON.stringify(mine.body));
@@ -2852,6 +2862,30 @@ test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; no
   const chosen = (await admin("PUT", notesUrl, { chatIds: [GROUP] })).body;
   assert.deepEqual([chosen.mode, chosen.targets, chosen.needsChoice], ["chosen", [GROUP], false]);
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Meeting notes now go to: “Wave 2 team”/);
+  // Member counts come from the Teams roster (fetched after the first look), with each chat's last activity.
+  let counted;
+  for (let i = 0; i < 50 && !counted?.chats.every((c) => c.member_count === 3); i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    counted = (await admin("GET", notesUrl)).body;
+  }
+  assert.ok(counted.chats.every((c) => c.member_count === 3 && c.last_seen_at), JSON.stringify(counted.chats));
+  // "Send test message": a small card in that chat saying who sent it; once per chat per minute; failures say why.
+  const t0 = sent.length;
+  const test1 = await admin("POST", `${notesUrl}/test`, { chatId: GROUP });
+  assert.equal(test1.status, 200, JSON.stringify(test1.body));
+  const testCard = sent.slice(t0).find((x) => x.url.includes(GROUP));
+  assert.match(cardText(cardsOf(testCard)[0]), /This is where .+'s meeting notes will go \(sent from the Sidekick portal by /);
+  const again = await admin("POST", `${notesUrl}/test`, { chatId: GROUP });
+  assert.equal(again.status, 429, "once per chat per minute");
+  assert.match(again.body.error, /Wait a minute before sending another/);
+  assert.equal(sent.slice(t0).filter((x) => x.url.includes(GROUP)).length, 1, "the second one wasn't posted");
+  assert.equal((await mia("POST", `${notesUrl}/test`, { chatId: "conv-1" })).status, 403, "Members can't");
+  failPosts.add("conv-1");
+  const failed = await admin("POST", `${notesUrl}/test`, { chatId: "conv-1" });
+  failPosts.delete("conv-1");
+  assert.equal(failed.status, 409, "Teams refusing is shown inline, not as a Sidekick failure");
+  assert.match(failed.body.error, /Couldn't post in .+Check that Sidekick is still in that chat/);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Sent a test message to Teams chat “Wave 2 team”/);
   const n = sent.length;
   const form = new FormData();
   form.append("ws", s.wsA);

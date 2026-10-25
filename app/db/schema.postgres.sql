@@ -581,6 +581,9 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_by TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_at TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_posted_to TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_sent_at TEXT;
+-- Notes picker polish: how many people a linked chat has (from the Teams roster, checked at most daily) and when.
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS member_count INTEGER;
+ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS members_checked_at TEXT;
 -- Scale readiness: Graph subscriptions are looked up per organization (renewals, notes status).
 CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at);
 -- Upload guard (lib/upload-guard.ts): held documents (status 'Held', text in held_text until kept or moved), what

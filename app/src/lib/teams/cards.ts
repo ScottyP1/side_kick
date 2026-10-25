@@ -195,10 +195,12 @@ export function helpCard(workspace: string | null): IAdaptiveCard {
         { title: `@${BRAND.name} link`, value: "Show which group this chat belongs to" },
         { title: `@${BRAND.name} add @name`, value: "Add someone to this group (Team Lead or admin)" },
         { title: `@${BRAND.name} remove @name`, value: "Take someone off this group (Team Lead or admin)" },
+        { title: `@${BRAND.name} post meeting notes here`, value: "Send this group's meeting notes to this chat (Team Lead or admin)" },
+        { title: `@${BRAND.name} stop posting notes here`, value: "Stop sending meeting notes to this chat (Team Lead or admin)" },
         { title: `@${BRAND.name} help`, value: "Show this card" },
       ],
     },
-    text("Depending on how an admin set up this chat, I post meeting notes and action items here after each meeting, and reminders about what's still open.", { size: "Small", isSubtle: true }),
+    text("Depending on how the Team Lead set up this group, I post meeting notes and action items here after each meeting, and reminders about what's still open.", { size: "Small", isSubtle: true }),
   ]);
 }
 

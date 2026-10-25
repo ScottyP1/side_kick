@@ -22,6 +22,9 @@
  *   only acts for tenants tied to a Sidekick org; anything else gets a "sign up first" card, and nothing about
  *   that chat is stored. In single-tenant mode (TENANT_ID set) every chat works as before.
  * - **Managing people from Teams** (members.ts): `@Sidekick add @name` / `remove @name` in a linked chat.
+ * - **Where meeting notes go, from Teams** (lib/notes-chats.ts): `@Sidekick post meeting notes here` / `stop posting
+ *   notes here` in a linked chat, for the group's Team Lead or an Org Owner/Admin. The portal's "Send test message"
+ *   (`sendNotesTestMessage`) posts a small card in a chat so people can see where notes will land.
  * - **Client guests**: a linked conversation can be marked as having client guests. Answers there use only
  *   Shareable sources (the group's and the firm library's), and notes from internal-only meetings are never posted there.
  * - **Follow-ups**: a question builds on the asker's earlier questions in the same channel thread, or in the same
@@ -56,7 +59,7 @@ import { leaveChat, mayAddSidekick, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
 import { recordChatMessage, reminderAction } from "../reminders";
-import { notesTargetsFor, parsePosted, postedToLine, recordNotesPosted, type PostedChat } from "../notes-chats";
+import { notesHereFromTeams, notesTargetsFor, parseNotesCommand, parsePosted, postedToLine, recordNotesPosted, type NotesChat, type PostedChat } from "../notes-chats";
 import { BRAND } from "../brand";
 import { cleanOutput, getGuardPolicy } from "../guardrails";
 import { SAVABLE_KINDS, setItemSaved } from "../saved-items";
@@ -415,7 +418,9 @@ async function mentionedPeople(a: InboundActivity, conv: TeamsConversation): Pro
  *   else the link code.
  * - `channelRenamed`: a channel's new name, so the portal shows it.
  * - `message`: someone mentioned Sidekick (or started with "@Sidekick" typed as plain text) → commands
- *   (`help`, `link`, `add @name`, `remove @name`) or a question to answer; other messages in tracked chats are only saved.
+ *   (`help`, `link`, `add @name`, `remove @name`, `post meeting notes here`, `stop posting notes here`) or a question
+ *   to answer; other messages in tracked chats are only saved. Linked chats also get their member count refreshed
+ *   (at most daily, `refreshMemberCount`).
  * Every handler first checks the tenant (`tenantGate`): in multi-tenant mode an unknown company only gets
  * the sign-up card.
  * - `card.action`: someone clicked Assign / Mark done / Reopen on an action-item card.
@@ -476,6 +481,7 @@ function registerHandlers(app: App) {
     const conv = await touchConversation(activity);
     // Sidekick is on its way out of this chat (refused installer, never assigned, removed): ignore everything.
     if (conv.leaving) return;
+    if (conv.workspace_id) after(() => refreshMemberCount(conv));
     // A chat linked (by code, before multi-tenant) to another org than the one its tenant belongs to is left alone.
     if (tenantMode() === "multi" && conv.org_id && gate.org && conv.org_id !== gate.org.id) {
       if (conv.kind === "personal" || mentionsSidekick(activity)) await send(`This chat is linked to a different organization's ${BRAND.name}. An admin can unlink it on the group's page in the ${BRAND.name} portal.`);
@@ -511,6 +517,12 @@ function registerHandlers(app: App) {
       const people = await mentionedPeople(activity, conv);
       const out = await workspaceMemberCommand(memberCommand, asker, { org_id: conv.org_id!, workspace_id: conv.workspace_id, tenant_id: conv.tenant_id }, (await workspaceName(conv)) ?? "this workspace", people);
       return void (await send({ type: "message", attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: noticeCard(out.title, out.lines.map((l) => `- ${l}`).join("\n")) }] } as IMessageActivityInput));
+    }
+    const notesCommand = parseNotesCommand(question);
+    if (notesCommand) {
+      const group = (await workspaceName(conv)) ?? "this group";
+      const text = await span("teams", "Change where meeting notes go from Teams", () => notesHereFromTeams(asker, conv.workspace_id!, group, conv.id, notesCommand));
+      return void (await send(cardMessage(noticeCard("Meeting notes", text))));
     }
     traceScope({ actor: asker.name });
     // Follow-ups: in a channel the reply thread is the conversation (its id carries ";messageid=<first post>"); in a
@@ -673,6 +685,48 @@ export async function notePostFailed(conversationId: string, what: string, e: un
   } catch (err) {
     console.error("Couldn't record the failed Teams post", err);
   }
+}
+
+/**
+ * Refreshes a linked chat's member count (`teams_conversations.member_count`) from the Teams roster, at most once a
+ * day per chat (`members_checked_at`), so the notes picker can tell similar chats apart. Runs after the reply (in
+ * `after`) or from the picker; failures are logged and retried the next day. Never throws.
+ */
+export async function refreshMemberCount(conv: Pick<TeamsConversation, "id" | "service_url"> & { members_checked_at?: string | null }): Promise<void> {
+  if (conv.members_checked_at && Date.now() - Date.parse(conv.members_checked_at) < 24 * 3600_000) return;
+  if (!conv.service_url || (PLAYGROUND_MODE && !isLocalUrl(conv.service_url))) return;
+  try {
+    await run("UPDATE teams_conversations SET members_checked_at = ? WHERE id = ?", now(), conv.id);
+    const { app } = await teams();
+    const members = await span("teams", "Count the people in a Teams chat", () => app.api.clone({ serviceUrl: conv.service_url }).conversations.getMembers(conv.id));
+    if (Array.isArray(members)) await run("UPDATE teams_conversations SET member_count = ? WHERE id = ?", members.length, conv.id);
+  } catch (e) {
+    console.error("Couldn't count the people in a Teams chat", e);
+  }
+}
+
+/** `refreshMemberCount` for each of a group's linked chats whose count is missing or a day old (the notes picker). */
+export async function refreshMemberCounts(orgId: string, workspaceId: string): Promise<void> {
+  const stale = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const chats = await all<Pick<TeamsConversation, "id" | "service_url"> & { members_checked_at: string | null }>(
+    `SELECT id, service_url, members_checked_at FROM teams_conversations
+      WHERE org_id = ? AND workspace_id = ? AND removed_at IS NULL AND leaving IS NULL AND (members_checked_at IS NULL OR members_checked_at < ?)`,
+    orgId, workspaceId, stale,
+  );
+  for (const c of chats) await refreshMemberCount(c);
+}
+
+/**
+ * The portal's "Send test message" (POST /api/workspaces/:id/notes-chats/test): posts a small card in `chat`, one of
+ * group `groupName`'s linked chats, saying meeting notes will go there and who sent it. The route has checked
+ * `requireManage` and the per-chat rate limit. Throws (with Teams' reason) if the post fails; the failed-posts watcher
+ * sees it like any other post.
+ */
+export async function sendNotesTestMessage(chat: NotesChat, groupName: string, senderName: string): Promise<void> {
+  const conv = await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ?", chat.id);
+  if (!conv) throw new HttpError(404, "That chat isn't assigned to this group any more. Reload the page.");
+  const c = noticeCard("Test message", `👋 This is where ${groupName}'s meeting notes will go (sent from the ${BRAND.name} portal by ${senderName}).`);
+  await postCard(conv, c, conv.id, "a test message");
 }
 
 /**

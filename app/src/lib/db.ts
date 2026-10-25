@@ -350,6 +350,11 @@ CREATE TABLE IF NOT EXISTS teams_chat_settings (
   conversation_id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
   json TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
 );
+-- Which linked Teams chats get a group's meeting notes (lib/notes-chats.ts). Only used when the group's
+-- workspaces.notes_choice is 'chosen'; 'none' = notes stay in the portal; NULL = no choice yet (one default chat).
+CREATE TABLE IF NOT EXISTS notes_chats (
+  workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL, org_id TEXT NOT NULL, PRIMARY KEY (workspace_id, conversation_id)
+);
 -- Messages Sidekick read in tracked chats (only chats an Org Owner/Admin switched "Track messages" on).
 -- audience: shareable when the chat has client guests, internal otherwise. Kept 90 days.
 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -713,6 +718,9 @@ function migrate(conn: DatabaseSync) {
   // graph_meetings row, when its notes went to Teams (posted once), and who saved an item to knowledge.
   for (const col of ["source", "graph_meeting_id", "notes_posted_at"]) if (!has("meetings", col)) conn.exec(`ALTER TABLE meetings ADD COLUMN ${col} TEXT`);
   for (const col of ["saved_by", "saved_at"]) if (!has("items", col)) conn.exec(`ALTER TABLE items ADD COLUMN ${col} TEXT`);
+  // "Meeting notes go to" (lib/notes-chats.ts): the group's choice, who made it and when; where a meeting's notes went.
+  for (const col of ["notes_choice", "notes_choice_by", "notes_choice_at"]) if (!has("workspaces", col)) conn.exec(`ALTER TABLE workspaces ADD COLUMN ${col} TEXT`);
+  if (!has("meetings", "notes_posted_to")) conn.exec("ALTER TABLE meetings ADD COLUMN notes_posted_to TEXT");
   // Scale readiness (docs/SCALE.md): indexes for per-group lists and counts, per-person lookups and the retention
   // clean-up (lib/retention.ts), found with the load test on 10,000 groups. Same list as db/schema.postgres.sql.
   for (const sql of [
@@ -788,10 +796,19 @@ function migrate(conn: DatabaseSync) {
  *   gets one audit entry ("Access", by Sidekick), and the Org Owner gets one notice on Home: a finding of kind
  *   `role_changed` with audience `owners` (lib/watchers.ts keeps it open for a while unless they change the role).
  *   The role change runs last, so a second run matches nobody and changes nothing.
+ * - **"Meeting notes go to"** (October 2026, the `notesChoice` steps; lib/notes-chats.ts): which chats get a group's
+ *   notes used to be a per-chat switch (`"notes":false` in teams_chat_settings, on by default). It is now one choice per
+ *   group. A group where someone had switched notes off in a linked chat keeps that choice: its other linked chats
+ *   become the chosen notes chats (`notes_chats`, `notes_choice = 'chosen'`), or `'none'` if every chat was off. Groups
+ *   where every chat got notes by default keep no choice (`NULL`): notes then go to one default chat and the group's
+ *   Team Lead is asked to pick. Only groups without a choice are touched, so a second run changes nothing.
  */
 const DATA_MIGRATIONS: { name: string; sql: string; params: () => Param[] }[] = (() => {
   const t = () => new Date().toISOString();
   const retired = "FROM users WHERE role = 'Billing Admin'";
+  // A linked chat of this group where someone switched meeting notes off (the old per-chat setting).
+  const notesOffIn = (ws: string) => `EXISTS (SELECT 1 FROM teams_conversations c2 JOIN teams_chat_settings s2 ON s2.conversation_id = c2.id AND s2.workspace_id = c2.workspace_id
+    WHERE c2.workspace_id = ${ws} AND c2.removed_at IS NULL AND s2.json LIKE '%"notes":false%')`;
   return [
     {
       name: "retireBillingAdmins: audit entry per person",
@@ -817,6 +834,22 @@ const DATA_MIGRATIONS: { name: string; sql: string; params: () => Param[] }[] = 
       name: "retireBillingAdmins: no groups",
       sql: `DELETE FROM workspace_members WHERE user_id IN (SELECT id ${retired})`,
       params: () => [],
+    },
+    {
+      name: "notesChoice: keep the chats that still had notes on",
+      sql: `INSERT INTO notes_chats (workspace_id, conversation_id, org_id)
+            SELECT c.workspace_id, c.id, c.org_id FROM teams_conversations c JOIN workspaces w ON w.id = c.workspace_id AND w.org_id = c.org_id
+             WHERE w.notes_choice IS NULL AND c.removed_at IS NULL AND ${notesOffIn("w.id")}
+               AND NOT EXISTS (SELECT 1 FROM teams_chat_settings s WHERE s.conversation_id = c.id AND s.workspace_id = c.workspace_id AND s.json LIKE '%"notes":false%')
+            ON CONFLICT DO NOTHING`,
+      params: () => [],
+    },
+    {
+      name: "notesChoice: record the choice",
+      sql: `UPDATE workspaces SET notes_choice = CASE WHEN EXISTS (SELECT 1 FROM notes_chats n WHERE n.workspace_id = workspaces.id) THEN 'chosen' ELSE 'none' END,
+                   notes_choice_by = ?, notes_choice_at = ?
+             WHERE notes_choice IS NULL AND ${notesOffIn("workspaces.id")}`,
+      params: () => [BRAND.name, t()],
     },
     {
       name: "retireBillingAdmins: Billing Admin becomes Member",

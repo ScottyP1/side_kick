@@ -464,6 +464,19 @@ async function phaseA() {
       world.chats.push({ id, ws: g.id, key: p.key, guests: chat.guests, count: chat.messages.length });
     }
   }
+  // "Meeting notes go to" (lib/notes-chats.ts): Contoso's Team Lead keeps notes in the internal chat, not the client chat;
+  // Litware gets a second chat and nobody has chosen yet, so its Team Lead sees "Pick which chat gets meeting notes".
+  {
+    const contoso = world.groups.contoso, litware = world.groups.litware;
+    const internal = world.chats.find((c) => c.key === "contoso" && !c.guests);
+    await contoso.lead("PUT", `/api/workspaces/${contoso.id}/notes-chats`, { chatIds: [internal.id] });
+    const leadership = { name: "Litware – leadership sync", guests: false, messages: [
+      { at: "2026-10-20T15:00:00.000Z", author: "Daniel Okoro", text: "Leadership sync moved to Thursdays at 10. I'll share the steering deck here." },
+      { at: "2026-10-21T10:20:00.000Z", author: "Freya Lindgren", text: "Thanks. Reconciliation is within 0.3% of the old warehouse this week." },
+    ] };
+    const id = await linkAndFillChat(litware.lead, litware.id, leadership, 1);
+    world.chats.push({ id, ws: litware.id, key: "litware", guests: false, count: leadership.messages.length });
+  }
 
   log("• Guardrails: stricter rules for the Fabrikam Bank group");
   const fab = world.groups.fabrikam.id;

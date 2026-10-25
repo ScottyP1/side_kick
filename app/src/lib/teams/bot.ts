@@ -55,7 +55,8 @@ import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, notic
 import { leaveChat, mayAddSidekick, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
-import { getChatSettings, recordChatMessage, reminderAction } from "../reminders";
+import { recordChatMessage, reminderAction } from "../reminders";
+import { notesTargetsFor, parsePosted, postedToLine, recordNotesPosted, type PostedChat } from "../notes-chats";
 import { BRAND } from "../brand";
 import { cleanOutput, getGuardPolicy } from "../guardrails";
 import { SAVABLE_KINDS, setItemSaved } from "../saved-items";
@@ -589,7 +590,7 @@ function registerHandlers(app: App) {
         throw e;
       }
       const meeting = await get<{ id: string }>("SELECT meeting_id AS id FROM items WHERE id = ? AND org_id = ?", String(data?.itemId ?? ""), conv.org_id);
-      const updated = meeting?.id ? await notesCardFor(conv.org_id, meeting.id) : null;
+      const updated = meeting?.id ? await notesCardFor(conv.org_id, meeting.id, conv) : null;
       if (!updated) return fail(verb === VERBS.saveKnowledge ? "Saved to knowledge." : "Removed from knowledge.");
       return { statusCode: 200 as const, type: "application/vnd.microsoft.card.adaptive" as const, value: updated };
     }
@@ -679,10 +680,12 @@ export async function notePostFailed(conversationId: string, what: string, e: un
  * summary, decisions and things to keep (with their saved state), open questions and the action-item count.
  * Text goes through the organization's output guardrails (`cleanOutput`: contact details masked when that switch
  * is on, swearing masked, slurs replaced). Null when the meeting isn't in this org or isn't Ready.
+ * With `viewer` (the chat the card is shown in), the footer says where the notes were posted: `postedTo` while posting,
+ * else what the meeting remembers; a chat with client guests only sees other guest chats' names (`postedToLine`).
  */
-export async function notesCardFor(orgId: string, meetingId: string): Promise<IAdaptiveCard | null> {
-  const m = await get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; source: string | null; ws: string }>(
-    "SELECT m.id, m.workspace_id, m.title, m.held_at, m.summary, m.status, m.source, w.name AS ws FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.id = ? AND m.org_id = ?",
+export async function notesCardFor(orgId: string, meetingId: string, viewer?: { guests: number }, postedTo?: PostedChat[]): Promise<IAdaptiveCard | null> {
+  const m = await get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; source: string | null; notes_posted_to: string | null; ws: string }>(
+    "SELECT m.id, m.workspace_id, m.title, m.held_at, m.summary, m.status, m.source, m.notes_posted_to, w.name AS ws FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.id = ? AND m.org_id = ?",
     meetingId, orgId,
   );
   if (!m || m.status !== "Ready") return null;
@@ -704,6 +707,7 @@ export async function notesCardFor(orgId: string, meetingId: string): Promise<IA
     meetingId: m.id,
     keep: items.filter((i) => (SAVABLE_KINDS as readonly string[]).includes(i.kind)).map((i) => ({ id: i.id, kind: i.kind, text: clean(i.text), savedBy: i.pinned ? (i.saved_by ?? "someone") : null })),
     source: m.source === "teams" ? "Captured from Microsoft Teams" : undefined,
+    postedTo: viewer ? postedToLine(postedTo ?? parsePosted(m.notes_posted_to), viewer.guests === 1) : null,
   });
 }
 
@@ -711,9 +715,10 @@ export async function notesCardFor(orgId: string, meetingId: string): Promise<IA
 const MAX_ACTION_CARDS = 15;
 
 /**
- * Posts a processed meeting's notes card, then one card per action item, to every Teams conversation
- * linked to the meeting's workspace that has meeting notes switched on in its chat settings (the default).
- * Skips conversations with client guests if the meeting was internal.
+ * Posts a processed meeting's notes card, then one card per action item, to the chats the group's Team Lead chose
+ * under "Meeting notes go to" (lib/notes-chats.ts; while nobody chose, one default chat). Skips conversations with
+ * client guests if the meeting was internal. Each card's footer says where the notes went, and the meeting
+ * remembers it (`notes_posted_to`) for the group's Teams chats tab.
  * A failure in one conversation is logged and doesn't stop the others. Returns how many got the notes.
  * Called from the meeting import/reprocess routes after the response is sent, so imports never wait on Teams.
  */
@@ -742,30 +747,33 @@ async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<
   );
   if (!m || m.status !== "Ready") return 0;
   traceScope({ workspaceId: m.workspace_id });
-  // Notes from an internal-only meeting never go to a conversation that has client guests in it.
-  const convs = await all<TeamsConversation>(
-    "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND removed_at IS NULL AND (guests = 0 OR ? = 1)",
-    orgId, m.workspace_id, m.external_guests,
-  );
-  // Only chats an admin left (or set) to receive meeting notes: a workspace can keep them to one notes chat.
-  const settings = await Promise.all(convs.map((c) => getChatSettings(c)));
-  const targets = convs.filter((_, i) => settings[i].notes);
+  // The group's "Meeting notes go to" choice (lib/notes-chats.ts); notes from an internal-only meeting never go to a
+  // conversation that has client guests in it.
+  const chosen = new Set((await notesTargetsFor(orgId, m.workspace_id, m.external_guests === 1)).map((c) => c.id));
+  if (!chosen.size) return 0;
+  const targets = (await all<TeamsConversation>(
+    "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND removed_at IS NULL", orgId, m.workspace_id,
+  )).filter((c) => chosen.has(c.id) && (m.external_guests === 1 || !c.guests));
   if (!targets.length) return 0;
   const actions = await all<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE meeting_id = ? AND org_id = ? ORDER BY rowid", m.id, orgId);
-  const notes = (await notesCardFor(orgId, m.id))!;
+  const planned: PostedChat[] = targets.map((c) => ({ name: c.name ?? "Teams chat", guests: c.guests === 1 }));
 
   let posted = 0;
+  const reached: PostedChat[] = [];
   for (const conv of targets) {
     try {
+      const notes = (await notesCardFor(orgId, m.id, conv, planned))!;
       const postId = await postCard(conv, notes, conv.id, "meeting notes");
       // In a channel the action items go in the notes post's thread; in chats they follow it.
       const target = conv.kind === "channel" && postId ? toThreadedConversationId(conv.id, postId) : conv.id;
       for (const a of actions.slice(0, MAX_ACTION_CARDS)) await postCard(conv, actionItemCard(a), target, "an action item");
       posted++;
+      reached.push({ name: conv.name ?? "Teams chat", guests: conv.guests === 1 });
     } catch (e) {
       console.error(`Couldn't post meeting notes to Teams conversation ${conv.id}`, e);
     }
   }
+  if (posted) await recordNotesPosted(orgId, m.id, reached);
   if (posted) await audit({ org_id: orgId, name: BRAND.name }, `Posted notes for “${m.title}” to ${posted} Teams ${posted === 1 ? "conversation" : "conversations"}`, "Agent action", m.workspace_id);
   return posted;
 }

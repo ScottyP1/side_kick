@@ -69,6 +69,54 @@ test(`[${engine}] retiring Billing Admins: they become Members with no groups, a
   assert.equal((await db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'Billing Admin'")).n, 0);
 });
 
+test(`[${engine}] "Meeting notes go to": the old per-chat switch becomes one choice per group, once`, async () => {
+  const org = db.newId();
+  const t = db.now();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Notes Co", t);
+  const [kept, unset, none] = [db.newId(), db.newId(), db.newId()];
+  for (const [ws, name] of [[kept, "Two chats, one switched off"], [unset, "Two chats, all default"], [none, "One chat, switched off"]]) {
+    await db.run("INSERT INTO workspaces (id, org_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)", ws, org, name, "#4f46e5", t);
+  }
+  const chat = (id, ws, i) => db.run("INSERT INTO teams_conversations (id, service_url, kind, name, org_id, workspace_id, linked_at, created_at, last_seen_at) VALUES (?, 'https://x', 'groupChat', ?, ?, ?, ?, ?, ?)", id, id, org, ws, `2026-10-0${i}T00:00:00Z`, t, t);
+  const off = (id, ws) => db.run("INSERT INTO teams_chat_settings (conversation_id, org_id, workspace_id, json, updated_at) VALUES (?, ?, ?, ?, ?)", id, org, ws, JSON.stringify({ track: true, notes: false }), t);
+  const ids = Object.fromEntries(["k1", "k2", "u1", "u2", "n1"].map((x) => [x, `${org}-${x}`]));
+  await chat(ids.k1, kept, 1); await chat(ids.k2, kept, 2); await off(ids.k1, kept);
+  await chat(ids.u1, unset, 1); await chat(ids.u2, unset, 2); await off(ids.u2, "an-older-group"); // saved for another group: ignored
+  await chat(ids.n1, none, 1); await off(ids.n1, none);
+
+  await db.runDataMigrations();
+  const choice = async (ws) => (await db.get("SELECT notes_choice FROM workspaces WHERE id = ?", ws)).notes_choice;
+  const chosen = async (ws) => (await db.all("SELECT conversation_id FROM notes_chats WHERE workspace_id = ? ORDER BY conversation_id", ws)).map((r) => r.conversation_id);
+  assert.equal(await choice(kept), "chosen", "an explicit switch-off is kept as a choice");
+  assert.deepEqual(await chosen(kept), [ids.k2], "the chats that still had notes on");
+  assert.equal(await choice(unset), null, "all on by default: no choice yet (one default chat, the Team Lead is asked)");
+  assert.deepEqual(await chosen(unset), []);
+  assert.equal(await choice(none), "none", "every chat switched off: notes stay in the portal");
+  assert.equal((await db.get("SELECT notes_choice_by FROM workspaces WHERE id = ?", kept)).notes_choice_by, "Sidekick");
+  // Running it again (every start-up does) changes nothing, even after the Team Lead changed the choice.
+  await db.run("DELETE FROM notes_chats WHERE workspace_id = ?", kept);
+  await db.run("INSERT INTO notes_chats (workspace_id, conversation_id, org_id) VALUES (?, ?, ?)", kept, ids.k1, org);
+  await db.runDataMigrations();
+  assert.deepEqual(await chosen(kept), [ids.k1]);
+  assert.equal(await choice(unset), null);
+});
+
+test(`[${engine}] "Meeting notes go to": the default chat and the card's footer`, async () => {
+  const r = await import("../src/lib/notes-chat-rules.ts");
+  const c = (id, name, guests = 0, kind = "groupChat") => ({ id, name, kind, guests });
+  assert.equal(r.pickDefaultNotesChat([]), null);
+  assert.equal(r.pickDefaultNotesChat([c("a", "Client crew", 1), c("b", "Core team")]), "b", "the first internal chat");
+  assert.equal(r.pickDefaultNotesChat([c("a", "Core team"), c("b", "Meeting Notes")]), "b", "a chat named for notes wins");
+  assert.equal(r.pickDefaultNotesChat([c("a", "Client notes", 1), c("b", "Team notes")]), "b", "internal before guests");
+  assert.equal(r.pickDefaultNotesChat([c("p", "Me", 0, "personal"), c("a", "Client crew", 1)]), "a", "never a 1:1 chat; a guest chat if that's all");
+  const posted = [{ name: "Core team", guests: false }, { name: "Client crew", guests: true }];
+  assert.equal(r.postedToLine(posted, false), "Notes posted to: Core team, Client crew.");
+  assert.equal(r.postedToLine(posted, true), "Notes posted to Client crew only.", "guests never see internal chats' names");
+  assert.equal(r.postedToLine([], false), null);
+  assert.deepEqual(r.parsePosted("{broken"), []);
+  assert.deepEqual(r.parsePosted(JSON.stringify(posted)), posted);
+});
+
 test(`[${engine}] a failed transaction saves nothing`, async () => {
   const id = db.newId();
   await assert.rejects(
@@ -119,7 +167,8 @@ const rules = await import("../src/lib/reminder-rules.ts");
 
 test(`[${engine}] reminder settings: defaults, bad values refused, changes listed for the audit log`, () => {
   const d = rules.parseChatSettings(null);
-  assert.deepEqual([d.track, d.notes, d.reminders, d.time], [false, true, false, "09:00"]);
+  assert.deepEqual([d.track, d.reminders, d.time], [false, false, "09:00"]);
+  assert.equal("notes" in rules.parseChatSettings(JSON.stringify({ notes: false })), false, "the old per-chat notes switch is ignored (lib/notes-chats.ts)");
   assert.deepEqual(rules.parseChatSettings("{not json").quietDays, [0, 6], "broken JSON falls back to defaults");
   assert.equal(rules.parseChatSettings(JSON.stringify({ time: "25:00", timeZone: "Nowhere/Here" })).time, "09:00");
   for (const bad of [{ time: "7:5" }, { timeZone: "Nowhere/Here" }, { quietDays: [7] }, { quietDays: [0, 1, 2, 3, 4, 5, 6] }, { kinds: { nope: true } }, { notes: 1 }, { extra: 1 }, null, []]) {
@@ -128,7 +177,8 @@ test(`[${engine}] reminder settings: defaults, bad values refused, changes liste
   const ok = rules.applySettingsChanges(d, { reminders: true, time: "08:30", quietDays: [6, 0, 0], kinds: { conflicts: false } });
   assert.deepEqual(ok.settings.quietDays, [0, 6]);
   assert.deepEqual(ok.changed, ["reminders on", "time 08:30", "sources that disagree off"]);
-  assert.deepEqual(rules.applySettingsChanges(d, { notes: true }).changed, [], "no change, nothing to audit");
+  assert.deepEqual(rules.applySettingsChanges(d, { track: false }).changed, [], "no change, nothing to audit");
+  assert.match(rules.applySettingsChanges(d, { notes: true }).error, /Meeting notes go to/, "notes are chosen per group now");
 });
 
 test(`[${engine}] reminder timing: local time zone, quiet days, at or after the chosen time, one slot per local day`, () => {

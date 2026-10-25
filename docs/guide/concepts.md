@@ -61,7 +61,7 @@ Sidekick keeps an eye on each group in the background, every 15 minutes, and lis
 - Teams chats waiting to be assigned to a group, and chats someone removed Sidekick from in Teams,
 - action items past their due date, and action items nobody owns two days after the meeting,
 - documents a newer meeting decision seems to change ("may be out of date"),
-- groups without a Team Lead (plans with Team Leads) or without a Teams chat for meeting notes,
+- groups without a Team Lead (plans with Team Leads) or without a Teams chat for meeting notes, and groups with several chats where nobody picked which one gets the notes,
 - connectors (such as Jira or Azure DevOps) that stopped working.
 
 Each problem is one item, however long it lasts, and it **clears itself** once it's fixed. You only see items for your own groups: everyone in a group sees its action items, unanswered questions and out-of-date documents; the group's Team Lead and the admins also see its Teams problems; organization-wide items (chats waiting, groups without a lead, connectors) are for Org Owners and Org Admins. Admins and the group's Team Lead can **Snooze** an item for a week; it comes back if it's still there. The checks themselves use no AI; only the "may be out of date" check asks the AI, and only about a document and decision that already look related.

@@ -9,8 +9,11 @@
  *   use; no prices: GET /api/workspaces/:id/usage);
  * - **People**: who is in the group; Org Owners/Admins and the group's Team Lead add people already in the
  *   organization and take Members/Viewers off it (/api/workspaces/:id/members);
- * - **Teams chats**: the chats assigned to the group, with their settings (notes, reminders, client guests;
- *   components/chat-settings.tsx), unassign, and assigning a chat with the code Sidekick shows in Teams;
+ * - **Teams chats**: **Meeting notes go to** (which chats get the group's meeting notes: one, several, or none; the
+ *   group's Team Lead and Org Owners/Admins choose, everyone else sees it read-only; GET/PUT
+ *   /api/workspaces/:id/notes-chats, lib/notes-chats.ts), then the chats assigned to the group with their settings
+ *   (reminders, tracking, client guests; components/chat-settings.tsx), unassign, and assigning a chat with the code
+ *   Sidekick shows in Teams. Opening the page at `#chats` (the "Pick the notes chat" finding) starts on this tab;
  * - **Documents**: what Sidekick answers from, with a link to Knowledge & docs to upload;
  * - **Settings** (Org Owners/Admins): name, client, engagement code, **Export** (zip of everything in it),
  *   **End this group** (engagement over: read-only now, deleted on a date, with a deletion certificate;
@@ -35,6 +38,13 @@ type TeamsLink = {
   id: string; kind: string; name: string | null; guests: number; linked_at: string; last_seen_at: string; workspace_id: string; workspace: string;
   settings: ChatSettings; lastReminder: LastReminder; savedMessages: number;
 };
+/** "Meeting notes go to" for this group, as GET /api/workspaces/:id/notes-chats returns it (lib/notes-chats.ts `NotesPlan`). */
+type NotesPlan = {
+  mode: "chosen" | "none" | "unset"; chosenBy: string | null; chosenAt: string | null;
+  chats: { id: string; name: string | null; kind: string; guests: number }[];
+  targets: string[]; defaultId: string | null; needsChoice: boolean; canManage: boolean;
+  last: { title: string; held_at: string; chats: string[] } | null;
+};
 type Doc = { id: string; name: string; audience: string; status: string; created_at: string; uploaded_by: string | null };
 type Tab = "overview" | "people" | "chats" | "docs" | "settings";
 
@@ -49,7 +59,12 @@ export default function GroupView() {
   const [canManage, setCanManage] = useState(false);
   const [links, setLinks] = useState<TeamsLink[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
+  const [notes, setNotes] = useState<NotesPlan | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  // A link to `#chats` (e.g. the "Pick the notes chat" finding) opens the Teams chats tab.
+  useEffect(() => {
+    if (window.location.hash === "#chats") setTab("chats");
+  }, []);
 
   // Loads the group (from the caller's list, so the workspace wall applies), then its people, chats and documents.
   const load = useCallback(
@@ -65,6 +80,7 @@ export default function GroupView() {
           }),
           api<{ links: TeamsLink[] }>("/api/teams-links").then((l) => setLinks(l.links.filter((x) => x.workspace_id === id))),
           api<{ docs: Doc[] }>(`/api/docs?ws=${encodeURIComponent(id)}`).then((d) => setDocs(d.docs)),
+          api<NotesPlan>(`/api/workspaces/${encodeURIComponent(id)}/notes-chats`).then(setNotes),
         ]).then(() => undefined);
       }),
     [id],
@@ -115,7 +131,7 @@ export default function GroupView() {
       {tab === "overview" && canManage && <Activity id={group.id} />}
       {tab === "overview" && <Overview group={group} members={members} links={links} docs={docs} go={setTab} openDocs={openDocs} />}
       {tab === "people" && <People group={group} members={members} canManage={canManage} reload={load} />}
-      {tab === "chats" && <Chats group={group} links={links} canManage={canManage} reload={load} />}
+      {tab === "chats" && <Chats group={group} links={links} notes={notes} canManage={canManage} reload={load} />}
       {tab === "docs" && <Docs docs={docs} openDocs={openDocs} />}
       {tab === "settings" && me.user.admin && (
         <Settings group={group} onSaved={async () => { await reload(); await load(); toast("Group updated."); }} onChanged={async () => { await reload(); await load(); }} onDeleted={async () => { await reload(); router.push("/workspaces"); }} />
@@ -303,8 +319,90 @@ function People({ group, members, canManage, reload }: { group: Group; members: 
   );
 }
 
-/** The Teams chats assigned to this group, their settings, and assigning one with a code. */
-function Chats({ group, links, canManage, reload }: { group: Group; links: TeamsLink[]; canManage: boolean; reload: () => Promise<void> }) {
+/**
+ * "Meeting notes go to": which of the group's chats get its meeting notes. The group's Team Lead and Org Owners/Admins
+ * tick one chat (usual) or several, or "Don't post notes in Teams"; everyone else sees the same list read-only. Chats
+ * with client guests are greyed: only notes of meetings the client attended go there, internal meetings' never do.
+ * While nobody has chosen, notes go to one default chat and a 2+ chat group shows "Pick which chat…".
+ */
+function NotesGoTo({ group, plan, canManage, reload }: { group: Group; plan: NotesPlan; canManage: boolean; reload: () => Promise<void> }) {
+  const toast = useToast();
+  // Starts from the saved choice; the parent re-mounts this (its `key`) after a save or reload.
+  const [sel, setSel] = useState(() => ({ none: plan.mode === "none", ids: plan.mode === "chosen" ? plan.targets : [] }));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const shown = sel.none ? [] : plan.mode === "unset" && !sel.ids.length ? plan.targets : sel.ids;
+  const changed = sel.none !== (plan.mode === "none") || (!sel.none && (plan.mode !== "chosen" || sel.ids.slice().sort().join() !== plan.targets.slice().sort().join()));
+  const name = (id: string) => plan.chats.find((c) => c.id === id)?.name ?? "Teams chat";
+  const toggle = (id: string, on: boolean) => {
+    const base = plan.mode === "unset" && !sel.ids.length && !sel.none ? plan.targets : sel.ids;
+    setSel({ none: false, ids: on ? [...new Set([...base, id])] : base.filter((x) => x !== id) });
+  };
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/workspaces/${encodeURIComponent(group.id)}/notes-chats`, { method: "PUT", json: sel.none ? { none: true } : { chatIds: shown } });
+      await reload();
+      toast(sel.none ? "Meeting notes now stay in the portal." : `Meeting notes now go to ${shown.map(name).join(", ")}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save where meeting notes go.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const status =
+    plan.mode === "none" ? "Not posted in Teams: notes stay in the portal."
+    : plan.mode === "unset" ? (plan.targets.length ? `Nobody chose yet, so notes go to ${name(plan.targets[0])} only.` : "Nobody chose yet.")
+    : `Notes go to ${plan.targets.map(name).join(", ")}.`;
+  return (
+    <div className="panel" style={{ marginBottom: 16 }}>
+      <div className="panel-h">
+        <div>
+          <h2>Meeting notes go to</h2>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            {status}
+            {plan.mode !== "unset" && plan.chosenBy ? ` Chosen by ${plan.chosenBy}${plan.chosenAt ? ` on ${fmtDate(plan.chosenAt)}` : ""}.` : ""}
+            {!canManage && " The group's Team Lead chooses this."}
+          </span>
+        </div>
+        {plan.needsChoice && <Pill kind="hand" nodot>Needs a choice</Pill>}
+      </div>
+      <div style={{ display: "grid", gap: 8, padding: "4px 0" }} role="group" aria-label="Chats that get meeting notes">
+        {plan.chats.map((c) => (
+          <label key={c.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", opacity: c.guests ? 0.7 : 1, fontWeight: 400 }}>
+            <input type="checkbox" disabled={!canManage || busy} checked={shown.includes(c.id)} onChange={(e) => toggle(c.id, e.target.checked)} style={{ marginTop: 3 }} />
+            <span>
+              <b>{c.name ?? "Teams chat"}</b>
+              {plan.mode === "unset" && c.id === plan.defaultId && <> <Pill nodot>Default</Pill></>}
+              {c.guests ? <> <Pill kind="warn" nodot>Client guests</Pill><span className="muted" style={{ display: "block", fontSize: 12.5 }}>Internal meetings&apos; notes never go here: only notes of meetings the client attended.</span></> : null}
+            </span>
+          </label>
+        ))}
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}>
+          <input type="checkbox" disabled={!canManage || busy} checked={sel.none} onChange={(e) => setSel({ none: e.target.checked, ids: [] })} />
+          <span>Don&apos;t post notes in Teams <span className="muted" style={{ fontSize: 12.5 }}>(they stay in {BRAND.name}&apos;s Meetings page)</span></span>
+        </label>
+      </div>
+      {plan.last && (
+        <p className="muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
+          Latest: notes for “{plan.last.title}” ({fmtDate(plan.last.held_at)}) were posted to {plan.last.chats.join(", ") || "no chat"}.
+        </p>
+      )}
+      {error && <p className="err">{error}</p>}
+      {canManage && (
+        <div style={{ marginTop: 10 }}>
+          <button className="btn primary small" disabled={busy || !changed || (!sel.none && !shown.length)} onClick={save}>
+            {plan.mode === "unset" ? "Save choice" : "Save"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "Meeting notes go to", then the Teams chats assigned to this group, their settings, and assigning one with a code. */
+function Chats({ group, links, notes, canManage, reload }: { group: Group; links: TeamsLink[]; notes: NotesPlan | null; canManage: boolean; reload: () => Promise<void> }) {
   const toast = useToast();
   const reportError = useReportError();
   const [settingsFor, setSettingsFor] = useState<TeamsLink | null>(null);
@@ -344,11 +442,12 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
 
   return (
     <>
+      {notes && notes.chats.length > 0 && <NotesGoTo key={`${notes.mode}:${notes.targets.join()}:${notes.chats.map((c) => c.id).join()}`} group={group} plan={notes} canManage={canManage} reload={reload} />}
       <div className="panel">
         <div className="panel-h">
           <div>
             <h2>Teams chats</h2>
-            <span className="muted" style={{ fontSize: 12.5 }}>In these chats {BRAND.name} answers from {group.name} only. Choose per chat whether it posts meeting notes and reminders.</span>
+            <span className="muted" style={{ fontSize: 12.5 }}>In these chats {BRAND.name} answers from {group.name} only. Choose per chat whether it reads every message and sends reminders.</span>
           </div>
           {canManage && <button className="btn" onClick={() => { setForm({ code: "", guests: false }); setError(""); setLinking(true); }}><Icon n="plus" />Assign a chat</button>}
         </div>
@@ -372,10 +471,10 @@ function Chats({ group, links, canManage, reload }: { group: Group; links: Teams
                     </td>
                     <td>
                       <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
-                        {l.settings.notes && <Pill nodot>Notes</Pill>}
+                        {notes?.targets.includes(l.id) && <Pill nodot>Meeting notes</Pill>}
                         {l.settings.track && <Pill kind="hand" nodot>Reads every message</Pill>}
                         {l.settings.reminders && <Pill kind="good" nodot>Reminders {l.settings.time}</Pill>}
-                        {!l.settings.notes && !l.settings.track && !l.settings.reminders && <span className="muted">Answers only</span>}
+                        {!notes?.targets.includes(l.id) && !l.settings.track && !l.settings.reminders && <span className="muted">Answers only</span>}
                       </span>
                       {l.settings.reminders && <div className="muted" style={{ fontSize: 12 }}>{lastReminderText(l.lastReminder)}</div>}
                     </td>

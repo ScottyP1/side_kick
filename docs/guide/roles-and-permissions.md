@@ -73,7 +73,7 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | Update action items (portal and Teams card buttons) | ✓ | ✓ | ✓ | ✓ | |
 | Refresh the knowledge map, resolve or dismiss gaps | ✓ | ✓ | ✓ | ✓ | |
 | See Needs attention for their groups: action items, unanswered questions, out-of-date documents | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See Needs attention about their groups' Teams chats (posts failing, Sidekick removed, no notes chat) | ✓ | ✓ | ✓ (own groups) | | |
+| See Needs attention about their groups' Teams chats (posts failing, Sidekick removed, no notes chat, pick the notes chat) | ✓ | ✓ | ✓ (own groups) | | |
 | See organization-wide Needs attention (chats waiting, groups without a Team Lead, connectors) | ✓ | ✓ | | | |
 | See Needs attention about a tool request for their groups (approved: connect it; declined, with the note) | ✓ | ✓ | ✓ (own groups) | | |
 | Snooze a Needs attention item for a week | ✓ | ✓ | ✓ (own groups' items) | | |
@@ -101,6 +101,7 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | |
 | Link, change or unlink Teams channels and chats (turning reminders on: Team plan and up) | ✓ | ✓ | ✓ (own workspaces) | | |
+| Choose which chats get a group's meeting notes ("Meeting notes go to"; everyone in the group sees it) | ✓ | ✓ | ✓ (own groups) | | |
 | Add Sidekick to a Teams chat (anyone else: Sidekick leaves) | ✓ | ✓ | ✓ | | |
 | See and assign Teams chats waiting to be assigned (portal only) | ✓ | ✓ | ✓ (chats they added, to own groups) | | |
 | Remove Sidekick from a Teams chat | ✓ | ✓ | ✓ (own groups' chats, or waiting chats they added) | | |

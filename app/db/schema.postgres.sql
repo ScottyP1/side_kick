@@ -200,6 +200,11 @@ CREATE TABLE IF NOT EXISTS teams_chat_settings (
   conversation_id TEXT PRIMARY KEY, org_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
   json TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
 );
+-- Which linked Teams chats get a group's meeting notes (lib/notes-chats.ts). Only used when the group's
+-- workspaces.notes_choice is 'chosen'; 'none' = notes stay in the portal; NULL = no choice yet (one default chat).
+CREATE TABLE IF NOT EXISTS notes_chats (
+  workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL, org_id TEXT NOT NULL, PRIMARY KEY (workspace_id, conversation_id)
+);
 -- Messages Sidekick read in tracked chats (only chats an Org Owner/Admin switched "Track messages" on).
 -- audience: shareable when the chat has client guests, internal otherwise. Kept 90 days.
 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -570,6 +575,11 @@ ALTER TABLE meetings ADD COLUMN IF NOT EXISTS graph_meeting_id TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_posted_at TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS saved_by TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS saved_at TEXT;
+-- "Meeting notes go to" (lib/notes-chats.ts): the group's choice, who made it and when; where a meeting's notes went.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_by TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_at TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_posted_to TEXT;
 -- Scale readiness: Graph subscriptions are looked up per organization (renewals, notes status).
 CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at);
 

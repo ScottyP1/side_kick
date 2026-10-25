@@ -1673,6 +1673,14 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await member("GET", `/api/workspaces/${s.wsB}/sources`)).status, 404);
   assert.equal((await other("GET", `/api/workspaces/${s.wsB}/sources`)).status, 404);
   assert.ok((await admin("GET", `/api/workspaces/${s.wsB}/sources`)).body.sources.some((x) => x.tool === "Azure DevOps"), "B's linked project shows on B's page");
+  // "Meeting notes go to": everyone in the group reads it; only its Team Lead or an admin changes it; nobody outside it sees it.
+  assert.equal((await member("GET", `/api/workspaces/${s.wsA}/notes-chats`)).body.canManage, false);
+  assert.equal((await member("GET", `/api/workspaces/${s.wsB}/notes-chats`)).status, 404);
+  assert.equal((await other("GET", `/api/workspaces/${s.wsB}/notes-chats`)).status, 404, "another organization gets not found");
+  assert.equal((await other("PUT", `/api/workspaces/${s.wsB}/notes-chats`, { none: true })).status, 404);
+  assert.equal((await lead("PUT", `/api/workspaces/${s.wsB}/notes-chats`, { none: true })).status, 404, "a Team Lead can't choose for another group");
+  assert.equal((await member("PUT", `/api/workspaces/${s.wsA}/notes-chats`, { none: true })).status, 403);
+  assert.equal((await viewer("PUT", `/api/workspaces/${s.wsA}/notes-chats`, { none: true })).status, 403);
   // A group's last 30 days: its Team Lead and admins only, never another group's (or organization's) numbers.
   const mine = await lead("GET", `/api/workspaces/${s.wsA}/usage`);
   assert.equal(mine.status, 200, JSON.stringify(mine.body));
@@ -2665,7 +2673,7 @@ test(`[${ENGINE}] reminders: settings are per chat, Org Owners/Admins only, chec
   const code = cardText(cardsOf(msg)[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
   assert.equal((await admin("POST", "/api/teams-links", { code, ws: s.wsA })).status, 200);
   const link = (await admin("GET", "/api/teams-links")).body.links.find((l) => l.id === GROUP);
-  assert.deepEqual([link.settings.notes, link.settings.track, link.settings.reminders], [true, false, false], "notes on, tracking and reminders off by default");
+  assert.deepEqual([link.settings.track, link.settings.reminders], [false, false], "tracking and reminders off by default");
 
   assert.equal((await mia("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { reminders: true } })).status, 403);
   for (const bad of [{ time: "9am" }, { timeZone: "Mars/Olympus" }, { quietDays: [0, 1, 2, 3, 4, 5, 6] }, { kinds: { actions: false, questions: false, outdated: false, conflicts: false } }, { surprise: true }, { track: "yes" }]) {
@@ -2821,8 +2829,19 @@ test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; no
   assert.equal((await tick()).posted, 1);
   assert.equal((await tick()).posted, 0, "never twice in the same day");
 
-  // Meeting notes: turn them off for the 1:1 chat, keep them in the group chat.
-  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: "conv-1", changes: { notes: false } })).status, 200);
+  // "Meeting notes go to": no choice yet, two chats (the 1:1 chat and the group chat) → the group chat by default, and a choice is needed.
+  const notesUrl = `/api/workspaces/${s.wsA}/notes-chats`;
+  const plan0 = (await admin("GET", notesUrl)).body;
+  assert.deepEqual([plan0.mode, plan0.defaultId, plan0.targets, plan0.needsChoice, plan0.canManage], ["unset", GROUP, [GROUP], true, true], JSON.stringify(plan0));
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: "conv-1", changes: { notes: false } })).status, 400, "no per-chat notes switch any more");
+  // A Member of the group sees it read-only and can't change it.
+  const remi = (await mia("GET", notesUrl)).body;
+  assert.deepEqual([remi.mode, remi.canManage], ["unset", false]);
+  assert.equal((await mia("PUT", notesUrl, { chatIds: [GROUP] })).status, 403);
+  for (const bad of [{}, { chatIds: [] }, { chatIds: ["not-linked-here"] }, { chatIds: [GROUP, 7] }]) assert.equal((await admin("PUT", notesUrl, bad)).status, 400, JSON.stringify(bad));
+  const chosen = (await admin("PUT", notesUrl, { chatIds: [GROUP] })).body;
+  assert.deepEqual([chosen.mode, chosen.targets, chosen.needsChoice], ["chosen", [GROUP], false]);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Meeting notes now go to: “Wave 2 team”/);
   const n = sent.length;
   const form = new FormData();
   form.append("ws", s.wsA);
@@ -2832,7 +2851,14 @@ test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; no
   await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && /Notes routing check/.test(cardText(cardsOf(x)[0] ?? {})));
   // The reminder after the meeting follows the notes in the group chat.
   await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {})));
-  assert.ok(!sent.slice(n).some((x) => x.url.includes("conv-1") && /Notes routing check/.test(JSON.stringify(x.body))), "no notes in the chat that turned them off");
+  assert.ok(!sent.slice(n).some((x) => x.url.includes("conv-1") && /Notes routing check/.test(JSON.stringify(x.body))), "no notes in the chat that wasn't chosen");
+  const notesPost = sent.slice(n).find((x) => x.url.includes(GROUP) && /Notes routing check/.test(cardText(cardsOf(x)[0] ?? {})));
+  assert.match(cardText(cardsOf(notesPost)[0]), /Notes posted to Wave 2 team only/, "the card's footer says where the notes went");
+  const after = (await admin("GET", notesUrl)).body;
+  assert.deepEqual([after.last?.title, after.last?.chats], ["Notes routing check", ["Wave 2 team"]], "the Teams chats tab says where the latest notes went");
+  // "Don't post notes in Teams" is a choice too; then back to the group chat for the tests below.
+  assert.equal((await admin("PUT", notesUrl, { none: true })).body.targets.length, 0);
+  assert.equal((await admin("PUT", notesUrl, { chatIds: [GROUP] })).status, 200);
 });
 
 test(`[${ENGINE}] reminders: unlinking a chat forgets its saved messages; the owner's switch pauses reminders`, async () => {
@@ -3977,6 +4003,35 @@ test(`[${ENGINE}] watchers: each check opens a finding with a next step, for the
   const steps = (await wa("GET", `/api/activity?view=trace&id=${watchRun.id}`)).body.spans;
   assert.ok(steps.filter((x) => x.kind === "watch").length >= 10);
   assert.doesNotMatch(JSON.stringify(steps), /purple elephant|Cutover runbook/, "counts only, no content in the trace");
+});
+
+test(`[${ENGINE}] meeting notes chat: a group with 2+ chats and no choice asks its Team Lead to pick; choosing resolves it`, async () => {
+  // A second chat for group 1, with client guests.
+  const before = sent.length;
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: "conv-watch-client", conversationType: "groupChat", tenantId: "tenant-1", name: "Client crew" } }));
+  const card = await waitForSent((m) => sent.indexOf(m) >= before && m.url.includes("conv-watch-client") && /Link this chat/.test(cardText(cardsOf(m)[0] ?? {})));
+  const code = cardText(cardsOf(card)[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+  assert.equal((await lena("POST", "/api/teams-links", { code, ws: w.g1, guests: true })).status, 200);
+  const url = `/api/workspaces/${w.g1}/notes-chats`;
+  const plan = (await max("GET", url)).body;
+  assert.deepEqual([plan.mode, plan.defaultId, plan.needsChoice, plan.canManage], ["unset", "conv-watch-1", true, false], "the internal chat is the default; Members read only");
+  assert.equal(plan.chats.find((c) => c.id === "conv-watch-client").guests, 1, "the picker knows which chat has client guests");
+  await jobTick();
+  const pick = (r) => r.body.findings.find((f) => f.kind === "no_notes_chat" && f.workspaceId === w.g1);
+  const f = pick(await lena("GET", "/api/findings"));
+  assert.ok(f, "the Team Lead is asked to pick");
+  assert.match(f.title, /Pick which chat gets meeting notes in “Wave 2 cutover”/);
+  assert.match(f.detail, /2 Teams chats.*“Wave 2 crew”/);
+  assert.equal(f.actionHref, `/workspaces/${w.g1}#chats`);
+  assert.ok(!pick(await max("GET", "/api/findings")), "Members don't get it");
+  assert.ok(!pick(await nora("GET", "/api/findings")), "nor people in other groups");
+  assert.equal((await nora("GET", url)).status, 404, "another group's choice is walled");
+  assert.equal((await max("PUT", url, { chatIds: ["conv-watch-1"] })).status, 403);
+  const chosen = await lena("PUT", url, { chatIds: ["conv-watch-1"] });
+  assert.equal(chosen.status, 200, JSON.stringify(chosen.body));
+  assert.deepEqual([chosen.body.mode, chosen.body.chosenBy, chosen.body.targets], ["chosen", "Lena Lead", ["conv-watch-1"]]);
+  await jobTick();
+  assert.ok(!pick(await lena("GET", "/api/findings")), "choosing resolves it");
 });
 
 test(`[${ENGINE}] watchers: findings aren't duplicated, can be snoozed, and resolve themselves once fixed`, async () => {

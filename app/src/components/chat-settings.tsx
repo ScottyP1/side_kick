@@ -2,11 +2,12 @@
 
 /**
  * The settings window for one linked Teams channel or chat (a group's page → Teams chats →
- * Settings). Org Owners and Org Admins, and Team Leads for the workspaces they lead, choose what Sidekick does in that chat: post meeting notes, keep
+ * Settings). Org Owners and Org Admins, and Team Leads for the workspaces they lead, choose what Sidekick does in that chat: keep
  * track of every message, and send reminders (time, time zone, quiet days, kinds). They can also preview
  * the next reminder or send one now. Saved with PATCH /api/teams-links/settings (audited); preview and
  * send use POST /api/reminders. Rules and defaults live in lib/reminder-rules.ts. Reminders are a plan
  * feature (Team and up): on Starter the switch shows "Not in your plan" unless this chat already has them.
+ * Which chats get meeting notes is chosen once per group ("Meeting notes go to" on the Teams chats tab), not here.
  */
 
 import { useMemo, useState } from "react";
@@ -18,7 +19,6 @@ import { useApp } from "@/components/shell";
 /** A linked chat's settings, as returned by GET /api/teams-links. */
 export type ChatSettings = {
   track: boolean;
-  notes: boolean;
   reminders: boolean;
   time: string;
   timeZone: string;
@@ -140,7 +140,6 @@ export function ChatSettingsModal({
         Choose what {BRAND.name} does in this {where}. {chat.guests ? "Client guests are in it, so it only ever gets Shareable items." : "It's internal, so it can get internal items too."} Changes are recorded in the audit log.
       </p>
       <div className="list">
-        {row("Meeting notes", `Post the notes and action items here after each meeting in ${chat.workspace}. Turn it off in the other chats to keep notes in one dedicated chat.`, s.notes, (v) => setS({ ...s, notes: v }))}
         {row(
           "Keep track of every message",
           `${BRAND.name} reads the messages here (not only @mentions), so it can answer from them and spot what changed, like a new cutover date. Everyone here is told when you switch it. Kept 90 days.${chat.savedMessages ? ` ${chat.savedMessages} saved so far.` : ""}`,

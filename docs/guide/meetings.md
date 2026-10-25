@@ -42,11 +42,21 @@ In Teams you download a past meeting's transcript from the meeting's **Recap →
 Limits: files up to 25 MB and up to 300,000 characters of transcript (about five hours of talk); split longer meetings into parts. If writing the notes fails, the meeting is still saved with **Try again**: don't add it twice.
 
 ## The notes chat in Teams
-Each group can have a **notes chat**: a Teams chat or channel linked to the group with *meeting notes* switched on (the default for a linked chat; change it on the group's page under Teams chats). After each meeting Sidekick posts there:
-1. a **notes card**: summary, the decisions and things to keep, and questions still open, with **Open in Sidekick**;
+Many teams have more than one chat for an engagement (say, one for the core team and one with the client), so the group's **Team Lead** chooses where meeting notes go. Open the group (**Groups**, then its card) → **Teams chats** → **Meeting notes go to**:
+- tick **one chat** (the usual choice) or several, or
+- **Don't post notes in Teams**: notes then stay on the Meetings page in Sidekick.
+
+Then **Save**. Org Owners and Org Admins can choose for any group; Members and Viewers see the same list read-only. Every change is in the audit log.
+
+Chats with **client guests** are marked and greyed: only notes from meetings the client attended go there. Notes from internal meetings never go to a chat with client guests, whatever is ticked.
+
+**Before anyone chooses**, notes go to **one** chat only: a chat with "notes" in its name if there is one, otherwise the group's first chat without client guests. A group with two or more chats and no choice yet shows **Pick which chat gets meeting notes** under *Needs attention* for its Team Lead, with a button to the Teams chats tab. (Groups that had switched notes off in some chats before this choice existed keep that: the chats that still had notes on are the chosen ones.)
+
+After each meeting Sidekick posts to the chosen chat(s):
+1. a **notes card**: summary, the decisions and things to keep, and questions still open, with **Open in Sidekick**. Its last line says where the notes were posted ("Notes posted to Core team only."); in a chat with client guests it only names other client chats;
 2. one **card per action item**, with **Assign** and **Mark done**.
 
-A group without a notes chat shows up under *Needs attention* so its Team Lead can add one.
+The Teams chats tab also shows where the latest meeting's notes went. A group without any Teams chat shows up under *Needs attention* so its Team Lead can add one.
 
 ## Save to knowledge
 Decisions, requirements, risks, facts and terms from a meeting can be **saved to the group's knowledge**:
@@ -63,5 +73,5 @@ Sidekick also works as a Teams app with a **Meetings** tab:
 You're signed in automatically with your Microsoft account (Teams single sign-on). You see only the groups you belong to, and can mark action items done and save things to knowledge with your own role. If the tab says you don't have an account yet, ask your Sidekick admin to add you, then sign in to the Sidekick portal with Microsoft once.
 
 <!-- help-center:skip -->
-For developers: lib/meetings-graph.ts (capture), lib/saved-items.ts (Save to knowledge), lib/teams/tab.ts (tab); tests in app/tests/meetings-graph.test.mjs. Microsoft setup steps for Cody: docs/RUNBOOKS.md → Automatic meeting notes.
+For developers: lib/meetings-graph.ts (capture), lib/notes-chats.ts ("Meeting notes go to"), lib/saved-items.ts (Save to knowledge), lib/teams/tab.ts (tab); tests in app/tests/meetings-graph.test.mjs. Microsoft setup steps for Cody: docs/RUNBOOKS.md → Automatic meeting notes.
 <!-- /help-center:skip -->

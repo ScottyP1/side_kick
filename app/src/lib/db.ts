@@ -633,6 +633,17 @@ CREATE TABLE IF NOT EXISTS meeting_autorecord (
   PRIMARY KEY (org_id, join_key)
 );
 CREATE INDEX IF NOT EXISTS meeting_autorecord_org ON meeting_autorecord(org_id, status, starts_at);
+-- "Is this meeting being transcribed?" for scheduled Teams meetings (lib/meeting-nudge.ts): one row per organization,
+-- meeting (join_key = hash of its join link, as in meeting_autorecord) and start time (each occurrence of a series).
+-- status planned | skipped | records | off | chat | nudged | transcribing | ended | quiet | nowhere | failed | late | gone;
+-- title only for a group's meetings (planned and after); posted_to = 'meeting' (its own chat) or 'notes' (the group's notes chat).
+CREATE TABLE IF NOT EXISTS meeting_nudges (
+  org_id TEXT NOT NULL REFERENCES orgs(id), join_key TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT, organizer_oid TEXT NOT NULL,
+  online_meeting_id TEXT, chat_id TEXT, workspace_id TEXT, title TEXT, status TEXT NOT NULL, reason TEXT, posted_to TEXT, nudged_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, join_key, starts_at)
+);
+CREATE INDEX IF NOT EXISTS meeting_nudges_due ON meeting_nudges(org_id, status, starts_at);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -924,6 +935,8 @@ function migrate(conn: DatabaseSync) {
   // Meetings that record by themselves (lib/auto-record.ts): the organization's switch (0/1), who and when, and the last scan.
   if (!has("auto_meetings", "auto_record")) conn.exec("ALTER TABLE auto_meetings ADD COLUMN auto_record INTEGER NOT NULL DEFAULT 0");
   for (const col of ["auto_record_by", "auto_record_at", "record_checked_at", "record_error"]) if (!has("auto_meetings", col)) conn.exec(`ALTER TABLE auto_meetings ADD COLUMN ${col} TEXT`);
+  // Scheduled-meeting transcription reminders (lib/meeting-nudge.ts): when the calendars were last read, and why not.
+  for (const col of ["remind_checked_at", "remind_error"]) if (!has("auto_meetings", col)) conn.exec(`ALTER TABLE auto_meetings ADD COLUMN ${col} TEXT`);
   // Meeting matching couldn't read the directory (people added by email can't be recognised): the plain message
   // and since when, shown on the Meetings panel; cleared once a lookup works (lib/meeting-group.ts noteDirectory).
   for (const col of ["directory_error", "directory_error_at"]) if (!has("auto_meetings", col)) conn.exec(`ALTER TABLE auto_meetings ADD COLUMN ${col} TEXT`);

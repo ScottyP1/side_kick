@@ -194,16 +194,17 @@ type OnlineMeeting = {
 
 const isOid = (s: unknown): s is string => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 /** Online meeting ids are base64; anything else is refused before it goes into a Graph path. */
-const isMeetingId = (s: unknown): s is string => typeof s === "string" && s.length > 0 && s.length <= 512 && /^[\w\-=+/]+$/.test(s);
+export const isMeetingId = (s: unknown): s is string => typeof s === "string" && s.length > 0 && s.length <= 512 && /^[\w\-=+/]+$/.test(s);
 /** The row key for a meeting: a hash of its join link (the link itself is never stored). */
-const joinKey = (url: string) => crypto.createHash("sha256").update(url).digest("hex");
+export const joinKey = (url: string) => crypto.createHash("sha256").update(url).digest("hex");
 /** A calendar time Graph gave in UTC (asked for with the Prefer header) as an ISO string, or null. */
-const utc = (t: CalendarEvent["start"]) => {
+export const utc = (t: CalendarEvent["start"]) => {
   if (!t?.dateTime) return null;
   const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(t.dateTime) ? t.dateTime : `${t.dateTime}Z`);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 };
-const cleanTitle = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, 200) || "Teams meeting";
+/** A meeting subject as Sidekick shows it: one line, at most 200 characters, "Teams meeting" when empty. */
+export const cleanTitle = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, 200) || "Teams meeting";
 
 /**
  * Whether a meeting is clearly one group's, and which: `{ workspaceId }`, or `{ reason }` to leave it alone.

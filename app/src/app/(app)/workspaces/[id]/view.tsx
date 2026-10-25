@@ -459,14 +459,16 @@ function NotesGoTo({ group, plan, canManage, reload }: { group: Group; plan: Not
 /** The group's "Turn on transcription" reminder, as GET /api/workspaces/:id/call-nudge returns it (lib/call-nudge.ts). */
 type CallNudge = {
   enabled: boolean; changedBy: string | null; changedAt: string | null; autoNotes: boolean;
-  unreadable: string[]; last: { chat: string; at: string } | null; canManage: boolean;
+  unreadable: string[]; last: { chat: string; at: string } | null; scheduledProblem: string | null; canManage: boolean;
 };
 
 /**
- * "Transcription reminders": when a call starts in one of the group's Teams chats and nobody has started transcription
- * after about two minutes, Sidekick posts one short reminder there (lib/call-nudge.ts). On by default; the group's
+ * "Transcription reminders": when a call starts in one of the group's Teams chats, or one of the group's scheduled Teams
+ * meetings starts, and nobody has started transcription after about two minutes, Sidekick posts one short reminder
+ * (lib/call-nudge.ts, lib/meeting-nudge.ts). On by default; the group's
  * Team Lead and Org Owners/Admins switch it (PUT /api/workspaces/:id/call-nudge, audited), everyone else sees it
- * read-only. Also says when it can't run (automatic notes off) and which chats Microsoft won't let Sidekick read.
+ * read-only. Also says when it can't run (automatic notes off), which chats Microsoft won't let Sidekick read, and why
+ * it can't see scheduled meetings (`scheduledProblem`).
  */
 function CallReminders({ group }: { group: Group }) {
   const toast = useToast();
@@ -495,14 +497,14 @@ function CallReminders({ group }: { group: Group }) {
         <div>
           <h2>Transcription reminders</h2>
           <span className="muted" style={{ fontSize: 12.5 }}>
-            Notes need a transcript. When a call starts in one of this group&apos;s Teams chats and nobody has started transcription after about 2 minutes, {BRAND.name} posts one short reminder there.
+            Notes need a transcript. When a call starts in one of this group&apos;s Teams chats, or one of the group&apos;s scheduled Teams meetings starts, and nobody has started transcription after about 2 minutes, {BRAND.name} posts one short reminder (in the meeting&apos;s chat when it&apos;s there, otherwise in the group&apos;s notes chat).
             {st.changedBy ? ` ${st.enabled ? "Turned on" : "Turned off"} by ${st.changedBy}${st.changedAt ? ` on ${fmtDate(st.changedAt)}` : ""}.` : ""}
             {!st.canManage && " The group's Team Lead chooses this."}
           </span>
         </div>
         {st.canManage ? busy ? <Spinner /> : <Switch on={st.enabled} onChange={flip} label="Transcription reminders" /> : <Pill nodot>{st.enabled ? "On" : "Off"}</Pill>}
       </div>
-      {(!st.autoNotes || st.unreadable.length > 0 || st.last) && (
+      {(!st.autoNotes || st.unreadable.length > 0 || st.scheduledProblem || st.last) && (
         <div className="panel-b">
           {!st.autoNotes && <p className="muted" style={{ margin: 0 }}>Automatic notes are off for your organization, so there are no reminders either. An Org Owner or Admin turns them on on the Meetings page.</p>}
           {st.unreadable.length > 0 && (
@@ -510,6 +512,7 @@ function CallReminders({ group }: { group: Group }) {
               {BRAND.name} can&apos;t see calls in {st.unreadable.map((n) => `“${n}”`).join(", ")}. Microsoft hasn&apos;t granted it the chat-reading permission there: your Microsoft admin checks Teams&apos; chat consent setting, then remove {BRAND.name} from the chat and add it again. <a href="/settings#microsoft-permissions">See Microsoft permissions</a>
             </p>
           )}
+          {st.scheduledProblem && <p className="err" style={{ margin: 0 }}>{st.scheduledProblem}</p>}
           {st.last && <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>Latest reminder: in {st.last.chat}, {fmtDate(st.last.at)}.</p>}
         </div>
       )}

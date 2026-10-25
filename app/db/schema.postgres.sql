@@ -663,6 +663,19 @@ ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS auto_record_by TEXT;
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS auto_record_at TEXT;
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS record_checked_at TEXT;
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS record_error TEXT;
+-- "Is this meeting being transcribed?" for scheduled Teams meetings (lib/meeting-nudge.ts): one row per organization,
+-- meeting (join_key = hash of its join link, as in meeting_autorecord) and start time (each occurrence of a series).
+-- status planned | skipped | records | off | chat | nudged | transcribing | ended | quiet | nowhere | failed | late | gone;
+-- title only for a group's meetings (planned and after); posted_to = 'meeting' (its own chat) or 'notes' (the group's notes chat).
+CREATE TABLE IF NOT EXISTS meeting_nudges (
+  org_id TEXT NOT NULL REFERENCES orgs(id), join_key TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT, organizer_oid TEXT NOT NULL,
+  online_meeting_id TEXT, chat_id TEXT, workspace_id TEXT, title TEXT, status TEXT NOT NULL, reason TEXT, posted_to TEXT, nudged_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, join_key, starts_at)
+);
+CREATE INDEX IF NOT EXISTS meeting_nudges_due ON meeting_nudges(org_id, status, starts_at);
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS remind_checked_at TEXT;
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS remind_error TEXT;
 -- ---------------------------------------------------------------------------------------------------------
 -- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
 -- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and

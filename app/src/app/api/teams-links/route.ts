@@ -20,7 +20,7 @@ import { after } from "next/server";
 import { assertCanAdd } from "@/lib/limits";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, HttpError, isAdmin, isLead, requireManage, requireUser, workspaceIdsFor, type User } from "@/lib/auth";
-import { all, get, now, run } from "@/lib/db";
+import { all, asSystem, get, now, run } from "@/lib/db";
 import { assignedCard, helpCard } from "@/lib/teams/cards";
 import { chatMemberNames, normalizeCode, postCard, type TeamsConversation } from "@/lib/teams/bot";
 import { WAITING_DAYS } from "@/lib/teams/install";
@@ -80,12 +80,14 @@ async function waitingScope(user: User): Promise<{ sql: string; params: string[]
 async function waitingChats(user: User, withMembers = false) {
   const scope = await waitingScope(user);
   if (!scope) return [];
-  const rows = await all<Waiting>(
+  // Waiting, unlinked or just-unlinked chats belong to no org yet (org_id NULL), which row-level security hides from
+  // any org; the tenant / org condition in the query is the wall here (system work, lib/db.ts asSystem).
+  const rows = await asSystem("Teams chats without an org", () => all<Waiting>(
     // No name saved (Teams left it out): the Sidekick person whose Microsoft account added it, if there is one.
     `SELECT id, kind, name, COALESCE(added_by, (SELECT u.name FROM users u WHERE u.org_id = ? AND u.entra_oid = teams_conversations.added_by_oid)) AS added_by,
             created_at, waiting_since, last_seen_at, service_url FROM teams_conversations WHERE ${scope.sql} ORDER BY created_at DESC LIMIT 100`,
     user.org_id, ...scope.params,
-  );
+  ));
   return Promise.all(rows.map(async ({ service_url, ...r }, i) => ({
     ...r,
     leaves_at: new Date(new Date(r.waiting_since ?? r.created_at).getTime() + WAITING_DAYS * 86400_000).toISOString(),
@@ -104,24 +106,26 @@ export const POST = handle(async (req: Request) => {
   if (body.id !== undefined) {
     // Assigning from "Waiting to be assigned": only chats this person may see there (own tenant; a lead's own).
     const scope = await waitingScope(user);
-    conv = typeof body.id === "string" && scope
-      ? await get<TeamsConversation>(`SELECT * FROM teams_conversations WHERE id = ? AND ${scope.sql}`, body.id, ...scope.params)
+    const id = body.id;
+    conv = typeof id === "string" && scope
+      ? await asSystem("Teams chats without an org", () => get<TeamsConversation>(`SELECT * FROM teams_conversations WHERE id = ? AND ${scope.sql}`, id, ...scope.params))
       : undefined;
     if (!conv) throw new HttpError(404, "That chat isn't waiting to be assigned any more (someone may have just assigned it). Reload the page.");
   } else {
     const code = normalizeCode(requireText(body.code, "Link code", 20));
     conv = code
-      ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE link_code = ? AND code_expires_at > ? AND workspace_id IS NULL", code, now())
+      ? await asSystem("Teams chats without an org", () => get<TeamsConversation>("SELECT * FROM teams_conversations WHERE link_code = ? AND code_expires_at > ? AND workspace_id IS NULL", code, now()))
       : undefined;
     // Multi-tenant: a code from another company's Teams never links into this org.
     if (conv && tenantMode() === "multi" && (!tenant || conv.tenant_id !== tenant)) conv = undefined;
     if (!conv) throw new HttpError(404, `That code doesn't match a Teams channel or chat. Codes expire after 24 hours: mention @${BRAND.name} with “link” in Teams to get a new one.`);
   }
-  // "AND workspace_id IS NULL": if two people assign the same chat at once, only the first one wins.
-  const linked = await run(
+  // "AND workspace_id IS NULL": if two people assign the same chat at once, only the first one wins. The chat has
+  // no org until this statement gives it this one: system work (lib/db.ts asSystem).
+  const linked = await asSystem("Teams chats without an org", () => run(
     "UPDATE teams_conversations SET org_id = ?, workspace_id = ?, guests = ?, linked_by = ?, linked_at = ?, link_code = NULL, code_expires_at = NULL, waiting_since = NULL WHERE id = ? AND workspace_id IS NULL",
     user.org_id, ws, body.guests ? 1 : 0, user.id, now(), conv.id,
-  );
+  ));
   if (!linked.changes) throw new HttpError(409, "Someone just linked that chat. Reload the page.");
   const wsName = (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ?", ws))!.name;
   await audit(user, `Linked Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}” to workspace “${wsName}”`, "Access", ws);
@@ -155,8 +159,9 @@ export const PATCH = handle(async (req: Request) => {
 export const DELETE = handle(async (req: Request) => {
   const user = await requireUser();
   const conv = await ownLink(user, new URL(req.url).searchParams.get("id"));
-  // Back to waiting (in the org's own tenant): the 7 days before Sidekick leaves start now.
-  await run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL, waiting_since = ? WHERE id = ?", now(), conv.id);
+  // Back to waiting (in the org's own tenant): the 7 days before Sidekick leaves start now. The chat leaves the org,
+  // which row-level security only allows as system work (`ownLink` checked it's this org's).
+  await asSystem("Teams chats without an org", () => run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL, waiting_since = ? WHERE id = ?", now(), conv.id));
   const forgotten = await forgetChat(conv.id);
   if (forgotten) await audit(user, `Deleted ${forgotten} saved message${forgotten === 1 ? "" : "s"} from Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}”`, "Data", conv.workspace_id);
   await audit(user, `Unlinked Teams ${conv.kind === "channel" ? "channel" : "chat"} “${conv.name ?? conv.id}”`, "Access", conv.workspace_id);

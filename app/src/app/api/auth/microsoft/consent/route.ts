@@ -21,4 +21,4 @@ export const GET = handle(async (req: Request) => {
     (await cookies()).set(FLASH_COOKIE, await errorMessageFor(req, e), { path: "/", maxAge: FLASH_SECONDS, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
     return NextResponse.redirect(new URL("/users?error=1", redirectUri(req)));
   }
-});
+}, { system: "Microsoft sign-in" });

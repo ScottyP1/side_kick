@@ -29,7 +29,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { withErrorDetails } from "./api";
 import { audit, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, managedWorkspaceIds, requireUser, type Role, type User } from "./auth";
-import { get, newId, now, run } from "./db";
+import { asSystem, get, newId, now, run } from "./db";
 import { entraConfig, entraConfigured, LOGIN_BASE, OIDC_COOKIE, redirectUri } from "./entra";
 import { tenantOfOrg } from "./tenants";
 import { assertFeature } from "./limits";
@@ -233,7 +233,8 @@ export async function findOrCreateMicrosoftUser(orgId: string, p: { objectId: st
   const byOid = await get<Found>("SELECT id, org_id, name, email, role, entra_oid FROM users WHERE org_id = ? AND entra_oid = ?", orgId, p.objectId);
   if (byOid) return { user: byOid, created: false };
   const email = p.email.toLowerCase();
-  const byEmail = email ? await get<Found>("SELECT id, org_id, name, email, role, entra_oid FROM users WHERE lower(email) = ?", email) : undefined;
+  // Emails are unique across every org, so this lookup spans orgs (system work, lib/db.ts asSystem).
+  const byEmail = email ? await asSystem("email is unique across orgs", () => get<Found>("SELECT id, org_id, name, email, role, entra_oid FROM users WHERE lower(email) = ?", email)) : undefined;
   if (byEmail && byEmail.org_id !== orgId) throw new HttpError(409, `${email} already has a ${BRAND.name} account in another organization.`);
   if (byEmail) {
     if (byEmail.entra_oid && byEmail.entra_oid !== p.objectId) throw new HttpError(409, `${email} is already linked to a different Microsoft account.`);

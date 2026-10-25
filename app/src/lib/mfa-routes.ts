@@ -20,7 +20,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { handle, readJson } from "./api";
 import { audit, HttpError, requireUser, startSession, verifyPassword } from "./auth";
-import { get } from "./db";
+import { asSystem, get } from "./db";
 import { clearSignInFailures, clientIp, recordSignInFailure, signInLocked, LOCKED_MESSAGE } from "./login-limit";
 import {
   confirmTotpSetup, finishPasskeySetup, finishSecondStep, newBackupCodes, passkeySetupOptions, pendingSecondStep, removeFactor,
@@ -80,8 +80,9 @@ export function mfaRoutes(kind: AccountKind) {
 
   const POST = handle(async (req: Request, { params }: Ctx) => {
     const { action } = await params;
-    if (action === "signin-options") return { options: await secondStepPasskeyOptions(kind, (await cookies()).get(cookie.name)?.value, req) };
-    if (action === "verify") return verify(req);
+    // The second step of signing in comes before the session (and so the org) exists: system work (lib/db.ts).
+    if (action === "signin-options") return asSystem("two-step sign-in", async () => ({ options: await secondStepPasskeyOptions(kind, (await cookies()).get(cookie.name)?.value, req) }));
+    if (action === "verify") return asSystem("two-step sign-in", () => verify(req));
 
     const me = await signedIn(kind);
     const body = await readJson<{ id?: string; code?: string; password?: string; label?: string; response?: never }>(req);

@@ -34,7 +34,7 @@
 import "server-only";
 import crypto from "node:crypto";
 import { audit, HttpError, type User } from "./auth";
-import { all, DIALECT, get, newId, now, run, tx } from "./db";
+import { all, asSystem, DIALECT, get, newId, now, run, tx } from "./db";
 import { deleteWorkspace } from "./workspaces";
 import { FIRM_SCOPE, removeFirmIndex } from "./search";
 import { platformLog } from "./owner";
@@ -142,7 +142,8 @@ export async function scheduleGroupRolloff(user: User, workspaceId: string, days
         id, user.org_id, org?.name ?? "", workspaceId, ws.name, "the engagement ended", now(), deleteOn, user.name, now(), JSON.stringify(chats.map((c) => c.id)),
       );
       // Unlinked, but not "waiting": Sidekick stays in the chat (so cancelling can relink it) until the deletion.
-      await run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL WHERE workspace_id = ? AND org_id = ?", workspaceId, user.org_id);
+      // The chats leave the org (org_id NULL): system work under row-level security (lib/db.ts asSystem).
+      await asSystem("Teams chats without an org", () => run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL WHERE workspace_id = ? AND org_id = ?", workspaceId, user.org_id));
     });
     await tellChats(chats, `“${ws.name}” has ended`, `This group's engagement has ended, so I've stopped answering and taking notes here. Everything I kept for it will be deleted on ${dateText(deleteOn)}. Ask your ${BRAND.name} admin if you need anything from it before then.`);
     await audit(user, `Set group “${ws.name}” to end: read-only now, everything deleted on ${dateText(deleteOn)}${chats.length ? `; unlinked ${chats.length} Teams chat${chats.length === 1 ? "" : "s"}` : ""}`, "Data", workspaceId);
@@ -166,10 +167,11 @@ export async function cancelGroupRolloff(actor: Pick<User, "org_id" | "name"> & 
       const claimed = await run("UPDATE rolloffs SET status = 'canceled', closed_by = ?, closed_at = ? WHERE id = ? AND status = 'scheduled'", actor.name, now(), r.id);
       if (!claimed.changes) throw new HttpError(409, "This group is being deleted right now and can't be kept.");
       for (const id of ids) {
-        const done = await run(
+        // Only the chats this group had (its rolloff row lists them), which have no org until now: system work.
+        const done = await asSystem("Teams chats without an org", () => run(
           "UPDATE teams_conversations SET org_id = ?, workspace_id = ?, linked_by = ?, linked_at = ?, waiting_since = NULL WHERE id = ? AND workspace_id IS NULL AND leaving IS NULL",
           actor.org_id, workspaceId, actor.id ?? null, now(), id,
-        );
+        ));
         relinked += done.changes;
       }
     });
@@ -309,7 +311,8 @@ export async function deleteGroupWithCertificate(orgId: string, workspaceId: str
     const counts = await groupCounts(orgId, workspaceId);
     const { unlinked } = await deleteWorkspace(orgId, workspaceId);
     const ids = (JSON.parse(rolloff?.chats_json ?? "[]") as string[]).filter((x) => typeof x === "string");
-    for (const id of ids) await run("UPDATE teams_conversations SET waiting_since = ? WHERE id = ? AND workspace_id IS NULL AND waiting_since IS NULL", now(), id);
+    // This group's former chats (no org since it ended): system work under row-level security (lib/db.ts).
+    for (const id of ids) await asSystem("Teams chats without an org", () => run("UPDATE teams_conversations SET waiting_since = ? WHERE id = ? AND workspace_id IS NULL AND waiting_since IS NULL", now(), id));
     counts["Teams chats unlinked"] = unlinked + ids.length;
     const cert: Certificate = {
       id: certificateId(), scope: "group", organization: org?.name ?? rolloff?.org_name ?? "", group: ws.name,

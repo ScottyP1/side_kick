@@ -48,4 +48,4 @@ export const POST = handle(async (req: Request) => {
   await startSession(user.id);
   await audit(user, "Signed in", "Sign-in");
   return { ok: true };
-});
+}, { system: "sign-in" });

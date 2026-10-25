@@ -10,6 +10,8 @@
  *   3. Production build (`next build`), the same step the Docker image and the Azure deploy run. The tests
  *      above use `next dev`, which lets through some errors only a production build reports (for example a
  *      page that needs a <Suspense> boundary under cacheComponents), so this catches them before a deploy does.
+ * Every step runs in strict org-scope mode (SIDEKICK_DB_STRICT=1, lib/db.ts): a query on an org table with no org and
+ * no named system reason fails, so a missing scope (and so a gap in Postgres row-level security) can't slip through.
  * Several worktrees can run at once with their own ports and database: TEST_PORT / TEST_MT_PORT (defaults
  * 3200/3201 and 3210/3211) and TEST_DATABASE_URL.
  * Postgres tests use TEST_DATABASE_URL (default postgres:///sidekick_test, a database on this Mac that is
@@ -24,6 +26,7 @@ import os from "node:os";
 import path from "node:path";
 
 const APP = path.resolve(import.meta.dirname, "..");
+process.env.SIDEKICK_DB_STRICT ||= "1"; // see the header: the app copies the tests start inherit it
 const PG_URL = process.env.TEST_DATABASE_URL || "postgres:///sidekick_test";
 const node = process.execPath;
 const results = [];

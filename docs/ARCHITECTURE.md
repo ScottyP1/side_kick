@@ -27,7 +27,7 @@ Browser (client portal, Owner Console)        Microsoft Teams
 
 | File | Job |
 |---|---|
-| `lib/db.ts` | The async query API (`all`, `get`, `run`, `tx`) over SQLite (laptop) or Postgres (`DATABASE_URL`); SQLite schema + migrations. Every table with client data has `org_id` and usually `workspace_id` |
+| `lib/db.ts` | The async query API (`all`, `get`, `run`, `tx`) over SQLite (laptop) or Postgres (`DATABASE_URL`); SQLite schema + migrations. Every table with client data has `org_id` and usually `workspace_id`. Also the org scope behind Postgres row-level security (`withOrg`, `asSystem`, `setScopeOrg`; see "Row-level security" below) |
 | `db/schema.postgres.sql` | The Postgres schema, mirroring the SQLite one |
 | `lib/auth.ts` | Sessions, roles, `requireUser` (also blocks everything but the password change while a temporary password is pending), `requireWorkspace` (the workspace wall), audit log |
 | `lib/login-limit.ts` | Sign-in rate limit: failed password sign-ins per email and per IP, stored in `login_failures` (works across several app copies) |
@@ -200,8 +200,26 @@ Quality check: `npm --prefix app run eval:answers` runs the accuracy test set (`
 4. Unlinked conversation in a tied tenant (channel/group chat): on install the installer must be a Team Lead/admin (else Sidekick leaves, install.ts); it then waits to be assigned in the portal, and Sidekick reads, saves and answers nothing there (mentions get the "not set up yet" notice). Elsewhere (untied tenant, 1:1) the link-code card. Assigned via the picker → every message is tracked. Linked → `add`/`remove @name` commands (members.ts), or typing indicator now and the answer card after the request returns.
 5. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
 
+## Row-level security (the second lock)
+The walls above live in application code. Behind them, Postgres itself refuses to hand out another org's rows
+(details, measured overhead and the full list of system paths: `docs/security/2026-10-row-level-security.md`).
+- **Scope**: every unit of work carries an org scope (AsyncLocalStorage in `lib/db.ts`). `handle()` opens one with
+  no org; `currentUser()` (so `requireUser`) sets the person's org; it can't change to another org afterwards.
+  Background work says what it is: `withOrg(orgId, fn)` for one org (each queued job with an `org_id`, a Teams
+  answer, saving a trace) or `asSystem("reason", fn)` for named work across orgs (session and sign-in lookups,
+  the job queue itself, the Teams bot's lookups, the Owner Console via `requireOwner` → `markRequestSystem`).
+- **On the connection**: before each query `lib/db.ts` sets `app.org_id`, `app.bypass` and the role in one
+  statement (session level, remembered per pooled connection; `SET LOCAL` inside `tx`). Org work runs as the
+  role `sidekick_app`, which can't get around the policies; system work keeps the owner role with `app.bypass = 'on'`.
+- **Tables**: every table with an `org_id` column, plus `orgs` and `workspace_members`, found automatically at
+  start-up (`db/schema.postgres.sql`, end) and in `lib/db.ts` (`RLS_TABLES`). Group-level walls stay in the app.
+- **Strict in tests**: `SIDEKICK_DB_STRICT=1` (set by `tests/run.mjs`) makes a query on an org table with no org
+  and no system reason throw. In production it logs once and runs as system work.
+- **SQLite** has no row-level security; the scope is still tracked there, so strict mode catches gaps on both engines.
+
 ## Rules every change must keep
 - **Walls**: filter every query by `org_id`, and by a workspace id that went through `requireWorkspace` (or a linked Teams conversation). Never trust an id from the request on its own.
+- **Org scope**: new background work, routes outside `handle()` or work before sign-in picks its scope explicitly: `withOrg(orgId, …)` when it's for one org (preferred), `asSystem("why", …)` only when it must span orgs. Never use `asSystem` to make a user-facing query "work"; a failing strict-mode test means the scope is missing.
 - **Data, not instructions**: anything from documents, transcripts or users goes to Claude inside tags, and the system prompt says to ignore instructions in it.
 - **Who pays for AI**: AI work goes through `structured()`; work Sidekick pays for itself (support assistant, help bot) passes `payer`, which skips and is left out of the organization's AI credit (`usage_events.payer`).
 - **Guardrails**: anything that answers people (portal, Teams, assistant, Help chat, help bot) goes through `lib/guardrails.ts`: `screenQuestion` before, `cleanOutput` (and `checkGrounding` for sourced answers) after. Refusals use the fixed `MESSAGES`, never Claude-written text. `guard_events` stores rule/where/when only, never text.

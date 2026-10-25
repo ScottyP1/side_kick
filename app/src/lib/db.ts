@@ -16,6 +16,11 @@
  *   Queries use `?` placeholders (converted to `$1, $2…` for Postgres) and never string-built values,
  *   which keeps them injection-safe on both.
  * - **Async**: every call returns a Promise (`await all(...)`), because Postgres is a network service.
+ * - **Org scope and row-level security** (the second lock): every query runs for one org (`withOrg`, or the
+ *   request's org set by `setScopeOrg` from `currentUser`) or as named system work (`asSystem`). On Postgres the
+ *   scope goes onto the connection (`app.org_id`, `app.bypass`, role `sidekick_app`) and the policies in
+ *   `db/schema.postgres.sql` hide every other org's rows, even from a query without `WHERE org_id = ?`.
+ *   Design: docs/security/2026-10-row-level-security.md.
  */
 import "server-only";
 import { DatabaseSync } from "node:sqlite";
@@ -618,10 +623,154 @@ CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
 /** A value that can be bound to a `?` placeholder. */
 export type Param = string | number | null;
 
+/* ---------------- Org scope (the second lock) ---------------- */
+
+/**
+ * Who the database is working for right now, carried through every `await` with AsyncLocalStorage:
+ * - `org`: the organization whose rows this work may touch. On Postgres it becomes `app.org_id` on the connection,
+ *   and row-level security (db/schema.postgres.sql, docs/ARCHITECTURE.md → "Row-level security") hides every
+ *   other org's rows, even from a query that forgot its `WHERE org_id = ?`.
+ * - `system`: set (to a short reason, e.g. "job queue") only by `asSystem`, for named work that spans orgs or
+ *   runs before anyone is known (sign-in, Teams bot lookups, the job queue, Owner Console). It sets `app.bypass`.
+ * A request (`openRequestScope`, from `handle()`) starts with neither; `currentUser` (so `requireUser`) fills in `org`.
+ */
+type DbScope = { org: string | null; system: string | null };
+
+declare global {
+  var __sidekickDbScope: AsyncLocalStorage<DbScope> | undefined;
+  var __sidekickDbFallback: string | undefined;
+  var __sidekickDbUnscoped: Set<string> | undefined;
+}
+// One store per process, shared by every copy of this module after a development reload.
+const scopeStore = (globalThis.__sidekickDbScope ??= new AsyncLocalStorage<DbScope>());
+
+/**
+ * Runs `fn` as work for one organization: every query inside it (and anything it awaits) can only see and write
+ * that org's rows on Postgres. For background work done for one org (a job, a Teams message once its org is known).
+ */
+export function withOrg<T>(orgId: string, fn: () => Promise<T>): Promise<T> {
+  if (!orgId) throw new Error("withOrg needs an organization id");
+  return scopeStore.run({ org: orgId, system: null }, fn);
+}
+
+/**
+ * Runs `fn` as system work that may read and write every organization's rows (sets `app.bypass` on Postgres).
+ * Only for named code paths that must span orgs or run before the org is known: session and sign-in lookups,
+ * sign-up, the job queue and its watchers, retention, the Owner Console, Teams bot lookups by tenant or
+ * conversation, Microsoft Graph notifications, error and trace logging. `reason` names the path (it shows in
+ * the strict-mode report). Never use it to make a failing user-facing query "work": give it the user's org instead.
+ */
+export function asSystem<T>(reason: string, fn: () => Promise<T>): Promise<T> {
+  const org = scopeStore.getStore()?.org ?? null;
+  return scopeStore.run({ org, system: reason || "system" }, fn);
+}
+
+/** Runs `fn` as an API request with no org yet; `setScopeOrg` (from `currentUser`) fills it in. Called by `handle()`. */
+export function openRequestScope<T>(fn: () => Promise<T>): Promise<T> {
+  return scopeStore.run({ org: null, system: null }, fn);
+}
+
+/**
+ * Records that the current request works for `orgId`: called by `currentUser` (so `requireUser`) once the session
+ * is checked, by the Teams tab once its Microsoft tenant's org is known, and by the connector sign-in callback once
+ * its saved state names the org. The scope is shared by everything the request awaits from then on.
+ * Refuses to switch a request from one org to another, which would be a bug.
+ */
+export function setScopeOrg(orgId: string): void {
+  const s = scopeStore.getStore();
+  if (!s || !orgId) return;
+  if (s.org && s.org !== orgId && !s.system) throw new Error("This request already works for another organization");
+  s.org = orgId;
+}
+
+/** The org the current work is scoped to, or null (system work, or before sign-in). For tests and diagnostics. */
+export function scopeOrg(): string | null {
+  return scopeStore.getStore()?.org ?? null;
+}
+
+/**
+ * Makes this whole process system work when nothing more specific is set. Only for command-line scripts
+ * (`npm run seed:demo`, data copies) and the direct database-layer tests, never the web server.
+ */
+export function useSystemScopeForProcess(reason: string): void {
+  globalThis.__sidekickDbFallback = reason;
+}
+
+/**
+ * Strict mode (SIDEKICK_DB_STRICT, set by the automated tests): a query with no org and no system reason fails
+ * with an error naming the fix. `report` writes each such call site once to SIDEKICK_DB_SCOPE_LOG instead.
+ * Off (the default, and in production), such a query logs a warning once per statement and runs as system work,
+ * so a path the tests don't cover keeps working; signed-in request code always has its org by then.
+ */
+const STRICT = process.env.SIDEKICK_DB_STRICT || "";
+
+/**
+ * Marks the current request as system work from here on (for the Owner Console once the operator's session is
+ * checked: its pages span every org by design). Like `setScopeOrg`, it changes the request's shared scope.
+ */
+export function markRequestSystem(reason: string): void {
+  const s = scopeStore.getStore();
+  if (s) s.system = reason || "system";
+}
+
+/**
+ * The tables that hold an organization's data: every table with an `org_id` column (read from the schema above,
+ * so a new table is covered automatically), plus `orgs` and `workspace_members`. Postgres guards exactly these
+ * with row-level security, and only a query that names one of them needs an org or system scope.
+ */
+export const RLS_TABLES: ReadonlySet<string> = new Set([
+  "orgs",
+  "workspace_members",
+  ...[...SCHEMA.matchAll(/CREATE (?:VIRTUAL )?TABLE IF NOT EXISTS (\w+)\s*(?:USING \w+)?\s*\(([\s\S]*?)\n\);/g)]
+    .filter((m) => /\borg_id\b/.test(m[2]))
+    .map((m) => m[1]),
+]);
+const orgDataCache = new Map<string, boolean>();
+/** True when `sql` names one of `RLS_TABLES` (a word match on the statement text, remembered per statement). */
+export function touchesOrgData(sql: string): boolean {
+  let hit = orgDataCache.get(sql);
+  if (hit === undefined) {
+    hit = (sql.toLowerCase().match(/[a-z_][a-z0-9_]*/g) ?? []).some((w) => RLS_TABLES.has(w));
+    if (orgDataCache.size < 5000) orgDataCache.set(sql, hit);
+  }
+  return hit;
+}
+
+/** The context a query runs in: org id ('' for none) and whether row-level security is bypassed. */
+type QueryCtx = { org: string; bypass: boolean };
+
+function queryCtx(sql: string): QueryCtx {
+  const s = scopeStore.getStore();
+  if (s?.system) return { org: s.org ?? "", bypass: true };
+  if (s?.org) return { org: s.org, bypass: false };
+  // No org tables involved (sign-in limits, platform switches, the operator's own tables): nothing to guard.
+  if (globalThis.__sidekickDbFallback || !touchesOrgData(sql)) return { org: "", bypass: true };
+  const where = s ? "a request before its organization is known" : "no request or job";
+  const message = `Database query outside any org scope (${where}). Wrap the work in withOrg(orgId, ...) or asSystem("why", ...) from lib/db.ts. SQL: ${sql.replace(/\s+/g, " ").trim().slice(0, 160)}`;
+  if (STRICT === "report") {
+    const site = (new Error().stack ?? "").split("\n").slice(2).filter((l) => !l.includes("/lib/db.ts") && !l.includes("node:")).slice(0, 4).join(" | ");
+    const seen = (globalThis.__sidekickDbUnscoped ??= new Set());
+    if (!seen.has(site)) {
+      seen.add(site);
+      fs.appendFileSync(process.env.SIDEKICK_DB_SCOPE_LOG || "db-scope.log", `${message}\n   at ${site}\n`);
+    }
+  } else if (STRICT) {
+    throw new Error(message);
+  } else {
+    const seen = (globalThis.__sidekickDbUnscoped ??= new Set());
+    const key = sql.slice(0, 200);
+    if (!seen.has(key)) {
+      seen.add(key);
+      console.warn(`[db] ${message}`);
+    }
+  }
+  return { org: "", bypass: true };
+}
+
 /** What each engine must provide. `tx` runs `fn` with every query inside it in one transaction. */
 type Driver = {
-  query(sql: string, params: Param[]): Promise<Record<string, unknown>[]>;
-  exec(sql: string, params: Param[]): Promise<{ changes: number }>;
+  query(sql: string, params: Param[], ctx: QueryCtx): Promise<Record<string, unknown>[]>;
+  exec(sql: string, params: Param[], ctx: QueryCtx): Promise<{ changes: number }>;
   tx<T>(fn: () => Promise<T>): Promise<T>;
 };
 
@@ -947,7 +1096,29 @@ export function toPgPlaceholders(sql: string): string {
   return out;
 }
 
-const pgTx = new AsyncLocalStorage<pg.PoolClient>();
+/** The transaction a query joins: its connection and the context last applied inside it (SET LOCAL). */
+const pgTx = new AsyncLocalStorage<{ client: pg.PoolClient; ctx: string }>();
+
+/**
+ * The role every app query runs as on Postgres (db/schema.postgres.sql creates it): no BYPASSRLS, only row
+ * access, so row-level security applies even when DATABASE_URL's login is a superuser (as on a developer's Mac).
+ */
+export const RLS_ROLE = "sidekick_app";
+/** Rollback switch: SIDEKICK_RLS=off turns row-level security off (policies disabled at the next start). */
+const RLS_ON = process.env.SIDEKICK_RLS !== "off";
+// The context last applied to a pooled connection at session level (outside any transaction), so an unchanged
+// context costs nothing: steady traffic for one org needs no extra round trip.
+const SESSION_CTX = Symbol("sidekickCtx");
+type CtxClient = pg.PoolClient & { [SESSION_CTX]?: string };
+
+/** How row-level security is working on this server, for the health page and tests. */
+export type RlsStatus = { mode: "role" | "forced-owner" | "off" | "sqlite"; detail: string };
+let rlsStatus: RlsStatus = DIALECT === "sqlite" ? { mode: "sqlite", detail: "SQLite has no row-level security" } : { mode: "off", detail: "not connected yet" };
+/** The row-level security mode found when the server connected to Postgres (see `RlsStatus`). */
+export async function rowLevelSecurity(): Promise<RlsStatus> {
+  if (DIALECT === "postgres") await driver();
+  return rlsStatus;
+}
 
 /** True for a Postgres URL that points at this computer (no network, so no TLS needed). */
 export function isLocalDatabase(url: string): boolean {
@@ -981,8 +1152,13 @@ async function postgresDriver(): Promise<Driver> {
   // Several app copies (or job workers) starting at once would apply the schema together, and its ALTER TABLEs
   // can deadlock each other; a session-level advisory lock lets one copy apply it at a time.
   const applySchema = async (sql: string) => {
-    const client = await pool.connect();
+    const client: CtxClient = await pool.connect();
     try {
+      // The schema and data migrations run as the database owner (not the app role) and span every org. The
+      // session settings are put back below, and the connection's cached context is forgotten.
+      client[SESSION_CTX] = undefined;
+      await client.query("RESET ROLE");
+      await client.query("SELECT set_config('app.bypass', 'on', false), set_config('sidekick.rls', $1, false)", [RLS_ON ? "on" : "off"]);
       await client.query("SELECT pg_advisory_lock(727274)");
       await client.query(sql);
       // Data migrations (`DATA_MIGRATIONS`, same SQL as SQLite) in one transaction, still under the lock.
@@ -996,10 +1172,31 @@ async function postgresDriver(): Promise<Driver> {
       }
     } finally {
       await client.query("SELECT pg_advisory_unlock(727274)").catch(() => {});
+      await client.query("SELECT set_config('app.bypass', 'off', false)").catch(() => {});
       client.release();
     }
   };
   await applySchema(applied);
+  // Which way row-level security works here: as the app role (normal), else as the owner with FORCE (when this
+  // login may not switch to the role), else not at all (a login that bypasses it, or SIDEKICK_RLS=off).
+  const who = (await pool.query(
+    `SELECT r.rolsuper OR r.rolbypassrls AS bypasses, EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AND pg_has_role(current_user, $1, 'MEMBER') AS can_switch
+       FROM pg_roles r WHERE r.rolname = current_user`, [RLS_ROLE],
+  )).rows[0] as { bypasses: boolean; can_switch: boolean };
+  const useRole = RLS_ON && who.can_switch;
+  rlsStatus = !RLS_ON ? { mode: "off", detail: "turned off with SIDEKICK_RLS=off" }
+    : useRole ? { mode: "role", detail: `queries run as ${RLS_ROLE}` }
+    : who.bypasses ? { mode: "off", detail: `the database login bypasses row-level security and can't switch to ${RLS_ROLE}` }
+    : { mode: "forced-owner", detail: "queries run as the table owner; FORCE ROW LEVEL SECURITY applies" };
+  if (rlsStatus.mode === "off" && RLS_ON) console.warn(`[db] Row-level security is NOT active: ${rlsStatus.detail}.`);
+  // The settings that make a context: the role, the org and the bypass flag, as one statement.
+  // Turned off (SIDEKICK_RLS=off): one fixed context, so connections never need the settings again.
+  const ctxKey = (c: QueryCtx) => (RLS_ON ? `${c.org}|${c.bypass ? "on" : "off"}` : "rls-off");
+  const ctxSql = (local: boolean) =>
+    `SELECT set_config('role', $1, ${local}), set_config('app.org_id', $2, ${local}), set_config('app.bypass', $3, ${local})`;
+  // System work keeps the login's own role (the table owner, which may also change the schema); org work runs as
+  // the app role, which can't get around the policies.
+  const ctxParams = (c: QueryCtx) => [useRole && !c.bypass ? RLS_ROLE : "none", c.org, c.bypass || !RLS_ON ? "on" : "off"];
   // In development the server outlives schema edits; re-apply the (idempotent) schema when the file changes.
   const ensureSchema = async () => {
     if (process.env.NODE_ENV === "production") return;
@@ -1009,22 +1206,45 @@ async function postgresDriver(): Promise<Driver> {
       applied = current;
     }
   };
-  const runner = () => pgTx.getStore() ?? pool;
+  /** Runs one statement with `ctx` applied: inside the current transaction (SET LOCAL), or on a pooled connection. */
+  const send = async (sql: string, params: Param[], ctx: QueryCtx) => {
+    await ensureSchema();
+    const want = ctxKey(ctx);
+    const inTx = pgTx.getStore();
+    if (inTx) {
+      if (inTx.ctx !== want) {
+        await inTx.client.query(ctxSql(true), ctxParams(ctx));
+        inTx.ctx = want;
+      }
+      return inTx.client.query(toPgPlaceholders(sql), params);
+    }
+    const client: CtxClient = await pool.connect();
+    try {
+      if (client[SESSION_CTX] !== want) {
+        client[SESSION_CTX] = undefined; // unknown until the settings are confirmed
+        await client.query(ctxSql(false), ctxParams(ctx));
+        client[SESSION_CTX] = want;
+      }
+      return await client.query(toPgPlaceholders(sql), params);
+    } finally {
+      client.release();
+    }
+  };
   return {
-    async query(sql, params) {
-      await ensureSchema();
-      return (await runner().query(toPgPlaceholders(sql), params)).rows;
+    async query(sql, params, ctx) {
+      return (await send(sql, params, ctx)).rows;
     },
-    async exec(sql, params) {
-      await ensureSchema();
-      return { changes: (await runner().query(toPgPlaceholders(sql), params)).rowCount ?? 0 };
+    async exec(sql, params, ctx) {
+      return { changes: (await send(sql, params, ctx)).rowCount ?? 0 };
     },
     async tx(fn) {
       if (pgTx.getStore()) return fn(); // nested: join the outer transaction
-      const client = await pool.connect();
+      await ensureSchema();
+      const client: CtxClient = await pool.connect();
       try {
         await client.query("BEGIN");
-        const out = await pgTx.run(client, fn);
+        // Settings made with SET LOCAL end with the transaction, so the connection's own context is unchanged.
+        const out = await pgTx.run({ client, ctx: client[SESSION_CTX] ?? "" }, fn);
         await client.query("COMMIT");
         return out;
       } catch (e) {
@@ -1087,7 +1307,7 @@ function timeQuery(sql: string, t0: number) {
 export async function all<T = Row>(sql: string, ...params: Param[]): Promise<T[]> {
   const t0 = performance.now();
   try {
-    return (await (await driver()).query(sql, params)) as T[];
+    return (await (await driver()).query(sql, params, queryCtx(sql))) as T[];
   } finally {
     timeQuery(sql, t0);
   }
@@ -1100,7 +1320,7 @@ export async function get<T = Row>(sql: string, ...params: Param[]): Promise<T |
 export async function run(sql: string, ...params: Param[]): Promise<{ changes: number }> {
   const t0 = performance.now();
   try {
-    return await (await driver()).exec(sql, params);
+    return await (await driver()).exec(sql, params, queryCtx(sql));
   } finally {
     timeQuery(sql, t0);
   }

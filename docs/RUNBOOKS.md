@@ -22,6 +22,7 @@ operations review is in `docs/security/`.
 | Reminders/watchers stopped, Owner Console → Job queue shows a backlog, stuck or dead jobs | [Job queue stuck](#job-queue-stuck) |
 | Setting up automatic meeting notes and the Teams tab, or they stopped working | [Automatic meeting notes](#automatic-meeting-notes-microsoft-setup) |
 | "Sidekick isn't allowed to remove itself from Teams chats" under Needs attention, or a Teams chat never shows as waiting | [Teams self-removal](#teams-sidekick-cant-remove-itself-from-chats) |
+| Pages show nothing or "not found" for data that exists, after the row-level security deploy | [Row-level security](#row-level-security) |
 
 ## Roll back a bad deploy
 
@@ -43,6 +44,61 @@ Then check `https://<the live address>/api/health` answers `"ok":true` and `"com
 - A rollback changes only the code. Database tables added by the newer version stay (they're
   `CREATE … IF NOT EXISTS`, so the older code just ignores them); nothing is dropped.
 - Fix the problem on a branch, merge, and deploy again as usual.
+
+## Row-level security
+
+The second lock behind the app's org checks (`docs/security/2026-10-row-level-security.md`): Postgres only hands
+out rows of the organization a request works for.
+
+**How it deploys.** Nothing to do by hand. It's part of `app/db/schema.postgres.sql`, which every app copy applies
+at start-up (one copy at a time, under an advisory lock). The block at the end of that file creates the role
+`sidekick_app` (no login), grants it row access, adds the policy `sidekick_org_v3` and an `org_id` index where
+missing, and turns on `ENABLE` + `FORCE ROW LEVEL SECURITY` on every table with an `org_id` column. It changes no
+data, checks before each step (a second start changes nothing), and the tables are small, so it takes seconds.
+After the deploy, check it's on:
+
+```bash
+curl -s https://<the live address>/api/health
+```
+
+It should show `"rowLevelSecurity":true` under `database`. If it says `false`, the app log says why
+(`Row-level security is NOT active: …`), for example when the database login may not create the role. The site
+still works then, protected by the app's own checks only.
+
+**Signs something's wrong.** A page or Teams answer suddenly empty or "not found" for data that's there, or a
+`new row violates row-level security policy` error with a reference code in Owner Console → App errors. Both
+mean a code path runs without the right org scope (`lib/db.ts` `withOrg`/`asSystem`). Production logs
+`[db] Database query outside any org scope` once per such statement, which names the query.
+
+**Roll back (turn it off), no deploy needed.** Set the switch and restart; the next start turns row-level
+security off on every table (the policies stay but do nothing):
+
+```bash
+az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars SIDEKICK_RLS=off
+```
+
+Then `/api/health` shows `"rowLevelSecurity":false`. To turn it back on, remove the variable (the next start
+turns it on again):
+
+```bash
+az containerapp update -g sidekick-rg -n sidekick-app --remove-env-vars SIDEKICK_RLS
+```
+
+**Last resort, straight in the database** (only if the app can't start at all): connect with `psql` as the
+admin and run the statements below. They hold only until the next app start re-applies the schema, so also set
+`SIDEKICK_RLS=off` as above.
+
+```sql
+DO $$ DECLARE t text; BEGIN
+  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND rowsecurity LOOP
+    EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY, DISABLE ROW LEVEL SECURITY', t);
+  END LOOP;
+END $$;
+```
+
+A code rollback ([Roll back](#roll-back-a-bad-deploy), or the automatic one) to a version from before row-level
+security is safe with the policies still on: older code connects as the owner and never sets `app.org_id`, and
+the policy lets exactly those connections through (so the old version keeps working during a deploy, too).
 
 ## Restore the database
 

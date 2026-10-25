@@ -28,7 +28,7 @@
 import "server-only";
 import { z } from "zod";
 import { isAdmin, isLead, managedWorkspaceIds, workspaceIdsFor, type User } from "./auth";
-import { all, get } from "./db";
+import { all, asSystem, get } from "./db";
 import { structured, type Ctx } from "./claude";
 import { assertEnabled, orgFlags } from "./owner";
 import { orgAccess } from "./billing";
@@ -85,7 +85,8 @@ export async function setupChecks(user: User, message = ""): Promise<Check[]> {
     })));
     const tenant = await tenantOfOrg(user.org_id);
     const waiting = isAdmin(user) && tenant
-      ? Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM teams_conversations WHERE tenant_id = ? AND workspace_id IS NULL AND waiting_since IS NOT NULL", tenant))?.n ?? 0)
+      // Waiting chats have no org yet (row-level security hides them from any org); the tenant is the wall here.
+      ? Number((await asSystem("Teams chats without an org", () => get<{ n: number }>("SELECT COUNT(*) AS n FROM teams_conversations WHERE tenant_id = ? AND workspace_id IS NULL AND waiting_since IS NOT NULL", tenant)))?.n ?? 0)
       : 0;
     checks.push({
       name: "Teams chats",

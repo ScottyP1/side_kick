@@ -21,7 +21,7 @@
  *   own role (Viewers can't). Everything else links to the portal.
  */
 import "server-only";
-import { all, get, run } from "../db";
+import { all, asSystem, get, run, setScopeOrg } from "../db";
 import { audit, canEdit, HttpError, requireWorkspace, workspaceIdsFor, type User } from "../auth";
 import { verifyTeamsSsoToken } from "../entra";
 import { orgForTenant, portalUrl } from "../tenants";
@@ -39,9 +39,11 @@ export async function tabUser(req: Request): Promise<User> {
   const token = /^Bearer (.+)$/i.exec(auth)?.[1] ?? "";
   if (!token) throw new HttpError(401, `Open ${BRAND.name} inside Microsoft Teams to use this tab.`);
   const who = await verifyTeamsSsoToken(token);
-  const org = await orgForTenant(who.tenantId);
+  // Which org a Microsoft tenant belongs to is a lookup across orgs (system work); the rest runs as that org.
+  const org = await asSystem("Teams tab sign-in", () => orgForTenant(who.tenantId));
   if (!org) throw new HttpError(403, `Your organization hasn't set up ${BRAND.name} yet. An admin can sign up at ${portalUrl("/signup")}.`);
   if (org.status === "Suspended") throw new HttpError(403, `Your organization's ${BRAND.name} access is paused. Contact the ${BRAND.name} team.`);
+  setScopeOrg(org.id);
   const user = await get<User>("SELECT id, org_id, name, email, role, must_change_password FROM users WHERE org_id = ? AND entra_oid = ?", org.id, who.objectId);
   if (!user) throw new HttpError(403, `You don't have a ${BRAND.name} account yet, or haven't signed in with Microsoft once. Ask your ${BRAND.name} admin to add you, then sign in at ${portalUrl("/login")} with Microsoft.`);
   traceScope({ orgId: user.org_id, actor: user.name, userId: user.id });

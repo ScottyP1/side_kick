@@ -39,12 +39,16 @@ type AutoRecord = {
   changedAt: string | null;
   lastCheckAt: string | null;
   lastError: string | null;
+  permissionMissing?: boolean;
   upcoming: { title: string; startsAt: string | null; status: "set" | "already"; group: string }[];
   /** Upcoming meetings left alone, by reason (admins and Team Leads only; no titles are kept for these). */
   skipped?: { reason: string; count: number }[];
   failed: { title: string; reason: string | null }[];
 };
-type Status = { enabled: boolean; connected: boolean; changedBy: string | null; lastCheckAt: string | null; lastError: string | null; instant: boolean; recent: Recent[]; autoRecord?: AutoRecord };
+type Status = { enabled: boolean; connected: boolean; changedBy: string | null; lastCheckAt: string | null; lastError: string | null; permissionMissing?: boolean; instant: boolean; recent: Recent[]; autoRecord?: AutoRecord };
+
+/** Link to the checklist of Microsoft permissions (Settings), shown after a "not approved" error. */
+const PermissionsLink = () => <a href="/settings#microsoft-permissions">See Microsoft permissions</a>;
 
 const STATUS_PILL: Record<Recent["status"], { label: string; kind: "good" | "info" | "warn" | "bad" | "hand" }> = {
   captured: { label: "Writing notes", kind: "info" },
@@ -121,7 +125,7 @@ export function AutoNotesPanel({ role, onOpen }: { role: string; onOpen: (meetin
         {admin && !s.connected && (
           <div className="callout"><Icon n="alert" /><div>Connect {BRAND.name} to your Microsoft 365 organization first (Settings → Microsoft sign-in). A Microsoft admin then approves meeting transcripts once.</div></div>
         )}
-        {s.enabled && s.lastError && manager && <div className="callout bad"><Icon n="alert" /><div>{s.lastError}</div></div>}
+        {s.enabled && s.lastError && manager && <div className="callout bad"><Icon n="alert" /><div>{s.lastError}{s.permissionMissing && <> <PermissionsLink /></>}</div></div>}
         {manager && waiting.map((r) => (
           <div key={r.id} className="callout">
             <Icon n="users" />
@@ -219,7 +223,7 @@ function AutoRecordSection({ r, admin, manager, busy, onToggle }: { r: AutoRecor
             ? `${BRAND.name} turns on Record and transcribe automatically for upcoming scheduled meetings that are clearly one group's (never with people from outside your organization). Teams also saves a video recording.${r.lastCheckAt ? ` Last checked ${fmtDate(r.lastCheckAt)}.` : ""}`
             : "People forget to start transcription. Turn this on and scheduled group meetings transcribe by themselves. Teams also saves a video recording, because Microsoft doesn't let apps choose transcribe only."}
         </div>
-        {manager && r.enabled && r.lastError && <div className="callout bad"><Icon n="alert" /><div>{r.lastError}</div></div>}
+        {manager && r.enabled && r.lastError && <div className="callout bad"><Icon n="alert" /><div>{r.lastError}{r.permissionMissing && <> <PermissionsLink /></>}</div></div>}
         {r.enabled && r.upcoming.length > 0 && (
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {r.upcoming.map((m, i) => <li key={i}><b>{m.title}</b> · {fmtTime(m.startsAt)} · {m.group}{m.status === "already" ? <span className="muted"> (the organizer had already turned it on)</span> : null}</li>)}

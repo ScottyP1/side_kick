@@ -4,7 +4,8 @@
  * - signs the person in: their Microsoft tenant must be connected to a Sidekick organization and they
  *   must have been added there (matched by Microsoft account id, or by email the first time); or
  * - (mode "link") connects the Org Owner's organization to their Microsoft tenant; or
- * - (admin consent) records that the organization's Microsoft admin approved Sidekick (lib/directory.ts).
+ * - (admin consent) records that the organization's Microsoft admin approved Sidekick (lib/directory.ts), refreshes
+ *   Settings → Microsoft permissions (lib/graph-permissions.ts) and returns to the page the approval started from.
  * Problems never fail silently: the browser lands on the sign-in page (or Settings) with the reason.
  * Audited: "Signed in with Microsoft", "Connected Microsoft sign-in".
  */
@@ -15,7 +16,8 @@ import { audit, HttpError, startSession } from "@/lib/auth";
 import { get, run } from "@/lib/db";
 import { FLASH_COOKIE, FLASH_SECONDS } from "@/lib/flash";
 import { finishMicrosoftSignIn, OIDC_COOKIE, redirectUri, safeNext, type MicrosoftIdentity } from "@/lib/entra";
-import { finishAdminConsent, isConsentReply } from "@/lib/directory";
+import { consentReplyPath, finishAdminConsent } from "@/lib/directory";
+import { checkPermissions } from "@/lib/graph-permissions";
 import { tieOrgToTenant } from "@/lib/tenants";
 import { BRAND } from "@/lib/brand";
 
@@ -25,12 +27,19 @@ export const GET = handle(async (req: Request) => {
   jar.delete({ name: OIDC_COOKIE, path: "/api/auth/microsoft" });
   const go = (path: string) => NextResponse.redirect(new URL(path, redirectUri(req)));
   let mode: "signin" | "link" | "consent" = "signin";
+  let consentPath: "/settings" | "/users" = "/users";
   try {
-    // The admin-consent round trip ("Approve Sidekick for your organization") comes back here too.
-    if (await isConsentReply(req)) {
+    // The admin-consent round trip ("Approve Sidekick for your organization") comes back here too, to the page it
+    // started from (Settings → Microsoft permissions, or Users & access).
+    const replyPath = await consentReplyPath(req);
+    if (replyPath) {
       mode = "consent";
-      await finishAdminConsent(req, cookieState);
-      return go("/users?microsoft=approved");
+      consentPath = replyPath;
+      const approver = await finishAdminConsent(req, cookieState);
+      // Refresh the permissions checklist right away. Best effort: Microsoft can take a minute to show a new
+      // approval, and the checklist then says "Not checked yet" with Check now.
+      await checkPermissions(approver.org_id, null).catch((e) => console.error("Checking Microsoft permissions after approval failed", e instanceof Error ? e.message : e));
+      return go(`${replyPath}?microsoft=approved`);
     }
     const { who, saved } = await finishMicrosoftSignIn(req, cookieState);
     mode = saved.mode;
@@ -46,7 +55,7 @@ export const GET = handle(async (req: Request) => {
     const message = await errorMessageFor(req, e);
     // The message travels in a short-lived cookie, not the address, so a link can't put its own words on the page (lib/flash.ts).
     jar.set(FLASH_COOKIE, message, { path: "/", maxAge: FLASH_SECONDS, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
-    return go(`${mode === "link" ? "/settings" : mode === "consent" ? "/users" : "/login"}?error=1`);
+    return go(`${mode === "link" ? "/settings" : mode === "consent" ? consentPath : "/login"}?error=1${mode === "consent" && consentPath === "/settings" ? "&about=permissions" : ""}`);
   }
 }, { system: "Microsoft sign-in" });
 

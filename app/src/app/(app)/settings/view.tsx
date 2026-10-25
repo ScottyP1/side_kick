@@ -3,7 +3,9 @@
 /**
  * Settings (/settings), in two parts:
  * - **Company settings** (Org Owners and Org Admins only): Microsoft sign-in (connect the org's Microsoft tenant,
- *   require it), "Require two-step sign-in for everyone" (Org Owner; Org Admins see it read-only), organization
+ *   require it), **Microsoft permissions** (the checklist of what Sidekick may do in Microsoft 365, with Check now
+ *   and Approve, components/microsoft-permissions.tsx; Team Leads see it read-only under "Your organization"),
+ *   "Require two-step sign-in for everyone" (Org Owner; Org Admins see it read-only), organization
  *   branding (logo and brand color), **Export your data** (the whole organization as a zip, GET /api/export) and
  *   **Roll-offs and certificates**: groups ending, a pending deletion of the organization, and deletion
  *   certificates to download (GET /api/rolloffs).
@@ -15,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/shell";
 import { TwoStepPanel } from "@/components/two-step";
+import { MicrosoftPermissionsPanel } from "@/components/microsoft-permissions";
 import { api, Icon, Pill, Switch, useReportError, useToast } from "@/components/ui";
 import { takeFlash } from "@/lib/flash";
 import { BACKUP_RETENTION_DAYS, ORG_GRACE_DAYS } from "@/lib/rolloff-policy";
@@ -39,6 +42,8 @@ function MicrosoftPanel() {
   const load = useCallback(() => api<MsStatus>("/api/auth/microsoft").then(setS).catch(reportError), [reportError]);
   useEffect(() => {
     const q = new URLSearchParams(location.search);
+    // The approval round trip of Microsoft permissions is that panel's (components/microsoft-permissions.tsx).
+    if (q.get("microsoft") === "approved" || q.get("about") === "permissions") return void load();
     if (q.get("microsoft") === "connected") toast("Microsoft sign-in connected");
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (q.has("error")) setError(takeFlash("Connecting Microsoft sign-in didn't finish. Try again."));
@@ -304,6 +309,7 @@ export default function SettingsPage() {
           <div className="grid g2">
             <MicrosoftPanel />
             <TwoStepPolicyPanel />
+            <MicrosoftPermissionsPanel />
             <div className="panel">
               <div className="panel-h"><h2>Your branding</h2><span className="muted">Applies to the whole portal</span></div>
               <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -335,6 +341,12 @@ export default function SettingsPage() {
             </div>
             <DataPanel />
           </div>
+        </section>
+      )}
+      {!me.user.admin && me.user.lead && (
+        <section aria-labelledby="ms-perm-h" style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+          <h2 id="ms-perm-h" className="eyebrow">Your organization</h2>
+          <div className="grid g2"><MicrosoftPermissionsPanel /></div>
         </section>
       )}
       <section aria-labelledby="account-h" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: me.user.admin ? 18 : 0 }}>

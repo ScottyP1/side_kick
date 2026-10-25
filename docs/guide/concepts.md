@@ -92,6 +92,9 @@ Every document is tagged:
 
 When **client guests are present** (in a meeting marked "Client guests attended", or a Teams channel marked as having client guests), Sidekick only uses Shareable sources, from the group and from the firm library. Notes from an internal-only meeting are never posted to a channel that has client guests.
 
+## Microsoft permissions
+What Sidekick may do in your company's Microsoft 365 (read the people directory, read meeting transcripts, turn on recording, remove itself from chats). Each permission belongs to Sidekick's app and is approved for your whole organization by one of your **Microsoft admins**, all at once, with **Approve Sidekick for your organization**. **Settings → Microsoft permissions** lists every one with the features it unlocks and whether it's **Approved**, **Not approved** or **Not checked yet**; **Check now** asks Microsoft once and keeps the answer. When a new Sidekick feature needs a new permission, it shows Not approved until your Microsoft admin approves again (only the new one is added). Reading a Teams chat's messages isn't part of this: Teams grants that per chat when Sidekick is added there.
+
 ## Sidekick in Teams
 Sidekick can be added to Teams channels and chats. Each channel or chat is **linked to one workspace** by an admin, and Sidekick only answers from that workspace there. See [Sidekick in Teams](teams-guide.md).
 

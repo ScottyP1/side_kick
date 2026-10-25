@@ -42,7 +42,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { all, get, newId, now, run } from "./db";
 import { audit, auditAsSidekick, HttpError, type User } from "./auth";
-import { ConsentNeededError, graphCall } from "./directory";
+import { ConsentNeededError, graphCall, NOT_APPROVED } from "./directory";
 import { entraConfigured } from "./entra";
 import { enqueue } from "./jobs";
 import { span } from "./trace";
@@ -70,7 +70,7 @@ const MAX_PAGES = 5;
 export type AutoRecordStatus = "set" | "already" | "skipped" | "failed" | "checking";
 
 /** The plain message when Microsoft refuses the calendar read or the meeting change (permission not approved). */
-export const RECORD_DENIED = `${BRAND.name} can't turn on automatic recording yet. A Microsoft admin of your organization needs to approve the new permissions to read calendars and change Teams meetings (Users & access → Approve ${BRAND.name} for your organization), and the Teams application access policy must include ${BRAND.name} (see "Automatic notes" in the help center).`;
+export const RECORD_DENIED = `${BRAND.name} can't turn on automatic recording yet. A Microsoft admin of your organization needs to approve the new permissions to read calendars and change Teams meetings (Settings → Microsoft permissions → Approve ${BRAND.name} for your organization), and the Teams application access policy must include ${BRAND.name} (see "Automatic notes" in the help center).`;
 
 /** Whether automatic recording is switched on for this organization (it also needs automatic notes on to run). */
 export async function autoRecordOn(orgId: string): Promise<boolean> {
@@ -151,6 +151,8 @@ export async function autoRecordStatus(orgId: string, opts: { workspaceIds: stri
     changedAt: row?.auto_record_at ?? null,
     lastCheckAt: row?.record_checked_at ?? null,
     lastError: opts.manager ? row?.record_error ?? null : null,
+    /** The last error is a Microsoft permission not approved: the page links to Settings → Microsoft permissions. */
+    permissionMissing: Boolean(opts.manager && row?.record_error && [RECORD_DENIED, NOT_APPROVED].includes(row.record_error)),
     upcoming: rows
       .filter((r) => r.workspace_id && allowed.has(r.workspace_id))
       .slice(0, 10)

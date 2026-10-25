@@ -153,7 +153,7 @@ function installBase(conv: TeamsConversation): string {
   if (!conv.team_aad_id) throw new HttpError(400, `Teams didn't say which team this channel belongs to. Remove ${BRAND.name} in Teams: the team's ⋯ → Manage team → Apps.`);
   return `/v1.0/teams/${encodeURIComponent(conv.team_aad_id)}`;
 }
-const DENIED = `${BRAND.name} isn't allowed to remove itself from Teams chats in your organization yet. A Microsoft admin approves it once (Users & access → Approve ${BRAND.name} for your organization), or remove ${BRAND.name} in Teams yourself.`;
+const DENIED = `${BRAND.name} isn't allowed to remove itself from Teams chats in your organization yet. A Microsoft admin approves it once (Settings → Microsoft permissions → Approve ${BRAND.name} for your organization), or remove ${BRAND.name} in Teams yourself.`;
 
 /**
  * Sidekick's own installation in the chat (or the channel's team), as Graph lists it, or null if it isn't

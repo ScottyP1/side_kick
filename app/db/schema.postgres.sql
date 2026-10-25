@@ -239,6 +239,10 @@ CREATE TABLE IF NOT EXISTS org_setup (
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS added_by TEXT;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS added_by_oid TEXT;
 ALTER TABLE orgs ADD COLUMN IF NOT EXISTS graph_consent_at TEXT;
+-- Settings → Microsoft permissions (lib/graph-permissions.ts): the last "Check now" result, when and by whom.
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS graph_roles TEXT;
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS graph_roles_at TEXT;
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS graph_roles_by TEXT;
 CREATE INDEX IF NOT EXISTS teams_conversations_tenant ON teams_conversations(tenant_id);
 -- Unassigned chats (lib/teams/install.ts): waiting since, the team's Microsoft 365 group id, pending departure.
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS waiting_since TEXT;

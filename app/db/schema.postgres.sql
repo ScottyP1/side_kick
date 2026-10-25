@@ -580,6 +580,7 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_by TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_at TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_posted_to TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_sent_at TEXT;
 -- Scale readiness: Graph subscriptions are looked up per organization (renewals, notes status).
 CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at);
 -- Upload guard (lib/upload-guard.ts): held documents (status 'Held', text in held_text until kept or moved), what

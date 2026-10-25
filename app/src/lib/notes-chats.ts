@@ -39,7 +39,7 @@ export type NotesMode = "chosen" | "none" | "unset";
  *   `guests` chats);
  * - `defaultId`: the chat notes go to while nobody has chosen;
  * - `needsChoice`: true when nobody chose (or every chosen chat is gone) and the group has 2+ chats;
- * - `last`: the latest meeting whose notes were posted, and to which chats (names, as posted).
+ * - `last`: the meeting whose notes were posted most recently, and to which chats (names, as posted).
  */
 export type NotesPlan = {
   mode: NotesMode;
@@ -80,7 +80,7 @@ export async function notesPlan(orgId: string, workspaceId: string): Promise<Not
   if (mode === "chosen" && !targets.length) mode = "unset";
   if (mode === "unset") targets = defaultId ? [defaultId] : [];
   const lastRow = await get<{ title: string; held_at: string; notes_posted_to: string }>(
-    "SELECT title, held_at, notes_posted_to FROM meetings WHERE org_id = ? AND workspace_id = ? AND notes_posted_to IS NOT NULL ORDER BY held_at DESC, id DESC LIMIT 1",
+    "SELECT title, held_at, notes_posted_to FROM meetings WHERE org_id = ? AND workspace_id = ? AND notes_sent_at IS NOT NULL ORDER BY notes_sent_at DESC, id DESC LIMIT 1",
     orgId, workspaceId,
   );
   const last: NotesPlan["last"] = lastRow ? { title: lastRow.title, held_at: lastRow.held_at, chats: parsePosted(lastRow.notes_posted_to).map((c) => c.name) } : null;
@@ -99,9 +99,12 @@ export async function notesTargetsFor(orgId: string, workspaceId: string, extern
   return plan.chats.filter((c) => plan.targets.includes(c.id) && (external || !c.guests));
 }
 
-/** Remembers which chats a meeting's notes were posted to, shown on the group's Teams chats tab and the card footer. */
+/**
+ * Remembers which chats a meeting's notes were posted to (`notes_posted_to`) and when (`notes_sent_at`, so "the latest"
+ * is the latest post, not the latest meeting date), shown on the group's Teams chats tab and the card footer.
+ */
 export async function recordNotesPosted(orgId: string, meetingId: string, chats: PostedChat[]): Promise<void> {
-  await run("UPDATE meetings SET notes_posted_to = ? WHERE id = ? AND org_id = ?", JSON.stringify(chats), meetingId, orgId);
+  await run("UPDATE meetings SET notes_posted_to = ?, notes_sent_at = ? WHERE id = ? AND org_id = ?", JSON.stringify(chats), now(), meetingId, orgId);
 }
 
 /**

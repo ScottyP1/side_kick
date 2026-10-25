@@ -727,7 +727,7 @@ function migrate(conn: DatabaseSync) {
   for (const col of ["saved_by", "saved_at"]) if (!has("items", col)) conn.exec(`ALTER TABLE items ADD COLUMN ${col} TEXT`);
   // "Meeting notes go to" (lib/notes-chats.ts): the group's choice, who made it and when; where a meeting's notes went.
   for (const col of ["notes_choice", "notes_choice_by", "notes_choice_at"]) if (!has("workspaces", col)) conn.exec(`ALTER TABLE workspaces ADD COLUMN ${col} TEXT`);
-  if (!has("meetings", "notes_posted_to")) conn.exec("ALTER TABLE meetings ADD COLUMN notes_posted_to TEXT");
+  for (const col of ["notes_posted_to", "notes_sent_at"]) if (!has("meetings", col)) conn.exec(`ALTER TABLE meetings ADD COLUMN ${col} TEXT`);
   // Upload guard (lib/upload-guard.ts): a document or firm document that looks like it belongs to another client is
   // saved Held (status 'Held', text kept in held_text, not indexed) until the uploader keeps or moves it.
   // guard_status: null = never flagged, 'kept' = flagged and kept (a Needs attention finding), 'reviewed' = a

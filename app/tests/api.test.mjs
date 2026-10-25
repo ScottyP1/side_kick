@@ -2864,7 +2864,12 @@ test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; no
   assert.ok(!sent.slice(n).some((x) => x.url.includes("conv-1") && /Notes routing check/.test(JSON.stringify(x.body))), "no notes in the chat that wasn't chosen");
   const notesPost = sent.slice(n).find((x) => x.url.includes(GROUP) && /Notes routing check/.test(cardText(cardsOf(x)[0] ?? {})));
   assert.match(cardText(cardsOf(notesPost)[0]), /Notes posted to Wave 2 team only/, "the card's footer says where the notes went");
-  const after = (await admin("GET", notesUrl)).body;
+  let after;
+  for (let i = 0; i < 50; i++) { // the post is recorded right after the cards go out
+    after = (await admin("GET", notesUrl)).body;
+    if (after.last?.title === "Notes routing check") break;
+    await new Promise((res) => setTimeout(res, 100));
+  }
   assert.deepEqual([after.last?.title, after.last?.chats], ["Notes routing check", ["Wave 2 team"]], "the Teams chats tab says where the latest notes went");
   // "Don't post notes in Teams" is a choice too; then back to the group chat for the tests below.
   assert.equal((await admin("PUT", notesUrl, { none: true })).body.targets.length, 0);

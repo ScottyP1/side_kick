@@ -582,6 +582,20 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_at TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_posted_to TEXT;
 -- Scale readiness: Graph subscriptions are looked up per organization (renewals, notes status).
 CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at);
+-- Upload guard (lib/upload-guard.ts): held documents (status 'Held', text in held_text until kept or moved), what
+-- matched (guard_json), flagged-and-kept state (guard_status), and firm documents limited to chosen groups.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS guard_status TEXT;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS guard_json TEXT;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS held_text TEXT;
+ALTER TABLE firm_docs ADD COLUMN IF NOT EXISTS guard_status TEXT;
+ALTER TABLE firm_docs ADD COLUMN IF NOT EXISTS guard_json TEXT;
+ALTER TABLE firm_docs ADD COLUMN IF NOT EXISTS held_text TEXT;
+ALTER TABLE firm_docs ADD COLUMN IF NOT EXISTS applies_to TEXT NOT NULL DEFAULT 'all';
+CREATE TABLE IF NOT EXISTS firm_doc_groups (
+  firm_doc_id TEXT NOT NULL REFERENCES firm_docs(id) ON DELETE CASCADE, org_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, PRIMARY KEY (firm_doc_id, workspace_id)
+);
+CREATE INDEX IF NOT EXISTS firm_doc_groups_ws ON firm_doc_groups(org_id, workspace_id);
 
 -- Connectors per group: move one-per-organization connectors into groups (same statements as lib/db.ts
 -- CONNECTOR_GROUP_MIGRATION, which explains them; keep both in step). Each is harmless to run again.

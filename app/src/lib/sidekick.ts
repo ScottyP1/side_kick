@@ -21,6 +21,7 @@ import { z } from "zod";
 import { all, get, newId, now, run, tx } from "./db";
 import { structured } from "./claude";
 import { FILTER_TYPES, findSources, indexText, type SourceFilter } from "./search";
+import { firmDocGroups } from "./firm";
 import { addExchange, endConversation, findConversation, latestConversation, openConversation, priorSummary, standaloneQuestion, startConversation, turnsForBrowser } from "./conversations";
 import { audit, auditAsSidekick, type User } from "./auth";
 import { assertEnabled } from "./owner";
@@ -70,6 +71,11 @@ export type CitedSource = {
   outdated: string | null;
   /** For a work item, page or file from a connector (type "workitem" or "page"): its link in Azure DevOps, Jira, GitHub, Confluence, SharePoint or OneDrive. */
   url?: string | null;
+  /**
+   * A firm document limited to chosen groups (lib/firm.ts "Applies to"): how many groups ("Firm policy · for 2
+   * groups"). A count, not names, so a chat with client guests never learns which other clients there are.
+   */
+  appliesTo?: number;
 };
 
 /** Where Ask was used and what it should keep: filters, and the conversation for follow-ups. */
@@ -201,16 +207,19 @@ export async function ask(user: User, workspaceId: string, question: string, gue
   const usedSources = sources.filter((s) => used.has(s.id));
   // Work items, Confluence pages and Microsoft 365 files (connectors) link back to the tool they came from.
   const links = await workItemLinks(user.org_id, usedSources.filter((s) => s.source_type === "workitem" || s.source_type === "page").map((s) => s.source_id));
+  // Firm documents limited to chosen groups say so ("Firm policy · for 2 groups").
+  const limited = await firmDocGroups(user.org_id, [...new Set(usedSources.filter((s) => s.origin === "firm").map((s) => s.source_id))]);
   const cited: CitedSource[] = usedSources
     .map((s) => ({
       id: s.id, title: s.title, loc: s.loc, type: s.source_type, sourceId: s.source_id, excerpt: clean(excerptFor(s.text, standalone.question)),
       origin: s.origin, date: s.date, outdated: s.outdated ?? null, ...(links.has(s.source_id) ? { url: links.get(s.source_id) } : {}),
+      ...(limited.has(s.source_id) ? { appliesTo: limited.get(s.source_id)!.length } : {}),
     }));
   for (const f of fired.values()) await recordGuard(place, "answer", f.rule, f.action);
   await addExchange(
     conv,
     { text: question, question: standalone.question, refused: false },
-    { text: result.answer, meta: { followUp: standalone.on, found: result.found, conflict: result.conflict, questionId, sources: cited.map((c) => ({ id: c.id, title: c.title, loc: c.loc, origin: c.origin, ...(c.url ? { url: c.url } : {}) })) } },
+    { text: result.answer, meta: { followUp: standalone.on, found: result.found, conflict: result.conflict, questionId, sources: cited.map((c) => ({ id: c.id, title: c.title, loc: c.loc, origin: c.origin, ...(c.url ? { url: c.url } : {}), ...(c.appliesTo ? { appliesTo: c.appliesTo } : {}) })) } },
   );
   return { ...base, found: result.found, answer: result.answer, sources: cited, blocked: null as RuleId | null, conflict: result.conflict, questionId };
 }

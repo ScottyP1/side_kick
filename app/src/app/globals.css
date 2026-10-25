@@ -588,3 +588,9 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;font-size:13px;margin:0}
 .kv dt{color:var(--muted)}
 .kv dd{margin:0;word-break:break-word}
+/* Upload guard (components/upload-guard.tsx): where an upload goes, in the group's colour (firm library: accent). */
+.upload-target{--group:var(--accent);display:flex;gap:8px;align-items:center;padding:8px 12px;border-radius:8px;border:1px solid color-mix(in srgb,var(--group) 35%,var(--line));border-left:4px solid var(--group);background:color-mix(in srgb,var(--group) 9%,var(--surface));font-size:13.5px;text-align:left;overflow-wrap:anywhere}
+.upload-target .dot{width:10px;height:10px;border-radius:50%;background:var(--group);flex:none}
+.upload-target.firm{--group:var(--info)}
+.held-actions{margin-top:6px;align-items:flex-start}
+tr.focus-row td{background:var(--accent-soft)}

@@ -1,6 +1,7 @@
 /**
  * @file Watchers: cheap background checks that notice what needs a person (an unanswered question, a Teams post
- * that didn't arrive, an overdue action item, a document a newer decision changed, a group without a Team Lead…)
+ * that didn't arrive, an overdue action item, a document a newer decision changed, a group without a Team Lead, a
+ * document that may be another client's…)
  * and turn each into a **finding** people see on Home and on the group's page, with a clear next step.
  *
  * Concepts
@@ -45,7 +46,7 @@ import { BRAND } from "./brand";
 import { KIND_LABEL as TOOL_LABEL, PROJECT_WORD, type ConnectorKind } from "./connector-text";
 
 /** The kinds of finding, one per watcher (chats have two: waiting to be assigned, and removed in Teams). */
-export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "role_changed"] as const;
+export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "role_changed", "misfiled_doc"] as const;
 export type FindingKind = (typeof FINDING_KINDS)[number];
 
 /** Short plain names for each kind (pills on the page, Owner Console counts). */
@@ -62,6 +63,7 @@ export const KIND_LABEL: Record<FindingKind, string> = {
   broken_connector: "Connector not working",
   connector_request: "Connector requests",
   role_changed: "Role changed",
+  misfiled_doc: "May be another client's",
 };
 
 export type Audience = "members" | "managers" | "admins" | "owners";
@@ -525,8 +527,48 @@ const connectorRequests: Watcher = {
   },
 };
 
+/**
+ * Documents the upload guard flagged as maybe another client's (lib/upload-guard.ts): ones still **held** (waiting
+ * for the uploader to keep or move them; not used in answers) and ones **kept** anyway. A group's go to its Team
+ * Lead and the admins; the firm library's to Org Owners/Admins. Resolves once the document is moved, confirmed
+ * (Keep here) or deleted.
+ */
+const misfiledDocs: Watcher = {
+  kind: "misfiled_doc",
+  label: "Documents that may be another client's",
+  async check(o) {
+    const groupIds = new Set(o.groups.map((g) => g.id));
+    const docs = await all<{ id: string; workspace_id: string | null; title: string; status: string; guard_json: string | null; firm: number }>(
+      `SELECT id, workspace_id, name AS title, status, guard_json, 0 AS firm FROM documents WHERE org_id = ? AND (status = 'Held' OR guard_status = 'kept')
+       UNION ALL
+       SELECT id, NULL AS workspace_id, title, status, guard_json, 1 AS firm FROM firm_docs WHERE org_id = ? AND (status = 'Held' OR guard_status = 'kept')`,
+      o.orgId, o.orgId,
+    );
+    return docs.filter((d) => d.firm || groupIds.has(d.workspace_id ?? "")).map((d) => {
+      let about = "another client";
+      try {
+        about = (JSON.parse(d.guard_json ?? "{}") as { group?: string }).group ?? about;
+      } catch {
+        /* an unreadable match still raises the finding, with the generic wording */
+      }
+      const held = d.status === "Held";
+      const where = d.firm ? "the firm library" : "this group";
+      return {
+        kind: "misfiled_doc", workspaceId: d.firm ? null : d.workspace_id, subject: d.id, audience: d.firm ? "admins" : "managers", severity: held ? "warn" : "bad",
+        title: `${quote(d.title, 70)} looks like it's about ${about}`,
+        detail: held
+          ? `It's held: ${BRAND.name} doesn't use it in answers until someone keeps it in ${where} or moves it.`
+          : `It was kept in ${where}${d.firm ? ", so every group it applies to can use it" : ", so this group's answers use it"}.`,
+        nextStep: d.firm ? `Move it into the ${about} group, limit it to that group, or keep it for every group.` : `Move it to the right group, or keep it here if it belongs.`,
+        actionHref: d.firm ? `/firm-library?doc=${d.id}` : `/knowledge?doc=${d.id}`, actionLabel: "Move or keep",
+        data: { doc: d.id, scope: d.firm ? "firm" : "document", held },
+      } satisfies Fresh;
+    });
+  },
+};
+
 /** Every watcher, in the order they run. */
-export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests, roleChanged];
+export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests, roleChanged, misfiledDocs];
 
 /* ------------------------------------------------------------------ */
 /* Running the watchers and keeping findings up to date                */
@@ -656,6 +698,8 @@ export type FindingView = {
   id: string; kind: FindingKind; kindLabel: string; workspaceId: string | null; workspace: string | null; severity: Severity; status: string;
   title: string; detail: string | null; nextStep: string; actionHref: string | null; actionLabel: string | null;
   firstSeen: string; lastSeen: string; snoozedUntil: string | null; canAct: boolean;
+  /** For a kept document that may be another client's (`misfiled_doc`): which one, so the row can offer Keep here. */
+  guard?: { doc: string; scope: "document" | "firm"; held: boolean };
 };
 
 /**
@@ -693,6 +737,7 @@ export async function findingsFor(user: User, opts: { workspaceId?: string; incl
       id: f.id, kind: f.kind, kindLabel: KIND_LABEL[f.kind] ?? f.kind, workspaceId: f.workspace_id, workspace: f.workspace, severity: f.severity, status: f.status,
       title: f.title, detail: f.detail, nextStep: f.next_step, actionHref: f.action_href, actionLabel: f.action_label,
       firstSeen: f.first_seen_at, lastSeen: f.last_seen_at, snoozedUntil: f.snoozed_until, canAct: mayAct(user, f, groups),
+      ...(f.kind === "misfiled_doc" && f.data_json ? { guard: JSON.parse(f.data_json) as FindingView["guard"] } : {}),
     }));
 }
 

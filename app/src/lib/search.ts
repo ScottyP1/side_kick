@@ -13,7 +13,11 @@
  *   present (a guest meeting, or a Teams channel marked as having client guests).
  * - **Firm library** (lib/firm.ts): org-wide documents (policies, standards, templates). Their passages are
  *   indexed **once per org** under the workspace id `FIRM_SCOPE` ("firm"), not copied into each group. A
- *   group's search covers that group **plus** its org's firm library, never another group or org.
+ *   group's search covers that group **plus** its org's firm library, never another group or org. A firm document
+ *   can be **limited to chosen groups** ("Applies to", `firm_docs.applies_to = 'some'` + `firm_doc_groups`): then
+ *   only those groups' searches include it (`limitedFirmClause` locally, `excludeSources` on Azure).
+ * - **Held documents** (lib/upload-guard.ts) are never indexed while held, so search can't find them; when kept
+ *   they're indexed normally, and when moved `moveIndexed` takes their passages out of the old scope first.
  * - **Source types**: `document` (a group's upload), `meeting` (a transcript), `notes` (the notes Sidekick wrote
  *   for a meeting: summary, decisions, facts; source id `<meeting id>:notes`), `chat` (a tracked Teams message)
  *   `firm` (a firm library document), `workitem` (an Azure DevOps work item, Jira issue or GitHub issue / pull
@@ -135,6 +139,52 @@ export async function removeWorkspaceIndex(orgId: string, workspaceId: string) {
  */
 export const removeFirmIndex = (orgId: string) => removeWorkspaceIndex(orgId, FIRM_SCOPE);
 
+/**
+ * Moves one source's passages to another scope (a group, or out of the firm library into a group): every local
+ * passage is removed from the old scope and written again under the new workspace id and source type (and title,
+ * when given), and on Azure the old entries are deleted and the passages indexed again. Used when a document is
+ * moved between groups or from the firm library into a group (lib/upload-guard.ts). Scoped to the org. Returns how
+ * many passages moved. Traced as its own step (counts only).
+ */
+export async function moveIndexed(orgId: string, sourceId: string, to: { workspaceId: string; sourceType: SourceType; title?: string }): Promise<number> {
+  return span("index", "Move passages", async () => {
+    const rows = await all<{ text: string; title: string; loc: string; audience: string }>(
+      "SELECT text, title, loc, audience FROM passages WHERE org_id = ? AND source_id = ? ORDER BY rowid", orgId, sourceId,
+    );
+    await run("DELETE FROM passages WHERE org_id = ? AND source_id = ?", orgId, sourceId);
+    if (azureSearchConfigured()) await azureRemove(sourceId).catch((e) => console.error("Azure AI Search: delete failed", e));
+    const title = to.title ?? rows[0]?.title ?? "";
+    const stmt = `INSERT INTO passages (text, title, loc, source_type, source_id, workspace_id, org_id, audience) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+    for (const p of rows) await run(stmt, p.text, title, p.loc, to.sourceType, sourceId, to.workspaceId, orgId, p.audience);
+    if (rows.length && azureSearchConfigured()) {
+      await azureIndex({ orgId, workspaceId: to.workspaceId, sourceType: to.sourceType, sourceId, title, audience: rows[0].audience, pieces: rows.map((p) => ({ text: p.text, loc: p.loc })) })
+        .catch((e) => console.error("Azure AI Search: indexing failed (local index still updated)", e));
+    }
+    spanAttrs({ passages: rows.length, source: to.sourceType, azure: azureSearchConfigured() });
+    return rows.length;
+  });
+}
+
+/**
+ * SQL (and its values) that leaves out firm documents limited to other groups: a firm passage stays only when its
+ * document applies to all groups, or `workspaceId` is one of its chosen groups (`firm_doc_groups`).
+ */
+function limitedFirmClause(orgId: string, workspaceId: string): [string, Param[]] {
+  return [
+    `AND (workspace_id <> '${FIRM_SCOPE}' OR source_id NOT IN (SELECT id FROM firm_docs WHERE org_id = ? AND applies_to = 'some'
+       AND id NOT IN (SELECT firm_doc_id FROM firm_doc_groups WHERE org_id = ? AND workspace_id = ?)))`,
+    [orgId, orgId, workspaceId],
+  ];
+}
+
+/** The firm documents limited to other groups (not `workspaceId`): left out of that group's Azure searches. */
+async function limitedFirmIds(orgId: string, workspaceId: string): Promise<string[]> {
+  return (await all<{ id: string }>(
+    "SELECT id FROM firm_docs WHERE org_id = ? AND applies_to = 'some' AND id NOT IN (SELECT firm_doc_id FROM firm_doc_groups WHERE org_id = ? AND workspace_id = ?)",
+    orgId, orgId, workspaceId,
+  )).map((r) => r.id);
+}
+
 /** Changes whether a source's passages are internal or shareable (when a document is re-tagged). */
 export async function setAudience(sourceId: string, audience: string) {
   await run("UPDATE passages SET audience = ? WHERE source_id = ?", audience, sourceId);
@@ -241,7 +291,8 @@ export async function searchPassages(orgId: string, workspaceId: string, questio
       try {
         await ensureBackfilled();
         // Azure has no dates on passages: take a bigger pool and keep the ones in the date range.
-        const hits = await azureSearch(orgId, scopes, question, { guests: opts.guests, limit: dated ? Math.max(limit * 3, 50) : limit, types: opts.types });
+        const excludeSources = scopes.includes(FIRM_SCOPE) ? await limitedFirmIds(orgId, workspaceId) : [];
+        const hits = await azureSearch(orgId, scopes, question, { guests: opts.guests, limit: dated ? Math.max(limit * 3, 50) : limit, types: opts.types, excludeSources });
         const kept = dated ? (await inDateRange(orgId, hits, opts)).slice(0, limit) : hits;
         spanAttrs({ engine: "Azure AI Search", results: kept.length, firm: scopes.length > 1 });
         return kept;
@@ -296,8 +347,8 @@ async function inDateRange(orgId: string, hits: Passage[], opts: SearchOpts): Pr
  * - SQLite: FTS5 with BM25 ranking (title weighted 2x), prefix matching on each word.
  * - Postgres: the generated `tsv` column (English stemming, title weighted higher) ranked with ts_rank,
  *   matching any of the question's meaningful words (and words starting with them).
- * Always filtered on the org and the given workspace ids (the group and maybe the firm library), the audience
- * when guests are present, and the type and date filters.
+ * Always filtered on the org and the given workspace ids (the group first, and maybe the firm library), the
+ * audience when guests are present, the type and date filters, and firm documents limited to other groups.
  */
 async function keywordSearch(orgId: string, scopes: string[], question: string, opts: SearchOpts & { limit: number }): Promise<Passage[]> {
   const words = keywords(question);
@@ -306,8 +357,10 @@ async function keywordSearch(orgId: string, scopes: string[], question: string, 
   const audienceClause = opts.guests ? "AND audience = 'shareable'" : "";
   const typeClause = opts.types?.length ? `AND source_type IN (${marks(opts.types.length)})` : "";
   const [dates, dateParams] = dateClause(orgId, opts);
-  const filters: Param[] = [orgId, ...scopes, ...(opts.types ?? []), ...dateParams];
-  const where = `org_id = ? AND workspace_id IN (${marks(scopes.length)}) ${audienceClause} ${typeClause} ${dates}`;
+  // The firm library is searched for the group in scopes[0]: leave out firm documents limited to other groups.
+  const [limited, limitedParams] = scopes.includes(FIRM_SCOPE) ? limitedFirmClause(orgId, scopes[0]) : ["", []];
+  const filters: Param[] = [orgId, ...scopes, ...(opts.types ?? []), ...dateParams, ...limitedParams];
+  const where = `org_id = ? AND workspace_id IN (${marks(scopes.length)}) ${audienceClause} ${typeClause} ${dates} ${limited}`;
   if (DIALECT === "postgres") {
     // to_tsquery syntax: word:* = prefix match, | = OR. Words are letters/digits only, so they're safe here,
     // and the whole query still goes in as a bound parameter.

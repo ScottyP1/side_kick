@@ -7,6 +7,9 @@
  *   shown with a "Teams" tag;
  * - **Add a past or outside meeting**: upload a transcript (Teams .vtt, Word or pasted text), for meetings held before
  *   automatic notes were on or outside Teams. A failed one is still saved; the page then opens it with **Try again**.
+ *   The dialog says which group the meeting goes to (components/upload-guard.tsx); people in two or more groups pick
+ *   the group right there. If the transcript looks like another client's meeting, nothing is saved yet: the dialog
+ *   asks "Keep it here, or move it?" (add here anyway, or add it to that group instead).
  * Decisions, requirements, risks, facts and terms can be **saved to knowledge** (PATCH /api/items/:id), like the
  * button on the notes card in Teams. Notes also go to the group's notes chats in Teams.
  */
@@ -17,6 +20,7 @@ import { api, ApiError, fmtDate, Icon, Modal, Pill, Spinner, useReportError, use
 import { ActionItemsTable, useUpdateAction, type ActionItem } from "@/components/action-items";
 import { BRAND } from "@/lib/brand";
 import { AutoNotesPanel } from "@/components/auto-notes";
+import { groupLabel, UploadTarget, type GuardMatch } from "@/components/upload-guard";
 
 /** Same limit as the server (lib/extract.ts MAX_TRANSCRIPT_CHARS), so the dialog can say so before sending. */
 const MAX_TRANSCRIPT_CHARS = 300_000;
@@ -32,7 +36,7 @@ type Detail = {
 };
 
 export default function MeetingsPage() {
-  const { ws, me } = useApp();
+  const { ws, me, setWs } = useApp();
   const toast = useToast();
   const [list, setList] = useState<M[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -44,6 +48,10 @@ export default function MeetingsPage() {
   const [err, setErr] = useState("");
   const [form, setForm] = useState({ title: "", held_at: new Date().toISOString().slice(0, 10), external: false, text: "" });
   const [file, setFile] = useState<File | null>(null);
+  // Upload guard: the group this meeting goes to (people in 2+ groups pick it), and the question when it looks
+  // like another client's meeting.
+  const [target, setTarget] = useState("");
+  const [check, setCheck] = useState<{ question: string; match: GuardMatch } | null>(null);
   const canEdit = me.user.role !== "Viewer";
 
   const load = useCallback(async () => {
@@ -77,25 +85,36 @@ export default function MeetingsPage() {
 
   const resetImport = () => {
     setImporting(false);
+    setCheck(null);
+    setTarget("");
     setFile(null);
     setForm({ title: "", held_at: new Date().toISOString().slice(0, 10), external: false, text: "" });
   };
-  const submit = async () => {
+  const submit = async (opts: { to?: string; anyway?: boolean } = {}) => {
     setBusy(true);
     setErr("");
+    const dest = opts.to ?? (target || ws);
     const fd = new FormData();
-    fd.set("ws", ws);
+    fd.set("ws", dest);
+    if (opts.anyway) fd.set("wrong_client_ok", "1");
     fd.set("title", form.title);
     fd.set("held_at", form.held_at);
     fd.set("external", String(form.external));
     fd.set("text", form.text);
     if (file) fd.set("file", file);
     try {
-      const r = await api<{ id: string }>("/api/meetings", { method: "POST", body: fd });
+      const r = await api<{ id?: string; check?: { question: string; match: GuardMatch } }>("/api/meetings", { method: "POST", body: fd });
+      if (r.check) {
+        // Nothing saved yet: ask where it belongs.
+        setTarget(dest);
+        setCheck(r.check);
+        return;
+      }
       resetImport();
       toast("Notes are ready");
+      if (dest !== ws) setWs(dest);
       await load();
-      openMeeting(r.id);
+      openMeeting(r.id!);
     } catch (e) {
       // The meeting was saved but its notes failed: close the dialog and open it, with Try again, so the
       // person retries there instead of importing it again (which left duplicate Failed meetings).
@@ -297,13 +316,36 @@ export default function MeetingsPage() {
           footer={
             <>
               <button className="btn" disabled={busy} onClick={() => setImporting(false)}>Cancel</button>
-              <button className="btn primary" disabled={busy || (!file && !form.text.trim()) || (!file && !form.title.trim()) || (!file && form.text.length > MAX_TRANSCRIPT_CHARS)} onClick={submit}>
+              <button className="btn primary" disabled={busy || (!file && !form.text.trim()) || (!file && !form.title.trim()) || (!file && form.text.length > MAX_TRANSCRIPT_CHARS) || Boolean(check)} onClick={() => submit()}>
                 {busy ? <><Spinner /> {BRAND.name} is writing notes…</> : "Add & write notes"}
               </button>
             </>
           }
         >
           <p className="muted" style={{ margin: 0 }}>For a meeting held before automatic notes were on, or outside Teams (another tool, in person with a recording). Teams meetings are added by themselves when automatic notes are on.</p>
+          <UploadTarget group={me.workspaces.find((w) => w.id === (target || ws))} />
+          {me.workspaces.length > 1 && (
+            <div className="field">
+              <label htmlFor="mgroup">Group (only its people see the notes)</label>
+              <select id="mgroup" className="input" value={target || ws} onChange={(e) => { setTarget(e.target.value); setCheck(null); }}>
+                {me.workspaces.map((w) => <option key={w.id} value={w.id}>{groupLabel(w)}</option>)}
+              </select>
+            </div>
+          )}
+          {check && (
+            <div className="callout warn" role="alert">
+              <div className="grow">
+                <b>{check.question}</b>
+                <div className="muted" style={{ fontSize: 12.5 }}>It mentions {check.match.terms.map((t) => `“${t}”`).join(", ")}. Nothing is saved yet.</div>
+                <div className="actions" style={{ marginTop: 8 }}>
+                  {me.workspaces.some((w) => w.id === check.match.workspaceId) && (
+                    <button className="btn small primary" disabled={busy} onClick={() => { setCheck(null); submit({ to: check.match.workspaceId }); }}>Add it to {check.match.group}</button>
+                  )}
+                  <button className="btn small" disabled={busy} onClick={() => { const to = target || ws; setCheck(null); submit({ to, anyway: true }); }}>Keep it here</button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="field">
             <label htmlFor="mfile">Transcript file</label>
             <input id="mfile" type="file" accept=".vtt,.docx,.txt,.md" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />

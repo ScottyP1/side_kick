@@ -28,7 +28,7 @@ export const GET = handle(async () => {
   const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", user.org_id);
   const ids = await workspaceIdsFor(user);
   const workspaces = ids.length
-    ? await all(`SELECT id, name, code, color FROM workspaces WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY name`, ...ids)
+    ? await all(`SELECT id, name, code, color, client FROM workspaces WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY name`, ...ids)
     : [];
   const settings = await get<{ json: string }>("SELECT json FROM settings WHERE org_id = ?", user.org_id);
   const [{ plan, limits }, credit] = await Promise.all([orgPlan(user.org_id), BILLING_VIEW_ROLES.includes(user.role) ? creditStatus(user.org_id) : null]);

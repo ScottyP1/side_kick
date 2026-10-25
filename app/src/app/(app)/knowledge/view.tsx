@@ -10,6 +10,11 @@
  * on the conversation: the page keeps the conversation id (per group and guests setting, in this browser tab) and
  * sends it back; the answer says what it followed up on, and New question starts afresh. Each answer has 👍/👎.
  * Org Owners/Admins also see the answer-quality counts for the last 30 days (no text).
+ *
+ * Upload guard (components/upload-guard.tsx, lib/upload-guard.ts): the drop zone says which group the files go to
+ * (in its colour); people in two or more groups confirm the group for each upload. A file that looks like another
+ * client's is **Held** (not used in answers) and its row asks "Keep it here, or move it?". `?doc=<id>` (from a
+ * "Needs attention" finding) scrolls to and highlights that document.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -18,11 +23,20 @@ import { AskPanel } from "./ask";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, fmtBytes, fmtDate, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { HeldActions, TargetConfirm, UploadTarget, type GuardMatch, type MoveTarget } from "@/components/upload-guard";
 
-type Doc = { id: string; name: string; size: number; audience: string; status: string; error: string | null; chunk_count: number; created_at: string; uploaded_by: string | null };
+type Doc = {
+  id: string; name: string; size: number; audience: string; status: string; error: string | null; chunk_count: number; created_at: string; uploaded_by: string | null;
+  /** Upload guard: "kept" = flagged and kept here; `match`/`question` for held or flagged ones. */
+  guard_status: string | null; match: GuardMatch | null; question: string | null;
+};
 
 export default function KnowledgePage() {
-  const { ws, me } = useApp();
+  const { ws, me, setWs } = useApp();
+  // `?doc=<id>` from a "Needs attention" finding: read after mount (no useSearchParams, so no Suspense boundary needed).
+  const [focus, setFocus] = useState<string | null>(null);
+  const [targets, setTargets] = useState<MoveTarget[]>([]);
+  const [pending, setPending] = useState<File[] | null>(null);
   const toast = useToast();
   const [docs, setDocs] = useState<Doc[] | null>(null);
   const [index, setIndex] = useState({ passages: 0, questions: 0, answered: 0 });
@@ -34,9 +48,10 @@ export default function KnowledgePage() {
 
   const load = useCallback(async () => {
     if (!ws) return;
-    const r = await api<{ docs: Doc[]; index: typeof index }>(`/api/docs?ws=${ws}`);
+    const r = await api<{ docs: Doc[]; index: typeof index; targets: MoveTarget[] }>(`/api/docs?ws=${ws}`);
     setDocs(r.docs);
     setIndex(r.index);
+    setTargets(r.targets);
   }, [ws]);
   const reportError = useReportError();
   useEffect(() => {
@@ -44,20 +59,43 @@ export default function KnowledgePage() {
     load().catch(reportError);
   }, [load, reportError]);
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the address once after mount
+    setFocus(new URLSearchParams(window.location.search).get("doc"));
+  }, []);
+  useEffect(() => {
+    if (focus && docs?.some((d) => d.id === focus)) document.getElementById(`doc-${focus}`)?.scrollIntoView({ block: "center" });
+  }, [focus, docs]);
+
   if (!ws) return <NeedsWorkspace />;
 
-  const upload = async (files: FileList | File[]) => {
+  // People in two or more groups confirm the group first (TargetConfirm); everyone else uploads straight away.
+  const choose = (files: FileList | File[]) => {
     const list = Array.from(files);
     if (!list.length) return;
+    if (me.workspaces.length > 1) setPending(list);
+    else upload(list, ws);
+  };
+  const upload = async (list: File[], target: string) => {
+    setPending(null);
     setUploading(true);
     const form = new FormData();
-    form.set("ws", ws);
+    form.set("ws", target);
     form.set("audience", audience);
     list.forEach((f) => form.append("files", f));
     try {
-      const r = await api<{ results: { name: string; ok: boolean; error?: string }[] }>("/api/docs", { method: "POST", body: form });
+      const r = await api<{ results: { name: string; ok: boolean; error?: string; held?: boolean }[] }>("/api/docs", { method: "POST", body: form });
       const failed = r.results.filter((x) => !x.ok);
-      toast(failed.length ? `${r.results.length - failed.length} indexed, ${failed.length} failed: ${failed[0].error}` : `${r.results.length} file${r.results.length > 1 ? "s" : ""} indexed and searchable`);
+      const held = r.results.filter((x) => x.held);
+      const ready = r.results.length - failed.length - held.length;
+      toast(
+        held.length
+          ? `${held.length} file${held.length > 1 ? "s" : ""} held: ${held.length > 1 ? "they look" : "it looks"} like another client's. Keep or move ${held.length > 1 ? "them" : "it"} below.${ready ? ` ${ready} indexed.` : ""}`
+          : failed.length ? `${ready} indexed, ${failed.length} failed: ${failed[0].error}` : `${r.results.length} file${r.results.length > 1 ? "s" : ""} indexed and searchable`,
+        held.length ? "error" : undefined,
+      );
+      // Uploaded to another group from the confirm step: switch to it, so the files are in view.
+      if (target !== ws) setWs(target);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Upload failed.");
     } finally {
@@ -86,7 +124,8 @@ export default function KnowledgePage() {
       toast(e instanceof Error ? e.message : "Couldn't delete.");
     }
   };
-  const wsName = me.workspaces.find((w) => w.id === ws)?.name;
+  const current = me.workspaces.find((w) => w.id === ws);
+  const wsName = current?.name;
 
   return (
     <>
@@ -111,9 +150,10 @@ export default function KnowledgePage() {
           onDrop={(e) => {
             e.preventDefault();
             setOver(false);
-            upload(e.dataTransfer.files);
+            choose(e.dataTransfer.files);
           }}
         >
+          <UploadTarget group={current} />
           <span style={{ color: "var(--accent)" }}>{uploading ? <Spinner /> : <Icon n="upload" />}</span>
           <b>{uploading ? "Reading and indexing…" : "Drop files here"}</b>
           <span className="muted">PDF, Word (.docx), text, Markdown, CSV, JSON or Teams transcripts (.vtt) · up to 25 MB each</span>
@@ -128,8 +168,20 @@ export default function KnowledgePage() {
             </div>
             <button className="btn" onClick={() => fileRef.current?.click()} disabled={uploading}>Choose files</button>
           </div>
-          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.pptx,.txt,.md,.vtt,.csv,.json" onChange={(e) => e.target.files && upload(e.target.files)} />
+          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.pptx,.txt,.md,.vtt,.csv,.json" onChange={(e) => e.target.files && choose(e.target.files)} />
         </div>
+      )}
+      {pending && (
+        <TargetConfirm
+          groups={me.workspaces}
+          current={ws}
+          what={pending.length > 1 ? `these ${pending.length} files` : `“${pending[0].name}”`}
+          onPick={(id) => upload(pending, id)}
+          onCancel={() => {
+            setPending(null);
+            if (fileRef.current) fileRef.current.value = "";
+          }}
+        />
       )}
 
       <div className="panel">
@@ -175,14 +227,17 @@ export default function KnowledgePage() {
               </thead>
               <tbody>
                 {docs?.map((d) => (
-                  <tr key={d.id}>
+                  <tr key={d.id} id={`doc-${d.id}`} className={focus === d.id ? "focus-row" : undefined}>
                     <td>
                       <b style={{ wordBreak: "break-word" }}>{d.name}</b>
                       {d.error && <div style={{ color: "var(--bad)", fontSize: 12.5 }}>{d.error}</div>}
                       {d.status === "Ready" && <div className="muted" style={{ fontSize: 12 }}>{d.chunk_count} passage{d.chunk_count === 1 ? "" : "s"}</div>}
+                      {d.match && (d.status === "Held" || d.guard_status === "kept") && canEdit && (
+                        <HeldActions scope="document" id={d.id} match={d.match} question={d.question} held={d.status === "Held"} targets={targets} currentWs={ws} canReview={me.user.admin || Boolean(me.user.lead)} onDone={() => load().catch(reportError)} />
+                      )}
                     </td>
                     <td>
-                      <Pill kind={d.status === "Ready" ? "good" : d.status === "Failed" ? "bad" : "info"}>{d.status}</Pill>
+                      <Pill kind={d.status === "Ready" ? (d.guard_status === "kept" ? "warn" : "good") : d.status === "Failed" ? "bad" : d.status === "Held" ? "warn" : "info"}>{d.status}</Pill>
                     </td>
                     <td>
                       <div className="seg" style={{ fontSize: 12 }}>

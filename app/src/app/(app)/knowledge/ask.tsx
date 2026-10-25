@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, CitedText, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 
-type Source = { id: string; title: string; loc: string; type: string; excerpt?: string; origin?: "group" | "firm"; date?: string | null; outdated?: string | null; url?: string | null };
+type Source = { id: string; title: string; loc: string; type: string; excerpt?: string; origin?: "group" | "firm"; date?: string | null; outdated?: string | null; url?: string | null; appliesTo?: number };
 type Answer = {
   found: boolean;
   answer: string;
@@ -69,7 +69,7 @@ function SourceLine({ s }: { s: Source }) {
     <div className="li" style={{ padding: "8px 12px" }}>
       <span className="cite">{s.id}</span>
       <div className="grow">
-        {s.origin === "firm" && <Pill kind="info" nodot>Firm policy</Pill>}{" "}
+        {s.origin === "firm" && <Pill kind="info" nodot>Firm policy{s.appliesTo ? ` · for ${s.appliesTo === 1 ? "this group only" : `${s.appliesTo} groups`}` : ""}</Pill>}{" "}
         <b style={{ fontSize: 13 }}>{s.title}</b>
         {s.loc && <span className="muted" style={{ fontSize: 12 }}> · {s.loc}</span>}
         {s.date && <span className="muted" style={{ fontSize: 12 }}> · {s.date}</span>}

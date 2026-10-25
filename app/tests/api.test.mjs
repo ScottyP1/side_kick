@@ -1513,6 +1513,13 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   for (const url of [`/api/docs?ws=${s.wsB}`, `/api/memory?ws=${s.wsB}`, `/api/meetings?ws=${s.wsB}`]) assert.equal((await member("GET", url)).status, 404, url);
   assert.equal((await member("POST", "/api/ask", { ws: s.wsB, question: "vault code" })).status, 404);
   assert.ok(!(await member("GET", "/api/me")).body.workspaces.some((w) => w.id === s.wsB));
+  // Upload guard: nobody outside B can keep, move or confirm B's document, or move it into a group they can see.
+  const bDoc = await dbValue("SELECT id FROM documents WHERE name = 'B secrets.md'");
+  for (const body of [{ action: "keep" }, { action: "move", to: s.wsA }]) {
+    assert.equal((await member("POST", `/api/docs/${bDoc}`, body)).status, 404, JSON.stringify(body));
+  }
+  assert.equal((await lead("POST", `/api/docs/${bDoc}`, { action: "review" })).status, 404, "a Team Lead of A can't confirm B's documents");
+  assert.ok(!leaks(await askA(member, "vault code ZEBRA-7731 Fabrikam merger")), "still nothing in A");
   // From another organization, even with workspace B's id.
   const other = client();
   const r = await owner("POST", "/api/owner/tenants", { org: "Leak Org", name: "Leak Admin", email: "leak@test.local" });
@@ -1566,6 +1573,8 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   const theirWs = (await other("POST", "/api/workspaces", { name: "Leak WS" })).body.id;
   assert.ok(!/admin@test\.local|bea@test\.local|lead@test\.local/.test(JSON.stringify((await other("GET", `/api/workspaces/${theirWs}/members?candidates=1`)).body)), "their Add people picker never offers this org's people");
   assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "vault code ZEBRA-7731" })));
+  assert.equal((await other("POST", `/api/docs/${bDoc}`, { action: "move", to: theirWs })).status, 404, "another org can't pull B's document into its own group");
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_id = '${bDoc}' AND workspace_id <> '${s.wsB}'`)), 0);
   // From a Teams chat linked to workspace A.
   const before = sent.length;
   await toBot(activity({ type: "message", text: "What is the vault code ZEBRA-7731 for the Fabrikam merger?" }));
@@ -4126,6 +4135,200 @@ async function resetPassword(...args) {
 const signInFrom = (url, ip, body) =>
   fetch(BASE + url, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify(body) });
 
+
+/* ---------- Upload guard (lib/upload-guard.ts): wrong-client check, held documents, moves, firm "Applies to" ---------- */
+
+const ug = {};
+const ugOwner = client();
+const ugMaria = client();
+const ugLead = client();
+const ugNina = client();
+const ugLara = client();
+const askIn = (call, ws, question) => call("POST", "/api/ask", { ws, question });
+const titlesOf = (r) => (r.body.sources ?? []).map((x) => x.title);
+const docsIn = async (call, ws) => (await call("GET", `/api/docs?ws=${ws}`)).body.docs;
+
+test(`[${ENGINE}] upload guard: another client's file is held (not searchable) until kept or moved; moves fully change scope`, async () => {
+  const r = await owner("POST", "/api/owner/tenants", { org: "Guard Co", name: "Gail Owner", email: "gail@guard.test" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  await firstSignIn(ugOwner, "gail@guard.test", r.body.tempPassword);
+  ug.org = await dbValue("SELECT id FROM orgs WHERE name = 'Guard Co'");
+  ug.contoso = (await ugOwner("POST", "/api/workspaces", { name: "Contoso Retail – Cloud Migration", client: "Contoso Retail", code: "CON-MIG-26" })).body.id;
+  ug.litware = (await ugOwner("POST", "/api/workspaces", { name: "Litware – Data Platform", client: "Litware", code: "LIT-DATA-26" })).body.id;
+  ug.fabrikam = (await ugOwner("POST", "/api/workspaces", { name: "Fabrikam Bank – Payments", client: "Fabrikam Bank", code: "FAB-PAY-26" })).body.id;
+  for (const [call, name, email, role, wss] of [
+    [ugMaria, "Maria Chen", "maria@guard.test", "Member", [ug.contoso, ug.litware]],
+    [ugLead, "Liam Lead", "liam@guard.test", "Team Lead", [ug.contoso]],
+    [ugNina, "Nina Contoso", "nina@guard.test", "Member", [ug.contoso]],
+    [ugLara, "Lara Litware", "lara@guard.test", "Member", [ug.litware]],
+  ]) {
+    const u = await ugOwner("POST", "/api/users", { name, email, role, workspaces: wss });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    assert.equal((await firstSignIn(call, email, u.body.tempPassword)).status, 200);
+  }
+  // Maria (in Contoso and Litware) drops a Litware file into Contoso: held, with the question, not indexed.
+  const litText = "Litware pipeline notes. Litware wants the QUOKKA-55 nightly load done by 05:00. Litware data office reviews late loads.";
+  const up = await uploadDoc(ugMaria, ug.contoso, "Litware SLA.md", litText);
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  const res = up.body.results[0];
+  assert.equal(res.held, true, JSON.stringify(res));
+  assert.equal(res.question, "This looks like it's about Litware – Data Platform. Keep it here, or move it?");
+  assert.equal(res.match.workspaceId, ug.litware);
+  ug.held = res.id;
+  assert.equal(await dbValue(`SELECT status FROM documents WHERE id = '${ug.held}'`), "Held");
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_id = '${ug.held}'`)), 0, "held = not indexed");
+  for (const call of [ugMaria, ugNina, ugOwner]) assert.ok(!titlesOf(await askIn(call, ug.contoso, "QUOKKA-55 nightly load")).includes("Litware SLA.md"), "held documents never reach answers");
+  assert.ok(!titlesOf(await askIn(ugMaria, ug.litware, "QUOKKA-55 nightly load")).includes("Litware SLA.md"));
+  const listed = (await docsIn(ugMaria, ug.contoso)).find((d) => d.id === ug.held);
+  assert.equal(listed.status, "Held");
+  assert.match(listed.question, /Keep it here, or move it\?/);
+  assert.deepEqual((await ugMaria("GET", `/api/docs?ws=${ug.contoso}`)).body.targets.map((t) => t.id).sort(), [ug.contoso, ug.litware].sort(), "move targets: only Maria's groups");
+  // No AI: matching is local, and the trace has the guard step with counts only.
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM usage_events WHERE org_id = '${ug.org}' AND feature = 'extract'`)), 0);
+  // Below the threshold, or more about its own client: not held. One engagement code: held.
+  assert.equal((await uploadDoc(ugMaria, ug.contoso, "Contoso plan.md", "Contoso Retail wave 2 plan. Lessons from Litware's rollout.")).body.results[0].held, undefined, "one mention isn't enough");
+  assert.equal((await uploadDoc(ugMaria, ug.contoso, "Contoso compare.md", "Contoso Retail plan, Contoso Retail stores, Contoso Retail budget, like Litware did, Litware again.")).body.results[0].held, undefined, "mostly about its own client");
+  const coded = await uploadDoc(ugMaria, ug.contoso, "Timesheet codes.md", "Book this week's hours to LIT-DATA-26.");
+  assert.equal(coded.body.results[0].held, true, "another group's engagement code holds it");
+  ug.coded = coded.body.results[0].id;
+  // Walls on the decision: other groups can't see or act on it; a Contoso-only Member can't move it to Litware.
+  assert.equal((await ugLara("POST", `/api/docs/${ug.held}`, { action: "keep" })).status, 404);
+  assert.equal((await ugLara("POST", `/api/docs/${ug.held}`, { action: "move", to: ug.litware })).status, 404);
+  assert.equal((await ugNina("POST", `/api/docs/${ug.held}`, { action: "move", to: ug.litware })).status, 404, "only groups they belong to");
+  assert.equal((await admin("POST", `/api/docs/${ug.held}`, { action: "move", to: s.wsA })).status, 404, "another org can't touch it");
+  assert.equal((await ugMaria("POST", `/api/docs/${ug.held}`, { action: "move", to: ug.contoso })).status, 400, "already there");
+  assert.equal((await ugMaria("POST", `/api/docs/${ug.held}`, { action: "move", to: s.wsA })).status, 404, "not a group of this org");
+  assert.equal((await ugMaria("POST", `/api/docs/${ug.held}`, { action: "frobnicate" })).status, 400);
+  // Maria moves it to Litware: indexed there only; Contoso people can't see it any more.
+  const moved = await ugMaria("POST", `/api/docs/${ug.held}`, { action: "move", to: ug.litware });
+  assert.equal(moved.status, 200, JSON.stringify(moved.body));
+  assert.equal(moved.body.group, "Litware – Data Platform");
+  assert.ok(titlesOf(await askIn(ugLara, ug.litware, "QUOKKA-55 nightly load")).includes("Litware SLA.md"), "searchable in Litware");
+  assert.ok(!titlesOf(await askIn(ugNina, ug.contoso, "QUOKKA-55 nightly load")).includes("Litware SLA.md"), "gone from Contoso");
+  assert.ok(!(await docsIn(ugNina, ug.contoso)).some((d) => d.id === ug.held));
+  assert.equal(await dbValue(`SELECT DISTINCT workspace_id FROM passages WHERE source_id = '${ug.held}'`), ug.litware);
+  assert.equal(await dbValue(`SELECT status FROM documents WHERE id = '${ug.held}'`), "Ready");
+  assert.equal((await ugNina("POST", `/api/docs/${ug.held}`, { action: "move", to: ug.contoso })).status, 404, "Nina can't pull it back from a group she isn't in");
+  const audit = JSON.stringify((await ugOwner("GET", "/api/audit")).body);
+  assert.match(audit, /Moved “Litware SLA\.md” from Contoso Retail – Cloud Migration to Litware – Data Platform/);
+  assert.match(audit, /Moved “Litware SLA\.md” here from Contoso Retail – Cloud Migration/);
+  // A Ready document moves too (passages follow, nothing left behind); the same text already there is refused.
+  const ready = (await uploadDoc(ugMaria, ug.contoso, "Shared glossary.md", "WOMBAT-9 means the weekly ingestion window.")).body.results[0];
+  assert.equal((await ugMaria("POST", `/api/docs/${ready.id}`, { action: "move", to: ug.litware })).status, 200);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE source_id = '${ready.id}' AND workspace_id = '${ug.contoso}'`)), 0);
+  assert.ok(titlesOf(await askIn(ugLara, ug.litware, "WOMBAT-9 weekly ingestion")).includes("Shared glossary.md"));
+  const again = (await uploadDoc(ugMaria, ug.contoso, "Glossary copy.md", "WOMBAT-9 means the weekly ingestion window.")).body.results[0];
+  assert.equal((await ugMaria("POST", `/api/docs/${again.id}`, { action: "move", to: ug.litware })).status, 409);
+});
+
+test(`[${ENGINE}] upload guard: a kept file raises Needs attention for the Team Lead, who confirms it; meetings are checked before saving`, async () => {
+  assert.equal((await ugNina("POST", `/api/docs/${ug.coded}`, { action: "review" })).status, 403, "Members can't confirm");
+  assert.equal((await ugMaria("POST", `/api/docs/${ug.coded}`, { action: "keep" })).status, 200);
+  assert.equal((await ugMaria("POST", `/api/docs/${ug.coded}`, { action: "keep" })).status, 409, "only held ones");
+  assert.ok(titlesOf(await askIn(ugNina, ug.contoso, "hours LIT-DATA-26 week")).includes("Timesheet codes.md"), "kept = indexed in Contoso");
+  await jobTick();
+  const f = (await ugLead("GET", "/api/findings")).body.findings.find((x) => x.kind === "misfiled_doc");
+  assert.ok(f, "the Team Lead sees it");
+  assert.match(f.title, /“Timesheet codes\.md” looks like it's about Litware – Data Platform/);
+  assert.equal(f.actionHref, `/knowledge?doc=${ug.coded}`);
+  assert.deepEqual(f.guard, { doc: ug.coded, scope: "document", held: false });
+  assert.ok(f.canAct);
+  assert.ok(!(await ugNina("GET", "/api/findings")).body.findings.some((x) => x.kind === "misfiled_doc"), "Members don't");
+  assert.ok(!(await ugLara("GET", "/api/findings")).body.findings.some((x) => x.kind === "misfiled_doc"), "other groups don't");
+  assert.ok((await ugOwner("GET", "/api/findings")).body.findings.some((x) => x.kind === "misfiled_doc"), "admins do");
+  assert.equal((await ugLead("POST", `/api/docs/${ug.coded}`, { action: "review" })).status, 200);
+  assert.ok(!(await ugLead("GET", "/api/findings")).body.findings.some((x) => x.kind === "misfiled_doc"), "resolved straight away");
+  await jobTick();
+  assert.ok(!(await ugOwner("GET", "/api/findings")).body.findings.some((x) => x.kind === "misfiled_doc" && x.workspaceId === ug.contoso), "and stays resolved");
+  // "Add a past or outside meeting": a Litware meeting added to Contoso is stopped before anything is saved or any AI runs.
+  const before = Number(await dbValue(`SELECT COUNT(*) FROM meetings WHERE org_id = '${ug.org}'`));
+  const m = await importMeeting(ugMaria, ug.contoso, "Pipeline sync", "Ana: Litware wants the load earlier. Ben: Litware's data office agrees. Ana: LIT-DATA-26 hours.");
+  assert.equal(m.status, 200);
+  assert.match(m.body.check.question, /This looks like it's about Litware – Data Platform/);
+  assert.equal(m.body.id, undefined);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM meetings WHERE org_id = '${ug.org}'`)), before, "nothing saved");
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM usage_events WHERE org_id = '${ug.org}' AND feature = 'extract'`)), 0, "no AI");
+  const form = new FormData();
+  for (const [k, v] of Object.entries({ ws: ug.contoso, title: "Pipeline sync", text: "Ana: Litware wants the load earlier. Ben: Litware's data office agrees.", held_at: "2026-10-20", wrong_client_ok: "1" })) form.append(k, v);
+  const kept = await ugMaria("POST", "/api/meetings", undefined, { form });
+  assert.equal(kept.status, 200, JSON.stringify(kept.body));
+  assert.ok(kept.body.id, "kept here on purpose");
+  assert.match(JSON.stringify((await ugOwner("GET", "/api/audit")).body), /Imported meeting “Pipeline sync” although it looks like it's about Litware – Data Platform/);
+});
+
+test(`[${ENGINE}] upload guard: firm library uploads naming a client are held; "Applies to" limits a firm document to chosen groups`, async () => {
+  // A client checklist uploaded to the firm library: held (every group would get it), in no group's answers.
+  const held = await firmUpload(ugOwner, "Store checklist.md", "Contoso Retail store cutover checklist: tills offline 23:00 to 02:00, KOALA-12 bridge.", { title: "Store checklist" });
+  assert.equal(held.status, 200, JSON.stringify(held.body));
+  assert.equal(held.body.results[0].held, true);
+  assert.equal(held.body.results[0].question, "This looks like it's about Contoso Retail – Cloud Migration. Firm library documents reach every group. Put it in the Contoso Retail – Cloud Migration group instead?");
+  ug.firmHeld = held.body.results[0].id;
+  for (const ws of [ug.contoso, ug.litware, ug.fabrikam]) assert.ok(!titlesOf(await askIn(ugOwner, ws, "KOALA-12 bridge tills")).includes("Store checklist"), "held firm documents never reach answers");
+  // Others in the org see the list without the guard details.
+  const ninaView = (await ugNina("GET", "/api/firm")).body.docs.find((d) => d.id === ug.firmHeld);
+  assert.equal(ninaView.match, null);
+  assert.equal(ninaView.question, null);
+  assert.equal((await ugNina("POST", `/api/firm/${ug.firmHeld}`, { action: "keep" })).status, 403);
+  assert.equal((await admin("POST", `/api/firm/${ug.firmHeld}`, { action: "keep" })).status, 404, "another org can't touch it");
+  // Limit it to Contoso: only Contoso's answers use it, and the citation says it's limited.
+  assert.equal((await ugOwner("POST", `/api/firm/${ug.firmHeld}`, { action: "limit" })).status, 200);
+  const inContoso = await askIn(ugNina, ug.contoso, "KOALA-12 bridge tills");
+  const cite = inContoso.body.sources.find((x) => x.title === "Store checklist");
+  assert.ok(cite, JSON.stringify(inContoso.body.sources));
+  assert.equal(cite.origin, "firm");
+  assert.equal(cite.appliesTo, 1);
+  assert.ok(!titlesOf(await askIn(ugLara, ug.litware, "KOALA-12 bridge tills")).includes("Store checklist"), "limited firm documents never reach other groups");
+  assert.ok(!titlesOf(await askIn(ugOwner, ug.fabrikam, "KOALA-12 bridge tills")).includes("Store checklist"), "not even for an admin asking in another group");
+  const firmList = (await ugOwner("GET", "/api/firm")).body;
+  const row = firmList.docs.find((d) => d.id === ug.firmHeld);
+  assert.equal(row.applies_to, "some");
+  assert.deepEqual(row.groups.map((g) => g.id), [ug.contoso]);
+  assert.equal(row.status, "Ready");
+  const laraRow = (await ugLara("GET", "/api/firm")).body.docs.find((d) => d.id === ug.firmHeld);
+  assert.deepEqual([laraRow.groups, laraRow.hiddenGroups], [[], 1], "other groups' names are hidden from non-admins");
+  // A firm standard for two groups (chosen at upload): not held although it names them, used only there.
+  const two = new FormData();
+  two.append("title", "Banking data residency");
+  two.append("applies_to", ug.contoso);
+  two.append("applies_to", ug.fabrikam);
+  two.append("files", new File(["Fabrikam Bank and Contoso Retail data stays in-region. EMU-77 approval needed for extracts."], "Residency.md", { type: "text/markdown" }));
+  const twoR = await ugOwner("POST", "/api/firm", undefined, { form: two });
+  assert.equal(twoR.status, 200, JSON.stringify(twoR.body));
+  assert.equal(twoR.body.results[0].held, undefined, "the chosen groups' own names don't hold it");
+  ug.limited = twoR.body.results[0].id;
+  assert.ok(titlesOf(await askIn(ugOwner, ug.fabrikam, "EMU-77 approval extracts")).includes("Banking data residency"));
+  assert.ok(titlesOf(await askIn(ugNina, ug.contoso, "EMU-77 approval extracts")).includes("Banking data residency"));
+  assert.ok(!titlesOf(await askIn(ugLara, ug.litware, "EMU-77 approval extracts")).includes("Banking data residency"));
+  // Changing "Applies to": all groups, back to some; bad or other-org groups refused; audited.
+  assert.equal((await ugOwner("PATCH", `/api/firm/${ug.limited}`, { applies_to: "all" })).status, 200);
+  assert.ok(titlesOf(await askIn(ugLara, ug.litware, "EMU-77 approval extracts")).includes("Banking data residency"), "all groups again");
+  assert.equal((await ugOwner("PATCH", `/api/firm/${ug.limited}`, { applies_to: [ug.fabrikam] })).status, 200);
+  assert.ok(!titlesOf(await askIn(ugNina, ug.contoso, "EMU-77 approval extracts")).includes("Banking data residency"));
+  assert.equal((await ugOwner("PATCH", `/api/firm/${ug.limited}`, { applies_to: [s.wsA] })).status, 400, "another org's group");
+  assert.equal((await ugOwner("PATCH", `/api/firm/${ug.limited}`, { applies_to: [] })).status, 400);
+  assert.equal((await ugNina("PATCH", `/api/firm/${ug.limited}`, { applies_to: "all" })).status, 403);
+  assert.match(JSON.stringify((await ugOwner("GET", "/api/audit")).body), /now applies to 1 group only/);
+  // A held firm document moved into a group: becomes that group's document, out of the firm library.
+  const cl = (await firmUpload(ugOwner, "Fabrikam runbook.md", "Fabrikam Bank card switch runbook, PANDA-3 rollback step.", { title: "Fabrikam runbook" })).body.results[0];
+  assert.equal(cl.held, true);
+  assert.equal((await ugOwner("POST", `/api/firm/${cl.id}`, { action: "move", to: ug.fabrikam })).status, 200);
+  assert.ok(!(await ugOwner("GET", "/api/firm")).body.docs.some((d) => d.id === cl.id));
+  const fab = await askIn(ugOwner, ug.fabrikam, "PANDA-3 rollback step");
+  assert.equal(fab.body.sources.find((x) => x.title === "Fabrikam runbook.md")?.origin, "group");
+  assert.ok(!titlesOf(await askIn(ugNina, ug.contoso, "PANDA-3 rollback step")).some((t) => /Fabrikam runbook/.test(t)), "never in other groups");
+  // Kept for every group anyway: a Needs attention item for the Org Owner/Admins only, confirmed from the finding.
+  const keep = (await firmUpload(ugOwner, "Litware lessons.md", "Lessons learned on Litware: start data quality checks early.", { title: "Litware lessons" })).body.results[0];
+  assert.equal(keep.held, true);
+  assert.equal((await ugOwner("POST", `/api/firm/${keep.id}`, { action: "keep" })).status, 200);
+  await jobTick();
+  const ff = (await ugOwner("GET", "/api/findings")).body.findings.find((x) => x.kind === "misfiled_doc" && x.guard?.scope === "firm");
+  assert.ok(ff, "admins see it");
+  assert.equal(ff.workspaceId, null);
+  assert.ok(!(await ugLead("GET", "/api/findings")).body.findings.some((x) => x.guard?.scope === "firm"), "Team Leads don't");
+  assert.equal((await ugOwner("POST", `/api/firm/${keep.id}`, { action: "review" })).status, 200);
+  assert.ok(!(await ugOwner("GET", "/api/findings")).body.findings.some((x) => x.guard?.doc === keep.id));
+});
+
 test(`[${ENGINE}] reset-password: a temporary password, signed out everywhere, change forced, audited`, async () => {
   const rita = await newPerson("Rita Reset", "rita@test.local", "Member");
   assert.equal((await rita.call("GET", "/api/overview")).status, 200);
@@ -5077,3 +5280,4 @@ test(`[${ENGINE}] connector requests: plans without connectors can't ask (upgrad
   assert.match(ap.body.error, /Your Team plan allows 1 connector and you have 1\./);
   assert.equal((await team.o("GET", "/api/connectors")).body.requests[0].status, "pending", "still waiting");
 });
+

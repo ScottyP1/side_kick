@@ -6,11 +6,17 @@
  * list; Org Owners and Org Admins upload (with title, audience, effective date and what it replaces), edit and
  * delete. Shareable firm documents are the only ones used where client guests are present. Firm documents count
  * toward the plan's document limit. API: /api/firm and /api/firm/[id] (lib/firm.ts).
+ *
+ * **Applies to**: every group (default) or chosen groups only; set when uploading and changed per document (Change).
+ * **Upload guard** (components/upload-guard.tsx): the form says the upload reaches every group (or the chosen ones);
+ * a file that mentions one of the org's clients is **Held** (not used in answers) and its row asks "Put it in the
+ * Contoso group instead?" with Move / Only for that group / Keep for every group. `?doc=<id>` highlights one row.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/shell";
-import { api, fmtBytes, fmtDate, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
+import { api, fmtBytes, fmtDate, Icon, Modal, Pill, Spinner, useReportError, useToast } from "@/components/ui";
+import { HeldActions, UploadTarget, type GuardMatch, type MoveTarget } from "@/components/upload-guard";
 import { BRAND } from "@/lib/brand";
 
 type FirmDoc = {
@@ -27,7 +33,28 @@ type FirmDoc = {
   superseded_title: string | null;
   uploaded_by: string | null;
   created_at: string;
+  applies_to: "all" | "some";
+  groups: { id: string; name: string }[];
+  /** For people who aren't admins: chosen groups they aren't in (names hidden). */
+  hiddenGroups?: number;
+  guard_status: string | null;
+  match: GuardMatch | null;
+  question: string | null;
 };
+
+/** Ticks for choosing groups ("Applies to"). */
+function GroupPicks({ groups, picked, setPicked }: { groups: MoveTarget[]; picked: string[]; setPicked: (ids: string[]) => void }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
+      {groups.map((g) => (
+        <label key={g.id} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+          <input type="checkbox" checked={picked.includes(g.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, g.id] : picked.filter((x) => x !== g.id))} />
+          {g.name}
+        </label>
+      ))}
+    </div>
+  );
+}
 
 export default function FirmLibraryPage() {
   const { me } = useApp();
@@ -41,18 +68,31 @@ export default function FirmLibraryPage() {
   const [title, setTitle] = useState("");
   const [effective, setEffective] = useState("");
   const [replaces, setReplaces] = useState("");
+  const [groups, setGroups] = useState<MoveTarget[]>([]);
+  const [limited, setLimited] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [editing, setEditing] = useState<{ doc: FirmDoc; limited: boolean; picked: string[] } | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const r = await api<{ docs: FirmDoc[]; counts: typeof counts; canManage: boolean }>("/api/firm");
+    const r = await api<{ docs: FirmDoc[]; counts: typeof counts; canManage: boolean; groups: MoveTarget[] }>("/api/firm");
     setDocs(r.docs);
     setCounts(r.counts);
     setCanManage(r.canManage);
+    setGroups(r.groups);
   }, []);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set after the request resolves
     load().catch(reportError);
   }, [load, reportError]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads `?doc=` once after mount (a "Needs attention" link)
+    setFocus(new URLSearchParams(window.location.search).get("doc"));
+  }, []);
+  useEffect(() => {
+    if (focus && docs?.some((d) => d.id === focus)) document.getElementById(`firm-${focus}`)?.scrollIntoView({ block: "center" });
+  }, [focus, docs]);
 
   const upload = async (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -63,11 +103,19 @@ export default function FirmLibraryPage() {
     if (title.trim()) form.set("title", title.trim());
     if (effective) form.set("effective_on", effective);
     if (replaces) form.set("replaces", replaces);
+    if (limited) picked.forEach((g) => form.append("applies_to", g));
     list.forEach((f) => form.append("files", f));
     try {
-      const r = await api<{ results: { name: string; ok: boolean; error?: string }[] }>("/api/firm", { method: "POST", body: form });
+      const r = await api<{ results: { name: string; ok: boolean; error?: string; held?: boolean }[] }>("/api/firm", { method: "POST", body: form });
       const failed = r.results.filter((x) => !x.ok);
-      toast(failed.length ? `${r.results.length - failed.length} added, ${failed.length} not added: ${failed[0].error}` : `${r.results.length} document${r.results.length > 1 ? "s" : ""} added. Every group can use ${r.results.length > 1 ? "them" : "it"} now`);
+      const held = r.results.filter((x) => x.held);
+      const who = limited ? "The chosen groups" : "Every group";
+      toast(
+        held.length
+          ? `${held.length} held: ${held.length > 1 ? "they mention" : "it mentions"} one of your clients. Decide below where ${held.length > 1 ? "they belong" : "it belongs"}.`
+          : failed.length ? `${r.results.length - failed.length} added, ${failed.length} not added: ${failed[0].error}` : `${r.results.length} document${r.results.length > 1 ? "s" : ""} added. ${who} can use ${r.results.length > 1 ? "them" : "it"} now`,
+        held.length ? "error" : undefined,
+      );
       if (!failed.length) {
         setTitle("");
         setEffective("");
@@ -110,6 +158,12 @@ export default function FirmLibraryPage() {
   };
 
   const current = docs?.filter((d) => d.status === "Ready" && !d.superseded_by) ?? [];
+  const groupName = (id: string) => groups.find((g) => g.id === id)?.name ?? "a group";
+  const saveAppliesTo = async () => {
+    if (!editing) return;
+    await change(editing.doc, { applies_to: editing.limited ? editing.picked : "all" });
+    setEditing(null);
+  };
 
   return (
     <>
@@ -153,8 +207,17 @@ export default function FirmLibraryPage() {
                 </div>
               </div>
             </div>
+            <div className="field">
+              <span>Applies to</span>
+              <div className="seg">
+                <button type="button" aria-pressed={!limited} onClick={() => setLimited(false)}>All groups</button>
+                <button type="button" aria-pressed={limited} onClick={() => setLimited(true)}>Chosen groups</button>
+              </div>
+              {limited && <GroupPicks groups={groups} picked={picked} setPicked={setPicked} />}
+            </div>
+            <UploadTarget firm limitedTo={limited ? picked.map(groupName) : undefined} />
             <div className="actions" style={{ alignItems: "center" }}>
-              <button className="btn primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
+              <button className="btn primary" onClick={() => fileRef.current?.click()} disabled={uploading || (limited && !picked.length)}>
                 {uploading ? <><Spinner /> Reading and indexing…</> : <><Icon n="upload" /> Choose files</>}
               </button>
               <span className="muted" style={{ fontSize: 12.5 }}>PDF, Word (.docx), text, Markdown, CSV or JSON · up to 25 MB each · counts toward your plan&apos;s document limit</span>
@@ -181,6 +244,7 @@ export default function FirmLibraryPage() {
                   <th>Document</th>
                   <th>Status</th>
                   <th>Audience</th>
+                  <th>Applies to</th>
                   <th>Effective</th>
                   <th>Added</th>
                   <th className="r">Size</th>
@@ -189,14 +253,17 @@ export default function FirmLibraryPage() {
               </thead>
               <tbody>
                 {docs?.map((d) => (
-                  <tr key={d.id}>
+                  <tr key={d.id} id={`firm-${d.id}`} className={focus === d.id ? "focus-row" : undefined}>
                     <td>
                       <b style={{ wordBreak: "break-word" }}>{d.title}</b>
                       <div className="muted" style={{ fontSize: 12 }}>{d.name}{d.status === "Ready" ? ` · ${d.chunk_count} passage${d.chunk_count === 1 ? "" : "s"}` : ""}</div>
                       {d.superseded_title && <div style={{ fontSize: 12.5, color: "var(--warn)" }}>Superseded by “{d.superseded_title}”</div>}
                       {d.error && <div style={{ color: "var(--bad)", fontSize: 12.5 }}>{d.error}</div>}
+                      {canManage && d.match && (d.status === "Held" || d.guard_status === "kept") && (
+                        <HeldActions scope="firm" id={d.id} match={d.match} question={d.question} held={d.status === "Held"} targets={groups} canReview onDone={() => load().catch(reportError)} />
+                      )}
                     </td>
-                    <td><Pill kind={d.status === "Ready" ? (d.superseded_by ? "warn" : "good") : d.status === "Failed" ? "bad" : "info"}>{d.status === "Ready" && d.superseded_by ? "Superseded" : d.status}</Pill></td>
+                    <td><Pill kind={d.status === "Ready" ? (d.superseded_by || d.guard_status === "kept" ? "warn" : "good") : d.status === "Failed" ? "bad" : d.status === "Held" ? "warn" : "info"}>{d.status === "Ready" && d.superseded_by ? "Superseded" : d.status}</Pill></td>
                     <td>
                       <div className="seg" style={{ fontSize: 12 }}>
                         {(["internal", "shareable"] as const).map((a) => (
@@ -205,6 +272,16 @@ export default function FirmLibraryPage() {
                           </button>
                         ))}
                       </div>
+                    </td>
+                    <td style={{ fontSize: 12.5, minWidth: 120 }}>
+                      {d.applies_to === "some"
+                        ? d.groups.length || d.hiddenGroups
+                          ? [...d.groups.map((g) => g.name), ...(d.hiddenGroups ? [`${d.hiddenGroups} other group${d.hiddenGroups > 1 ? "s" : ""}`] : [])].join(", ")
+                          : <span className="muted">No groups (removed)</span>
+                        : <span className="muted">All groups</span>}
+                      {canManage && (
+                        <div><button className="btn small ghost" style={{ padding: "2px 6px" }} onClick={() => setEditing({ doc: d, limited: d.applies_to === "some", picked: d.groups.map((g) => g.id) })}>Change</button></div>
+                      )}
                     </td>
                     <td className="muted" style={{ whiteSpace: "nowrap" }}>{d.effective_on ?? "—"}</td>
                     <td className="muted">{fmtDate(d.created_at)}{d.uploaded_by ? ` · ${d.uploaded_by}` : ""}</td>
@@ -228,6 +305,26 @@ export default function FirmLibraryPage() {
           </div>
         )}
       </div>
+      {editing && (
+        <Modal
+          title={`Who can use “${editing.doc.title}”?`}
+          onClose={() => setEditing(null)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
+              <button className="btn primary" disabled={editing.limited && !editing.picked.length} onClick={saveAppliesTo}>Save</button>
+            </>
+          }
+        >
+          <div className="seg">
+            <button type="button" aria-pressed={!editing.limited} onClick={() => setEditing({ ...editing, limited: false })}>All groups</button>
+            <button type="button" aria-pressed={editing.limited} onClick={() => setEditing({ ...editing, limited: true })}>Chosen groups</button>
+          </div>
+          {editing.limited && <GroupPicks groups={groups} picked={editing.picked} setPicked={(ids) => setEditing({ ...editing, picked: ids })} />}
+          <UploadTarget firm limitedTo={editing.limited ? editing.picked.map(groupName) : undefined} />
+          <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>Only the chosen groups&apos; answers use it, straight away. Client guests still only see Shareable documents.</p>
+        </Modal>
+      )}
     </>
   );
 }

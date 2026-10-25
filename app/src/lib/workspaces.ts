@@ -67,7 +67,7 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
     // Ask and Teams conversations in this group (follow-ups), with their turns.
     await run("DELETE FROM conversation_turns WHERE conversation_id IN (SELECT id FROM conversations WHERE workspace_id = ? AND org_id = ?)", ...ws);
     for (const table of [
-      "guard_custom_rules", "guard_workspace_rules", "chat_messages", "teams_chat_settings", "reminder_runs",
+      "guard_custom_rules", "guard_workspace_rules", "chat_messages", "teams_chat_settings", "notes_chats", "reminder_runs",
       "action_items", "items", "meetings", "documents", "questions", "passages", "answer_feedback", "conversations",
       // The group's connections to outside tools (lib/connectors.ts) with their links and imported items; other groups keep theirs.
       "connector_items", "connector_links", "connectors", "connector_states", "connector_requests",

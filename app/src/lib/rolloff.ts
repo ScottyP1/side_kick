@@ -333,7 +333,7 @@ export const ORG_TABLES = [
   "connector_items", "connector_links", "connectors", "connector_states", "connector_requests", "connector_kinds",
   "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
   "guard_rule_versions", "guard_custom_rules", "guard_workspace_rules", "guard_events", "guard_rules",
-  "chat_messages", "teams_chat_settings", "reminder_runs", "action_items", "items", "meetings", "documents",
+  "chat_messages", "teams_chat_settings", "notes_chats", "reminder_runs", "action_items", "items", "meetings", "documents",
   "questions", "passages", "usage_events", "audit_log", "settings", "org_flags", "traces", "org_setup",
   "credit_topups", "credit_notices", "ai_batch_items", "org_terms", "subscriptions", "teams_conversations",
   "users", "workspaces",

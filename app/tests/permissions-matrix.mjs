@@ -87,6 +87,7 @@ export const MATRIX = [
   { what: "Remove a person from the organization", method: "DELETE", url: () => `/api/users/${NOPE}`, allow: ADMINS },
   { what: "Link Teams channels and chats (Team Leads: to their workspaces)", method: "POST", url: () => "/api/teams-links", body: { ws: NOPE }, allow: MANAGERS },
   { what: "Change a Teams link (guests) or unlink it (Team Leads: in their workspaces)", method: "PATCH", url: () => "/api/teams-links", body: { id: NOPE }, allow: MANAGERS },
+  { what: "Choose which chats get a group's meeting notes (Team Leads: their own groups)", method: "PUT", url: (s) => `/api/workspaces/${s.wsA}/notes-chats`, body: {}, allow: MANAGERS },
   { what: "See the audit log", method: "GET", url: () => "/api/audit", allow: ADMINS },
   { what: "See Activity (traces and performance)", method: "GET", url: () => "/api/activity?view=overview", allow: ADMINS },
   { what: "Change branding (logo, brand color)", method: "PUT", url: () => "/api/settings", body: {}, allow: ADMINS, skipAllowed: true },

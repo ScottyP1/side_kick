@@ -39,12 +39,11 @@ import { structured } from "./claude";
 import { FeatureOffError } from "./owner";
 import { hasFeature } from "./limits";
 import { brokenConnectors } from "./connector-health";
-import { getChatSettings } from "./reminders";
+import { notesPlan } from "./notes-chats";
 import { versionKey } from "./rank";
 import { tagSafe } from "./security";
 import { BRAND } from "./brand";
 import { KIND_LABEL as TOOL_LABEL, PROJECT_WORD, type ConnectorKind } from "./connector-text";
-import type { TeamsConversation } from "./teams/bot";
 
 /** The kinds of finding, one per watcher (chats have two: waiting to be assigned, and removed in Teams). */
 export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "role_changed", "misfiled_doc"] as const;
@@ -384,8 +383,13 @@ const noLead: Watcher = {
 };
 
 /**
- * Groups with no Teams chat that gets meeting notes. Only for organizations that use Teams with Sidekick (a chat
- * linked to any group, or Microsoft connected), so a portal-only customer isn't nagged.
+ * Where a group's meeting notes go in Teams (lib/notes-chats.ts). Only for organizations that use Teams with Sidekick (a
+ * chat linked to any group, or Microsoft connected), so a portal-only customer isn't nagged. Two findings, both for the
+ * group's managers:
+ * - subject "": the group has **no linked Teams chat** at all, so notes stay in the portal;
+ * - subject "pick": the group has **two or more chats and nobody chose** under "Meeting notes go to" (or every chosen
+ *   chat is gone), so notes only reach the default chat until the Team Lead picks. Resolves itself once they choose
+ *   (one chat, several, or "Don't post notes in Teams", which is a choice too).
  */
 const noNotesChat: Watcher = {
   kind: "no_notes_chat",
@@ -394,16 +398,35 @@ const noNotesChat: Watcher = {
     const usesTeams = await get("SELECT 1 AS x FROM teams_conversations WHERE org_id = ? AND workspace_id IS NOT NULL LIMIT 1", o.orgId)
       ?? await get("SELECT 1 AS x FROM orgs WHERE id = ? AND entra_tenant_id IS NOT NULL", o.orgId);
     if (!usesTeams) return [];
-    const chats = await all<TeamsConversation>("SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id IS NOT NULL AND removed_at IS NULL AND leaving IS NULL", o.orgId);
-    const withNotes = new Set<string>();
-    for (const c of chats) if ((await getChatSettings(c)).notes) withNotes.add(c.workspace_id!);
-    return o.groups.filter((g) => !withNotes.has(g.id)).map((g) => ({
-      kind: "no_notes_chat", workspaceId: g.id, subject: "", audience: "managers", severity: "info",
-      title: `${quote(g.name, 60)} has no Teams chat for meeting notes`,
-      detail: `Meeting notes and reminders for this group stay in the portal: no linked Teams chat takes them.`,
-      nextStep: `Add ${BRAND.name} to the group's Teams chat and assign it to this group (or switch meeting notes on for a chat it already has).`,
-      actionHref: `/workspaces/${g.id}`, actionLabel: "Open group",
-    } satisfies Fresh));
+    // One count per group first: only groups with 2+ chats need the full plan (keeps this cheap with thousands of groups).
+    const counts = new Map((await all<{ workspace_id: string; n: number }>(
+      "SELECT workspace_id, COUNT(*) AS n FROM teams_conversations WHERE org_id = ? AND workspace_id IS NOT NULL AND removed_at IS NULL AND leaving IS NULL GROUP BY workspace_id", o.orgId,
+    )).map((r) => [r.workspace_id, Number(r.n)]));
+    const out: Fresh[] = [];
+    for (const g of o.groups) {
+      const n = counts.get(g.id) ?? 0;
+      if (n === 1) continue;
+      const plan = n ? await notesPlan(o.orgId, g.id) : null;
+      if (!plan) {
+        out.push({
+          kind: "no_notes_chat", workspaceId: g.id, subject: "", audience: "managers", severity: "info",
+          title: `${quote(g.name, 60)} has no Teams chat for meeting notes`,
+          detail: `Meeting notes and reminders for this group stay in the portal: no Teams chat is assigned to it.`,
+          nextStep: `Add ${BRAND.name} to the group's Teams chat and assign it to this group.`,
+          actionHref: `/workspaces/${g.id}#chats`, actionLabel: "Open Teams chats",
+        });
+      } else if (plan.needsChoice) {
+        const fallback = plan.chats.find((c) => c.id === plan.defaultId);
+        out.push({
+          kind: "no_notes_chat", workspaceId: g.id, subject: "pick", audience: "managers", severity: "info",
+          title: `Pick which chat gets meeting notes in ${quote(g.name, 60)}`,
+          detail: `${quote(g.name, 60)} has ${plan.chats.length} Teams chats and nobody chose where meeting notes go, so they only go to ${fallback ? quote(fallback.name ?? "Teams chat", 60) : "no chat"} for now.`,
+          nextStep: `On the group's Teams chats tab, choose the chat (or chats) under “Meeting notes go to”, or “Don't post notes in Teams”.`,
+          actionHref: `/workspaces/${g.id}#chats`, actionLabel: "Pick the notes chat",
+        });
+      }
+    }
+    return out;
   },
 };
 

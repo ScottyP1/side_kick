@@ -91,6 +91,10 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
     assert.ok(count(`SELECT COUNT(*) FROM findings WHERE org_id = ${northwind} AND kind = ? AND status = 'open'`, kind) >= 1, `a "${kind}" finding`);
   }
   assert.equal(count("SELECT COUNT(*) FROM jobs WHERE status = 'dead'"), 0, "no job gave up");
+  // "Meeting notes go to": Contoso's two chats, notes to the internal one only; Litware's two chats, no choice yet.
+  assert.equal(count("SELECT COUNT(*) FROM workspaces w JOIN notes_chats n ON n.workspace_id = w.id JOIN teams_conversations c ON c.id = n.conversation_id WHERE w.name LIKE 'Contoso%' AND w.notes_choice = 'chosen' AND c.guests = 0"), 1);
+  assert.equal(count("SELECT COUNT(*) FROM notes_chats n JOIN workspaces w ON w.id = n.workspace_id WHERE w.name LIKE 'Contoso%'"), 1, "only one of Contoso's chats");
+  assert.equal(count(`SELECT COUNT(*) FROM findings f JOIN workspaces w ON w.id = f.workspace_id WHERE f.org_id = ${northwind} AND f.kind = 'no_notes_chat' AND f.status = 'open' AND w.name LIKE 'Litware%' AND f.title LIKE 'Pick which chat%'`), 1, "Litware's Team Lead is asked to pick");
   // Allow → connect per group → request: four tool types allowed (Microsoft 365 through a request), connections per
   // group (Azure DevOps in Contoso and, separately, Litware), GitHub not allowed with one request declined (with a
   // note) and one waiting for the Org Owner.

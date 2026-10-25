@@ -223,6 +223,8 @@ export type NotesInput = {
   keep?: NotesKeepItem[];
   /** "Captured from Microsoft Teams" for automatic notes. */
   source?: string;
+  /** Footer: where these notes were posted ("Notes posted to …", lib/notes-chats.ts `postedToLine`). */
+  postedTo?: string | null;
 };
 
 /** Cap on rows with a Save button, so a long meeting's card stays within Teams' card size; the rest is in the portal. */
@@ -234,6 +236,7 @@ const KEEP_LABEL: Record<string, string> = { decision: "Decision", requirement: 
  * each decision (then requirements, risks, facts, terms) is a row with **Save to knowledge** (verb
  * `VERBS.saveKnowledge`, data `{ itemId, meetingId }`); a saved one shows who saved it and **Undo**
  * (`VERBS.unsaveKnowledge`). The bot answers a click with this card rebuilt, so everyone sees the new state.
+ * The footer says which chats got the notes (`postedTo`).
  */
 export function meetingNotesCard(m: NotesInput): IAdaptiveCard {
   const sub = [m.heldAt, m.source].filter(Boolean).join(" · ");
@@ -275,6 +278,7 @@ export function meetingNotesCard(m: NotesInput): IAdaptiveCard {
   }
   list("Still open", m.openQuestions);
   if (m.actionCount) body.push(text(`${m.actionCount} action item${m.actionCount === 1 ? "" : "s"} below. Assign them or mark them done right here.`, { size: "Small", isSubtle: true, spacing: "Large" }));
+  if (m.postedTo) body.push(text(m.postedTo, { size: "Small", isSubtle: true, spacing: m.actionCount ? "Small" : "Large" }));
   return card(body, [{ type: "Action.OpenUrl", title: `Open in ${BRAND.name}`, url: m.portalUrl }]);
 }
 

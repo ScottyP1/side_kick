@@ -64,7 +64,7 @@ Sidekick keeps an eye on each group in the background, every 15 minutes, and lis
 - Teams chats waiting to be assigned to a group, and chats someone removed Sidekick from in Teams,
 - action items past their due date, and action items nobody owns two days after the meeting,
 - documents a newer meeting decision seems to change ("may be out of date"),
-- groups without a Team Lead (plans with Team Leads) or without a Teams chat for meeting notes,
+- groups without a Team Lead (plans with Team Leads) or without a Teams chat for meeting notes, and groups with several chats where nobody picked which one gets the notes,
 - connectors (such as Jira or Azure DevOps) that stopped working,
 - documents that may be another client's: held ones waiting for a decision, and ones kept anyway (for the group's Team Lead and the admins; firm library ones for the Org Owner and Admins).
 

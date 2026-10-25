@@ -7,7 +7,8 @@
  * - **Chat settings**: every linked Teams channel or chat has its own settings (stored as JSON in
  *   `teams_chat_settings`, missing fields = the defaults below):
  *   - `track`: Sidekick reads and remembers every message in the chat (not only @mentions);
- *   - `notes`: meeting notes and action-item cards are posted here after each meeting;
+ *   (Which chats get meeting notes is one choice per group since Oct 2026: lib/notes-chats.ts. An old `notes` field in
+ *   the JSON is ignored here; lib/db.ts `DATA_MIGRATIONS` carried it over.)
  *   - `reminders`: a reminder card is posted once a day at `time` (24-hour "HH:MM") in `timeZone`,
  *     except on `quietDays` (0 = Sunday … 6 = Saturday), and also right after a meeting if `afterMeeting`;
  *   - `kinds`: which reminders to include (overdue/unowned action items, open questions and decisions,
@@ -22,7 +23,6 @@ export type ReminderKinds = { actions: boolean; questions: boolean; outdated: bo
 /** One linked Teams chat's settings (see the file comment). */
 export type ChatSettings = {
   track: boolean;
-  notes: boolean;
   reminders: boolean;
   time: string;
   timeZone: string;
@@ -32,12 +32,11 @@ export type ChatSettings = {
 };
 
 /**
- * Settings for a chat nobody has changed yet: meeting notes on (how Sidekick always worked), message
- * tracking and reminders off until an admin turns them on, 9:00 on weekdays, every kind of reminder.
+ * Settings for a chat nobody has changed yet: message tracking and reminders off until an admin turns them on,
+ * 9:00 on weekdays, every kind of reminder.
  */
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   track: false,
-  notes: true,
   reminders: false,
   time: "09:00",
   timeZone: "America/New_York",
@@ -80,7 +79,6 @@ export function parseChatSettings(json: string | null | undefined): ChatSettings
   const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
   return {
     track: bool(raw.track, d.track),
-    notes: bool(raw.notes, d.notes),
     reminders: bool(raw.reminders, d.reminders),
     time: typeof raw.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(raw.time) ? raw.time : d.time,
     timeZone: validTimeZone(raw.timeZone) ? raw.timeZone : d.timeZone,
@@ -100,11 +98,12 @@ export function applySettingsChanges(current: ChatSettings, changes: unknown): {
   const c = changes as Record<string, unknown>;
   const next: ChatSettings = { ...current, kinds: { ...current.kinds }, quietDays: [...current.quietDays] };
   const changed: string[] = [];
-  const known = new Set(["track", "notes", "reminders", "time", "timeZone", "quietDays", "afterMeeting", "kinds"]);
+  if ("notes" in c) return { error: "Choose where meeting notes go with “Meeting notes go to” on the group's Teams chats tab." };
+  const known = new Set(["track", "reminders", "time", "timeZone", "quietDays", "afterMeeting", "kinds"]);
   const unknown = Object.keys(c).find((key) => !known.has(key));
   if (unknown) return { error: `Unknown setting “${unknown.slice(0, 40)}”.` };
   const onOff = (v: boolean) => (v ? "on" : "off");
-  for (const [key, label] of [["track", "message tracking"], ["notes", "meeting notes"], ["reminders", "reminders"], ["afterMeeting", "reminders after meetings"]] as const) {
+  for (const [key, label] of [["track", "message tracking"], ["reminders", "reminders"], ["afterMeeting", "reminders after meetings"]] as const) {
     if (!(key in c)) continue;
     if (typeof c[key] !== "boolean") return { error: `“${label}” must be on or off.` };
     if (next[key] !== c[key]) changed.push(`${label} ${onOff(c[key] as boolean)}`);

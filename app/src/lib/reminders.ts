@@ -3,8 +3,8 @@
  *
  * What it does
  * - **Chat settings** (per linked Teams channel or chat; rules in reminder-rules.ts): Org Owners/Admins,
- *   and Team Leads for the workspaces they lead, choose, per chat, whether Sidekick tracks every message there, gets the meeting notes, and sends
- *   reminders (time, time zone, quiet days, kinds). Every change is audited. Reminders are a plan feature
+ *   and Team Leads for the workspaces they lead, choose, per chat, whether Sidekick tracks every message there and sends
+ *   reminders (which chats get meeting notes is one choice per group: lib/notes-chats.ts) (time, time zone, quiet days, kinds). Every change is audited. Reminders are a plan feature
  *   (Team and up, `assertFeature` in lib/limits.ts): turning them on in a chat is refused on Starter, but a
  *   chat that already has them on keeps them (and its settings can still be changed) after a downgrade.
  * - **Chat tracking** (`recordChatMessage`): in a tracked channel or group chat, every message (not only
@@ -131,12 +131,14 @@ export async function announceTracking(conv: TeamsConversation, on: boolean, by:
   );
 }
 
-/** Forgets every message Sidekick saved from one chat (when it's unlinked). Returns how many. */
+/** Forgets every message Sidekick saved from one chat, its settings and its place among the group's notes chats (when it's unlinked). Returns how many messages. */
 export async function forgetChat(conversationId: string): Promise<number> {
   const rows = await all<{ id: string }>("SELECT id FROM chat_messages WHERE conversation_id = ?", conversationId);
   for (const r of rows) await removeIndexed(r.id);
   await run("DELETE FROM chat_messages WHERE conversation_id = ?", conversationId);
   await run("DELETE FROM teams_chat_settings WHERE conversation_id = ?", conversationId);
+  // No longer a chosen notes chat (lib/notes-chats.ts): if it's assigned again, it isn't picked automatically.
+  await run("DELETE FROM notes_chats WHERE conversation_id = ?", conversationId);
   return rows.length;
 }
 

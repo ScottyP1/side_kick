@@ -120,7 +120,7 @@ Sidekick needs to know who's asking: sign in to the Sidekick portal with Microso
 
 ## What Sidekick can and can't see
 - It only reads messages that mention it (every message in a 1:1 chat with it), unless an admin turned on **Keep track of every message** for that chat (Sidekick announces it there).
-- Meeting notes go to the chats an admin left notes switched on for (all linked chats by default), so a workspace can keep them in one dedicated notes chat.
+- Meeting notes go only to the chat(s) the group's Team Lead chose under **Meeting notes go to** (one chat until someone chooses); the notes card says where it was posted.
 - It only answers from the linked workspace and your organization's firm library. It never uses other workspaces or other clients' material.
 - In chats and channels marked as having **client guests**, it only uses documents tagged *Shareable* (group and firm library), never posts notes from internal-only meetings there, and only reminds about items whose every source is Shareable.
 - If the chat or channel is unlinked, Sidekick stops answering and posting there until it's linked again.

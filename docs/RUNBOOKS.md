@@ -202,6 +202,16 @@ licensing requirements for Microsoft Teams APIs"* and check whether meeting tran
 transcript content) are listed as metered for your licence. If they are, stop and decide first: nothing is charged
 until a customer turns automatic notes on.
 
+### 0. Billing for transcripts (Azure, once)
+Microsoft charges for reading Teams transcripts through Graph (about **$0.0022 per meeting minute**; ~$6.60 per 100
+half-hour meetings; see Microsoft's "Teams licenses" page for Graph). Link the Azure subscription to the Entra app as a
+metered-API billing account, once (done Oct 25, 2026 as `sidekick-graph-billing` in `sidekick-rg`):
+```bash
+az provider register --namespace Microsoft.GraphServices --wait
+az resource create -g sidekick-rg -n sidekick-graph-billing --resource-type Microsoft.GraphServices/accounts --location global --properties '{"appId":"<Entra app id>"}'
+```
+Customers don't need this: the transcripts are read by Sidekick's app, billed to Sidekick.
+
 ### 1. Graph permissions on the Entra app (Entra admin center)
 1. Entra admin center → App registrations → the Entra app → **API permissions** → Add a permission → Microsoft Graph
    → **Application permissions**: add `OnlineMeetingTranscript.Read.All` (read transcripts) and
@@ -222,17 +232,19 @@ until a customer turns automatic notes on.
    `bc59ab01-8403-45c6-8796-ac3ef710b3e3`, `27922004-5251-4030-b22d-91ecd9a37ea4` (Microsoft 365 and Outlook).
 4. **Manifest** (the app registration's own JSON): set `"accessTokenAcceptedVersion": 2` (Sidekick checks v2 tokens).
 
-### 3. Allow Sidekick to read meetings (Teams PowerShell, once per tenant)
-Graph only lets an app read online meetings with an *application access policy*. On the Mac:
+### 3 + 4. Allow Sidekick to read meetings, and turn transcription on (Teams PowerShell, once per tenant)
+Graph only lets an app read online meetings with an *application access policy*, which only Teams PowerShell can set.
+On a Mac (done Oct 25, 2026 for Sidekick Labs):
 ```bash
-pwsh -Command "Install-Module MicrosoftTeams -Scope CurrentUser; Connect-MicrosoftTeams; New-CsApplicationAccessPolicy -Identity Sidekick-Meetings -AppIds '<Entra app id>' -Description 'Sidekick reads meeting transcripts'; Grant-CsApplicationAccessPolicy -PolicyName Sidekick-Meetings -Global"
+brew install powershell
+pwsh -File app/scripts/teams-access-policy.ps1
 ```
-It can take up to 30 minutes to apply. Customers' Teams admins run the same two commands in their tenant (the help
-center tells them to ask the Sidekick team for the steps; send them this section).
-
-### 4. Teams transcription on (Teams admin center)
-Meetings → Meeting policies → Global (or the policy the users have) → Recording & transcription → **Transcription:
-On**. Sidekick can only write notes for meetings with a transcript.
+The script reuses the `az login` session (a Global Administrator) because Teams PowerShell's own sign-in crashes on
+macOS and its device-code sign-in is blocked by Entra security defaults (error 530035). It creates and grants the
+`Sidekick-Meetings` policy org-wide and sets **Transcription: On** in the Global meeting policy; it ends with `DONE`.
+Changes can take up to 30 minutes to apply. Customers' Teams admins (usually on Windows) run the equivalent:
+`Connect-MicrosoftTeams; New-CsApplicationAccessPolicy -Identity Sidekick-Meetings -AppIds '<Entra app id>'; Grant-CsApplicationAccessPolicy -PolicyName Sidekick-Meetings -Global`
+(send them this section). Sidekick can only write notes for meetings with a transcript.
 
 ### 5. New Teams package (version 1.4.0: Meetings tab, chat/channel/meeting tab)
 ```bash

@@ -16,6 +16,12 @@
  *   skipped without keeping its title, meeting hours over the plan skipped with the reason;
  * - "Save to knowledge" from the card and the portal (roles, walls, search source);
  * - the Teams tab with Teams single sign-on (token checks, walls, actions) and its framing headers;
+ * - meetings that record by themselves (lib/auto-record.ts): off by default, admins only, needs automatic notes on;
+ *   refused until the calendar/meeting-change permissions are approved (said plainly); then the organizer's calendar
+ *   is read, each meeting looked up by its join link and patched with recordAutomatically once (a recurring series
+ *   once), only when clearly one group's (meeting chat linked, or most invitees), never with outsiders; a change
+ *   Teams refuses is listed; an organizer switching it off again is left alone; skipped ones looked at again after a
+ *   day; the group's people see their own upcoming meetings; switched off means no calendar reads;
  * - isolation: another organization sees none of it.
  *
  * Nothing real is touched: its own data folder or the TEST_DATABASE_URL database (wiped first), fake Claude, Teams in
@@ -115,6 +121,12 @@ const throttle = { meeting: [] }; // queue of Retry-After values to answer the n
 const CHAT_MSGS = new Map(); // chat id → its latest messages (call events for the transcription reminder)
 const chatDenied = new Set(); // chats Graph refuses to read (403: the chat permission wasn't granted there)
 const chatReads = []; // every GET /chats/{id}/messages
+const EVENTS = []; // calendar events: { organizer, event } (lib/auto-record.ts reads calendarView)
+const recordApproved = new Set(); // tenants that approved Calendars.ReadBasic.All + OnlineMeetings.ReadWrite.All
+const patches = []; // every PATCH of an online meeting: { organizer, id, body }
+const lookups = []; // every online meeting lookup by join link: { organizer, url }
+const calendarReads = []; // every calendarView read: { organizer, start, end, select }
+const patchRefused = new Set(); // online meeting ids whose PATCH Graph answers 400
 const vtt = (lines) => `WEBVTT\n\n${lines.map(([who, text], i) => `00:${String(i).padStart(2, "0")}:01.000 --> 00:${String(i).padStart(2, "0")}:09.000\n<v ${who}>${text}</v>`).join("\n\n")}\n`;
 
 async function validateWith(url) {
@@ -219,7 +231,36 @@ const microsoft = http.createServer((req, res) => {
       res.writeHead(200, { "content-type": "text/vtt" });
       return void res.end(t.vtt);
     }
+    // Meetings that record by themselves: the organizer's calendar, the meeting by its join link, and the change.
+    const cal = p.match(/^\/v1\.0\/users\/([^/]+)\/calendarView$/);
+    if (cal && req.method === "GET") {
+      if (!recordApproved.has(tid)) return send(403, { error: { code: "ErrorAccessDenied", message: "Access is denied." } });
+      const start = url.searchParams.get("startDateTime");
+      const end = url.searchParams.get("endDateTime");
+      calendarReads.push({ organizer: cal[1], start, end, select: url.searchParams.get("$select"), prefer: req.headers.prefer ?? "" });
+      const list = EVENTS.filter((e) => e.calendar === cal[1] && e.event.start.dateTime >= start.slice(0, 19) && e.event.start.dateTime <= end.slice(0, 19));
+      return send(200, { value: list.map((e) => e.event) });
+    }
+    const byLink = p.match(/^\/v1\.0\/users\/([^/]+)\/onlineMeetings$/);
+    if (byLink && req.method === "GET") {
+      if (!recordApproved.has(tid)) return send(403, { error: { code: "Forbidden" } });
+      const f = /^JoinWebUrl eq '(.*)'$/.exec(url.searchParams.get("$filter") ?? "");
+      const joinUrl = f ? f[1].replace(/''/g, "'") : null;
+      lookups.push({ organizer: byLink[1], url: joinUrl });
+      const m = [...MEETINGS.values()].find((x) => x.joinUrl && x.joinUrl === joinUrl && x.organizer === byLink[1]);
+      return send(200, { value: m ? [m.body] : [] });
+    }
     const meeting = p.match(/^\/v1\.0\/users\/([^/]+)\/onlineMeetings\/([^/]+)$/);
+    if (meeting && req.method === "PATCH") {
+      if (!recordApproved.has(tid)) return send(403, { error: { code: "Forbidden" } });
+      const m = MEETINGS.get(meeting[2]);
+      if (!m || m.organizer !== meeting[1]) return send(404, { error: { code: "NotFound" } });
+      if (patchRefused.has(meeting[2])) return send(400, { error: { code: "BadRequest", message: "Auto recording is not allowed by policy." } });
+      const b = JSON.parse(body);
+      patches.push({ organizer: meeting[1], id: meeting[2], body: b });
+      Object.assign(m.body, b);
+      return send(200, m.body);
+    }
     if (meeting) {
       if (throttle.meeting.length) return send(429, { error: { code: "TooManyRequests" } }, { "Retry-After": String(throttle.meeting.shift()) });
       const m = MEETINGS.get(meeting[2]);
@@ -985,3 +1026,157 @@ test(`[${ENGINE}] transcription reminder: a chat Microsoft won't let Sidekick re
   assert.deepEqual((await lou("GET", `/api/workspaces/${s.w1}/call-nudge`)).body.unreadable, []);
 });
 
+
+/* ---------- Meetings that record and transcribe by themselves (lib/auto-record.ts) ---------- */
+
+/** A Teams join link for a meeting (with the characters real ones have: %, ?, quotes in context). */
+const joinUrlFor = (name) => `https://teams.microsoft.com/l/meetup-join/19%3ameeting_${name}%40thread.v2/0?context=%7b%22Tid%22%3a%22${TA}%22%7d&n='${name}'`;
+/**
+ * Schedules a Teams meeting in the fake Graph: an online meeting (no transcript yet) plus the organizer's calendar
+ * event(s) for it, `occurrences` days apart (a recurring series shares one join link). Returns the meeting id.
+ */
+function schedule(name, { organizer, attendees = [], guests = [], emails = [], chat, inDays = 1, occurrences = 1, recordAutomatically = false, event = {} } = {}) {
+  const thread = chat ?? `19:meeting_${name}@thread.v2`;
+  const meetingId = meetingIdFor(organizer, thread);
+  const joinUrl = joinUrlFor(name);
+  const start = new Date(Date.now() + inDays * 86400_000);
+  MEETINGS.set(meetingId, {
+    organizer, joinUrl,
+    body: {
+      id: meetingId, subject: `Planned ${name}`, startDateTime: start.toISOString(), endDateTime: new Date(start.getTime() + 1800_000).toISOString(), chatInfo: { threadId: thread }, joinWebUrl: joinUrl, recordAutomatically,
+      participants: {
+        organizer: { identity: { user: { id: organizer, tenantId: TA } } },
+        attendees: [...attendees.map((id) => ({ identity: { user: { id, tenantId: TA } } })), ...guests.map((id) => ({ identity: { user: { id, tenantId: TG } } }))],
+      },
+    },
+  });
+  for (let i = 0; i < occurrences; i++) {
+    const at = new Date(start.getTime() + i * 86400_000);
+    EVENTS.push({
+      calendar: organizer,
+      event: {
+        subject: `Planned ${name}`, start: { dateTime: at.toISOString().slice(0, 19) + ".0000000", timeZone: "UTC" }, isOrganizer: true, isCancelled: false, isOnlineMeeting: true,
+        onlineMeetingProvider: "teamsForBusiness", onlineMeeting: { joinUrl },
+        attendees: [...emails.map((address) => ({ type: "required", emailAddress: { address } })), { type: "resource", emailAddress: { address: "room-1@a.test" } }],
+        ...event,
+      },
+    });
+  }
+  return meetingId;
+}
+const patched = (id) => patches.filter((x) => x.id === id).length;
+
+test(`[${ENGINE}] meetings that record by themselves: off by default, admins only, needs automatic notes on, refused permissions said plainly`, async () => {
+  const st = (await ann("GET", "/api/meetings/auto")).body;
+  assert.equal(st.enabled, true, "automatic notes are on from the reminder tests");
+  assert.equal(st.autoRecord.enabled, false, "off by default");
+  assert.equal((await lou("PUT", "/api/meetings/auto", { autoRecord: true })).status, 403, "a Team Lead can't switch it");
+  assert.equal((await mo("PUT", "/api/meetings/auto", { autoRecord: true })).status, 403);
+  assert.equal((await ann("PUT", "/api/meetings/auto", { autoRecord: "yes" })).status, 400);
+  assert.equal((await bob("PUT", "/api/meetings/auto", { autoRecord: true })).status, 409, "Org B hasn't turned on automatic notes");
+  // Nothing is read from calendars while it's off.
+  s.plan = schedule("plan", { organizer: OID.lou, attendees: [OID.mo], emails: ["mo@a.test", "quinn@a.test"] });
+  await drain({ sweep: true });
+  assert.equal(calendarReads.length, 0);
+  assert.equal(patches.length, 0);
+  // On, but tenant A hasn't approved the new permissions yet: the scan says what to approve and changes nothing.
+  const on = await ann("PUT", "/api/meetings/auto", { autoRecord: true });
+  assert.equal(on.status, 200, JSON.stringify(on.body));
+  await drain();
+  const after = (await ann("GET", "/api/meetings/auto")).body.autoRecord;
+  assert.equal(after.enabled, true);
+  assert.match(after.lastError, /approve the new permissions to read calendars and change Teams meetings/);
+  assert.equal(patches.length, 0);
+  assert.equal((await lou("GET", "/api/meetings/auto")).body.autoRecord.lastError, after.lastError, "a Team Lead sees the problem too");
+  assert.equal((await mo("GET", "/api/meetings/auto")).body.autoRecord.lastError, null, "a Member doesn't");
+  assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Turned on automatic recording and transcription for groups' scheduled Teams meetings \(Teams also saves a video recording\)/);
+});
+
+test(`[${ENGINE}] meetings that record by themselves: clearly one group's meetings are set once; outsiders, ties and minorities are left alone`, async () => {
+  recordApproved.add(TA);
+  const series = schedule("series", { organizer: OID.lou, emails: ["mo@a.test"], occurrences: 3 });
+  const linked = schedule("linked", { organizer: OID.lou, attendees: [OID.mo, OID.vic], chat: "19:meeting_w2room@thread.v2" }); // chat linked to W2
+  const client = schedule("client", { organizer: OID.lou, attendees: [OID.mo], guests: [OID.guest] });
+  const tie = schedule("tie2", { organizer: OID.quinn, emails: ["mo@a.test", "pat@a.test"] });
+  const minority = schedule("minority", { organizer: OID.lou, emails: ["mo@a.test", "x1@elsewhere.test", "x2@elsewhere.test", "x3@elsewhere.test"] });
+  const already = schedule("already", { organizer: OID.lou, emails: ["mo@a.test"], recordAutomatically: true });
+  const refused = schedule("refused", { organizer: OID.lou, emails: ["quinn@a.test"] });
+  patchRefused.add(refused);
+  const notMine = schedule("notmine", { organizer: OID.lou, emails: ["mo@a.test"], event: { isOrganizer: false } });
+  const cancelled = schedule("cancelled", { organizer: OID.lou, emails: ["mo@a.test"], event: { isCancelled: true } });
+  const later = schedule("later", { organizer: OID.lou, emails: ["mo@a.test"], inDays: 10 });
+  assert.equal((await ann("POST", "/api/meetings/auto", { action: "check" })).status, 200);
+  // (Check now runs at most once a minute, and the switch above already asked this minute: sweep instead.)
+  await drain({ sweep: true });
+  // The calendar is read for the next 7 days, in UTC, keeping to the fields Sidekick needs.
+  const read = calendarReads.find((c) => c.organizer === OID.lou);
+  assert.ok(read, JSON.stringify(calendarReads));
+  assert.ok(new Date(read.end) - new Date(read.start) <= 7 * 86400_000 + 1000);
+  assert.match(read.prefer, /outlook\.timezone="UTC"/);
+  assert.doesNotMatch(read.select, /body/);
+  assert.ok(calendarReads.every((c) => c.organizer !== OID.bob), "never another organization's people");
+  // The join link is looked up exactly (quotes doubled and undone, encoding kept).
+  assert.ok(lookups.some((l) => l.url === joinUrlFor("plan")), JSON.stringify(lookups.slice(0, 2)));
+  // Set: the plan (all W1), the series once, the meeting whose chat is linked to W2.
+  assert.equal(patched(s.plan), 1);
+  assert.deepEqual(patches.find((x) => x.id === s.plan).body, { recordAutomatically: true }, "nothing else is changed");
+  assert.equal(patched(series), 1, "a recurring series is set once");
+  assert.equal(patched(linked), 1);
+  // Left alone.
+  for (const id of [client, tie, minority, already, notMine, cancelled, later]) assert.equal(patched(id), 0);
+  const status = (id) => scalar(`SELECT status || '|' || COALESCE(reason, '') FROM meeting_autorecord WHERE online_meeting_id = '${id}'`);
+  assert.match(await status(client), /^skipped\|People from outside your organization/);
+  assert.match(await status(tie), /^skipped\|Several groups/);
+  assert.match(await status(minority), /^skipped\|Fewer than half/);
+  assert.match(await status(already), /^already\|/);
+  assert.match(await status(refused), /^failed\|Microsoft Teams didn't accept the change/);
+  assert.equal(await scalar("SELECT COUNT(*) FROM meeting_autorecord WHERE status = 'skipped' AND title IS NOT NULL"), "0", "titles of meetings left alone aren't kept");
+  assert.equal(await scalar(`SELECT workspace_id FROM meeting_autorecord WHERE online_meeting_id = '${linked}'`), s.w2);
+  // Audited per meeting, traced, and the scan's own status is clean.
+  const audit = JSON.stringify((await ann("GET", "/api/audit")).body);
+  assert.match(audit, /Turned on automatic recording and transcription for the Teams meeting “Planned plan”/);
+  assert.doesNotMatch(audit, /Planned client|Planned minority/);
+  assert.notEqual(await scalar("SELECT COUNT(*) FROM trace_spans WHERE name = 'Turn on automatic recording for a Teams meeting'"), "0");
+  assert.notEqual(await scalar("SELECT COUNT(*) FROM trace_spans WHERE name = 'Read upcoming Teams meetings'"), "0");
+  const st = (await ann("GET", "/api/meetings/auto")).body.autoRecord;
+  assert.equal(st.lastError, null);
+  assert.ok(st.failed.some((f) => f.title === "Planned refused" && /meeting policy allows automatic recording/.test(f.reason)), JSON.stringify(st.failed));
+  // Each group's people see their own group's upcoming meetings only.
+  const forMo = (await mo("GET", "/api/meetings/auto")).body.autoRecord.upcoming.map((m) => m.title);
+  assert.ok(forMo.includes("Planned plan") && forMo.includes("Planned already"), JSON.stringify(forMo));
+  assert.ok(!forMo.includes("Planned linked"), "W2's meeting isn't shown to a W1-only member");
+  assert.deepEqual((await mo("GET", "/api/meetings/auto")).body.autoRecord.failed, [], "Members don't see problems");
+  assert.ok((await pat("GET", "/api/meetings/auto")).body.autoRecord.upcoming.some((m) => m.title === "Planned linked" && m.group === "W2"));
+  s.recordSkipped = client;
+});
+
+test(`[${ENGINE}] meetings that record by themselves: an organizer turning it off stays off; skipped ones are looked at again after a day; off stops reading`, async () => {
+  // Lou switches recording off again in Meeting options: Sidekick doesn't turn it back on.
+  MEETINGS.get(s.plan).body.recordAutomatically = false;
+  const before = patches.length;
+  const lookupsBefore = lookups.length;
+  await drain({ sweep: true });
+  assert.equal(patches.filter((x) => x.id === s.plan).length, 1, "set once, never again");
+  // Nothing else is patched; the refused one is tried again (it failed), the skipped ones aren't yet.
+  assert.deepEqual(patches.slice(before).map((x) => x.id), []);
+  assert.ok(!lookups.slice(lookupsBefore).some((l) => l.url === joinUrlFor("client")), "a skipped meeting isn't looked up again within a day");
+  assert.ok(lookups.slice(lookupsBefore).some((l) => l.url === joinUrlFor("refused")), "a failed one is");
+  // A day later the skipped one is looked at again (its invitees may have changed); the guest is gone now.
+  MEETINGS.get(s.recordSkipped).body.participants.attendees = [{ identity: { user: { id: OID.mo, tenantId: TA } } }];
+  await dbExec(`UPDATE meeting_autorecord SET updated_at = '${new Date(Date.now() - 2 * 86400_000).toISOString()}' WHERE status = 'skipped'`);
+  await drain({ sweep: true });
+  assert.equal(patched(s.recordSkipped), 1);
+  // Switched off: audited, and calendars aren't read any more.
+  assert.equal((await ann("PUT", "/api/meetings/auto", { autoRecord: false })).status, 200);
+  const reads = calendarReads.length;
+  await drain({ sweep: true });
+  assert.equal(calendarReads.length, reads);
+  assert.equal((await ann("GET", "/api/meetings/auto")).body.autoRecord.enabled, false);
+  assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Turned off automatic recording and transcription/);
+  // Isolation: Org B sees none of it.
+  const b = (await bob("GET", "/api/meetings/auto")).body.autoRecord;
+  assert.equal(b.enabled, false);
+  assert.deepEqual(b.upcoming, []);
+  assert.deepEqual(b.failed, []);
+  assert.equal(await scalar(`SELECT COUNT(*) FROM meeting_autorecord WHERE org_id <> (SELECT org_id FROM users WHERE email = 'ann@a.test')`), "0");
+});

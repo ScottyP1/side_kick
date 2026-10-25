@@ -618,6 +618,15 @@ CREATE INDEX IF NOT EXISTS call_nudges_ws ON call_nudges(org_id, workspace_id, s
 CREATE TABLE IF NOT EXISTS call_watch (
   conversation_id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, checked_at TEXT NOT NULL, error TEXT
 );
+-- Meetings that record and transcribe by themselves (lib/auto-record.ts): one row per organization and Teams meeting
+-- (join_key = hash of its join link; a recurring series is one row). status set | already | skipped | failed; a set
+-- meeting is never changed again. title only for set, already and failed rows (the group's own meetings).
+CREATE TABLE IF NOT EXISTS meeting_autorecord (
+  org_id TEXT NOT NULL REFERENCES orgs(id), join_key TEXT NOT NULL, online_meeting_id TEXT, organizer_oid TEXT NOT NULL,
+  workspace_id TEXT, status TEXT NOT NULL, reason TEXT, title TEXT, starts_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, join_key)
+);
+CREATE INDEX IF NOT EXISTS meeting_autorecord_org ON meeting_autorecord(org_id, status, starts_at);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -755,6 +764,9 @@ function migrate(conn: DatabaseSync) {
   // "Turn on transcription" reminder (lib/call-nudge.ts): the group's switch (NULL or 1 = on, 0 = off), who and when.
   if (!has("workspaces", "call_nudge")) conn.exec("ALTER TABLE workspaces ADD COLUMN call_nudge INTEGER");
   for (const col of ["call_nudge_by", "call_nudge_at"]) if (!has("workspaces", col)) conn.exec(`ALTER TABLE workspaces ADD COLUMN ${col} TEXT`);
+  // Meetings that record by themselves (lib/auto-record.ts): the organization's switch (0/1), who and when, and the last scan.
+  if (!has("auto_meetings", "auto_record")) conn.exec("ALTER TABLE auto_meetings ADD COLUMN auto_record INTEGER NOT NULL DEFAULT 0");
+  for (const col of ["auto_record_by", "auto_record_at", "record_checked_at", "record_error"]) if (!has("auto_meetings", col)) conn.exec(`ALTER TABLE auto_meetings ADD COLUMN ${col} TEXT`);
   // Scale readiness (docs/SCALE.md): indexes for per-group lists and counts, per-person lookups and the retention
   // clean-up (lib/retention.ts), found with the load test on 10,000 groups. Same list as db/schema.postgres.sql.
   for (const sql of [

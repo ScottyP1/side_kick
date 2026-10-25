@@ -72,6 +72,7 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | Save a meeting's decisions, requirements, risks and facts to knowledge (portal, Teams card and tab) | ✓ | ✓ | ✓ | ✓ | |
 | See the automatic-notes panel and their groups' captured Teams meetings | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See skipped Teams meetings and pick the group for one several groups were in | ✓ | ✓ | ✓ (own groups) | | |
+| See their groups' upcoming meetings that will record by themselves | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Update action items (portal and Teams card buttons) | ✓ | ✓ | ✓ | ✓ | |
 | Refresh the knowledge map, resolve or dismiss gaps | ✓ | ✓ | ✓ | ✓ | |
 | See Needs attention for their groups: action items, unanswered questions, out-of-date documents | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -96,6 +97,7 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | Add, change or delete firm library documents | ✓ | ✓ | | | |
 | Keep, limit to chosen groups or move a held firm library document into a group; choose which groups a firm document applies to | ✓ | ✓ | | | |
 | Turn automatic notes after Teams meetings on or off, check now, try a skipped meeting again | ✓ | ✓ | | | |
+| Turn "Group meetings record and transcribe by themselves" on or off (Teams also saves a video) | ✓ | ✓ | | | |
 | Connect an allowed tool for a group with the account the client gave them, reconnect or disconnect the group's connection | ✓ | ✓ | ✓ (own groups) | | |
 | Link projects through a group's connection (repositories, spaces, libraries), sync now or unlink | ✓ | ✓ | ✓ (own groups) | | |
 | Ask the Org Owner to allow a tool type for their group (with a reason), see the request's status, cancel their own | | ✓ | ✓ (own groups) | | |

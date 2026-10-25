@@ -732,6 +732,8 @@ function migrate(conn: DatabaseSync) {
   // Notes picker polish: how many people a linked chat has (from the Teams roster, checked at most daily) and when.
   if (!has("teams_conversations", "member_count")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN member_count INTEGER");
   if (!has("teams_conversations", "members_checked_at")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN members_checked_at TEXT");
+  // Meet now (ad hoc calls): which kind of Teams call a captured transcript came from ('meeting' scheduled, 'adhoc').
+  if (!has("graph_meetings", "kind")) conn.exec("ALTER TABLE graph_meetings ADD COLUMN kind TEXT NOT NULL DEFAULT 'meeting'");
   // Upload guard (lib/upload-guard.ts): a document or firm document that looks like it belongs to another client is
   // saved Held (status 'Held', text kept in held_text, not indexed) until the uploader keeps or moves it.
   // guard_status: null = never flagged, 'kept' = flagged and kept (a Needs attention finding), 'reviewed' = a

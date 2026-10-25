@@ -8,6 +8,9 @@
  *   once (a later poll of the same transcript doesn't duplicate it), notes written and posted to the group's notes
  *   chat as a card with "Save to knowledge";
  * - polling fallback (getAllTranscripts) with a cursor per organizer;
+ * - Meet now (ad hoc calls): refused until the call transcripts permission is approved (plain message, scheduled
+ *   meetings unaffected), then found by polling and notifications, landing in the group of the chat it was started
+ *   from (or of the people who spoke) and posted once;
  * - throttling: a short Retry-After waited in place, a long one making the job wait at least that long;
  * - which group: most people, a tie waiting for a lead to pick (only their own group), a meeting of nobody's group
  *   skipped without keeping its title, meeting hours over the plan skipped with the reason;
@@ -104,6 +107,9 @@ const subCalls = [];
 const MEETINGS = new Map(); // online meeting id → meeting
 const TRANSCRIPTS = []; // { id, meetingId, organizer, createdDateTime, vtt }
 const pollCalls = [];
+const CALLS = []; // ad hoc calls (Meet now): { callId, transcriptId, organizer, createdDateTime, endDateTime, vtt }
+const callsApproved = new Set(); // tenants that approved CallTranscripts.Read.All
+const callPollCalls = [];
 const transcriptsOff = new Set(); // tenants whose Teams "Transcript API access" switch is off (403 GraphAccessToTranscriptsDisabled)
 const throttle = { meeting: [] }; // queue of Retry-After values to answer the next meeting reads with (429)
 const vtt = (lines) => `WEBVTT\n\n${lines.map(([who, text], i) => `00:${String(i).padStart(2, "0")}:01.000 --> 00:${String(i).padStart(2, "0")}:09.000\n<v ${who}>${text}</v>`).join("\n\n")}\n`;
@@ -142,14 +148,18 @@ const microsoft = http.createServer((req, res) => {
     const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "");
     if (!p.startsWith("/v1.0/")) return send(404, { error: "not found" });
     if (!consented.has(tid)) return send(403, { error: { code: "Forbidden" } });
-    if (transcriptsOff.has(tid) && (p === "/v1.0/subscriptions" || p.includes("/onlineMeetings/"))) {
+    if (transcriptsOff.has(tid) && (p === "/v1.0/subscriptions" || p.includes("/onlineMeetings/") || p.includes("/adhocCalls/"))) {
       return send(403, { error: { code: "Forbidden", message: "Graph API access to transcripts is disabled for this tenant.", innerError: { code: "GraphAccessToTranscriptsDisabled" } } });
     }
     // Subscriptions.
     if (p === "/v1.0/subscriptions" && req.method === "POST") {
       const b = JSON.parse(body);
+      if (b.resource === "communications/adhocCalls/getAllTranscripts" && !callsApproved.has(tid)) {
+        subCalls.push({ op: "denied", body: b, tid });
+        return send(403, { error: { code: "Forbidden", message: "API requires one of 'CallTranscripts.Read.All'." } });
+      }
       subCalls.push({ op: "create", body: b, tid });
-      if (b.resource !== "communications/onlineMeetings/getAllTranscripts" || b.changeType !== "created" || !b.clientState) return send(400, { error: { code: "InvalidRequest" } });
+      if (!["communications/onlineMeetings/getAllTranscripts", "communications/adhocCalls/getAllTranscripts"].includes(b.resource) || b.changeType !== "created" || !b.clientState) return send(400, { error: { code: "InvalidRequest" } });
       if (!(await validateWith(b.notificationUrl)) || !(await validateWith(b.lifecycleNotificationUrl))) return send(400, { error: { code: "ValidationError", message: "Subscription validation request failed" } });
       const id = crypto.randomUUID();
       SUBS.set(id, { ...b, id, tid });
@@ -173,6 +183,23 @@ const microsoft = http.createServer((req, res) => {
       pollCalls.push({ organizer: all[2], from: all[3], to: all[4] });
       const list = TRANSCRIPTS.filter((t) => t.organizer === all[2] && t.createdDateTime >= all[3] && t.createdDateTime <= all[4]);
       return send(200, { value: list.map((t) => ({ id: t.id, meetingId: t.meetingId, createdDateTime: t.createdDateTime, meetingOrganizer: { user: { id: t.organizer } } })) });
+    }
+    // Ad hoc calls (Meet now): need CallTranscripts.Read.All.
+    if (p.includes("/adhocCalls/") && !callsApproved.has(tid)) return send(403, { error: { code: "Forbidden", message: "API requires one of 'CallTranscripts.Read.All'." } });
+    const allCalls = p.match(/^\/v1\.0\/users\/([^/]+)\/adhocCalls\/getAllTranscripts\(userId='([^']+)',startDateTime=([^,]+),endDateTime=([^)]+)\)$/);
+    if (allCalls) {
+      callPollCalls.push({ organizer: allCalls[2], from: allCalls[3], to: allCalls[4] });
+      const list = CALLS.filter((c) => c.organizer === allCalls[2] && c.createdDateTime >= allCalls[3] && c.createdDateTime <= allCalls[4]);
+      return send(200, { value: list.map((c) => ({ id: c.transcriptId, meetingId: null, callId: c.callId, createdDateTime: c.createdDateTime, endDateTime: c.endDateTime, meetingOrganizer: { user: { id: c.organizer, tenantId: TA } } })) });
+    }
+    const callTranscript = p.match(/^\/v1\.0\/users\/([^/]+)\/adhocCalls\/([^/]+)\/transcripts\/([^/]+?)(\/content)?$/);
+    if (callTranscript) {
+      const c = CALLS.find((x) => x.callId === callTranscript[2] && x.transcriptId === callTranscript[3] && x.organizer === callTranscript[1]);
+      if (!c) return send(404, { error: { code: "NotFound" } });
+      if (!callTranscript[4]) return send(200, { id: c.transcriptId, callId: c.callId, meetingId: null, createdDateTime: c.createdDateTime, endDateTime: c.endDateTime });
+      if (url.searchParams.get("$format") !== "text/vtt") return send(404, { error: { code: "NotFound" } });
+      res.writeHead(200, { "content-type": "text/vtt" });
+      return void res.end(c.vtt);
     }
     const content = p.match(/^\/v1\.0\/users\/([^/]+)\/onlineMeetings\/([^/]+)\/transcripts\/([^/]+)\/content$/);
     if (content) {
@@ -208,6 +235,19 @@ function addMeeting(name, { organizer, attendees = [], guests = [], chat = `19:m
   const transcriptId = `MSMj${crypto.createHash("sha1").update(name).digest("hex").slice(0, 20)}`;
   if (transcript) TRANSCRIPTS.push({ id: transcriptId, meetingId, organizer, createdDateTime: new Date(end.getTime() + 60_000).toISOString(), vtt: vtt([["Lou Lead", `In ${name} we decided to move the cutover.`], ["Mo Member", "I'll send the test report by Friday."]]) });
   return { meetingId, transcriptId, chat };
+}
+
+/**
+ * Adds a Meet now call (an ad hoc call) started from a Teams chat, with its transcript, to the fake Graph. Like the
+ * real one, the transcript id is base64 of "…19:<chat>@thread.v2#<call id>-…-TranscriptV2". Returns the ids.
+ */
+function addCall(name, { organizer, chat, speakers = [["Lou Lead", `In ${name} we decided to move the cutover.`], ["Mo Member", "I'll send the test report by Friday."]], minutes = 20 } = {}) {
+  const callId = guid(`call-${name}`);
+  const end = new Date(Date.now() - 2 * 60_000);
+  const start = new Date(end.getTime() - minutes * 60_000);
+  const transcriptId = Buffer.from(`3##${chat}#${callId}-${Math.floor(start.getTime() / 1000)}-TranscriptV2`).toString("base64");
+  CALLS.push({ callId, transcriptId, organizer, createdDateTime: start.toISOString(), endDateTime: end.toISOString(), vtt: vtt(speakers) });
+  return { callId, transcriptId, chat };
 }
 
 /** Signs in with the fake Microsoft. */
@@ -264,6 +304,8 @@ const activity = (conv, overrides = {}) => ({
   from: { id: "29:lou", name: "Lou Lead", aadObjectId: OID.lou }, recipient: { id: "bot", name: "Sidekick" },
   conversation: { id: conv, conversationType: "groupChat", tenantId: TA, name: `Chat ${conv}` }, ...overrides,
 });
+/** The scheduled-meeting subscription in the database (the upkeep test changes only this one). */
+const MEET_SUB = "graph_subscriptions WHERE resource = 'communications/onlineMeetings/getAllTranscripts'";
 /** Posts a Graph notification batch to the app, as Graph would. */
 const notify = (value) => fetch(`${BASE}/api/graph/notifications`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ value }) });
 
@@ -456,7 +498,10 @@ test(`[${ENGINE}] Graph subscription: created after consent with the validation 
   s.sub = [...SUBS.values()][0];
   const st = (await ann("GET", "/api/meetings/auto")).body;
   assert.equal(st.instant, true);
-  assert.equal(st.lastError, null);
+  // Scheduled meetings work; calls started with Meet now still need the new permission, said plainly.
+  assert.match(st.lastError, /approve the new call transcripts permission/);
+  assert.match(st.lastError, /Scheduled Teams meetings aren't affected/);
+  assert.ok(subCalls.some((c) => c.op === "denied" && c.body.resource === "communications/adhocCalls/getAllTranscripts"));
   // A second upkeep run with plenty of time left changes nothing.
   await drain({ sweep: true });
   assert.equal(subCalls.filter((c) => c.op === "create").length, 1);
@@ -557,6 +602,61 @@ test(`[${ENGINE}] the meeting's own chat decides the group when it's linked`, as
   await drain({ sweep: true });
   assert.ok((await pat("GET", `/api/meetings?ws=${s.w2}`)).body.meetings.some((m) => m.title === "Meeting room"));
   assert.ok(!(await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.some((m) => m.title === "Meeting room"));
+});
+
+test(`[${ENGINE}] Meet now in a group chat (ad hoc call): needs the call permission, then lands in the chat's group and posts notes once`, async () => {
+  // W2's "Wave 2 cutover" group chat; Lou (W1) presses Meet now there and talks with Mo (W1): the chat wins.
+  const chat = "19:wave2cutover@thread.v2";
+  await toBot(activity(chat, { type: "installationUpdate", action: "add" }));
+  await waitFor(chat, /not set up/);
+  assert.equal((await ann("POST", "/api/teams-links", { id: chat, ws: s.w2 })).status, 200);
+  const wave = addCall("wave", { organizer: OID.lou, chat });
+  // Not approved yet: nothing captured, the panel says what to approve, scheduled meetings still polled.
+  const meetPolls = pollCalls.length;
+  await drain({ sweep: true });
+  assert.equal(await scalar(`SELECT COUNT(*) FROM graph_meetings WHERE transcript_id = '${wave.transcriptId}'`), "0");
+  assert.ok(pollCalls.length > meetPolls, "scheduled meetings are still checked");
+  assert.match((await ann("GET", "/api/meetings/auto")).body.lastError, /new call transcripts permission/);
+
+  // Approved: the call subscription is made, and the poll still finds the call held before approval.
+  callsApproved.add(TA);
+  const from = sent.length;
+  await drain({ sweep: true });
+  const callSub = [...SUBS.values()].find((x) => x.resource === "communications/adhocCalls/getAllTranscripts");
+  assert.ok(callSub, "a subscription on ad hoc call transcripts");
+  assert.ok(callPollCalls.some((c) => c.organizer === OID.lou && new Date(c.from) < new Date(Date.now() - 20 * 60_000)), JSON.stringify(callPollCalls.slice(-3)));
+  assert.equal(await scalar(`SELECT kind FROM graph_meetings WHERE transcript_id = '${wave.transcriptId}'`), "adhoc");
+  const w2 = (await pat("GET", `/api/meetings?ws=${s.w2}`)).body.meetings;
+  const got = w2.find((m) => m.title === `Chat ${chat} call`);
+  assert.ok(got, JSON.stringify(w2.map((m) => m.title)));
+  assert.equal(got.status, "Ready");
+  assert.equal(got.source, "teams");
+  assert.ok(!(await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.some((m) => m.id === got.id), "not in the people's group");
+  assert.equal((await pat("GET", `/api/meetings/${got.id}`)).body.meeting.duration_min, 20);
+  const posts = () => sent.slice(from).filter((m) => JSON.stringify(m.body).includes("MEETING NOTES · W2")).length;
+  const start = Date.now();
+  while (!posts() && Date.now() - start < 20000) await new Promise((r) => setTimeout(r, 150));
+  assert.equal(posts(), 1, "notes posted to the group's notes chat");
+  assert.equal((await ann("GET", "/api/meetings/auto")).body.lastError, null);
+  assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Captured the Teams call “Chat 19:wave2cutover@thread.v2 call” \(20 min\)/);
+  // Polled again: no second meeting, no second post.
+  await drain({ sweep: true });
+  assert.equal(posts(), 1, "posted once");
+  assert.equal((await pat("GET", `/api/meetings?ws=${s.w2}`)).body.meetings.filter((m) => m.title === got.title).length, 1);
+
+  // A notification for a call in a chat no group has: the people who spoke (Lou and Mo, both W1) decide.
+  const side = addCall("side", { organizer: OID.lou, chat: "19:unlinked-side@thread.v2" });
+  const resource = `users/${OID.lou}/adhocCalls/${side.callId}/transcripts/${side.transcriptId}`;
+  assert.equal((await notify([{ subscriptionId: callSub.id, clientState: "guess", resource }])).status, 202);
+  assert.equal(await scalar(`SELECT COUNT(*) FROM graph_meetings WHERE transcript_id = '${side.transcriptId}'`), "0", "forged one ignored");
+  assert.equal((await notify([{ subscriptionId: callSub.id, clientState: callSub.clientState, changeType: "created", resource, tenantId: TA }])).status, 202);
+  assert.equal(await scalar(`SELECT via FROM graph_meetings WHERE transcript_id = '${side.transcriptId}'`), "notification");
+  await drain();
+  assert.ok((await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.some((m) => m.title === "Teams call" && m.status === "Ready"));
+  // A call of nobody's group (Ann alone): skipped, nothing kept but the ids.
+  addCall("alone", { organizer: OID.ann, chat: "19:unlinked-alone@thread.v2", speakers: [["Ann Owner", "Just me here."]] });
+  await drain({ sweep: true });
+  assert.equal(await scalar("SELECT COUNT(*) FROM graph_meetings WHERE kind = 'adhoc' AND status = 'skipped' AND title IS NULL"), "1");
 });
 
 test(`[${ENGINE}] throttling: a short Retry-After is waited in place; a long one makes the job wait at least that long`, async () => {
@@ -702,24 +802,24 @@ test(`[${ENGINE}] isolation: another organization sees none of Org A's Teams mee
 
 test(`[${ENGINE}] subscription upkeep: renewed before it runs out, recreated when Graph forgot or removed it, removed when switched off`, async () => {
   // Less than a day left: renewed in place.
-  await dbExec(`UPDATE graph_subscriptions SET expires_at = '${new Date(Date.now() + 3600_000).toISOString()}'`);
+  await dbExec(`UPDATE graph_subscriptions SET expires_at = '${new Date(Date.now() + 3600_000).toISOString()}' WHERE resource = 'communications/onlineMeetings/getAllTranscripts'`);
   await drain({ sweep: true });
   assert.equal(subCalls.filter((c) => c.op === "renew").length, 1);
-  assert.ok(new Date(await scalar("SELECT expires_at FROM graph_subscriptions")) > new Date(Date.now() + 2 * 86400_000));
+  assert.ok(new Date(await scalar(`SELECT expires_at FROM ${MEET_SUB}`)) > new Date(Date.now() + 2 * 86400_000));
   // Graph lost it (expired): the renewal gets 404 and a new one is made.
-  const oldId = await scalar("SELECT id FROM graph_subscriptions");
+  const oldId = await scalar(`SELECT id FROM ${MEET_SUB}`);
   SUBS.delete(oldId);
-  await dbExec(`UPDATE graph_subscriptions SET expires_at = '${new Date(Date.now() - 60_000).toISOString()}'`);
+  await dbExec(`UPDATE graph_subscriptions SET expires_at = '${new Date(Date.now() - 60_000).toISOString()}' WHERE resource = 'communications/onlineMeetings/getAllTranscripts'`);
   await drain({ sweep: true });
-  const newId = await scalar("SELECT id FROM graph_subscriptions");
+  const newId = await scalar(`SELECT id FROM ${MEET_SUB}`);
   assert.notEqual(newId, oldId);
   assert.ok(SUBS.has(newId));
-  assert.equal(await scalar("SELECT COUNT(*) FROM graph_subscriptions"), "1");
+  assert.equal(await scalar(`SELECT COUNT(*) FROM ${MEET_SUB}`), "1");
   // Lifecycle: a forged event is ignored; "reauthorizationRequired" renews, "subscriptionRemoved" recreates, "missed" polls.
   const sub = SUBS.get(newId);
   const life = (value) => fetch(`${BASE}/api/graph/lifecycle`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ value }) });
   assert.equal((await life([{ subscriptionId: newId, clientState: "nope", lifecycleEvent: "subscriptionRemoved" }])).status, 202);
-  assert.equal(await scalar("SELECT id FROM graph_subscriptions"), newId);
+  assert.equal(await scalar(`SELECT id FROM ${MEET_SUB}`), newId);
   const renews = subCalls.filter((c) => c.op === "renew").length;
   assert.equal((await life([{ subscriptionId: newId, clientState: sub.clientState, lifecycleEvent: "reauthorizationRequired" }])).status, 202);
   await drain();
@@ -727,7 +827,7 @@ test(`[${ENGINE}] subscription upkeep: renewed before it runs out, recreated whe
   SUBS.delete(newId);
   assert.equal((await life([{ subscriptionId: newId, clientState: sub.clientState, lifecycleEvent: "subscriptionRemoved" }])).status, 202);
   await drain();
-  const third = await scalar("SELECT id FROM graph_subscriptions");
+  const third = await scalar(`SELECT id FROM ${MEET_SUB}`);
   assert.ok(third && third !== newId && SUBS.has(third));
   const polls = pollCalls.length;
   assert.equal((await life([{ subscriptionId: third, clientState: SUBS.get(third).clientState, lifecycleEvent: "missed" }])).status, 202);

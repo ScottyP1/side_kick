@@ -3,14 +3,14 @@
 Sidekick writes the notes for your group's meetings: a short summary, the **decisions**, **action items** (with owners and dates as spoken), **open questions**, and lasting facts like requirements, risks and terms. Notes land in the right group in the portal, are posted to the group's notes chat in Teams, and answers can use them straight away.
 
 There are two ways meetings get to Sidekick:
-- **Automatic notes after Teams meetings**: when a Teams meeting of a group's people ends, Sidekick reads its transcript and writes the notes by itself. No bot joins the call.
+- **Automatic notes after Teams meetings**: when a Teams meeting of a group's people ends, Sidekick reads its transcript and writes the notes by itself. That includes scheduled meetings and calls started with **Meet now** inside a group chat. No bot joins the call.
 - **Add a past or outside meeting**: upload a transcript yourself, for meetings held before automatic notes were on, or outside Teams.
 
 ## Automatic notes after Teams meetings
 
 ### Turning it on (Org Owners and Org Admins)
 1. Connect Sidekick to your Microsoft 365 organization: **Settings → Microsoft sign-in**.
-2. A Microsoft admin of your organization approves Sidekick to read meeting transcripts, once for the whole organization, and allows Sidekick in Teams' meeting settings, including turning on **Transcript API access** (Microsoft Graph access to transcripts, off by default in new Microsoft 365 organizations). Your IT team has the exact steps from the Sidekick team.
+2. A Microsoft admin of your organization approves Sidekick to read meeting and call transcripts, once for the whole organization, and allows Sidekick in Teams' meeting settings, including turning on **Transcript API access** (Microsoft Graph access to transcripts, off by default in new Microsoft 365 organizations). Your IT team has the exact steps from the Sidekick team.
 3. Make sure Teams records transcripts for your meetings (Teams meeting policy: transcription on). Sidekick can only write notes for meetings that have a transcript.
 4. On **Meetings**, press **Turn on** under *Automatic notes after Teams meetings*.
 
@@ -18,10 +18,15 @@ Sidekick then checks for new meetings straight away. With everything approved, n
 
 If something is missing (for example the transcript permission isn't approved yet), the panel says so in plain words. Fix it and press **Check now**.
 
+### Meet now in a group chat
+Pressing **Meet now** (the camera button) inside a Teams group chat starts a call that Microsoft keeps apart from scheduled meetings. Sidekick picks those up too: turn on transcription during the call as usual, and when it ends the notes land in the group that chat is linked to and are posted to the group's notes chat. A call started in a chat that isn't linked to a group goes to the group whose people spoke in it (at least two of them), like a scheduled meeting.
+
+Microsoft needs a separate approval for these calls (*Read all call transcripts*). If your organization approved Sidekick before October 2026, the Meetings page says *"approve the new call transcripts permission"*: a Microsoft admin presses **Users & access → Approve Sidekick for your organization** once more. Scheduled meetings keep working meanwhile, and calls from the last day are still picked up once it's approved.
+
 ### Which group a meeting goes to
 Sidekick picks the group like this:
-1. **The meeting's own chat**: if Sidekick was added to the meeting's chat (for example by adding the Sidekick tab to the meeting) and a Team Lead or admin assigned that chat to a group, the meeting goes to that group.
-2. **Otherwise, the people**: the group with the most of its people in the meeting (the organizer and the invitees), and at least two of them. People count once they've signed in to Sidekick with Microsoft at least once, or were imported from Microsoft 365.
+1. **The meeting's own chat**: if Sidekick was added to the meeting's chat (for example by adding the Sidekick tab to the meeting) and a Team Lead or admin assigned that chat to a group, the meeting goes to that group. For a **Meet now** call this is the group chat it was started from.
+2. **Otherwise, the people**: the group with the most of its people in the meeting (the organizer and the invitees; for a Meet now call, who started it and who spoke), and at least two of them. People count once they've signed in to Sidekick with Microsoft at least once, or were imported from Microsoft 365.
 3. **A tie**: if people from several groups were there equally, the meeting waits under **Pick a group** on the Meetings page. An Org Owner, Org Admin or the Team Lead of one of those groups picks it; a Team Lead only sees their own groups as choices.
 4. **Nobody's meeting**: if it isn't a meeting of any group's people, Sidekick skips it and keeps nothing about it (not even its title).
 

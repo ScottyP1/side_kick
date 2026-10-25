@@ -514,7 +514,7 @@ test(`[${ENGINE}] Teams: @Sidekick add/remove @name works only for the workspace
     throw new Error("No reply");
   };
 
-  assert.match(await run(member, "add", "29:maria"), /Only this workspace's Team Lead or an Org Admin can add people to W1/);
+  assert.match(await run(member, "add", "29:maria"), /Only this group's Team Lead or an Org Admin can add people to W1/);
   assert.match(await run(stranger, "add", "29:maria"), /I don't know you in Sidekick yet/);
   assert.match(await run(bobInA, "add", "29:maria"), /I don't know you in Sidekick yet/, "another org's owner has no say here");
 
@@ -537,7 +537,7 @@ test(`[${ENGINE}] Teams: @Sidekick add/remove @name works only for the workspace
   assert.match(await run(lead, "remove", "29:maria"), /Took Maria Lopez off W1/);
   const after = (await ann("GET", "/api/users")).body.users.find((u) => u.email === "maria@a.test");
   assert.deepEqual(after.workspaces, []);
-  assert.match(await run(member, "remove", "29:maria"), /Only this workspace's Team Lead or an Org Admin can take people off W1/);
+  assert.match(await run(member, "remove", "29:maria"), /Only this group's Team Lead or an Org Admin can take people off W1/);
   // The Org Owner can do it too.
   assert.match(await run({ id: "29:ann", name: "Ann Owner", aadObjectId: "oid-ann" }, "add", "29:maria"), /Added Maria Lopez to W1\./);
 
@@ -649,7 +649,7 @@ test(`[${ENGINE}] directory import: needs the Microsoft admin's approval, then i
 
   // Rules: a lead only Member/Viewer into the workspaces they lead.
   assert.equal((await lou("POST", "/api/directory/import", { ids: [pat.id], role: "Org Admin", workspaces: [s.w1] })).status, 403);
-  assert.match((await lou("POST", "/api/directory/import", { ids: [pat.id], role: "Member", workspaces: [s.w2] })).body.error, /Pick at least one of your workspaces/);
+  assert.match((await lou("POST", "/api/directory/import", { ids: [pat.id], role: "Member", workspaces: [s.w2] })).body.error, /Pick at least one of your groups/);
   const r = await ann("POST", "/api/directory/import", { ids: [pat.id, guid("oid-pguest"), guid("oid-bea")], role: "Viewer", workspaces: [s.w2] });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.deepEqual(r.body.added.map((a) => [a.name, a.created]), [["Pat Person", true]]);

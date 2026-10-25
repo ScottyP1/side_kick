@@ -73,13 +73,17 @@ function MicrosoftPanel() {
     <div className="panel">
       <div className="panel-h">
         <h2>Microsoft sign-in</h2>
-        {s.connected ? <Pill kind="good">Connected</Pill> : <Pill>Not connected</Pill>}
+        {!s.configured ? <Pill kind="warn">Not set up</Pill> : s.connected ? <Pill kind="good">Connected</Pill> : <Pill>Not connected</Pill>}
       </div>
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="muted" style={{ margin: 0 }}>
-          People sign in with the Microsoft work account they use for Teams and Outlook. {BRAND.name} still decides what they can see: they must be added on Users &amp; access first, and their role and workspaces apply as usual.
+          People sign in with the Microsoft work account they use for Teams and Outlook. {BRAND.name} still decides what they can see: they must be added on Users &amp; access first, and their role and groups apply as usual.
         </p>
-        {!s.configured && <p className="callout warn" style={{ margin: 0 }}>Microsoft sign-in isn&apos;t set up on this {BRAND.name} yet (the {BRAND.name} team adds the app details).</p>}
+        {!s.configured && (
+          <p className="callout warn" style={{ margin: 0 }}>
+            {s.canManage ? <>Microsoft sign-in isn&apos;t set up on this {BRAND.name} yet (the {BRAND.name} team adds the app details).</> : <>Microsoft sign-in isn&apos;t available yet. Sign in with your email and password for now.</>}
+          </p>
+        )}
         {s.configured && s.connected && s.tenantId && <span className="muted" style={{ fontSize: 12.5 }}>Microsoft tenant: <code>{s.tenantId}</code></span>}
         <span style={{ fontSize: 13 }}>Your account: {s.linked ? <Pill kind="good">Linked to Microsoft</Pill> : <Pill>Not linked yet</Pill>}{!s.linked && s.connected && s.configured && <> · <a href="/api/auth/microsoft/start?next=/settings">Sign in with Microsoft to link it</a></>}</span>
         {s.canManage && s.configured && !s.connected && (

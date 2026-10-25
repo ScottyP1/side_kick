@@ -34,13 +34,19 @@ export default function OverviewPage() {
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const first = me.user.name.split(" ")[0];
+  const inGroup = me.workspaces.length > 0;
 
-  const steps = [
-    { done: (s?.workspaces ?? 0) > 0, label: "Create a workspace for a client engagement", href: "/workspaces" },
-    { done: (s?.documents ?? 0) > 0, label: "Upload project documents (SOW, designs, runbooks)", href: "/knowledge" },
-    { done: (s?.meetings ?? 0) > 0, label: "Import a Teams meeting transcript", href: "/meetings" },
-    { done: (s?.questions ?? 0) > 0, label: `Ask ${BRAND.name} a question about the project`, href: "/knowledge" },
-  ];
+  // Get-started steps this person can actually do: only admins create groups, Viewers don't upload or import,
+  // and someone in no group yet can only ask to be added to one.
+  const editor = me.user.role !== "Viewer";
+  const steps = !me.user.admin && !inGroup
+    ? [{ done: false, label: "Ask an Org Admin or a Team Lead to add you to a group", href: "" }]
+    : [
+        ...(me.user.admin ? [{ done: (s?.workspaces ?? 0) > 0, label: "Create a group for a client engagement", href: "/workspaces" }] : []),
+        ...(editor ? [{ done: (s?.documents ?? 0) > 0, label: "Upload project documents (SOW, designs, runbooks)", href: "/knowledge" }] : []),
+        ...(editor ? [{ done: (s?.meetings ?? 0) > 0, label: "Import a Teams meeting transcript", href: "/meetings" }] : []),
+        { done: (s?.questions ?? 0) > 0, label: `Ask ${BRAND.name} a question about the project`, href: "/knowledge" },
+      ];
   const attention = data
     ? [
         ...data.attention.failedMeetings.map((m) => ({ kind: "bad", label: "Error", title: `Meeting “${m.title}” wasn't processed`, detail: m.error, href: "/meetings", ws: m.workspace_id })),
@@ -56,12 +62,12 @@ export default function OverviewPage() {
         <div>
           <div className="eyebrow">Overview</div>
           <h1>{me.org.name}</h1>
-          <p>Here&apos;s what {BRAND.name} knows and what needs attention across your workspaces.</p>
+          <p>Here&apos;s what {BRAND.name} knows and what needs attention across your groups.</p>
         </div>
         <div className="actions">
-          {/* Only roles that can change workspace content import meetings (canEdit in lib/auth.ts). */}
-          {me.user.role !== "Viewer" && <Link className="btn" href="/meetings">Import meeting</Link>}
-          <Link className="btn primary" href="/knowledge">Ask {BRAND.name}</Link>
+          {/* Only roles that can change group content import meetings (canEdit in lib/auth.ts); both buttons need a group. */}
+          {inGroup && me.user.role !== "Viewer" && <Link className="btn" href="/meetings">Import meeting</Link>}
+          {inGroup && <Link className="btn primary" href="/knowledge">Ask {BRAND.name}</Link>}
         </div>
       </div>
 
@@ -123,7 +129,7 @@ export default function OverviewPage() {
                 <div key={x.label} className="li">
                   <Pill kind={x.done ? "good" : ""}>{x.done ? "Done" : "To do"}</Pill>
                   <div className="grow" style={x.done ? { color: "var(--muted)" } : undefined}>{x.label}</div>
-                  {!x.done && <Link className="btn small" href={x.href}>Go</Link>}
+                  {!x.done && x.href && <Link className="btn small" href={x.href}>Go</Link>}
                 </div>
               ))}
             {attention.map((a, i) => (

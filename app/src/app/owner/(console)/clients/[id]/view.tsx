@@ -87,7 +87,7 @@ function Client() {
           <h1>{d.org.name}</h1>
           <p>
             <Pill kind={d.org.status === "Active" ? "good" : "bad"}>{d.org.status === "Active" ? "Active" : "Paused"}</Pill>{" "}
-            {d.people.length} {d.people.length === 1 ? "person" : "people"} ({admins} admin{admins === 1 ? "" : "s"}) · {d.workspaces.length} workspace{d.workspaces.length === 1 ? "" : "s"} · since {fmtDate(d.org.created_at)} ·{" "}
+            {d.people.length} {d.people.length === 1 ? "person" : "people"} ({admins} admin{admins === 1 ? "" : "s"}) · {d.workspaces.length} group{d.workspaces.length === 1 ? "" : "s"} · since {fmtDate(d.org.created_at)} ·{" "}
             Microsoft sign-in {d.org.microsoft_connected ? (d.org.microsoft_required ? "connected and required" : "connected") : "not connected"}
           </p>
         </div>
@@ -97,7 +97,7 @@ function Client() {
         <div className="panel-h"><h2>People</h2></div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Role</th><th>Workspaces</th><th>Sign-in</th><th>Last active</th></tr></thead>
+            <thead><tr><th>Name</th><th>Role</th><th>Groups</th><th>Sign-in</th><th>Last active</th></tr></thead>
             <tbody>
               {d.people.map((p) => (
                 <tr key={p.id}>
@@ -125,9 +125,9 @@ function Client() {
 
       <div className="grid g2">
         <div className="panel">
-          <div className="panel-h"><h2>Workspaces</h2></div>
+          <div className="panel-h"><h2>Groups</h2></div>
           <div className="list">
-            {!d.workspaces.length && <div className="li muted">No workspaces yet.</div>}
+            {!d.workspaces.length && <div className="li muted">No groups yet.</div>}
             {d.workspaces.map((w) => (
               <div key={w.id} className="li">
                 <span><b>{w.name}</b>{w.code && <span className="muted"> · {w.code}</span>}</span>

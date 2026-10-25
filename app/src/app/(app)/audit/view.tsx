@@ -17,14 +17,14 @@ type Health = { database: { engine: string }; claude: boolean; search: string; t
 
 /** The data path, step by step, for the setup that is running now. */
 function flowFor(h: Health | null): [string, string][] {
-  const search = !h ? "…" : h.search === "azure-hybrid" ? "Azure AI Search (keyword + meaning), filtered to your workspace" : h.search === "azure-keyword" ? "Azure AI Search (keyword), filtered to your workspace" : `Keyword search inside ${BRAND.name}'s own database`;
+  const search = !h ? "…" : h.search === "azure-hybrid" ? "Azure AI Search (keyword + meaning), filtered to your group" : h.search === "azure-keyword" ? "Azure AI Search (keyword), filtered to your group" : `Keyword search inside ${BRAND.name}'s own database`;
   return [
     ["Your browser", "Signed-in session, HTTPS in production"],
-    [`${BRAND.name} server`, "Checks role and workspace on every request"],
+    [`${BRAND.name} server`, "Checks role and group on every request"],
     ["AI answers", !h ? "…" : h.claude ? "Working: the AI sees only the passages needed for one answer, and never trains on your data" : "Not set up yet"],
     ["Database", !h ? "…" : h.database.engine === "postgres" ? "PostgreSQL" : `SQLite on the machine running ${BRAND.name}`],
     ["Search", search],
-    ...(h?.teams ? [["Microsoft Teams", "Only chats and channels an admin linked to a workspace"] as [string, string]] : []),
+    ...(h?.teams ? [["Microsoft Teams", "Only chats and channels an admin linked to a group"] as [string, string]] : []),
   ];
 }
 
@@ -66,7 +66,7 @@ export default function AuditPage() {
           </div>
           <div className="grid g3" style={{ gap: 10 }}>
             {[
-              ["Workspace walls", "Search and answers only use the workspace you're in; people only see workspaces they belong to"],
+              ["Group walls", "Search and answers only use the group you're in; people only see groups they belong to"],
               ["Guest-safe answers", "With client guests present, documents tagged Internal are excluded"],
               ["Passwords hashed", "scrypt with a unique salt; sessions are random tokens, stored hashed"],
             ].map(([t, d]) => (
@@ -84,7 +84,7 @@ export default function AuditPage() {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>When</th><th>Who</th><th>What happened</th><th>Workspace</th><th>Type</th></tr></thead>
+            <thead><tr><th>When</th><th>Who</th><th>What happened</th><th>Group</th><th>Type</th></tr></thead>
             <tbody>
               {shown.map((r) => (
                 <tr key={r.id}>

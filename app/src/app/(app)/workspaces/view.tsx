@@ -54,7 +54,7 @@ export default function GroupsPage() {
             <span>
               {admin
                 ? "Create one for each client team, like “Payments Platform” for Northwind Bank, and pick its Team Lead."
-                : "You haven't been added to a group yet. Your Org Owner, Org Admin or Team Lead adds people."}
+                : "You haven't been added to a group yet. Ask an Org Admin or a Team Lead to add you to one."}
             </span>
             {admin && <Link className="btn primary" href="/workspaces/new">Create your first group</Link>}
           </div>

@@ -265,7 +265,7 @@ export async function importPeople(actor: User, objectIds: string[], role: Role,
   const workspaces = workspaceIds.filter((w) => allowed.has(w));
   if (isLead(actor)) {
     if (!LEAD_ASSIGNABLE_ROLES.includes(role)) throw new HttpError(403, "Team Leads can add people as Member or Viewer. Ask an Org Admin for other roles.");
-    if (!workspaces.length) throw new HttpError(400, "Pick at least one of your workspaces for these people.");
+    if (!workspaces.length) throw new HttpError(400, "Pick at least one of your groups for these people.");
   }
   if (role === "Team Lead") await assertFeature(actor.org_id, "teamLeads");
   const ids = [...new Set(objectIds)].slice(0, 50);

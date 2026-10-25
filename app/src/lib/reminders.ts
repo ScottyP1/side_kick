@@ -114,7 +114,7 @@ export async function saveChatSettings(user: User, conv: TeamsConversation, chan
  * Used by the settings and reminder routes.
  */
 export async function managedLinkedChat(user: User, id: unknown): Promise<TeamsConversation> {
-  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the workspace's Team Lead can change Teams chat settings.");
+  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the group's Team Lead can change Teams chat settings.");
   const conv = typeof id === "string" && id ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
   if (!conv?.workspace_id) throw new HttpError(404, "Linked Teams channel not found.");
   await requireManage(user, conv.workspace_id);

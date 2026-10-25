@@ -16,10 +16,10 @@ type Ctx = { params: Promise<{ id: string }> };
 /** The workspace, after the role check and the workspace wall. */
 async function load(id: string, action: string, opts: { allowEnding?: boolean } = {}): Promise<{ user: User; ws: { id: string; name: string; code: string | null; client: string | null } }> {
   const user = await requireUser();
-  if (!isAdmin(user)) throw new HttpError(403, `Only Org Owners and Org Admins can ${action} workspaces.`);
+  if (!isAdmin(user)) throw new HttpError(403, `Only Org Owners and Org Admins can ${action} groups.`);
   await requireWorkspace(user, id, opts);
   const ws = await get<{ id: string; name: string; code: string | null; client: string | null }>("SELECT id, name, code, client FROM workspaces WHERE id = ? AND org_id = ?", id, user.org_id);
-  if (!ws) throw new HttpError(404, "Workspace not found, or you're not a member of it.");
+  if (!ws) throw new HttpError(404, "Group not found, or you're not a member of it.");
   return { user, ws };
 }
 

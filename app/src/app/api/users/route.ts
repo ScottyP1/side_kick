@@ -64,7 +64,7 @@ export const POST = handle(async (req: Request) => {
   const workspaces = (body.workspaces ?? []).filter((ws) => allowed.has(ws));
   if (isLead(admin)) {
     if (!LEAD_ASSIGNABLE_ROLES.includes(role)) throw new HttpError(403, "Team Leads can add people as Member or Viewer. Ask an Org Admin for other roles.");
-    if (!workspaces.length) throw new HttpError(400, "Pick at least one of your workspaces for this person.");
+    if (!workspaces.length) throw new HttpError(400, "Pick at least one of your groups for this person.");
   }
   const existing = await get<{ id: string; org_id: string; name: string; role: Role }>("SELECT id, org_id, name, role FROM users WHERE email = ?", email);
   if (existing && isLead(admin) && existing.org_id === admin.org_id && LEAD_ASSIGNABLE_ROLES.includes(existing.role)) {

@@ -54,7 +54,7 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
       ...p,
       microsoft: p.microsoft === 1,
       // Admins see every workspace in their org, so their list is "all" rather than memberships.
-      workspaces: p.role === "Org Owner" || p.role === "Org Admin" ? ["All workspaces"] : members.filter((m) => m.user_id === p.id).map((m) => wsName.get(m.workspace_id)!),
+      workspaces: p.role === "Org Owner" || p.role === "Org Admin" ? ["All groups"] : members.filter((m) => m.user_id === p.id).map((m) => wsName.get(m.workspace_id)!),
     })),
     workspaces: workspaces.map((w) => ({ ...w, members: members.filter((m) => m.workspace_id === w.id).length })),
     flags: await orgFlags(org.id),

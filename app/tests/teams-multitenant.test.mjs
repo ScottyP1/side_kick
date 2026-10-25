@@ -6,6 +6,8 @@
  * - chats waiting to be assigned show only to their own org, and only the allowed roles can assign them;
  * - the link code still works as a fallback, but only within the org's own tenant;
  * - `@Sidekick add/remove @name` in Teams: who may, who can be added, auditing;
+ * - `@Sidekick post meeting notes here` / `stop posting notes here`: who may (per role, strangers, another org's
+ *   owner), chats with client guests, auditing;
  * - directory import with a fake Microsoft Graph: admin approval, consent-needed message, rules, isolation.
  * The main suite (tests/api.test.mjs) runs single-tenant mode and checks it behaves as before.
  *
@@ -49,6 +51,11 @@ const ROSTER = {
   "29:mo": { id: "29:mo", name: "Mo Member", aadObjectId: "oid-mo", email: "mo@a.test", tenantId: TA, userRole: "user" },
 };
 const connector = http.createServer((req, res) => {
+  // A chat's whole roster (the notes picker's member counts).
+  if (req.method === "GET" && /\/v3\/conversations\/[^/]+\/members\/?$/.test(decodeURIComponent(req.url).split("?")[0])) {
+    res.writeHead(200, { "content-type": "application/json" });
+    return void res.end(JSON.stringify(Object.values(ROSTER)));
+  }
   const member = decodeURIComponent(req.url).match(/\/v3\/conversations\/[^/]+\/members\/(.+)$/);
   if (req.method === "GET" && member) {
     const p = ROSTER[member[1]];
@@ -521,6 +528,64 @@ test(`[${ENGINE}] Teams: @Sidekick add/remove @name works only for the workspace
   await toBot(activity(TA, s.chat, { type: "message", text: "<at>Sidekick</at> add a risk section to the plan?", entities: [atSidekick], from: lead }));
   await new Promise((r) => setTimeout(r, 1500));
   assert.doesNotMatch(sentTo(s.chat, i), /People for W1|can't do that/);
+});
+
+test(`[${ENGINE}] Teams: "@Sidekick post meeting notes here" works only for the group's lead or an admin, and respects client guests`, async () => {
+  const say = async (conv, from, text) => {
+    const i = sent.length;
+    await toBot(activity(TA, conv, { type: "message", from, text: `<at>Sidekick</at> ${text}`, entities: [atSidekick] }));
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) {
+      const out = sentTo(conv, i);
+      if (out) return out;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    throw new Error("No reply");
+  };
+  const plan = async () => (await ann("GET", `/api/workspaces/${s.w1}/notes-chats`)).body;
+  const MO = { id: "29:mo", name: "Mo Member", aadObjectId: "oid-mo" };
+  const BOB = { id: "29:bob", name: "Bob Owner", aadObjectId: "oid-bob" };
+
+  // Members, people Sidekick doesn't know and another organization's owner get a polite no; nothing changes.
+  assert.match(await say(s.chat, MO, "post meeting notes here"), /Only the Team Lead or an admin can change where notes go/);
+  assert.match(await say(s.chat, { id: "29:x", name: "Xavier", aadObjectId: "oid-x" }, "notes here"), /Only the Team Lead or an admin can change where notes go/);
+  assert.match(await say(s.chat, BOB, "post meeting notes here"), /Only the Team Lead or an admin/);
+  assert.equal((await plan()).mode, "unset");
+
+  // The group's Team Lead: this chat gets the notes.
+  assert.match(await say(s.chat, LOU, "post meeting notes here"), /Done ✓ Meeting notes for W1 will be posted here\./);
+  let p = await plan();
+  assert.deepEqual([p.mode, p.targets, p.chosenBy], ["chosen", [s.chat], "Lou Lead"]);
+  assert.match(await say(s.chat, LOU, "send meeting notes here"), /already go here/);
+
+  // A second chat, with client guests: accepted, but internal meetings' notes never go there.
+  const CLIENT = "19:w1-client@thread.v2";
+  await install(CLIENT, LOU);
+  const f0 = sent.length;
+  assert.equal((await lou("POST", "/api/teams-links", { id: CLIENT, ws: s.w1 })).status, 200);
+  await waitFor(CLIENT, /Assigned to W1/, f0);
+  assert.equal((await lou("PATCH", "/api/teams-links", { id: CLIENT, guests: true })).status, 200);
+  const guestReply = await say(CLIENT, ANN, "Post meeting notes here please");
+  assert.match(guestReply, /Done ✓ Meeting notes for W1 will be posted here\. They also still go to “Chat 19:wave2@thread\.v2”\./);
+  assert.match(guestReply, /Client guests are in this chat, so only notes of meetings the client attended come here: internal meetings' notes never do/);
+  p = await plan();
+  assert.deepEqual(p.targets.slice().sort(), [s.chat, CLIENT].sort());
+
+  // Stopping: a Member can't; the lead can, and the last chat stopping leaves notes in the portal.
+  assert.match(await say(CLIENT, MO, "stop posting notes here"), /Only the Team Lead or an admin/);
+  assert.match(await say(CLIENT, LOU, "stop posting notes here"), /won't be posted here any more\. They still go to “Chat 19:wave2@thread\.v2”/);
+  assert.match(await say(CLIENT, LOU, "stop posting notes here"), /don't come here, so there's nothing to stop/);
+  assert.match(await say(s.chat, LOU, "don't post notes here"), /No other chat gets them now, so they stay in the Sidekick portal/);
+  assert.equal((await plan()).mode, "none");
+  assert.match(await say(s.chat, LOU, "post meeting notes here"), /Done ✓/);
+
+  // Audited like the portal picker, marked "from Teams"; Bob's org never sees it.
+  const audit = JSON.stringify((await ann("GET", "/api/audit")).body);
+  assert.match(audit, /Meeting notes now go to: “Chat 19:wave2@thread\.v2”, “Chat 19:w1-client@thread\.v2” \(from Teams\)/);
+  assert.match(audit, /Meeting notes now go to: not posted in Teams \(portal only\) \(from Teams\)/);
+  assert.doesNotMatch(JSON.stringify((await bob("GET", "/api/audit")).body), /Meeting notes now go to/);
+  // The help card lists the commands.
+  assert.match(await say(s.chat, MO, "help"), /post meeting notes here.*stop posting notes here/);
 });
 
 test(`[${ENGINE}] directory import: needs the Microsoft admin's approval, then imports Microsoft-sign-in people`, async () => {

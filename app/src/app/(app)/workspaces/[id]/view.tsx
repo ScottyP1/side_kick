@@ -11,7 +11,7 @@
  *   organization and take Members/Viewers off it (/api/workspaces/:id/members);
  * - **Teams chats**: **Meeting notes go to** (which chats get the group's meeting notes: one, several, or none; the
  *   group's Team Lead and Org Owners/Admins choose, everyone else sees it read-only; GET/PUT
- *   /api/workspaces/:id/notes-chats, lib/notes-chats.ts), then the chats assigned to the group with their settings
+ *   /api/workspaces/:id/notes-chats, lib/notes-chats.ts; "Send test message" per chat: POST …/notes-chats/test), then the chats assigned to the group with their settings
  *   (reminders, tracking, client guests; components/chat-settings.tsx), unassign, and assigning a chat with the code
  *   Sidekick shows in Teams. Opening the page at `#chats` (the "Pick the notes chat" finding) starts on this tab;
  * - **Documents**: what Sidekick answers from, with a link to Knowledge & docs to upload;
@@ -41,7 +41,7 @@ type TeamsLink = {
 /** "Meeting notes go to" for this group, as GET /api/workspaces/:id/notes-chats returns it (lib/notes-chats.ts `NotesPlan`). */
 type NotesPlan = {
   mode: "chosen" | "none" | "unset"; chosenBy: string | null; chosenAt: string | null;
-  chats: { id: string; name: string | null; kind: string; guests: number }[];
+  chats: { id: string; name: string | null; kind: string; guests: number; member_count: number | null; last_seen_at: string | null }[];
   targets: string[]; defaultId: string | null; needsChoice: boolean; canManage: boolean;
   last: { title: string; held_at: string; chats: string[] } | null;
 };
@@ -319,21 +319,33 @@ function People({ group, members, canManage, reload }: { group: Group; members: 
   );
 }
 
+/** From this many linked chats on, the picker gets a search box and shows each chat's member count and last activity. */
+const NOTES_SEARCH_FROM = 6;
+
 /**
  * "Meeting notes go to": which of the group's chats get its meeting notes. The group's Team Lead and Org Owners/Admins
  * tick one chat (usual) or several, or "Don't post notes in Teams"; everyone else sees the same list read-only. Chats
- * with client guests are greyed: only notes of meetings the client attended go there, internal meetings' never do.
+ * with client guests are marked: only notes of meetings the client attended go there, internal meetings' never do.
  * While nobody has chosen, notes go to one default chat and a 2+ chat group shows "Pick which chat…".
+ * Only this group's linked chats are ever listed (never anyone's other Teams chats). Managers also get "Send test
+ * message" per chat (a small card in that chat; once per chat per minute). With 6+ chats there's a search box, and each
+ * chat shows its member count and last activity so similar chats are easy to tell apart.
  */
 function NotesGoTo({ group, plan, canManage, reload }: { group: Group; plan: NotesPlan; canManage: boolean; reload: () => Promise<void> }) {
   const toast = useToast();
   // Starts from the saved choice; the parent re-mounts this (its `key`) after a save or reload.
   const [sel, setSel] = useState(() => ({ none: plan.mode === "none", ids: plan.mode === "chosen" ? plan.targets : [] }));
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [q, setQ] = useState("");
   const [error, setError] = useState("");
   const shown = sel.none ? [] : plan.mode === "unset" && !sel.ids.length ? plan.targets : sel.ids;
   const changed = sel.none !== (plan.mode === "none") || (!sel.none && (plan.mode !== "chosen" || sel.ids.slice().sort().join() !== plan.targets.slice().sort().join()));
   const name = (id: string) => plan.chats.find((c) => c.id === id)?.name ?? "Teams chat";
+  const many = plan.chats.length >= NOTES_SEARCH_FROM;
+  const needle = q.trim().toLowerCase();
+  // Ticked chats stay visible while searching, so a choice never disappears from view.
+  const listed = many && needle ? plan.chats.filter((c) => shown.includes(c.id) || (c.name ?? "teams chat").toLowerCase().includes(needle)) : plan.chats;
   const toggle = (id: string, on: boolean) => {
     const base = plan.mode === "unset" && !sel.ids.length && !sel.none ? plan.targets : sel.ids;
     setSel({ none: false, ids: on ? [...new Set([...base, id])] : base.filter((x) => x !== id) });
@@ -351,10 +363,24 @@ function NotesGoTo({ group, plan, canManage, reload }: { group: Group; plan: Not
       setBusy(false);
     }
   };
+  const sendTest = async (id: string) => {
+    setTesting(id);
+    setError("");
+    try {
+      await api(`/api/workspaces/${encodeURIComponent(group.id)}/notes-chats/test`, { method: "POST", json: { chatId: id } });
+      toast(`Test message posted in ${name(id)}. Check it in Teams.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Couldn't post a test message in ${name(id)}.`);
+    } finally {
+      setTesting(null);
+    }
+  };
   const status =
     plan.mode === "none" ? "Not posted in Teams: notes stay in the portal."
     : plan.mode === "unset" ? (plan.targets.length ? `Nobody chose yet, so notes go to ${name(plan.targets[0])} only.` : "Nobody chose yet.")
     : `Notes go to ${plan.targets.map(name).join(", ")}.`;
+  const meta = (c: NotesPlan["chats"][number]) =>
+    [c.member_count != null ? `${c.member_count} ${c.member_count === 1 ? "member" : "members"}` : null, c.last_seen_at ? `last activity ${fmtDate(c.last_seen_at)}` : null].filter(Boolean).join(" · ");
   return (
     <div className="panel" style={{ marginBottom: 16 }}>
       <div className="panel-h">
@@ -368,33 +394,50 @@ function NotesGoTo({ group, plan, canManage, reload }: { group: Group; plan: Not
         </div>
         {plan.needsChoice && <Pill kind="hand" nodot>Needs a choice</Pill>}
       </div>
-      <div style={{ display: "grid", gap: 8, padding: "4px 0" }} role="group" aria-label="Chats that get meeting notes">
-        {plan.chats.map((c) => (
-          <label key={c.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", opacity: c.guests ? 0.7 : 1, fontWeight: 400 }}>
-            <input type="checkbox" disabled={!canManage || busy} checked={shown.includes(c.id)} onChange={(e) => toggle(c.id, e.target.checked)} style={{ marginTop: 3 }} />
-            <span>
-              <b>{c.name ?? "Teams chat"}</b>
-              {plan.mode === "unset" && c.id === plan.defaultId && <> <Pill nodot>Default</Pill></>}
-              {c.guests ? <> <Pill kind="warn" nodot>Client guests</Pill><span className="muted" style={{ display: "block", fontSize: 12.5 }}>Internal meetings&apos; notes never go here: only notes of meetings the client attended.</span></> : null}
-            </span>
-          </label>
-        ))}
-        <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}>
-          <input type="checkbox" disabled={!canManage || busy} checked={sel.none} onChange={(e) => setSel({ none: e.target.checked, ids: [] })} />
-          <span>Don&apos;t post notes in Teams <span className="muted" style={{ fontSize: 12.5 }}>(they stay in {BRAND.name}&apos;s Meetings page)</span></span>
-        </label>
+      <div className="panel-b">
+        {many && (
+          <input className="input" type="search" style={{ marginBottom: 12, maxWidth: 360 }} placeholder={`Search ${plan.chats.length} chats by name`} value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search this group's chats" />
+        )}
+        <div className="notes-opts" role="group" aria-label="Chats that get meeting notes">
+          {listed.map((c) => (
+            <div key={c.id} className={`notes-opt${shown.includes(c.id) ? " on" : ""}`}>
+              <label>
+                <input type="checkbox" disabled={!canManage || busy} checked={shown.includes(c.id)} onChange={(e) => toggle(c.id, e.target.checked)} />
+                <span style={{ minWidth: 0 }}>
+                  <b>{c.name ?? "Teams chat"}</b>
+                  {plan.mode === "unset" && c.id === plan.defaultId && <> <Pill nodot>Default</Pill></>}
+                  {c.guests ? <> <Pill kind="warn" nodot>Client guests</Pill></> : null}
+                  {many && meta(c) && <span className="meta">{meta(c)}</span>}
+                  {c.guests ? <span className="meta">Internal meetings&apos; notes never go here: only notes of meetings the client attended.</span> : null}
+                </span>
+              </label>
+              {canManage && (
+                <button className="btn small" disabled={testing !== null} onClick={() => sendTest(c.id)} title={`Post a short test card in ${c.name ?? "this chat"}`}>
+                  {testing === c.id ? "Sending…" : "Send test message"}
+                </button>
+              )}
+            </div>
+          ))}
+          {many && needle && !listed.length && <p className="muted" style={{ margin: 0 }}>No chat in this group matches “{q.trim()}”.</p>}
+          <div className={`notes-opt${sel.none ? " on" : ""}`}>
+            <label>
+              <input type="checkbox" disabled={!canManage || busy} checked={sel.none} onChange={(e) => setSel({ none: e.target.checked, ids: [] })} />
+              <span>Don&apos;t post notes in Teams <span className="meta" style={{ display: "inline" }}>(they stay in {BRAND.name}&apos;s Meetings page)</span></span>
+            </label>
+          </div>
+        </div>
+        {error && <p className="err" style={{ marginBottom: 0 }}>{error}</p>}
       </div>
-      {plan.last && (
-        <p className="muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
-          Latest: notes for “{plan.last.title}” ({fmtDate(plan.last.held_at)}) were posted to {plan.last.chats.join(", ") || "no chat"}.
-        </p>
-      )}
-      {error && <p className="err">{error}</p>}
-      {canManage && (
-        <div style={{ marginTop: 10 }}>
-          <button className="btn primary small" disabled={busy || !changed || (!sel.none && !shown.length)} onClick={save}>
-            {plan.mode === "unset" ? "Save choice" : "Save"}
-          </button>
+      {(plan.last || canManage) && (
+        <div className="panel-f">
+          <span className="muted" style={{ fontSize: 12.5, flex: "1 1 240px" }}>
+            {plan.last ? <>Latest: notes for “{plan.last.title}” ({fmtDate(plan.last.held_at)}) were posted to {plan.last.chats.join(", ") || "no chat"}.</> : canManage ? <>Tip: in a chat, the Team Lead can also say “@{BRAND.name} post meeting notes here”.</> : null}
+          </span>
+          {canManage && (
+            <button className="btn primary" disabled={busy || !changed || (!sel.none && !shown.length)} onClick={save}>
+              {plan.mode === "unset" ? "Save choice" : "Save"}
+            </button>
+          )}
         </div>
       )}
     </div>

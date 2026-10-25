@@ -258,7 +258,11 @@ export const Switch = ({ on, onChange, label }: { on: boolean; onChange: (v: boo
   <button className="switch" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} />
 );
 
-/** A dialog over the page with a title, body and footer buttons. Escape or the X closes it. `wide` for charts/tables. */
+/**
+ * A dialog over the page with a title, body and footer buttons. Escape or the X closes it. `wide` for charts/tables.
+ * It covers everything fixed on the page (globals.css `.modal-bg`): on phones the bottom tab bar hides while it is open
+ * and the footer stays pinned in view, so its buttons are never under the bar.
+ */
 export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();

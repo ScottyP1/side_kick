@@ -1,0 +1,706 @@
+<title>How Sidekick Works</title>
+<!--
+  How Sidekick works, end to end: a visual explainer for Cody (customers, investors, the team).
+  Six sections, one diagram each: services, new client setup, a question's journey, a meeting's journey,
+  the walls between clients, and common questions. Facts checked against app/src/lib (guardrails.ts,
+  search.ts, meetings-graph.ts, directory.ts PERMISSIONS_EXPLAINED, teams/install.ts, auth.ts) and docs/
+  (TECH-STACK, HOSTING, RUNBOOKS, TEAMS-MULTITENANT, guide/) on Oct 25, 2026. Update it when those change.
+  Published as a private Artifact; this file is the source. Made-up sample names only.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~72ch) with wide figures; sticky contents strip on top; Sidekick's Indigo palette. */
+:root{
+  --bg:#f6f6f9; --surface:#ffffff; --sunken:#efeff4; --line:#e0e0e8; --fg:#17171f; --muted:#55576a; --faint:#6c6f83;
+  --accent:#4f46e5; --accent-soft:#ecebfd; --accent-fg:#ffffff;
+  --good:#13743a; --good-soft:#e1f3e7; --warn:#8a5800; --warn-soft:#fbf0d6; --bad:#b42318; --bad-soft:#fbe4e1;
+  --teams:#5b5fc7;
+  --f-display:"Instrument Sans","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101016; --surface:#17171f; --sunken:#1e1e29; --line:#2d2d3b; --fg:#ececf3; --muted:#a3a4b8; --faint:#8a8ca2;
+  --accent:#a7a3ff; --accent-soft:#28264d; --accent-fg:#16133d;
+  --good:#5fcf8a; --good-soft:#14301f; --warn:#f0b452; --warn-soft:#34290f; --bad:#ff8a7f; --bad-soft:#3d1a18;
+  --teams:#7f85f5; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#101016; --surface:#17171f; --sunken:#1e1e29; --line:#2d2d3b; --fg:#ececf3; --muted:#a3a4b8; --faint:#8a8ca2;
+  --accent:#a7a3ff; --accent-soft:#28264d; --accent-fg:#16133d;
+  --good:#5fcf8a; --good-soft:#14301f; --warn:#f0b452; --warn-soft:#34290f; --bad:#ff8a7f; --bad-soft:#3d1a18;
+  --teams:#7f85f5; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:16px/1.6 var(--f-body);padding-inline:16px;padding-block:0 64px}
+.wrap{max-width:1040px;margin:0 auto}
+.col{max-width:72ch}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;line-height:1.2;margin:0}
+h1{font-size:clamp(2rem,5vw,3rem);font-weight:700;letter-spacing:-.02em}
+h2{font-size:1.6rem;font-weight:700;letter-spacing:-.01em}
+h3{font-size:1.05rem;font-weight:600}
+p{margin:0}
+a{color:var(--accent)}
+code{font-family:var(--f-mono);font-size:.86em;background:var(--sunken);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+.eyebrow{font:500 .75rem/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.muted{color:var(--muted)}
+
+header.hero{padding-block:48px 28px;display:grid;gap:14px}
+header.hero .lede{font-size:1.15rem;color:var(--muted);max-width:62ch}
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{font:500 .8rem/1 var(--f-mono);border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:.45em .8em;color:var(--muted)}
+
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin-inline:-16px;padding:10px 16px;overflow-x:auto;white-space:nowrap}
+nav.toc ol{list-style:none;margin:0 auto;padding:0;display:flex;gap:18px;max-width:1040px}
+nav.toc a{font:500 .85rem var(--f-display);color:var(--muted);text-decoration:none}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent)}
+nav.toc span{font-family:var(--f-mono);color:var(--faint);margin-right:6px}
+
+section{padding-block:56px 8px;display:grid;gap:18px;scroll-margin-top:56px}
+section + section{border-top:1px solid var(--line)}
+.sec-head{display:grid;gap:8px}
+
+figure{margin:6px 0;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 16px 14px}
+figure .scroll{overflow-x:auto}
+figure svg{display:block;width:100%;height:auto;min-width:680px;color:var(--fg);font-family:var(--f-body)}
+figcaption{margin-top:10px;font-size:.88rem;color:var(--muted);max-width:80ch}
+
+/* SVG paint, all from tokens */
+.bx{fill:var(--surface);stroke:var(--line);stroke-width:1.5}
+.bx-s{fill:var(--sunken);stroke:var(--line);stroke-width:1.5}
+.bx-a{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.bx-t{fill:var(--surface);stroke:var(--teams);stroke-width:1.5}
+.bx-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.2}
+.bx-good{fill:var(--good-soft);stroke:var(--good);stroke-width:1.2}
+.bx-warn{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.2}
+.ln{stroke:currentColor;stroke-width:1.4;fill:none;opacity:.7}
+.ln-d{stroke:currentColor;stroke-width:1.3;fill:none;opacity:.55;stroke-dasharray:5 4}
+.ln-bad{stroke:var(--bad);stroke-width:1.3;fill:none;stroke-dasharray:4 3}
+.ln-a{stroke:var(--accent);stroke-width:1.8;fill:none}
+.wall{stroke:var(--bad);stroke-width:3;fill:none;stroke-dasharray:2 5;stroke-linecap:round}
+.t{fill:var(--fg);font-size:13px}
+.tb{fill:var(--fg);font-size:13.5px;font-weight:600;font-family:var(--f-display)}
+.ts{fill:var(--muted);font-size:11.5px}
+.tm{fill:var(--muted);font-size:11px;font-family:var(--f-mono)}
+.ta{fill:var(--accent);font-size:11.5px;font-weight:500}
+.tbad{fill:var(--bad);font-size:11.5px;font-weight:500}
+.tgood{fill:var(--good);font-size:11.5px;font-weight:500}
+.lane{fill:var(--sunken);opacity:.6}
+.dot{fill:var(--accent)}
+.num{fill:var(--accent-fg);font:600 11px var(--f-mono)}
+.mk{fill:currentColor;opacity:.8}
+
+/* Tables */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.92rem;min-width:620px}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--line)}
+th{font:600 .75rem var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--sunken)}
+tr:last-child td{border-bottom:0}
+td:first-child{font-weight:600;white-space:nowrap}
+
+/* Step list for setup */
+ol.steps{list-style:none;margin:0;padding:0;display:grid;gap:12px;counter-reset:s}
+ol.steps li{display:grid;grid-template-columns:2.2rem 1fr;gap:12px;align-items:start}
+ol.steps li::before{counter-increment:s;content:counter(s);font:600 .85rem/2.2rem var(--f-mono);text-align:center;width:2.2rem;height:2.2rem;border-radius:50%;background:var(--accent-soft);color:var(--accent)}
+ol.steps .who{display:inline-block;font:500 .72rem/1 var(--f-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:.35em .6em;margin-left:6px;vertical-align:2px}
+ol.steps li > div{min-width:0;display:grid;gap:4px}
+
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px}
+.note{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:6px;min-width:0}
+.note ul{margin:0;padding-left:1.1em;display:grid;gap:4px}
+.callout{border-left:3px solid var(--warn);background:var(--warn-soft);padding:12px 16px;border-radius:0 10px 10px 0;font-size:.95rem}
+
+dl.faq{margin:0;display:grid;gap:0;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+dl.faq div{padding:16px 18px;border-bottom:1px solid var(--line);display:grid;gap:6px}
+dl.faq div:last-child{border-bottom:0}
+dl.faq dt{font:600 1.02rem var(--f-display)}
+dl.faq dd{margin:0;color:var(--fg)}
+/* Picture walkthrough */
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px}
+.shot{margin:0;padding:12px;display:grid;gap:10px;align-content:start;min-width:0}
+.shot img{display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);background:var(--sunken)}
+.shot.tall img{max-height:420px;width:auto;max-width:100%;margin-inline:auto}
+.shot figcaption{margin:0;font-size:.9rem;color:var(--fg)}
+.shot figcaption b{font-family:var(--f-display)}
+.shot .step{font:500 .72rem var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:2px}
+footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);font-size:.85rem;color:var(--faint)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+
+<div class="wrap">
+<header class="hero">
+  <div class="eyebrow">Sidekick · end to end · October 2026</div>
+  <h1>How Sidekick works</h1>
+  <p class="lede">One app, a handful of cloud services, and Microsoft Teams. This page follows a new client from sign-up to their first meeting notes, then traces a question and a meeting through the system, and shows the walls that keep each client's data apart.</p>
+  <div class="facts">
+    <span class="chip">1 Next.js app</span><span class="chip">Azure Container Apps · East US</span><span class="chip">Postgres · Central US</span><span class="chip">Claude via Anthropic API</span><span class="chip">~$45/month Azure today</span>
+  </div>
+</header>
+</div>
+
+<nav class="toc" aria-label="Sections">
+  <ol>
+    <li><a href="#services"><span>1</span>Services</a></li>
+    <li><a href="#setup"><span>2</span>New client setup</a></li>
+    <li><a href="#question"><span>3</span>A question</a></li>
+    <li><a href="#meeting"><span>4</span>A meeting</a></li>
+    <li><a href="#walls"><span>5</span>The walls</a></li>
+    <li><a href="#faq"><span>6</span>Questions</a></li>
+  </ol>
+</nav>
+
+<div class="wrap">
+
+<!-- ============================================================ 1. SERVICES -->
+<section id="services">
+  <div class="sec-head col">
+    <div class="eyebrow">1 · Services map</div>
+    <h2>One app in the middle, everything else is a service it calls</h2>
+    <p>Sidekick is a single Next.js application. The same container is the public website, the customer portal, your Owner Console, the API and the Teams bot. There's no separate "backend" to keep in sync.</p>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 940 580" role="img" aria-label="The Sidekick app in Azure Container Apps receives Teams messages through Azure Bot and browser visits, and calls Postgres, Azure AI Search, Claude, Entra ID and Microsoft Graph. GitHub Actions deploys it; Key Vault holds its secrets; Log Analytics watches it.">
+      <defs>
+        <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+      </defs>
+      <!-- GitHub -->
+      <rect x="340" y="18" width="240" height="58" rx="10" class="bx-s"/>
+      <text x="460" y="42" text-anchor="middle" class="tb">GitHub + GitHub Actions</text>
+      <text x="460" y="61" text-anchor="middle" class="ts">code · tests every PR · deploys on merge</text>
+      <line x1="460" y1="76" x2="460" y2="148" class="ln" marker-end="url(#ar1)"/>
+      <text x="468" y="118" class="ts">new version, health-checked</text>
+
+      <!-- People -->
+      <rect x="18" y="168" width="170" height="64" rx="10" class="bx-t"/>
+      <text x="103" y="195" text-anchor="middle" class="tb">People in Teams</text>
+      <text x="103" y="214" text-anchor="middle" class="ts">chats, the Sidekick tab</text>
+      <rect x="18" y="352" width="170" height="64" rx="10" class="bx"/>
+      <text x="103" y="379" text-anchor="middle" class="tb">People in a browser</text>
+      <text x="103" y="398" text-anchor="middle" class="ts">website, portal, console</text>
+      <line x1="188" y1="200" x2="318" y2="214" class="ln" marker-end="url(#ar1)"/>
+      <text x="196" y="190" class="ta">via Azure Bot</text>
+      <text x="196" y="250" class="ts">messages signed</text>
+      <text x="196" y="264" class="ts">by Microsoft</text>
+      <line x1="188" y1="384" x2="318" y2="370" class="ln" marker-end="url(#ar1)"/>
+      <text x="200" y="404" class="ts">HTTPS</text>
+
+      <!-- App -->
+      <rect x="320" y="150" width="280" height="290" rx="14" class="bx-a"/>
+      <text x="460" y="180" text-anchor="middle" class="tb">Sidekick app</text>
+      <text x="460" y="198" text-anchor="middle" class="tm">Next.js · Azure Container Apps</text>
+      <g class="t">
+        <rect x="342" y="214" width="236" height="38" rx="7" class="bx"/><text x="356" y="238" class="t">Website, portal, Owner Console</text>
+        <rect x="342" y="260" width="236" height="38" rx="7" class="bx"/><text x="356" y="284" class="t">API routes (sign-in, Ask, groups…)</text>
+        <rect x="342" y="306" width="236" height="38" rx="7" class="bx"/><text x="356" y="330" class="t">Teams bot at /api/messages</text>
+        <rect x="342" y="352" width="236" height="38" rx="7" class="bx"/><text x="356" y="376" class="t">Job queue, heartbeat every 30 s</text>
+      </g>
+      <text x="460" y="420" text-anchor="middle" class="ts">notes, reminders, syncs, watchers</text>
+
+      <!-- Right column -->
+      <g>
+        <rect x="740" y="40" width="182" height="62" rx="10" class="bx"/>
+        <text x="831" y="66" text-anchor="middle" class="tb">Postgres</text>
+        <text x="831" y="85" text-anchor="middle" class="ts">every record</text>
+        <rect x="740" y="132" width="182" height="62" rx="10" class="bx"/>
+        <text x="831" y="158" text-anchor="middle" class="tb">Azure AI Search</text>
+        <text x="831" y="177" text-anchor="middle" class="ts">+ embeddings (meaning)</text>
+        <rect x="740" y="224" width="182" height="62" rx="10" class="bx-a"/>
+        <text x="831" y="250" text-anchor="middle" class="tb">Claude</text>
+        <text x="831" y="269" text-anchor="middle" class="ts">Anthropic API, not Azure</text>
+        <rect x="740" y="316" width="182" height="62" rx="10" class="bx-t"/>
+        <text x="831" y="342" text-anchor="middle" class="tb">Microsoft Entra ID</text>
+        <text x="831" y="361" text-anchor="middle" class="ts">"Sign in with Microsoft"</text>
+        <rect x="740" y="408" width="182" height="62" rx="10" class="bx-t"/>
+        <text x="831" y="434" text-anchor="middle" class="tb">Microsoft Graph</text>
+        <text x="831" y="453" text-anchor="middle" class="ts">directory, transcripts</text>
+      </g>
+      <line x1="600" y1="190" x2="738" y2="72" class="ln" marker-end="url(#ar1)"/>
+      <text x="650" y="118" class="ts" transform="rotate(-40 650 118)">reads/writes</text>
+      <line x1="600" y1="232" x2="738" y2="164" class="ln" marker-end="url(#ar1)"/>
+      <text x="628" y="190" class="ts">find passages</text>
+      <line x1="600" y1="270" x2="738" y2="256" class="ln-a" marker-end="url(#ar1)"/>
+      <text x="612" y="252" class="ta">answers, notes</text>
+      <line x1="600" y1="320" x2="738" y2="346" class="ln" marker-end="url(#ar1)"/>
+      <text x="626" y="322" class="ts">verify sign-in</text>
+      <line x1="600" y1="380" x2="738" y2="436" class="ln" marker-end="url(#ar1)"/>
+      <text x="606" y="430" class="ts">people, meetings,</text>
+      <text x="606" y="444" class="ts">leave a chat</text>
+      <line x1="738" y1="452" x2="602" y2="410" class="ln-d" marker-end="url(#ar1)"/>
+      <text x="650" y="478" class="ts">"transcript ready"</text>
+
+      <!-- Bottom -->
+      <rect x="300" y="500" width="150" height="58" rx="10" class="bx-s"/>
+      <text x="375" y="525" text-anchor="middle" class="tb">Key Vault</text>
+      <text x="375" y="544" text-anchor="middle" class="ts">API keys, DB password</text>
+      <rect x="470" y="500" width="150" height="58" rx="10" class="bx-s"/>
+      <text x="545" y="525" text-anchor="middle" class="tb">Log Analytics</text>
+      <text x="545" y="544" text-anchor="middle" class="ts">+ App Insights uptime</text>
+      <line x1="375" y1="500" x2="400" y2="442" class="ln-d" marker-end="url(#ar1)"/>
+      <text x="306" y="478" class="ts">secrets</text>
+      <line x1="520" y1="442" x2="545" y2="500" class="ln-d" marker-end="url(#ar1)"/>
+      <text x="556" y="478" class="ts">logs, alerts</text>
+    </svg>
+    </div>
+    <figcaption>Every arrow starts at the app, apart from the people coming in and Microsoft's "transcript ready" notice. Claude is the only service outside Azure and Microsoft; it is called directly with Anthropic's API.</figcaption>
+  </figure>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Service</th><th>What it does for Sidekick</th><th>If it's down</th></tr></thead>
+      <tbody>
+        <tr><td>Azure Container Apps</td><td>Runs the one app container (0.5 CPU, 1 GB, one copy today). HTTPS, health probes, keeps old versions for rollback.</td><td>Everything is down. A bad deploy rolls itself back if the new version isn't healthy within ten minutes.</td></tr>
+        <tr><td>Postgres</td><td>Every record: companies, groups, people, documents' text, meetings, action items, chats, audit log, usage. 35 days of point-in-time backups.</td><td>The app can't work. A backup restores to a new server (RUNBOOKS → Restore the database).</td></tr>
+        <tr><td>Azure AI Search + embeddings</td><td>A searchable copy of every passage, with "meaning" search (embeddings from <code>text-embedding-3-small</code>) so "go-live" finds "cutover".</td><td><strong>Answers keep working.</strong> Search falls back to the keyword index inside Postgres, which is always kept. The Azure copy rebuilds itself from Postgres.</td></tr>
+        <tr><td>Claude (Anthropic)</td><td>Writes answers with sources, meeting notes, reminders and the guardrail check. Opus 5.5 by default, Haiku 5.5 for cheap jobs. Busy errors are retried with backoff.</td><td>People see a plain "very busy, try again in a minute". Questions aren't answered and notes wait for a retry (meeting jobs retry automatically).</td></tr>
+        <tr><td>Azure Bot + Teams SDK</td><td>Delivers Teams chat messages to <code>/api/messages</code> and carries Sidekick's replies and cards back. Every message is signed by Microsoft.</td><td>Sidekick is quiet in Teams. The portal still works.</td></tr>
+        <tr><td>Microsoft Entra ID</td><td>"Sign in with Microsoft" and Teams tab sign-in. Sidekick checks Microsoft's signed tokens.</td><td>Microsoft sign-in fails. Password sign-in still works unless the client requires Microsoft sign-in.</td></tr>
+        <tr><td>Microsoft Graph</td><td>Imports people from the client's directory, recognises who added Sidekick, removes Sidekick from chats it shouldn't be in, reads meeting transcripts.</td><td>Imports and new meeting notes pause. Meeting checks catch up on the next 15-minute poll.</td></tr>
+        <tr><td>Key Vault</td><td>Holds the Claude key, database password, encryption key and app secrets. Only the app's managed identity can read them.</td><td>The running app keeps its secrets in memory; a fresh start would fail until it's back.</td></tr>
+        <tr><td>Log Analytics + App Insights</td><td>Logs, a 5-minute uptime test from outside, email alerts. The app's own Activity page and Owner Console show the rest.</td><td>Sidekick keeps running; you just lose visibility.</td></tr>
+        <tr><td>GitHub Actions</td><td>Runs ~400 tests on both databases for every pull request, then deploys each merge to <code>main</code> with a managed identity (no stored password).</td><td>No new deploys. The live app is unaffected.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ 2. SETUP -->
+<section id="setup">
+  <div class="sec-head col">
+    <div class="eyebrow">2 · New client setup</div>
+    <h2>From sign-up to the first notes in Teams</h2>
+    <p>Three kinds of people do the setup, in this order. Most steps happen once per client company. The made-up client here is Northwind Consulting, whose engagement team works for its client Contoso.</p>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1060 380" role="img" aria-label="Setup in ten steps across four lanes: the Org Owner signs up, connects Microsoft and creates groups; the client's Microsoft admin approves permissions and sets Teams admin settings; the Team Lead adds Sidekick to a chat, assigns it and picks the notes chat; the Org Owner turns on automatic notes; Sidekick posts the first notes.">
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+      </defs>
+      <!-- lanes -->
+      <rect x="0" y="10" width="1060" height="80" rx="8" class="lane"/>
+      <rect x="0" y="100" width="1060" height="80" rx="8" class="lane"/>
+      <rect x="0" y="190" width="1060" height="80" rx="8" class="lane"/>
+      <rect x="0" y="280" width="1060" height="80" rx="8" class="lane"/>
+      <text x="12" y="46" class="tb">Org Owner</text><text x="12" y="64" class="ts">or Org Admin</text>
+      <text x="12" y="136" class="tb">Microsoft</text><text x="12" y="154" class="ts">admin (client's IT)</text>
+      <text x="12" y="226" class="tb">Team Lead</text><text x="12" y="244" class="ts">Teams + portal</text>
+      <text x="12" y="316" class="tb">Sidekick</text><text x="12" y="334" class="ts">automatic</text>
+
+      <!-- steps: x = 140 + i*90, box w=82 -->
+      <g>
+        <!-- 1 -->
+        <rect x="140" y="22" width="82" height="56" rx="8" class="bx"/><circle cx="152" cy="22" r="9" class="dot"/><text x="152" y="26" text-anchor="middle" class="num">1</text>
+        <text x="181" y="46" text-anchor="middle" class="t">Sign up,</text><text x="181" y="62" text-anchor="middle" class="t">pick plan</text>
+        <!-- 2 -->
+        <rect x="230" y="22" width="82" height="56" rx="8" class="bx"/><circle cx="242" cy="22" r="9" class="dot"/><text x="242" y="26" text-anchor="middle" class="num">2</text>
+        <text x="271" y="46" text-anchor="middle" class="t">Connect</text><text x="271" y="62" text-anchor="middle" class="t">Microsoft</text>
+        <!-- 3 -->
+        <rect x="320" y="112" width="82" height="56" rx="8" class="bx-t"/><circle cx="332" cy="112" r="9" class="dot"/><text x="332" y="116" text-anchor="middle" class="num">3</text>
+        <text x="361" y="136" text-anchor="middle" class="t">Approve</text><text x="361" y="152" text-anchor="middle" class="t">Sidekick</text>
+        <!-- 4 -->
+        <rect x="410" y="22" width="82" height="56" rx="8" class="bx"/><circle cx="422" cy="22" r="9" class="dot"/><text x="422" y="26" text-anchor="middle" class="num">4</text>
+        <text x="451" y="46" text-anchor="middle" class="t">Groups +</text><text x="451" y="62" text-anchor="middle" class="t">people</text>
+        <!-- 5 -->
+        <rect x="500" y="112" width="82" height="56" rx="8" class="bx-t"/><circle cx="512" cy="112" r="9" class="dot"/><text x="512" y="116" text-anchor="middle" class="num">5</text>
+        <text x="541" y="136" text-anchor="middle" class="t">Teams</text><text x="541" y="152" text-anchor="middle" class="t">settings</text>
+        <!-- 6 -->
+        <rect x="590" y="202" width="82" height="56" rx="8" class="bx"/><circle cx="602" cy="202" r="9" class="dot"/><text x="602" y="206" text-anchor="middle" class="num">6</text>
+        <text x="631" y="226" text-anchor="middle" class="t">Add to a</text><text x="631" y="242" text-anchor="middle" class="t">Teams chat</text>
+        <!-- 7 -->
+        <rect x="680" y="202" width="82" height="56" rx="8" class="bx"/><circle cx="692" cy="202" r="9" class="dot"/><text x="692" y="206" text-anchor="middle" class="num">7</text>
+        <text x="721" y="226" text-anchor="middle" class="t">Assign to</text><text x="721" y="242" text-anchor="middle" class="t">a group</text>
+        <!-- 8 -->
+        <rect x="770" y="202" width="82" height="56" rx="8" class="bx"/><circle cx="782" cy="202" r="9" class="dot"/><text x="782" y="206" text-anchor="middle" class="num">8</text>
+        <text x="811" y="226" text-anchor="middle" class="t">Pick the</text><text x="811" y="242" text-anchor="middle" class="t">notes chat</text>
+        <!-- 9 -->
+        <rect x="860" y="22" width="82" height="56" rx="8" class="bx"/><circle cx="872" cy="22" r="9" class="dot"/><text x="872" y="26" text-anchor="middle" class="num">9</text>
+        <text x="901" y="46" text-anchor="middle" class="t">Turn on</text><text x="901" y="62" text-anchor="middle" class="t">auto notes</text>
+        <!-- 10 -->
+        <rect x="950" y="292" width="100" height="56" rx="8" class="bx-a"/><circle cx="962" cy="292" r="9" class="dot"/><text x="962" y="296" text-anchor="middle" class="num">10</text>
+        <text x="1000" y="316" text-anchor="middle" class="tb">First notes</text><text x="1000" y="334" text-anchor="middle" class="ts">in the chat</text>
+      </g>
+      <!-- flow -->
+      <path d="M222 50 H230" class="ln" marker-end="url(#ar2)"/>
+      <path d="M312 50 H326 V110" class="ln" marker-end="url(#ar2)"/>
+      <path d="M402 140 H416 V80" class="ln" marker-end="url(#ar2)"/>
+      <path d="M492 50 H506 V110" class="ln" marker-end="url(#ar2)"/>
+      <path d="M582 140 H596 V200" class="ln" marker-end="url(#ar2)"/>
+      <path d="M672 230 H680" class="ln" marker-end="url(#ar2)"/>
+      <path d="M762 230 H770" class="ln" marker-end="url(#ar2)"/>
+      <path d="M852 230 H866 V80" class="ln" marker-end="url(#ar2)"/>
+      <path d="M942 50 H990 V290" class="ln" marker-end="url(#ar2)"/>
+      <text x="996" y="180" class="ts">after the</text><text x="996" y="194" class="ts">next meeting</text>
+      <!-- waiting note -->
+      <text x="590" y="294" class="tm">waits ≤ 7 days, then leaves</text>
+      <path d="M631 258 V280" class="ln-d"/>
+    </svg>
+    </div>
+    <figcaption>The Team Lead lane only starts once Microsoft has approved Sidekick and the Teams settings are in place. Between steps 6 and 7 the chat sits under "Waiting to be assigned" and Sidekick reads nothing there.</figcaption>
+  </figure>
+
+  <ol class="steps">
+    <li><div><h3>Sign up and pick a plan <span class="who">Org Owner</span></h3><p>The company signs up at <code>/signup</code> (name, owner, plan, free trial, then checkout) and the setup wizard follows. Self-service sign-up is <strong>off for now</strong>, so today the Sidekick team creates each client; flipping it on is one switch in the Owner Console. Plans are priced per group: Starter $199 (1 group), Team $699 (5), Business $1,999 (20), Enterprise custom.</p></div></li>
+    <li><div><h3>Connect Microsoft sign-in <span class="who">Org Owner</span></h3><p>Settings → Microsoft sign-in → Connect with Microsoft. This ties the Sidekick company to the client's Microsoft 365 tenant. From then on people use "Sign in with Microsoft", and on Business and up the owner can require it (no Sidekick passwords left).</p></div></li>
+    <li><div><h3>The client's Microsoft admin approves Sidekick, once <span class="who">Microsoft admin</span></h3><p>An Org Owner or Admin starts it from Users &amp; access → Approve Sidekick for your organization; a Global Administrator (or Cloud Application Administrator) approves on Microsoft's page. What they approve, in Sidekick's own words:</p></div></li>
+  </ol>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Permission</th><th>Why Sidekick needs it</th></tr></thead>
+      <tbody>
+        <tr><td>User.Read <span class="muted">(delegated)</span></td><td>Lets people sign in with their work account. Sidekick sees name, email and account id.</td></tr>
+        <tr><td>User.Read.All</td><td>Search the directory when an admin imports people or someone types <code>@Sidekick add</code>. Names, work emails, job titles and ids only; never changes anything.</td></tr>
+        <tr><td>TeamsAppInstallation.<br>ReadWriteSelfForChat.All / ForTeam.All</td><td>Lets Sidekick remove <em>itself</em> from a chat: when someone other than a Team Lead or admin adds it, when nobody assigns a chat within 7 days, or on "Remove Sidekick from this chat". It can't touch other apps.</td></tr>
+        <tr><td>OnlineMeetingTranscript.Read.All<br>+ OnlineMeetings.Read.All</td><td>Only used once automatic notes are turned on. Reads a finished meeting's subject, times and invitees to find the group, and its transcript to write notes. Meetings that aren't any group's are skipped and nothing is kept. Never joins or records a call.</td></tr>
+        <tr><td>access_as_user <span class="muted">(delegated)</span></td><td>Signs people in to the Sidekick tab in Teams without a password.</td></tr>
+        <tr><td>Chat messages <span class="muted">(per chat)</span></td><td>Not part of this approval. Granted per chat when Sidekick is added there; Sidekick reads a chat only once it's assigned to a group.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <ol class="steps" start="4" style="counter-reset:s 3">
+    <li><div><h3>Create groups and add people <span class="who">Org Owner / Admin</span></h3><p>One group per client team (e.g. "Contoso cutover", client Contoso, Team Lead Priya Raman). People are added by email or imported from Microsoft 365, each with a role: Org Owner, Org Admin, Team Lead, Member or Viewer. Team Leads can import into their own groups.</p></div></li>
+    <li><div><h3>One-time Teams admin settings <span class="who">Microsoft / Teams admin</span></h3><p>In the client's Teams admin center and Teams PowerShell (we send them RUNBOOKS → Automatic meeting notes):</p>
+      <ul style="margin:4px 0 0;padding-left:1.1em;display:grid;gap:3px">
+        <li>An app <strong>permission policy</strong> that lets only Team Leads and admins add Sidekick (Sidekick enforces this itself too, this just avoids "joined and left" noise).</li>
+        <li><strong>Resource-specific consent for chats</strong> on, so Sidekick can read the chats it's assigned to.</li>
+        <li>An <strong>application access policy</strong> for Sidekick, <strong>transcription on</strong> in the meeting policy, and <strong>Transcript API access</strong> on (off by default since 2026; without it Microsoft refuses every transcript).</li>
+      </ul></div></li>
+    <li><div><h3>Add Sidekick to a Teams group chat <span class="who">Team Lead</span></h3><p>Only a Team Lead, Org Admin or Org Owner may add it. Sidekick checks the adder's Microsoft account (and looks them up in the directory by email if needed); anyone else gets a short card and Sidekick leaves. It posts "I'm not set up for this chat yet" and then reads, saves and answers nothing.</p></div></li>
+    <li><div><h3>Assign the chat to one group, in the portal <span class="who">Team Lead / Admin</span></h3><p>Group page → Teams chats → Assign a chat lists waiting chats with who added Sidekick, when, and who's in it. Tick "client guests" if the client can read the chat. Assigning happens <strong>only in the portal</strong>, never from Teams. Unassigned after 7 days, Sidekick leaves.</p></div></li>
+    <li><div><h3>Choose where meeting notes go <span class="who">Team Lead</span></h3><p>Group → Teams chats → "Meeting notes go to": one chat (usual), several, or "Don't post notes in Teams". Also from the chat: <code>@Sidekick post meeting notes here</code>. Until someone chooses, notes go to one chat (one named "notes", else the first without client guests).</p></div></li>
+    <li><div><h3>Turn on automatic notes <span class="who">Org Owner / Admin</span></h3><p>Meetings → Automatic notes after Teams meetings → Turn on. Sidekick checks the setup straight away; if something is missing (approval, access policy, Transcript API access) the panel names it in plain words.</p></div></li>
+    <li><div><h3>First notes arrive <span class="who">Sidekick</span></h3><p>After the group's next transcribed Teams meeting, usually within minutes (at most about 15), the notes card lands in the chosen chat. Section 4 shows how.</p></div></li>
+  </ol>
+
+  <div class="sec-head col" style="margin-top:28px">
+    <div class="eyebrow">Setup inside Teams, in pictures</div>
+    <h3 style="font-size:1.3rem">What it looks like on screen</h3>
+    <p>Real screens from Sidekick Labs' own Microsoft 365 test organization (Oct 24–25, 2026), with made-up sample data. Step numbers match the list above.</p>
+  </div>
+  <div class="shots">
+    <figure class="shot"><img src="how-it-works/01-entra-permissions.jpg" alt="Permissions approved" loading="lazy"><figcaption><span class="step">Step 3 · Microsoft admin</span><b>Permissions approved.</b> Microsoft's Entra admin center after approval: each Graph permission shows a green "Granted". A client's admin gets here from Users &amp; access → Approve Sidekick for your organization.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/07-upload-guard.jpg" alt="Add documents to the right group" loading="lazy"><figcaption><span class="step">Step 4 · Anyone in 2+ groups</span><b>Add documents to the right group.</b> Every upload shows which group it goes to; people in two or more groups confirm it each time. Files that mention another client are held for a decision.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/02-teams-admin-center.jpg" alt="Sidekick in the Teams admin center" loading="lazy"><figcaption><span class="step">Step 5 · Teams admin</span><b>Sidekick in the Teams admin center.</b> Where the client's Teams admin uploads the app and chooses who may use it. Recommended: only Team Leads and admins, not everyone.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/03-teams-apps.jpg" alt="Find Sidekick in Teams" loading="lazy"><figcaption><span class="step">Step 6 · Team Lead</span><b>Find Sidekick in Teams.</b> Apps → Built for your org. (Once Sidekick is in the Teams Store, clients will find it there instead.)</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/04-teams-app-page.jpg" alt="Add it" loading="lazy"><figcaption><span class="step">Step 6 · Team Lead</span><b>Add it.</b> The app page says what Sidekick does, with example prompts. Add, then pick the group chat.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/05-added-not-set-up.jpg" alt=""I'm not set up for this chat yet"" loading="lazy"><figcaption><span class="step">Step 6 · Sidekick</span><b>"I'm not set up for this chat yet".</b> Sidekick waits and reads nothing until the chat is assigned. Above it: when someone Sidekick doesn't recognise as a Team Lead adds it, Sidekick says so and leaves (this was a recognition bug, fixed in PR #76).</figcaption></figure>
+    <figure class="shot tall"><img src="how-it-works/06-assign-chat.jpg" alt="Assign the waiting chat" loading="lazy"><figcaption><span class="step">Step 7 · Team Lead</span><b>Assign the waiting chat.</b> In the portal (here on a phone): the waiting chat, who's in it and the date Sidekick will leave if nobody assigns it. This was taken before PR #76: it now shows the real name of whoever added Sidekick, not "Someone in Teams".</figcaption></figure>
+    <figure class="shot tall"><img src="how-it-works/11-transcript.png" alt="The transcript Teams makes" loading="lazy"><figcaption><span class="step">Step 10 · The meeting</span><b>The transcript Teams makes.</b> Sidekick reads this after the meeting ends, through Microsoft Graph. No bot in the call. Decisions and action items like these become the notes card.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/08-answer.jpg" alt="Ask in the chat, get an answer with sources" loading="lazy"><figcaption><span class="step">Everyday use</span><b>Ask in the chat, get an answer with sources.</b> @Sidekick in the assigned chat. The answer cites [S1], [S2]… and flags that the runbook is out of date.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/09-sources.jpg" alt="Sources, and when they disagree" loading="lazy"><figcaption><span class="step">Everyday use</span><b>Sources, and when they disagree.</b> Each source with its excerpt (meetings, runbook, RAID log), a "sources disagree" warning, and 👍/👎.</figcaption></figure>
+  </div>
+</section>
+
+<!-- ============================================================ 3. QUESTION -->
+<section id="question">
+  <div class="sec-head col">
+    <div class="eyebrow">3 · A question's journey</div>
+    <h2>"When is the wave 2 cutover?"</h2>
+    <p>The same path runs whether the question comes from <code>@Sidekick</code> in a Teams chat or from Ask in the portal (<code>ask()</code> in <code>lib/sidekick.ts</code>). Every stop can end the trip early, and each early ending has fixed wording.</p>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1060 330" role="img" aria-label="A question passes the walls, a local guardrail check, a Claude guardrail check, search, Claude's answer and an output check before the reply. Each stage can end early: not found, a fixed refusal, or I don't know.">
+      <defs>
+        <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+        <marker id="ar3b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/></marker>
+      </defs>
+      <!-- main row y=40..140 -->
+      <rect x="10" y="50" width="120" height="84" rx="10" class="bx-t"/>
+      <text x="70" y="80" text-anchor="middle" class="tb">Question</text>
+      <text x="70" y="99" text-anchor="middle" class="ts">Teams chat</text>
+      <text x="70" y="114" text-anchor="middle" class="ts">or portal Ask</text>
+
+      <rect x="160" y="50" width="122" height="84" rx="10" class="bx"/>
+      <text x="221" y="80" text-anchor="middle" class="tb">Walls</text>
+      <text x="221" y="99" text-anchor="middle" class="ts">which org + group?</text>
+      <text x="221" y="114" text-anchor="middle" class="tm">requireWorkspace</text>
+
+      <rect x="312" y="50" width="122" height="84" rx="10" class="bx"/>
+      <text x="373" y="80" text-anchor="middle" class="tb">Quick check</text>
+      <text x="373" y="99" text-anchor="middle" class="ts">slurs, swearing,</text>
+      <text x="373" y="114" text-anchor="middle" class="ts">jailbreak phrases</text>
+
+      <rect x="464" y="50" width="122" height="84" rx="10" class="bx"/>
+      <text x="525" y="80" text-anchor="middle" class="tb">Claude check</text>
+      <text x="525" y="99" text-anchor="middle" class="ts">locked rules +</text>
+      <text x="525" y="114" text-anchor="middle" class="ts">switches + custom</text>
+
+      <rect x="616" y="50" width="122" height="84" rx="10" class="bx"/>
+      <text x="677" y="80" text-anchor="middle" class="tb">Search</text>
+      <text x="677" y="99" text-anchor="middle" class="ts">~30 candidates</text>
+      <text x="677" y="114" text-anchor="middle" class="ts">→ best 10</text>
+
+      <rect x="768" y="50" width="122" height="84" rx="10" class="bx-a"/>
+      <text x="829" y="80" text-anchor="middle" class="tb">Claude answers</text>
+      <text x="829" y="99" text-anchor="middle" class="ts">only from sources,</text>
+      <text x="829" y="114" text-anchor="middle" class="ts">cites [S1] [S2]</text>
+
+      <rect x="920" y="50" width="130" height="84" rx="10" class="bx"/>
+      <text x="985" y="80" text-anchor="middle" class="tb">Output check</text>
+      <text x="985" y="99" text-anchor="middle" class="ts">real source cited?</text>
+      <text x="985" y="114" text-anchor="middle" class="ts">mask, clean</text>
+
+      <path d="M130 92 H158" class="ln" marker-end="url(#ar3)"/>
+      <path d="M282 92 H310" class="ln" marker-end="url(#ar3)"/>
+      <path d="M434 92 H462" class="ln" marker-end="url(#ar3)"/>
+      <path d="M586 92 H614" class="ln" marker-end="url(#ar3)"/>
+      <path d="M738 92 H766" class="ln" marker-end="url(#ar3)"/>
+      <path d="M890 92 H918" class="ln" marker-end="url(#ar3)"/>
+
+      <!-- exits -->
+      <path d="M221 134 V196" class="ln-bad" marker-end="url(#ar3b)"/>
+      <path d="M373 134 V196" class="ln-bad" marker-end="url(#ar3b)"/>
+      <path d="M525 134 V196" class="ln-bad" marker-end="url(#ar3b)"/>
+      <path d="M985 134 V196" class="ln-bad" marker-end="url(#ar3b)"/>
+      <rect x="160" y="198" width="122" height="62" rx="8" class="bx-bad"/>
+      <text x="221" y="222" text-anchor="middle" class="tbad">"Not found"</text>
+      <text x="221" y="240" text-anchor="middle" class="ts">not your group</text>
+      <rect x="312" y="198" width="274" height="62" rx="8" class="bx-bad"/>
+      <text x="449" y="222" text-anchor="middle" class="tbad">Fixed refusal wording</text>
+      <text x="449" y="240" text-anchor="middle" class="ts">never text Claude wrote</text>
+      <rect x="920" y="198" width="130" height="62" rx="8" class="bx-warn"/>
+      <text x="985" y="222" text-anchor="middle" class="t" style="fill:var(--warn);font-weight:600">"I don't know"</text>
+      <text x="985" y="240" text-anchor="middle" class="ts">logged as a gap</text>
+
+      <!-- success -->
+      <rect x="616" y="198" width="274" height="62" rx="8" class="bx-good"/>
+      <text x="753" y="222" text-anchor="middle" class="tgood">Reply with sources + 👍 / 👎</text>
+      <text x="753" y="240" text-anchor="middle" class="ts">Teams card or portal answer</text>
+      <path d="M940 134 C 930 175, 900 210, 892 222" class="ln-a" marker-end="url(#ar3)"/>
+      <text x="16" y="300" class="tm">Every block, mask and "I don't know" is counted on the Guardrails page (which rule, where, when), never the question text.</text>
+    </svg>
+    </div>
+    <figcaption>Five checkpoints before a reply. Refusals are pre-written sentences, so a crafted question can't make the refusal itself say something it shouldn't.</figcaption>
+  </figure>
+
+  <div class="two">
+    <div class="note"><h3>The walls come first</h3><p>In the portal, <code>requireWorkspace</code> refuses any group the person isn't a member of (admins see every group in their own company). In Teams, the chat itself decides the group: an assigned chat belongs to exactly one group. Unassigned chats get no answers at all.</p></div>
+    <div class="note"><h3>Guardrails on the way in</h3>
+      <ul>
+        <li><strong>Quick local check</strong>: no AI, no cost. Slurs, strong swearing, known jailbreak phrases.</li>
+        <li><strong>Claude check</strong>: a small call judges the question against the <strong>locked rules</strong> (no hate, harassment, sexual content, harm; can't be talked out of its rules; never crosses client walls; "I don't know" instead of guessing), the <strong>switches</strong> the Org Owner turned on (swearing, small talk, judging people, HR/legal/medical, contact details, competitors) and up to 20 <strong>custom rules</strong> ("Never quote day rates").</li>
+        <li>Switches and custom rules can only make Sidekick <em>stricter</em>. A group can add switches on top of the company's, never remove them.</li>
+        <li>Follow-ups ("and wave 3?") are rewritten into a full question first, and both versions are checked.</li>
+      </ul></div>
+    <div class="note"><h3>Search and ranking</h3><p>Looks only in this group's documents, meetings, notes, chats, connected tools and the company's firm library (<code>lib/search.ts</code>). With client guests present, only Shareable sources. About 30 candidates are re-ranked (<code>lib/rank.ts</code>): fit to the whole question, freshness, outdated versions ×0.55, firm policy first for policy questions, meeting notes ×1.15. Duplicates are dropped, at most 3 passages per source, the best 10 go to Claude.</p></div>
+    <div class="note"><h3>On the way out</h3>
+      <ul>
+        <li><strong>Grounding</strong>: the answer must cite a source that was actually sent. If not, it becomes "I don't know. I couldn't back that up…" and the question is logged as a knowledge gap.</li>
+        <li>Swearing masked, a slur replaces the whole answer, emails and phone numbers hidden when that switch is on.</li>
+        <li>If sources disagree, Claude says so ("the sources disagree").</li>
+      </ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ 4. MEETING -->
+<section id="meeting">
+  <div class="sec-head col">
+    <div class="eyebrow">4 · A meeting's journey</div>
+    <h2>From "End meeting" to notes in the chat</h2>
+    <p>No bot joins the call. Sidekick reads the transcript Teams already makes, through Microsoft Graph, after the meeting ends (<code>lib/meetings-graph.ts</code>). This covers scheduled Teams meetings today; "Meet now" calls started from a group chat are being added.</p>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1060 420" role="img" aria-label="A transcribed Teams meeting ends. Sidekick hears about it by a Graph notification within minutes or a 15-minute poll. A meetings.fetch job picks the group, checks plan limits and saves the meeting; a meetings.notes job has Claude write notes and posts them once to the notes chat with Save to knowledge.">
+      <defs>
+        <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+        <marker id="ar4b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/></marker>
+      </defs>
+      <!-- 1 meeting -->
+      <rect x="10" y="120" width="140" height="84" rx="10" class="bx-t"/>
+      <text x="80" y="150" text-anchor="middle" class="tb">Teams meeting</text>
+      <text x="80" y="169" text-anchor="middle" class="ts">transcription on,</text>
+      <text x="80" y="184" text-anchor="middle" class="ts">meeting ends</text>
+      <!-- two ways -->
+      <rect x="196" y="56" width="160" height="64" rx="10" class="bx"/>
+      <text x="276" y="82" text-anchor="middle" class="tb">Graph notification</text>
+      <text x="276" y="101" text-anchor="middle" class="ts">within minutes</text>
+      <rect x="196" y="204" width="160" height="64" rx="10" class="bx-s"/>
+      <text x="276" y="230" text-anchor="middle" class="tb">15-minute poll</text>
+      <text x="276" y="249" text-anchor="middle" class="ts">catches anything missed</text>
+      <path d="M150 150 C 170 120, 180 92, 194 88" class="ln" marker-end="url(#ar4)"/>
+      <path d="M150 176 C 170 206, 180 234, 194 236" class="ln-d" marker-end="url(#ar4)"/>
+      <!-- fetch -->
+      <rect x="402" y="120" width="150" height="84" rx="10" class="bx"/>
+      <text x="477" y="148" text-anchor="middle" class="tb">meetings.fetch</text>
+      <text x="477" y="167" text-anchor="middle" class="ts">one job per transcript,</text>
+      <text x="477" y="182" text-anchor="middle" class="ts">captured once</text>
+      <path d="M356 88 C 380 92, 390 130, 400 150" class="ln" marker-end="url(#ar4)"/>
+      <path d="M356 236 C 380 232, 390 196, 400 176" class="ln" marker-end="url(#ar4)"/>
+      <!-- group -->
+      <rect x="598" y="120" width="150" height="84" rx="10" class="bx"/>
+      <text x="673" y="148" text-anchor="middle" class="tb">Pick the group</text>
+      <text x="673" y="167" text-anchor="middle" class="ts">meeting's chat, else</text>
+      <text x="673" y="182" text-anchor="middle" class="ts">most people (≥ 2)</text>
+      <path d="M552 162 H596" class="ln" marker-end="url(#ar4)"/>
+      <!-- limits -->
+      <rect x="794" y="120" width="120" height="84" rx="10" class="bx"/>
+      <text x="854" y="148" text-anchor="middle" class="tb">Plan limits</text>
+      <text x="854" y="167" text-anchor="middle" class="ts">meeting hours,</text>
+      <text x="854" y="182" text-anchor="middle" class="ts">AI credit</text>
+      <path d="M748 162 H792" class="ln" marker-end="url(#ar4)"/>
+      <!-- notes -->
+      <rect x="930" y="120" width="120" height="84" rx="10" class="bx-a"/>
+      <text x="990" y="148" text-anchor="middle" class="tb">meetings.notes</text>
+      <text x="990" y="167" text-anchor="middle" class="ts">Claude writes</text>
+      <text x="990" y="182" text-anchor="middle" class="ts">the notes</text>
+      <path d="M914 162 H928" class="ln" marker-end="url(#ar4)"/>
+      <!-- exits from group/limits -->
+      <path d="M640 120 V40" class="ln-bad" marker-end="url(#ar4b)"/>
+      <rect x="560" y="8" width="160" height="32" rx="8" class="bx-warn"/>
+      <text x="640" y="29" text-anchor="middle" class="ts" style="fill:var(--warn);font-weight:600">Tie → "Pick a group"</text>
+      <path d="M706 120 V60 H748" class="ln-bad"/>
+      <rect x="748" y="44" width="200" height="32" rx="8" class="bx-bad"/>
+      <text x="848" y="65" text-anchor="middle" class="tbad">Nobody's meeting → skipped</text>
+      <text x="960" y="65" class="ts">nothing kept</text>
+      <path d="M854 204 V250" class="ln-bad" marker-end="url(#ar4b)"/>
+      <rect x="770" y="252" width="170" height="44" rx="8" class="bx-bad"/>
+      <text x="855" y="270" text-anchor="middle" class="tbad">Skipped, with reason</text>
+      <text x="855" y="286" text-anchor="middle" class="ts">never charged extra</text>
+      <!-- output -->
+      <path d="M990 204 V320" class="ln-a" marker-end="url(#ar4)"/>
+      <rect x="560" y="322" width="490" height="84" rx="10" class="bx-good"/>
+      <text x="580" y="348" class="tgood">Posted once to the group's notes chat</text>
+      <text x="580" y="368" class="ts">notes card: summary, decisions, open questions, Save to knowledge, Open in Sidekick</text>
+      <text x="580" y="386" class="ts">+ one card per action item (Assign, Mark done) · saved in the group · searchable at once</text>
+      <text x="10" y="350" class="tm">Every step is a job: runs once,</text>
+      <text x="10" y="366" class="tm">retries with backoff, honours</text>
+      <text x="10" y="382" class="tm">Microsoft's "slow down", lands</text>
+      <text x="10" y="398" class="tm">in Failed + Try again if stuck.</text>
+    </svg>
+    </div>
+    <figcaption>Two ways in, one way through. Whichever path hears first, the transcript is captured once and the notes are posted once.</figcaption>
+  </figure>
+
+  <div class="two">
+    <div class="note"><h3>Which group gets the meeting</h3>
+      <ul>
+        <li>If Sidekick is in the meeting's own chat and that chat is assigned, that group.</li>
+        <li>Otherwise the group with the most of its people among organizer and invitees, at least two.</li>
+        <li>A real tie waits under <strong>Pick a group</strong> for an admin or one of the Team Leads.</li>
+        <li>Not any group's meeting: skipped, and not even the title is kept.</li>
+      </ul></div>
+    <div class="note"><h3>Client guests</h3><p>If anyone from another Microsoft organization attended, the meeting is marked <strong>Client guests present</strong> and its notes count as shareable. Notes from internal meetings are never posted to a chat with client guests, whatever is ticked.</p>
+      <h3 style="margin-top:8px">Save to knowledge</h3><p>Decisions, requirements, risks and facts on the card can be saved to the group's knowledge with one click; answers then find them first, long after the meeting.</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ 5. WALLS -->
+<section id="walls">
+  <div class="sec-head col">
+    <div class="eyebrow">5 · The walls</div>
+    <h2>What keeps one client's data away from another</h2>
+    <p>There are two walls: between companies (organizations), and between groups inside a company. Every query in the code carries both the company and the group; an automated test tries to cross each wall on every new feature.</p>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 420" role="img" aria-label="Northwind Consulting holds two groups, Contoso cutover and Litware CRM, separated by a wall, both reading the shared firm library. Each Teams chat is assigned to exactly one group. A second company, Tailspin Advisory, is behind another wall. A guest chat sees Shareable sources only.">
+      <defs>
+        <marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+      </defs>
+      <!-- Org A -->
+      <rect x="10" y="10" width="660" height="400" rx="14" class="bx-s"/>
+      <text x="30" y="38" class="tb">Northwind Consulting</text>
+      <text x="30" y="56" class="ts">one company = one Microsoft tenant</text>
+      <!-- group 1 -->
+      <rect x="30" y="76" width="290" height="190" rx="12" class="bx"/>
+      <text x="48" y="102" class="tb">Group: Contoso cutover</text>
+      <text x="48" y="122" class="ts">docs · meetings · notes · chat messages</text>
+      <text x="48" y="138" class="ts">connected tools · action items</text>
+      <rect x="48" y="156" width="118" height="44" rx="8" class="bx-t"/>
+      <text x="107" y="183" text-anchor="middle" class="t">Core team chat</text>
+      <rect x="180" y="156" width="124" height="44" rx="8" class="bx-t"/>
+      <text x="242" y="176" text-anchor="middle" class="t">Contoso chat</text>
+      <text x="242" y="192" text-anchor="middle" class="tm">client guests</text>
+      <text x="48" y="232" class="ts">Members see this group only.</text>
+      <text x="48" y="248" class="ts">Guest chat: Shareable sources only.</text>
+      <!-- group 2 -->
+      <rect x="360" y="76" width="290" height="190" rx="12" class="bx"/>
+      <text x="378" y="102" class="tb">Group: Litware CRM</text>
+      <text x="378" y="122" class="ts">its own docs, meetings, chats</text>
+      <rect x="378" y="156" width="118" height="44" rx="8" class="bx-t"/>
+      <text x="437" y="183" text-anchor="middle" class="t">Litware chat</text>
+      <text x="378" y="232" class="ts">A chat belongs to exactly one group.</text>
+      <!-- wall between groups -->
+      <line x1="340" y1="72" x2="340" y2="270" class="wall"/>
+      <text x="340" y="66" text-anchor="middle" class="tbad">wall</text>
+      <!-- firm library -->
+      <rect x="30" y="300" width="620" height="54" rx="10" class="bx-a"/>
+      <text x="48" y="324" class="tb">Firm library</text>
+      <text x="48" y="342" class="ts">company policies and templates, read by every group (or only chosen ones)</text>
+      <path d="M175 298 V268" class="ln" marker-end="url(#ar5)"/>
+      <path d="M505 298 V268" class="ln" marker-end="url(#ar5)"/>
+      <text x="30" y="386" class="ts">Org Owners and Org Admins see every group in Northwind, and nothing outside it.</text>
+      <!-- wall between orgs -->
+      <line x1="700" y1="14" x2="700" y2="406" class="wall"/>
+      <!-- Org B -->
+      <rect x="730" y="10" width="260" height="400" rx="14" class="bx-s"/>
+      <text x="750" y="38" class="tb">Tailspin Advisory</text>
+      <text x="750" y="56" class="ts">another customer, another tenant</text>
+      <rect x="750" y="76" width="220" height="190" rx="12" class="bx"/>
+      <text x="768" y="102" class="tb">Its own groups</text>
+      <text x="768" y="122" class="ts">its own firm library,</text>
+      <text x="768" y="138" class="ts">people, chats, meetings</text>
+      <text x="768" y="232" class="ts">Teams messages from a tenant</text>
+      <text x="768" y="248" class="ts">not tied to a Sidekick company</text>
+      <text x="768" y="264" class="ts">get a "sign up first" card.</text>
+      <text x="750" y="324" class="tbad">Nothing crosses this wall:</text>
+      <text x="750" y="342" class="ts">no search, no answers, no export,</text>
+      <text x="750" y="358" class="ts">no meeting can land in another company.</text>
+    </svg>
+    </div>
+    <figcaption>Dotted red lines are the walls. The firm library is the only thing shared, and only inside one company.</figcaption>
+  </figure>
+
+  <div class="two">
+    <div class="note"><h3>How the walls are built</h3>
+      <ul>
+        <li>Every API route that touches group data calls <code>requireWorkspace</code> first. Not a member? "Not found", so it doesn't even confirm the group exists.</li>
+        <li>Search filters every query to one company and one group (plus that company's firm library), in Postgres and in Azure AI Search alike.</li>
+        <li>A Teams chat is assigned to exactly one group, only in the portal, only by a Team Lead or admin.</li>
+        <li>Claude only ever sees the handful of passages for one question, and is told to treat them as data, never instructions.</li>
+      </ul></div>
+    <div class="note"><h3>Guests and Teams</h3>
+      <ul>
+        <li>Someone in an assigned chat who isn't a Sidekick person acts as a Member of that one group, shown as "Name (Teams)".</li>
+        <li>Chats marked "client guests" get answers from <strong>Shareable</strong> sources only, and only notes from meetings the client attended.</li>
+        <li>Uploads are checked for another client's name before they're searchable; a likely mistake is held until someone decides.</li>
+        <li>When an engagement ends, a group can roll off: read-only, then deleted with a deletion certificate.</li>
+      </ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ 6. FAQ -->
+<section id="faq">
+  <div class="sec-head col">
+    <div class="eyebrow">6 · Questions you might get asked</div>
+    <h2>Short answers</h2>
+  </div>
+  <dl class="faq">
+    <div><dt>Where does our data live?</dt><dd>In Sidekick's Postgres database in Microsoft Azure (Central US), with 35 days of backups. A searchable copy of passages sits in Azure AI Search. Uploaded files are kept as text; original files aren't stored. Claude only receives the few passages needed for one answer or one transcript, stores nothing between calls, and Anthropic doesn't train on API data by default.</dd></div>
+    <div><dt>Does a bot join our calls?</dt><dd>No. Sidekick reads the transcript Teams already makes, after the meeting ends. Nothing joins, listens or records. (A live in-meeting Sidekick is a planned Enterprise feature.)</dd></div>
+    <div><dt>What Microsoft permissions does it need?</dt><dd>Sign-in, read the directory (names, emails, titles), remove itself from chats, and read meeting details and transcripts once automatic notes are on. All read-only towards your data; it never changes anything in Microsoft 365. Chat messages are granted per chat and read only once a chat is assigned to a group. Full list in section 2.</dd></div>
+    <div><dt>Who can add Sidekick to a chat?</dt><dd>Only Team Leads, Org Admins and the Org Owner. If anyone else adds it, Sidekick says so and leaves. A chat nobody assigns within 7 days is left automatically.</dd></div>
+    <div><dt>Could another client see our information?</dt><dd>No. Every query is walled to one company and one group, Teams chats belong to exactly one group, and an automated test tries to break those walls on every change. See section 5.</dd></div>
+    <div><dt>What if Claude is wrong?</dt><dd>Every answer cites its sources, so people can check. If no real source backs the answer, Sidekick says "I don't know" instead of guessing and logs the question as a knowledge gap. If sources disagree, it says so. People can mark answers 👍/👎, and admins see the counts.</dd></div>
+    <div><dt>What does it cost to run?</dt><dd>About $45 a month of Azure today (app, database, registry, logs). Before the first real customer, search moves to the Basic tier (about $75 a month). At around 100 companies the Azure plan is roughly $500–600 a month. On top of that: Claude, billed by Anthropic per use and the biggest variable cost, and Microsoft's transcript fee of about $0.0022 per meeting minute (about $6.60 per 100 half-hour meetings), paid by Sidekick.</dd></div>
+    <div><dt>What happens if something breaks?</dt><dd>Search falls back to its built-in index; Claude being busy shows a plain "try again in a minute"; missed meetings are caught by the 15-minute poll; background jobs retry and land in a dead-letter list you can see in the Owner Console. A bad deploy rolls itself back.</dd></div>
+    <div><dt>Can we control what it will answer?</dt><dd>Yes. Locked rules always apply; the Org Owner adds switches (no HR/legal/medical advice, no competitor talk, hide contact details…) and up to 20 custom rules. A group can be made stricter than the rest. Rules can only tighten, never loosen.</dd></div>
+    <div><dt>What happens when an engagement ends?</dt><dd>The group is set to end: it becomes read-only, can be exported as a zip, and is deleted after the notice period with a deletion certificate. Canceling the whole account does the same for the company.</dd></div>
+  </dl>
+</section>
+
+<footer>Checked against the code and docs on October 25, 2026 (lib/guardrails.ts, lib/search.ts, lib/meetings-graph.ts, lib/directory.ts, lib/teams/install.ts, docs/HOSTING.md, docs/RUNBOOKS.md). Source: docs/HOW-IT-WORKS.html in the Sidekick repo. Sample names are made up.</footer>
+</div>

@@ -117,6 +117,14 @@ dl.faq div{padding:16px 18px;border-bottom:1px solid var(--line);display:grid;ga
 dl.faq div:last-child{border-bottom:0}
 dl.faq dt{font:600 1.02rem var(--f-display)}
 dl.faq dd{margin:0;color:var(--fg)}
+/* Picture walkthrough */
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px}
+.shot{margin:0;padding:12px;display:grid;gap:10px;align-content:start;min-width:0}
+.shot img{display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);background:var(--sunken)}
+.shot.tall img{max-height:420px;width:auto;max-width:100%;margin-inline:auto}
+.shot figcaption{margin:0;font-size:.9rem;color:var(--fg)}
+.shot figcaption b{font-family:var(--f-display)}
+.shot .step{font:500 .72rem var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:2px}
 footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);font-size:.85rem;color:var(--faint)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
@@ -371,6 +379,24 @@ html{scroll-behavior:smooth}
     <li><div><h3>Turn on automatic notes <span class="who">Org Owner / Admin</span></h3><p>Meetings → Automatic notes after Teams meetings → Turn on. Sidekick checks the setup straight away; if something is missing (approval, access policy, Transcript API access) the panel names it in plain words.</p></div></li>
     <li><div><h3>First notes arrive <span class="who">Sidekick</span></h3><p>After the group's next transcribed Teams meeting, usually within minutes (at most about 15), the notes card lands in the chosen chat. Section 4 shows how.</p></div></li>
   </ol>
+
+  <div class="sec-head col" style="margin-top:28px">
+    <div class="eyebrow">Setup inside Teams, in pictures</div>
+    <h3 style="font-size:1.3rem">What it looks like on screen</h3>
+    <p>Real screens from Sidekick Labs' own Microsoft 365 test organization (Oct 24–25, 2026), with made-up sample data. Step numbers match the list above.</p>
+  </div>
+  <div class="shots">
+    <figure class="shot"><img src="how-it-works/01-entra-permissions.jpg" alt="Permissions approved" loading="lazy"><figcaption><span class="step">Step 3 · Microsoft admin</span><b>Permissions approved.</b> Microsoft's Entra admin center after approval: each Graph permission shows a green "Granted". A client's admin gets here from Users &amp; access → Approve Sidekick for your organization.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/07-upload-guard.jpg" alt="Add documents to the right group" loading="lazy"><figcaption><span class="step">Step 4 · Anyone in 2+ groups</span><b>Add documents to the right group.</b> Every upload shows which group it goes to; people in two or more groups confirm it each time. Files that mention another client are held for a decision.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/02-teams-admin-center.jpg" alt="Sidekick in the Teams admin center" loading="lazy"><figcaption><span class="step">Step 5 · Teams admin</span><b>Sidekick in the Teams admin center.</b> Where the client's Teams admin uploads the app and chooses who may use it. Recommended: only Team Leads and admins, not everyone.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/03-teams-apps.jpg" alt="Find Sidekick in Teams" loading="lazy"><figcaption><span class="step">Step 6 · Team Lead</span><b>Find Sidekick in Teams.</b> Apps → Built for your org. (Once Sidekick is in the Teams Store, clients will find it there instead.)</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/04-teams-app-page.jpg" alt="Add it" loading="lazy"><figcaption><span class="step">Step 6 · Team Lead</span><b>Add it.</b> The app page says what Sidekick does, with example prompts. Add, then pick the group chat.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/05-added-not-set-up.jpg" alt=""I'm not set up for this chat yet"" loading="lazy"><figcaption><span class="step">Step 6 · Sidekick</span><b>"I'm not set up for this chat yet".</b> Sidekick waits and reads nothing until the chat is assigned. Above it: when someone Sidekick doesn't recognise as a Team Lead adds it, Sidekick says so and leaves (this was a recognition bug, fixed in PR #76).</figcaption></figure>
+    <figure class="shot tall"><img src="how-it-works/06-assign-chat.jpg" alt="Assign the waiting chat" loading="lazy"><figcaption><span class="step">Step 7 · Team Lead</span><b>Assign the waiting chat.</b> In the portal (here on a phone): the waiting chat, who's in it and the date Sidekick will leave if nobody assigns it. This was taken before PR #76: it now shows the real name of whoever added Sidekick, not "Someone in Teams".</figcaption></figure>
+    <figure class="shot tall"><img src="how-it-works/11-transcript.png" alt="The transcript Teams makes" loading="lazy"><figcaption><span class="step">Step 10 · The meeting</span><b>The transcript Teams makes.</b> Sidekick reads this after the meeting ends, through Microsoft Graph. No bot in the call. Decisions and action items like these become the notes card.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/08-answer.jpg" alt="Ask in the chat, get an answer with sources" loading="lazy"><figcaption><span class="step">Everyday use</span><b>Ask in the chat, get an answer with sources.</b> @Sidekick in the assigned chat. The answer cites [S1], [S2]… and flags that the runbook is out of date.</figcaption></figure>
+    <figure class="shot"><img src="how-it-works/09-sources.jpg" alt="Sources, and when they disagree" loading="lazy"><figcaption><span class="step">Everyday use</span><b>Sources, and when they disagree.</b> Each source with its excerpt (meetings, runbook, RAID log), a "sources disagree" warning, and 👍/👎.</figcaption></figure>
+  </div>
 </section>
 
 <!-- ============================================================ 3. QUESTION -->

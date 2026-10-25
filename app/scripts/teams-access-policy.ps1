@@ -1,6 +1,9 @@
 # One-time Teams setup for Sidekick automatic meeting notes (docs/RUNBOOKS.md → Automatic meeting notes, step 3):
 # creates the application access policy that lets the Sidekick app read online meetings and transcripts, grants it
-# org-wide, and turns Teams transcription on in the Global meeting policy. Safe to run again.
+# org-wide, turns Teams transcription on in the Global meeting policy, and turns on the tenant's "Transcript API
+# access" switch (EnableGraphTranscriptAccess, off by default since Microsoft's 2026 change; without it Graph answers
+# 403 GraphAccessToTranscriptsDisabled) plus speaker names in transcripts (EnableAttributedTranscripts, so notes know
+# who said what). Safe to run again.
 #
 # Why this way: on a Mac, Connect-MicrosoftTeams' normal sign-in crashes (it loads a Windows-only library) and the
 # device-code sign-in is blocked by Entra security defaults (error 530035). So it reuses the Azure CLI's sign-in
@@ -25,4 +28,7 @@ Write-Host "Granted it for the whole organization."
 Set-CsTeamsMeetingPolicy -Identity Global -AllowTranscription $true
 $t = (Get-CsTeamsMeetingPolicy -Identity Global).AllowTranscription
 Write-Host "Transcription on for everyone: $t"
+Set-CsTeamsMeetingConfiguration -Identity Global -EnableGraphTranscriptAccess $true -EnableAttributedTranscripts $true
+$c = Get-CsTeamsMeetingConfiguration -Identity Global
+Write-Host "Apps may read transcripts (Graph): $($c.EnableGraphTranscriptAccess); speaker names: $($c.EnableAttributedTranscripts)"
 Write-Host "DONE (Microsoft says changes can take up to 30 minutes to apply)."

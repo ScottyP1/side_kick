@@ -104,6 +104,7 @@ const subCalls = [];
 const MEETINGS = new Map(); // online meeting id → meeting
 const TRANSCRIPTS = []; // { id, meetingId, organizer, createdDateTime, vtt }
 const pollCalls = [];
+const transcriptsOff = new Set(); // tenants whose Teams "Transcript API access" switch is off (403 GraphAccessToTranscriptsDisabled)
 const throttle = { meeting: [] }; // queue of Retry-After values to answer the next meeting reads with (429)
 const vtt = (lines) => `WEBVTT\n\n${lines.map(([who, text], i) => `00:${String(i).padStart(2, "0")}:01.000 --> 00:${String(i).padStart(2, "0")}:09.000\n<v ${who}>${text}</v>`).join("\n\n")}\n`;
 
@@ -141,6 +142,9 @@ const microsoft = http.createServer((req, res) => {
     const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "");
     if (!p.startsWith("/v1.0/")) return send(404, { error: "not found" });
     if (!consented.has(tid)) return send(403, { error: { code: "Forbidden" } });
+    if (transcriptsOff.has(tid) && (p === "/v1.0/subscriptions" || p.includes("/onlineMeetings/"))) {
+      return send(403, { error: { code: "Forbidden", message: "Graph API access to transcripts is disabled for this tenant.", innerError: { code: "GraphAccessToTranscriptsDisabled" } } });
+    }
     // Subscriptions.
     if (p === "/v1.0/subscriptions" && req.method === "POST") {
       const b = JSON.parse(body);
@@ -418,6 +422,22 @@ test(`[${ENGINE}] automatic notes: off by default, only admins switch it, consen
   // A Member sees the switch is on but not the admin's problem text.
   assert.equal((await mo("GET", "/api/meetings/auto")).body.enabled, true);
   assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Turned on automatic notes after Teams meetings/);
+});
+
+test(`[${ENGINE}] automatic notes: Teams' transcript switch being off is named as its own fix, not as missing consent`, async () => {
+  // Every permission approved, but the tenant's "Transcript API access" (EnableGraphTranscriptAccess) is off.
+  consented.add(TA);
+  transcriptsOff.add(TA);
+  try {
+    await drain({ sweep: true });
+    const st = (await ann("GET", "/api/meetings/auto")).body;
+    assert.match(st.lastError, /Transcript API access/);
+    assert.doesNotMatch(st.lastError, /approve the meeting transcripts permission/);
+    assert.equal(SUBS.size, 0);
+  } finally {
+    transcriptsOff.delete(TA);
+    consented.delete(TA);
+  }
 });
 
 test(`[${ENGINE}] Graph subscription: created after consent with the validation handshake; the notification address echoes tokens as text`, async () => {

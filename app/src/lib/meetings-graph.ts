@@ -395,7 +395,7 @@ export async function ensureSubscription(orgId: string, at = new Date()): Promis
           clientState,
           latestSupportedTlsVersion: "v1_2",
         },
-        deniedMessage: TRANSCRIPT_DENIED,
+        deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES,
       }),
     );
     if (!made?.id || !isGraphId(made.id)) throw new HttpError(502, "Microsoft Graph didn't confirm the meeting subscription.");
@@ -416,6 +416,17 @@ export async function ensureSubscription(orgId: string, at = new Date()): Promis
 
 /** The plain message when Microsoft refuses transcript access (consent or Teams' access policy missing). */
 export const TRANSCRIPT_DENIED = `${BRAND.name} can't read your Teams meeting transcripts yet. A Microsoft admin of your organization needs to approve the meeting transcripts permission and allow ${BRAND.name} in Teams (see "Automatic notes" in the help center).`;
+
+/**
+ * Messages for Graph refusals that need a tenant switch rather than a permission: since Microsoft's 2026 change,
+ * Teams' **Transcript API access** (`EnableGraphTranscriptAccess`) is off by default and Graph answers 403
+ * `GraphAccessToTranscriptsDisabled` even with every permission approved. Speaker names
+ * (`EnableAttributedTranscripts`) are a second switch. Fix: docs/RUNBOOKS.md → Automatic meeting notes, step 3 + 4.
+ */
+export const TRANSCRIPT_DENIED_CODES: Record<string, string> = {
+  GraphAccessToTranscriptsDisabled: `Microsoft Teams in your organization doesn't let apps read meeting transcripts yet. A Teams admin needs to turn on "Transcript API access" (Microsoft Graph access) in the Teams meeting settings, or run Set-CsTeamsMeetingConfiguration -EnableGraphTranscriptAccess $true (see "Automatic notes" in the help center).`,
+  SpeakerAttributionNotAllowed: `Microsoft Teams in your organization doesn't share speaker names in meeting transcripts yet. A Teams admin needs to run Set-CsTeamsMeetingConfiguration -EnableAttributedTranscripts $true (see "Automatic notes" in the help center).`,
+};
 
 /* ------------------------------------------------------------------ */
 /* Polling fallback (job meetings.poll.org)                            */
@@ -456,7 +467,7 @@ export async function pollOrg(orgId: string, at = new Date()): Promise<{ found: 
       let path: string | null = `/v1.0/users/${o.oid}/onlineMeetings/getAllTranscripts(meetingOrganizerUserId='${o.oid}',startDateTime=${from},endDateTime=${to})`;
       for (let page = 0; path && page < 20; page++) {
         const res: { value?: GraphTranscript[]; "@odata.nextLink"?: string } | null = await span("microsoft", "List Teams meeting transcripts", () =>
-          graphCall<{ value?: GraphTranscript[]; "@odata.nextLink"?: string }>(tenant, "GET", path!, { deniedMessage: TRANSCRIPT_DENIED }),
+          graphCall<{ value?: GraphTranscript[]; "@odata.nextLink"?: string }>(tenant, "GET", path!, { deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }),
         );
         for (const t of res?.value ?? []) {
           if (t.id && t.meetingId && (await recordTranscript(orgId, { meetingId: t.meetingId, transcriptId: t.id, organizerOid: t.meetingOrganizer?.user?.id ?? o.oid, via: "poll" }))) found++;
@@ -588,7 +599,7 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
   const tenant = await tenantOfOrg(orgId);
   if (!tenant) return skip(`${BRAND.name} isn't connected to your Microsoft 365 organization any more.`);
   const base = `/v1.0/users/${row.organizer_oid}/onlineMeetings/${encodeURIComponent(row.online_meeting_id)}`;
-  const meeting = await span("microsoft", "Read the Teams meeting", () => graphCall<GraphOnlineMeeting>(tenant, "GET", base, { deniedMessage: TRANSCRIPT_DENIED }));
+  const meeting = await span("microsoft", "Read the Teams meeting", () => graphCall<GraphOnlineMeeting>(tenant, "GET", base, { deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }));
   if (!meeting) return skip("Microsoft Teams no longer has this meeting.");
   const title = cleanTitle(meeting.subject);
   const timing = { title, started_at: meeting.startDateTime ?? null, ended_at: meeting.endDateTime ?? null };
@@ -622,7 +633,7 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
   }
 
   const vtt = await span("microsoft", "Download the meeting transcript", () =>
-    graphCall<string>(tenant, "GET", `${base}/transcripts/${encodeURIComponent(row.transcript_id)}/content?$format=text/vtt`, { raw: true, deniedMessage: TRANSCRIPT_DENIED }),
+    graphCall<string>(tenant, "GET", `${base}/transcripts/${encodeURIComponent(row.transcript_id)}/content?$format=text/vtt`, { raw: true, deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }),
   );
   if (vtt === null) throw new HttpError(503, "The transcript isn't ready in Microsoft Teams yet. It will be fetched again shortly.");
   const transcript = (vtt.trimStart().startsWith("WEBVTT") ? vttToTranscript(vtt) : vtt).trim();

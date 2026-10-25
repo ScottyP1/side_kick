@@ -8,20 +8,23 @@
  * - PUT `{ enabled }`: turn it on or off for the organization. Org Owners and Org Admins only.
  * - POST `{ action: "check" }` (Org Owners/Admins): look for new meetings now.
  *   POST `{ action: "assign", id, ws }`: pick the group for a waiting meeting (an Org Owner/Admin, or the Team Lead
- *   of that group; `ws` must be one of the meeting's candidate groups).
+ *   of that group; `ws` must be one of the meeting's candidate groups, or for a meeting where fewer than two of one
+ *   group's people were recognised, any group when an Org Owner/Admin picks).
+ *   POST `{ action: "add-person", id, oid }`: **Add to group** for one of a picked meeting's people who isn't in its
+ *   group yet (an Org Owner/Admin, or the group's Team Lead; within the plan's seats).
  *   POST `{ action: "retry", id }` (Org Owners/Admins): try a skipped or failed meeting again.
  */
 // Registers the job kinds this route enqueues (meetings.fetch, meetings.poll.org, meetings.subscription).
 import "@/lib/job-kinds";
 import { handle, readJson } from "@/lib/api";
 import { HttpError, isAdmin, isLead, requireManage, requireUser, workspaceIdsFor } from "@/lib/auth";
-import { autoNotesStatus, requestCheck, retryCapture, setAutoNotes } from "@/lib/meetings-graph";
+import { addMeetingPerson, autoNotesStatus, requestCheck, retryCapture, setAutoNotes } from "@/lib/meetings-graph";
 
 const ADMINS = ["Org Owner", "Org Admin"] as const;
 
 export const GET = handle(async () => {
   const user = await requireUser();
-  return autoNotesStatus(user.org_id, { workspaceIds: await workspaceIdsFor(user), manager: isAdmin(user) || isLead(user) });
+  return autoNotesStatus(user.org_id, { workspaceIds: await workspaceIdsFor(user), manager: isAdmin(user) || isLead(user), admin: isAdmin(user) });
 });
 
 export const PUT = handle(async (req: Request) => {
@@ -33,7 +36,7 @@ export const PUT = handle(async (req: Request) => {
 });
 
 export const POST = handle(async (req: Request) => {
-  const body = await readJson<{ action?: unknown; id?: unknown; ws?: unknown }>(req);
+  const body = await readJson<{ action?: unknown; id?: unknown; ws?: unknown; oid?: unknown }>(req);
   if (body.action === "check") {
     const user = await requireUser(ADMINS);
     await requestCheck(user.org_id);
@@ -44,6 +47,10 @@ export const POST = handle(async (req: Request) => {
     const ws = await requireManage(user, typeof body.ws === "string" ? body.ws : null);
     await retryCapture(user, body.id, ws);
     return { ok: true };
+  }
+  if (body.action === "add-person") {
+    const user = await requireUser();
+    return { ok: true, ...(await addMeetingPerson(user, body.id, body.oid)) };
   }
   if (body.action === "retry") {
     const user = await requireUser(ADMINS);

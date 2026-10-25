@@ -13,7 +13,11 @@
  *   from (or of the people who spoke) and posted once;
  * - throttling: a short Retry-After waited in place, a long one making the job wait at least that long;
  * - which group: most people, a tie waiting for a lead to pick (only their own group), a meeting of nobody's group
- *   skipped without keeping its title, meeting hours over the plan skipped with the reason;
+ *   skipped without keeping its title, meeting hours over the plan skipped with the reason; people added by email
+ *   recognised through the fake directory (`/users/{id}`, `/users/{email}`; never a guest or another tenant); a
+ *   meeting with too few known people waiting, then picked, with **Add to group** for its newcomers (roles, walls,
+ *   seats); the title hint (client name or engagement code, whole words);
+ * - the notes prompt: commitments however phrased become action items (fake Claude `__COMMITMENTS__`);
  * - "Save to knowledge" from the card and the portal (roles, walls, search source);
  * - the Teams tab with Teams single sign-on (token checks, walls, actions) and its framing headers;
  * - isolation: another organization sees none of it.
@@ -53,7 +57,7 @@ function guid(name) {
   const h = crypto.createHash("sha1").update(name).digest("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
-const OID = Object.fromEntries(["ann", "lou", "mo", "pat", "quinn", "vic", "bob", "outsider", "guest"].map((n) => [n, guid(`oid-${n}`)]));
+const OID = Object.fromEntries(["ann", "lou", "mo", "pat", "quinn", "vic", "bob", "outsider", "guest", "jo", "gus", "ole", "kai", "nia", "ola"].map((n) => [n, guid(`oid-${n}`)]));
 /** A Teams meeting id: base64 of "1*<organizer>*0**<meeting chat>". */
 const meetingIdFor = (organizer, thread) => Buffer.from(`1*${organizer}*0**${thread}`).toString("base64");
 
@@ -115,6 +119,9 @@ const throttle = { meeting: [] }; // queue of Retry-After values to answer the n
 const CHAT_MSGS = new Map(); // chat id → its latest messages (call events for the transcription reminder)
 const chatDenied = new Set(); // chats Graph refuses to read (403: the chat permission wasn't granted there)
 const chatReads = []; // every GET /chats/{id}/messages
+// Each tenant's people directory (GET /users/{id or sign-in name}): { tenant, id, upn, mail, name, userType }.
+const DIRECTORY = [];
+const dirCalls = []; // every directory lookup: { tid, key }
 const vtt = (lines) => `WEBVTT\n\n${lines.map(([who, text], i) => `00:${String(i).padStart(2, "0")}:01.000 --> 00:${String(i).padStart(2, "0")}:09.000\n<v ${who}>${text}</v>`).join("\n\n")}\n`;
 
 async function validateWith(url) {
@@ -188,6 +195,15 @@ const microsoft = http.createServer((req, res) => {
       s.expirationDateTime = JSON.parse(body).expirationDateTime;
       return send(200, { id: s.id, expirationDateTime: s.expirationDateTime });
     }
+    // The directory: one person by account id or sign-in name (UPN), only in the tenant asking (like Graph).
+    const dirUser = p.match(/^\/v1\.0\/users\/([^/]+)$/);
+    if (dirUser && req.method === "GET") {
+      const key = dirUser[1].toLowerCase();
+      dirCalls.push({ tid, key });
+      const u = DIRECTORY.find((d) => d.tenant === tid && (d.id === key || d.upn.toLowerCase() === key));
+      if (!u) return send(404, { error: { code: "Request_ResourceNotFound" } });
+      return send(200, { id: u.id, displayName: u.name, mail: u.mail, userPrincipalName: u.upn, userType: u.userType ?? "Member", accountEnabled: true });
+    }
     // Polling: transcripts of meetings one person organized.
     const all = p.match(/^\/v1\.0\/users\/([^/]+)\/onlineMeetings\/getAllTranscripts\(meetingOrganizerUserId='([^']+)',startDateTime=([^,]+),endDateTime=([^)]+)\)$/);
     if (all) {
@@ -230,21 +246,21 @@ const microsoft = http.createServer((req, res) => {
 });
 
 /** Adds a Teams meeting (and its transcript) to the fake Graph. Returns the ids. */
-function addMeeting(name, { organizer, attendees = [], guests = [], chat = `19:meeting_${name}@thread.v2`, minutes = 30, transcript = true, start = new Date(Date.now() - (minutes + 5) * 60_000) } = {}) {
+function addMeeting(name, { organizer, attendees = [], guests = [], others = [], subject = `Meeting ${name}`, lines, chat = `19:meeting_${name}@thread.v2`, minutes = 30, transcript = true, start = new Date(Date.now() - (minutes + 5) * 60_000) } = {}) {
   const meetingId = meetingIdFor(organizer, chat);
   const end = new Date(start.getTime() + minutes * 60_000);
   MEETINGS.set(meetingId, {
     organizer,
     body: {
-      id: meetingId, subject: `Meeting ${name}`, startDateTime: start.toISOString(), endDateTime: end.toISOString(), chatInfo: { threadId: chat },
+      id: meetingId, subject, startDateTime: start.toISOString(), endDateTime: end.toISOString(), chatInfo: { threadId: chat },
       participants: {
         organizer: { identity: { user: { id: organizer, tenantId: TA } } },
-        attendees: [...attendees.map((id) => ({ identity: { user: { id, tenantId: TA } } })), ...guests.map((id) => ({ identity: { user: { id, tenantId: TG } } }))],
+        attendees: [...attendees.map((id) => ({ identity: { user: { id, tenantId: TA } } })), ...guests.map((id) => ({ identity: { user: { id, tenantId: TG } } })), ...others.map(({ id, tenantId }) => ({ identity: { user: { id, tenantId } } }))],
       },
     },
   });
   const transcriptId = `MSMj${crypto.createHash("sha1").update(name).digest("hex").slice(0, 20)}`;
-  if (transcript) TRANSCRIPTS.push({ id: transcriptId, meetingId, organizer, createdDateTime: new Date(end.getTime() + 60_000).toISOString(), vtt: vtt([["Lou Lead", `In ${name} we decided to move the cutover.`], ["Mo Member", "I'll send the test report by Friday."]]) });
+  if (transcript) TRANSCRIPTS.push({ id: transcriptId, meetingId, organizer, createdDateTime: new Date(end.getTime() + 60_000).toISOString(), vtt: vtt(lines ?? [["Lou Lead", `In ${name} we decided to move the cutover.`], ["Mo Member", "I'll send the test report by Friday."]]) });
   return { meetingId, transcriptId, chat };
 }
 
@@ -580,16 +596,25 @@ test(`[${ENGINE}] polling fallback: a meeting Graph never notified about is foun
 test(`[${ENGINE}] which group: a tie waits for a lead to pick one of their groups; nobody's meeting is skipped without its title`, async () => {
   // Quinn (W1 and W2) with Mo (W1) and Pat (W2): two people from each group.
   const tie = addMeeting("tie", { organizer: OID.quinn, attendees: [OID.mo, OID.pat] });
-  // Ann alone with someone outside: no group's meeting.
+  // Ann (in W1 and W2) with someone Sidekick doesn't know: unclear, so it waits too (never dropped silently).
   addMeeting("solo", { organizer: OID.ann, attendees: [OID.outsider] });
+  // Nobody from any group (someone outside Sidekick with a client guest), heard of by notification: skipped.
+  const nobody = addMeeting("nobody", { organizer: OID.outsider, guests: [OID.guest] });
+  assert.equal((await notify([{ subscriptionId: s.sub.id, clientState: s.sub.clientState, changeType: "created", resource: `communications/onlineMeetings('${nobody.meetingId}')/transcripts('${nobody.transcriptId}')`, tenantId: TA }])).status, 202);
   await drain({ sweep: true });
   const forLou = (await lou("GET", "/api/meetings/auto")).body.recent.find((r) => r.title === "Meeting tie");
   assert.equal(forLou.status, "waiting");
   assert.deepEqual(forLou.candidates.map((c) => c.id), [s.w1], "a lead only sees their own group to pick");
   assert.equal((await ann("GET", "/api/meetings/auto")).body.recent.find((r) => r.title === "Meeting tie").candidates.length, 2);
   assert.ok(!(await mo("GET", "/api/meetings/auto")).body.recent.some((r) => r.title === "Meeting tie"), "a Member doesn't see waiting meetings");
-  assert.equal(await scalar("SELECT COUNT(*) FROM graph_meetings WHERE status = 'skipped' AND title IS NULL"), "1", "the solo meeting is skipped and its title not kept");
-  assert.ok(!JSON.stringify((await ann("GET", "/api/meetings/auto")).body).includes("Meeting solo"));
+  assert.equal(await scalar("SELECT COUNT(*) FROM graph_meetings WHERE status = 'skipped' AND title IS NULL"), "1", "nobody's meeting is skipped and its title not kept");
+  assert.ok(!JSON.stringify((await ann("GET", "/api/meetings/auto")).body).includes("Meeting nobody"));
+  const solo = (await ann("GET", "/api/meetings/auto")).body.recent.find((r) => r.title === "Meeting solo");
+  assert.equal(solo.status, "waiting");
+  assert.equal(solo.unclear, true);
+  assert.match(solo.reason, /fewer than two people from one group/);
+  assert.equal(await scalar("SELECT COUNT(*) FROM meetings WHERE title = 'Meeting solo'"), "0", "nothing written before someone picks");
+  s.solo = solo;
   // Who may pick: not a Member, not another org, not a group that isn't a candidate.
   assert.equal((await mo("POST", "/api/meetings/auto", { action: "assign", id: forLou.id, ws: s.w1 })).status, 403);
   assert.equal((await bob("POST", "/api/meetings/auto", { action: "assign", id: forLou.id, ws: s.bw })).status, 404, "another org can't even find it");
@@ -798,6 +823,148 @@ test(`[${ENGINE}] Teams tab pages: only Teams may frame them; every other page s
     assert.equal(r.headers.get("x-frame-options"), "DENY", p);
     assert.match(r.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/, p);
   }
+});
+
+test(`[${ENGINE}] people added by email: recognised through the tenant's directory (once, audited); never a guest or another tenant`, async () => {
+  // Added by email, never signed in with Microsoft. Jo's sign-in name differs from their Sidekick email (only the
+  // mail matches); Gus is a guest in tenant A with a matching mail; Ole's account lives in tenant B; Kai's sign-in
+  // name is their Sidekick email.
+  for (const [name, email, ws] of [["Jo New", "jo@a.test", s.w1], ["Gus Guest", "gus@client.test", s.w1], ["Ole Other", "ole@a.test", s.w1], ["Kai Email", "kai@a.test", s.w2]]) {
+    const u = await ann("POST", "/api/users", { name, email, role: "Member", workspaces: [ws] });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+  }
+  DIRECTORY.push(
+    { tenant: TA, id: OID.jo, upn: "jo.new@a.onmicrosoft.test", mail: "jo@a.test", name: "Jo New" },
+    { tenant: TA, id: OID.gus, upn: "gus_client.test#EXT#@a.onmicrosoft.test", mail: "gus@client.test", name: "Gus Guest", userType: "Guest" },
+    { tenant: TB, id: OID.ole, upn: "ole@b.test", mail: "ole@a.test", name: "Ole Other" },
+    { tenant: TA, id: OID.kai, upn: "kai@a.test", mail: "kai@a.test", name: "Kai Email" },
+  );
+  const oidOf = (email) => scalar(`SELECT COALESCE(LOWER(entra_oid), '') FROM users WHERE email = '${email}'`);
+  // Lou with Jo, Gus and Ole: only Jo counts, so W1 has two people and gets it.
+  addMeeting("email1", { organizer: OID.lou, attendees: [OID.jo, OID.gus], others: [{ id: OID.ole, tenantId: TB }] });
+  await drain({ sweep: true });
+  assert.ok((await lou("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.some((m) => m.title === "Meeting email1" && m.status === "Ready"));
+  assert.equal(await oidOf("jo@a.test"), OID.jo, "Jo's account id was saved");
+  assert.equal(await oidOf("gus@client.test"), "", "a guest is never linked, even with a matching mail");
+  assert.equal(await oidOf("ole@a.test"), "", "another tenant's account is never linked");
+  assert.ok(!dirCalls.some((c) => c.key === OID.ole), "another tenant's invitee isn't even looked up");
+  // The poll found Kai (no account id) by their email once, and now checks their meetings.
+  assert.equal(await oidOf("kai@a.test"), OID.kai);
+  assert.ok(pollCalls.some((c) => c.organizer === OID.kai), "Kai's meetings are polled");
+  await drain({ sweep: true });
+  assert.equal(dirCalls.filter((c) => c.key === "kai@a.test").length, 1, "looked up once");
+  assert.equal(dirCalls.filter((c) => c.key === "jo@a.test").length, 1, "Jo's email was tried once too (no match: their sign-in name differs)");
+  // A second meeting with Jo: no second lookup, no second audit line.
+  const before = dirCalls.length;
+  addMeeting("email2", { organizer: OID.lou, attendees: [OID.jo] });
+  await drain({ sweep: true });
+  assert.ok((await lou("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.some((m) => m.title === "Meeting email2"));
+  assert.ok(!dirCalls.slice(before).some((c) => c.key === OID.jo));
+  assert.equal(await scalar("SELECT COUNT(*) FROM audit_log WHERE action LIKE '%recognised them in a Teams meeting by their email%'"), "1");
+  assert.equal(await scalar("SELECT COUNT(*) FROM audit_log WHERE action LIKE '%looked for their Teams meetings by their email%'"), "1");
+});
+
+test(`[${ENGINE}] new members: a meeting with one known group person waits; after a pick the picker adds the newcomers (seats respected)`, async () => {
+  // Mo (W1) with Nia and Ola (tenant A, not in Sidekick yet), Gus (a guest in tenant A) and a client guest.
+  DIRECTORY.push(
+    { tenant: TA, id: OID.nia, upn: "nia@a.test", mail: "nia@a.test", name: "Nia New" },
+    { tenant: TA, id: OID.ola, upn: "ola@a.test", mail: "ola@a.test", name: "Ola Also" },
+  );
+  const from = sent.length;
+  addMeeting("newbie", { organizer: OID.mo, attendees: [OID.nia, OID.ola, OID.gus], guests: [OID.guest] });
+  await drain({ sweep: true });
+  const forLou = (await lou("GET", "/api/meetings/auto")).body.recent.find((r) => r.title === "Meeting newbie");
+  assert.equal(forLou?.status, "waiting", "a lead sees it: one of their group's people was there");
+  assert.equal(forLou.unclear, true);
+  assert.deepEqual(forLou.candidates.map((c) => c.id), [s.w1]);
+  assert.ok(!(await pat("GET", "/api/meetings/auto")).body.recent.some((r) => r.title === "Meeting newbie"), "a Member doesn't");
+  assert.ok(!(await bob("GET", "/api/meetings/auto")).body.recent.some((r) => r.title === "Meeting newbie"), "another org doesn't");
+  const forAnn = (await ann("GET", "/api/meetings/auto")).body.recent.find((r) => r.title === "Meeting newbie");
+  assert.equal(forAnn.candidates[0].id, s.w1, "the groups its people are in come first");
+  assert.ok(forAnn.candidates.some((c) => c.id === s.w2), "an admin may pick any group for an unclear meeting");
+  // Nothing is written, kept or posted before someone picks: only ids, title and time.
+  assert.equal(await scalar("SELECT COUNT(*) FROM meetings WHERE title = 'Meeting newbie'"), "0");
+  assert.equal(await scalar("SELECT COALESCE(newcomers, '') || COALESCE(workspace_id, '') FROM graph_meetings WHERE title = 'Meeting newbie'"), "");
+  assert.ok(!sentTo(CHAT_W1, from).includes("newbie"));
+  // Picking: not a Member, not a group a lead doesn't lead, not another org.
+  assert.equal((await mo("POST", "/api/meetings/auto", { action: "assign", id: forLou.id, ws: s.w1 })).status, 403);
+  assert.equal((await lou("POST", "/api/meetings/auto", { action: "assign", id: forLou.id, ws: s.w2 })).status, 404);
+  assert.equal((await bob("POST", "/api/meetings/auto", { action: "assign", id: forLou.id, ws: s.bw })).status, 404);
+  assert.equal((await lou("POST", "/api/meetings/auto", { action: "assign", id: forLou.id, ws: s.w1 })).status, 200);
+  await drain();
+  assert.ok((await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.some((m) => m.title === "Meeting newbie" && m.status === "Ready"), "notes written after the pick");
+  // The picker sees who isn't in W1 yet: Nia and Ola, never the guests or Mo.
+  const row = (await lou("GET", "/api/meetings/auto")).body.recent.find((r) => r.title === "Meeting newbie");
+  assert.deepEqual(row.newcomers.map((p) => p.name).sort(), ["Nia New", "Ola Also"]);
+  assert.ok(!(await mo("GET", "/api/meetings/auto")).body.recent.find((r) => r.title === "Meeting newbie").newcomers.length, "only managers see newcomers");
+  // Add to group: a lead or admin of that group only, people on the list only.
+  assert.equal((await mo("POST", "/api/meetings/auto", { action: "add-person", id: row.id, oid: OID.nia })).status, 403);
+  assert.equal((await vic("POST", "/api/meetings/auto", { action: "add-person", id: row.id, oid: OID.nia })).status, 403);
+  assert.equal((await bob("POST", "/api/meetings/auto", { action: "add-person", id: row.id, oid: OID.nia })).status, 404);
+  assert.equal((await lou("POST", "/api/meetings/auto", { action: "add-person", id: row.id, oid: OID.gus })).status, 404, "a guest is never offered");
+  const added = await lou("POST", "/api/meetings/auto", { action: "add-person", id: row.id, oid: OID.nia });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  assert.equal(added.body.created, true);
+  assert.equal(await scalar(`SELECT COUNT(*) FROM users u JOIN workspace_members wm ON wm.user_id = u.id WHERE u.email = 'nia@a.test' AND wm.workspace_id = '${s.w1}' AND u.role = 'Member' AND LOWER(u.entra_oid) = '${OID.nia}'`), "1");
+  assert.equal((await lou("POST", "/api/meetings/auto", { action: "add-person", id: row.id, oid: OID.nia })).status, 409, "already in");
+  assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Added Nia New \(nia@a\.test\) to group “W1” from the Teams meeting “Meeting newbie”/);
+  // A full plan refuses a new person (402); with room it works.
+  const orgA = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Org A").id;
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${orgA}/terms`, { limits: { seats: 1, meetingHours: 1000 } })).status, 200);
+  assert.equal((await lou("POST", "/api/meetings/auto", { action: "add-person", id: row.id, oid: OID.ola })).status, 402);
+  assert.equal(await scalar("SELECT COUNT(*) FROM users WHERE email = 'ola@a.test'"), "0");
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${orgA}/terms`, { limits: { seats: 1000, meetingHours: 1000 } })).status, 200);
+  assert.equal((await ann("POST", "/api/meetings/auto", { action: "add-person", id: row.id, oid: OID.ola })).status, 200);
+  assert.deepEqual((await lou("GET", "/api/meetings/auto")).body.recent.find((r) => r.title === "Meeting newbie").newcomers, [], "the list empties as people are added");
+});
+
+test(`[${ENGINE}] title hint: a tie or an unclear meeting goes to the one group its title names, and the notes say so`, async () => {
+  assert.equal((await ann("PATCH", `/api/workspaces/${s.w1}`, { client: "Litware", code: "LIT-DATA-26" })).status, 200);
+  assert.equal((await ann("PATCH", `/api/workspaces/${s.w2}`, { client: "Fabrikam" })).status, 200);
+  // Quinn, Mo and Pat tie between W1 and W2 (as in the tie test); the title names Litware only.
+  addMeeting("lit", { organizer: OID.quinn, attendees: [OID.mo, OID.pat], subject: "litware cutover review" });
+  // The engagement code works too.
+  addMeeting("code", { organizer: OID.quinn, attendees: [OID.mo, OID.pat], subject: "Steering LIT-DATA-26" });
+  // Both clients named: still a tie, waits.
+  addMeeting("both", { organizer: OID.quinn, attendees: [OID.mo, OID.pat], subject: "Litware and Fabrikam planning" });
+  // A client name inside another word doesn't count ("Litwares" is not "Litware").
+  addMeeting("part", { organizer: OID.quinn, attendees: [OID.mo, OID.pat], subject: "Litwares offsite" });
+  // Unclear (Quinn with someone unknown): the title names Fabrikam, so W2.
+  addMeeting("fab", { organizer: OID.quinn, attendees: [OID.outsider], subject: "Fabrikam check-in" });
+  await drain({ sweep: true });
+  const w1 = (await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings;
+  const lit = w1.find((m) => m.title === "litware cutover review");
+  assert.ok(lit && w1.some((m) => m.title === "Steering LIT-DATA-26"), JSON.stringify(w1.map((m) => m.title)));
+  assert.match((await mo("GET", `/api/meetings/${lit.id}`)).body.meeting.summary, /^Picked Litware from the meeting title\./);
+  assert.ok((await pat("GET", `/api/meetings?ws=${s.w2}`)).body.meetings.some((m) => m.title === "Fabrikam check-in"));
+  const st = (await ann("GET", "/api/meetings/auto")).body.recent;
+  assert.equal(st.find((r) => r.title === "Litware and Fabrikam planning")?.status, "waiting");
+  assert.equal(st.find((r) => r.title === "Litwares offsite")?.status, "waiting");
+  // Nobody picked these by hand, so there's no newcomers list.
+  assert.deepEqual(st.find((r) => r.title === "Fabrikam check-in").newcomers, []);
+});
+
+test(`[${ENGINE}] notes prompt: commitments however phrased become action items owned by whoever committed; floated ideas don't`, async () => {
+  addMeeting("natural", {
+    organizer: OID.lou, attendees: [OID.mo],
+    lines: [
+      ["Lou Lead", "__COMMITMENTS__ Thanks both, quick one today."],
+      ["Mo Member", "The vendor contract is a mess. Leave it with me."],
+      ["Lou Lead", "Could you get the load numbers to Pat before the review?"],
+      ["Mo Member", "On it."],
+      ["Quinn Both", "Maybe we could try a new dashboard for the steering group someday."],
+      ["Lou Lead", "Let me check the budget with finance first."],
+    ],
+  });
+  await drain({ sweep: true });
+  const m = (await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.find((x) => x.title === "Meeting natural");
+  assert.ok(m, "captured");
+  const actions = (await mo("GET", `/api/meetings/${m.id}`)).body.actions.map((a) => `${a.owner}: ${a.text}`).sort();
+  assert.deepEqual(actions, [
+    "Lou Lead: Let me check the budget with finance first.",
+    "Mo Member: Could you get the load numbers to Pat before the review?",
+    "Mo Member: The vendor contract is a mess. Leave it with me.",
+  ]);
 });
 
 test(`[${ENGINE}] isolation: another organization sees none of Org A's Teams meetings or switches`, async () => {

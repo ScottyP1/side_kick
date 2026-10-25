@@ -2,6 +2,8 @@
 
 Sidekick writes the notes for your group's meetings: a short summary, the **decisions**, **action items** (with owners and dates as spoken), **open questions**, and lasting facts like requirements, risks and terms. Notes land in the right group in the portal, are posted to the group's notes chat in Teams, and answers can use them straight away.
 
+**Action items are commitments, however they were said.** Nobody needs to say "action item". "I'll send it over", "let me check with finance", "leave it with me", or a "yes" / "on it" to someone's request all count, and the owner is the person who took it on. Ideas that were only floated ("maybe we could…") aren't action items unless someone then takes them on.
+
 There are two ways meetings get to Sidekick:
 - **Automatic notes after Teams meetings**: when a Teams meeting of a group's people ends, Sidekick reads its transcript and writes the notes by itself. That includes scheduled meetings and calls started with **Meet now** inside a group chat. No bot joins the call.
 - **Add a past or outside meeting**: upload a transcript yourself, for meetings held before automatic notes were on, or outside Teams.
@@ -24,11 +26,16 @@ Pressing **Meet now** (the camera button) inside a Teams group chat starts a cal
 Microsoft needs a separate approval for these calls (*Read all call transcripts*). If your organization approved Sidekick before October 2026, the Meetings page says *"approve the new call transcripts permission"*: a Microsoft admin presses **Users & access → Approve Sidekick for your organization** once more. Scheduled meetings keep working meanwhile, and calls from the last day are still picked up once it's approved.
 
 ### Which group a meeting goes to
-Sidekick picks the group like this:
+Sidekick never guesses: a meeting goes to a group only when that's clear. Anything unclear waits for a person to pick; it never lands in a client's group by default. Sidekick picks the group like this:
 1. **The meeting's own chat**: if Sidekick was added to the meeting's chat (for example by adding the Sidekick tab to the meeting) and a Team Lead or admin assigned that chat to a group, the meeting goes to that group. For a **Meet now** call this is the group chat it was started from.
-2. **Otherwise, the people**: the group with the most of its people in the meeting (the organizer and the invitees; for a Meet now call, who started it and who spoke), and at least two of them. People count once they've signed in to Sidekick with Microsoft at least once, or were imported from Microsoft 365.
-3. **A tie**: if people from several groups were there equally, the meeting waits under **Pick a group** on the Meetings page. An Org Owner, Org Admin or the Team Lead of one of those groups picks it; a Team Lead only sees their own groups as choices.
-4. **Nobody's meeting**: if it isn't a meeting of any group's people, Sidekick skips it and keeps nothing about it (not even its title).
+2. **Otherwise, the people**: the group with the most of its people in the meeting (the organizer and the invitees; for a Meet now call, who started it and who spoke), and at least two of them. If two groups have the same number, the organizer's group wins.
+3. **Still unclear: the meeting title.** If groups tie, or no group has two of its people there, Sidekick looks at the meeting title. When it names exactly one of those groups, by its **client name**, **group name** or **engagement code** (as whole words, any capitals; names made only of everyday words like "Data Platform" and your organization's own name don't count), the meeting goes there, and the notes start with a line saying so, for example *"Picked Litware from the meeting title."* So "Litware weekly" or "Steering LIT-DATA-26" is enough.
+4. **Otherwise it waits under Pick a group** on the Meetings page. That happens when people from several groups were there equally, or when Sidekick recognised fewer than two people from one group (often because someone is new to the group). Org Owners and Org Admins see every waiting meeting, and for one where too few people were recognised they can pick any group. A Team Lead sees the ones that include people from their own groups, and only those groups as choices. Until someone picks, Sidekick keeps only the meeting's title and time: nothing is written or posted.
+5. **Nobody's meeting**: if no group's people were in it (or the person was alone), Sidekick skips it and keeps nothing about it (not even its title).
+
+**Who counts as a group's person.** People count once Sidekick knows their Microsoft account: they've signed in with Microsoft, were imported from Microsoft 365, or were **added by email**. For people added by email, Sidekick looks their account up in your organization's own Microsoft 365 directory (it needs the directory permission your Microsoft admin approved) and matches their sign-in name or email. It saves the match once (the audit log says *"Microsoft account linked when Sidekick recognised them in a Teams meeting by their email"*), and also checks their own meetings from then on. Guests from other companies and people from another Microsoft organization are never matched, even when an email looks the same.
+
+**New people on the project.** After you pick a group for a waiting meeting, the notes are written and the Meetings page shows **People in this meeting who aren't in *group* yet**: people from your own Microsoft 365 organization only (never guests or other organizations). **Add to group** adds one of them to that group. Someone new to Sidekick gets an account that signs in with Microsoft and takes a seat on your plan (if the plan is full, Sidekick says so and adds nobody). An Org Owner, Org Admin or that group's Team Lead can do this (a Team Lead adds Members and Viewers). Each addition is in the group's audit log.
 
 If anyone from another Microsoft organization (a client guest) was in the meeting, it's marked **Client guests present**: its notes count as shareable, and notes from internal meetings are never posted to chats with client guests.
 
@@ -37,7 +44,7 @@ Each captured meeting's length counts toward your plan's **meeting hours** this 
 
 ### What you see on the Meetings page
 - Captured meetings have a **Teams** tag, and the meeting page says *captured from Microsoft Teams*.
-- The panel lists recent Teams meetings with their status: **Writing notes**, **Notes written**, **Pick a group**, **Skipped** (with the reason) or **Failed** (with **Try again**). Members see the meetings of their own groups; Org Owners, Org Admins and Team Leads also see skipped ones and the ones waiting for a group.
+- The panel lists recent Teams meetings with their status: **Writing notes**, **Notes written**, **Pick a group**, **Skipped** (with the reason) or **Failed** (with **Try again**). Members see the meetings of their own groups; Org Owners, Org Admins and Team Leads also see skipped ones and the ones waiting for a group, and, after a pick, the meeting's people who aren't in the group yet with **Add to group**.
 
 ## Getting a transcript every time
 Teams only makes a transcript when someone starts transcription, and people forget. Two things help.

@@ -299,7 +299,7 @@ export async function canSeeWorkspace(user: User, workspaceId: string): Promise<
  */
 export async function requireWorkspace(user: User, workspaceId: string | null | undefined, opts: { allowEnding?: boolean } = {}): Promise<string> {
   if (!workspaceId || !(await canSeeWorkspace(user, workspaceId))) {
-    throw new HttpError(404, "Workspace not found, or you're not a member of it.");
+    throw new HttpError(404, "Group not found, or you're not a member of it.");
   }
   traceScope({ workspaceId });
   if (!opts.allowEnding && isWriteRequest()) {
@@ -329,7 +329,7 @@ export async function managedWorkspaceIds(user: User): Promise<string[]> {
  */
 export async function requireManage(user: User, workspaceId: string | null | undefined): Promise<string> {
   // The role is checked first, so other roles always get a plain 403 whatever workspace they name.
-  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the workspace's Team Lead can do this.");
+  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the group's Team Lead can do this.");
   return requireWorkspace(user, workspaceId);
 }
 

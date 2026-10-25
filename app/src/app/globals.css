@@ -47,13 +47,13 @@ h3{font-size:14px;font-weight:600}
 .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
 
 .app{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100%}
-.rail{background:var(--rail);color:var(--rail-fg);padding:18px 12px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.rail{background:var(--rail);color:var(--rail-fg);padding:18px 12px;display:flex;flex-direction:column;gap:14px;position:sticky;top:0;height:100vh;overflow-y:auto}
 .brand{display:flex;align-items:center;gap:10px;padding:0 8px;color:#fff}
 .brand-mark{width:30px;height:30px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:var(--accent-fg);font-family:var(--f-display);font-weight:700}
 .brand b{font-family:var(--f-display);font-size:16px;color:#f4f4fa}
 .brand small{display:block;font-size:11px;color:var(--rail-fg);opacity:.75}
 .nav{display:flex;flex-direction:column;gap:2px}
-.nav-group{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;opacity:.55;padding:12px 10px 4px}
+.nav-group{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;opacity:.55;padding:8px 10px 4px}
 .nav button{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;font-size:13.5px}
 .nav button:hover{background:var(--rail-active);color:#fff}
 .nav button[aria-current="page"]{background:var(--rail-active);color:#fff;box-shadow:inset 3px 0 0 var(--accent)}
@@ -67,6 +67,7 @@ h3{font-size:14px;font-weight:600}
 .topbar{display:flex;align-items:center;gap:12px;padding:12px 28px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:env(safe-area-inset-top,0px);z-index:5;flex-wrap:wrap}
 .search{flex:1;min-width:180px;max-width:420px;display:flex;align-items:center;gap:8px;background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--muted)}
 .search input{border:0;background:transparent;outline:0;width:100%}
+.search:focus-within{outline:2px solid var(--accent);outline-offset:1px}
 .topbar .spacer{flex:1}
 .avatar{width:30px;height:30px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:600;font-size:12px;flex:none}
 .content{padding:24px 28px 48px;display:flex;flex-direction:column;gap:20px;max-width:1280px;width:100%}
@@ -83,6 +84,9 @@ h3{font-size:14px;font-weight:600}
 .btn.small{padding:4px 9px;font-size:12.5px}
 .btn.ghost{border-color:transparent;background:transparent}
 .btn:disabled{opacity:.45;cursor:not-allowed}
+/* Link-styled buttons look like every other button (no link underline); .wrap lets a long label (a group name) wrap on phones. */
+a.btn{text-decoration:none}
+.btn.wrap{white-space:normal;text-align:left;max-width:100%}
 
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);min-width:0}
 .panel-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
@@ -151,7 +155,7 @@ td.r,th.r{text-align:right}
 .field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .field label{font-weight:500;font-size:13px}
 .field .hint{font-size:12px;color:var(--muted)}
-.input,select.input,textarea.input{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 10px;width:100%}
+.input,select.input,textarea.input{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 10px;width:100%;max-width:100%}
 textarea.input{min-height:80px;resize:vertical}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex-wrap:wrap}
 .seg button{border:0;background:var(--surface);padding:6px 12px;cursor:pointer;border-right:1px solid var(--line)}
@@ -176,6 +180,7 @@ textarea.input{min-height:80px;resize:vertical}
 .drop.over{border-color:var(--accent);background:var(--accent-soft)}
 
 .callout{display:flex;gap:10px;padding:12px 14px;border-radius:8px;background:var(--hand-soft);color:var(--fg);border:1px solid color-mix(in srgb,var(--hand) 30%,transparent)}
+.callout>div{min-width:0}
 .callout.info{background:var(--info-soft);border-color:color-mix(in srgb,var(--info) 30%,transparent)}
 .callout.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
 .callout.bad{background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 30%,transparent)}
@@ -188,6 +193,8 @@ textarea.input{min-height:80px;resize:vertical}
 .flow{display:flex;align-items:stretch;gap:8px;overflow-x:auto;padding-bottom:4px}
 .flow-step{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--sunken);min-width:150px;flex:1;font-size:13px}
 .flow-arrow{align-self:center;color:var(--faint);flex:none}
+/* Phones: the data-flow steps stack top to bottom instead of scrolling sideways (half-hidden boxes). */
+@media (max-width:640px){.flow{flex-direction:column;overflow-x:visible}.flow-arrow{transform:rotate(90deg)}}
 .app-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));grid-auto-rows:1fr;gap:12px}
 .app-tile{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:20px 12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;justify-content:flex-start;min-height:190px;min-width:0;transition:border-color .15s, transform .15s, box-shadow .15s}
 .app-tile:is(a,button):hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
@@ -231,6 +238,7 @@ a.app-tile{text-decoration:none;color:inherit}
 .modal{background:var(--surface);border-radius:12px;border:1px solid var(--line);width:min(560px,100%);max-height:min(90vh,calc(100dvh - 32px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)));overflow:auto;overscroll-behavior:contain;box-shadow:0 20px 60px rgba(0,0,0,.25)}
 .modal .panel-h{position:sticky;top:0;z-index:1;background:var(--surface);flex-wrap:nowrap;align-items:flex-start}
 .modal .panel-h h2{min-width:0;overflow-wrap:anywhere}
+.modal:focus{outline:none}
 .modal .panel-h > .btn{flex:none}
 .modal-f{position:sticky;bottom:0;z-index:1;background:var(--surface);display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:14px 16px;border-top:1px solid var(--line)}
 /* a long label ("Upload to Contoso Retail – Cloud Migration") wraps inside the dialog instead of spilling off a phone */
@@ -273,7 +281,7 @@ button.avatar{border:0;cursor:pointer;font-family:inherit}
 
 /* ---- app additions ---- */
 a{color:inherit}
-.nav a{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;font-size:13.5px}
+.nav a{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:7px;font-size:13.5px}
 .nav a:hover{background:var(--rail-active);color:#fff}
 .nav a[aria-current="page"]{background:var(--rail-active);color:#fff;box-shadow:inset 3px 0 0 var(--accent)}
 .nav a:focus-visible{outline:2px solid var(--accent)}

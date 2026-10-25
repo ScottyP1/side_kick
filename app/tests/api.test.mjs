@@ -883,7 +883,7 @@ test(`[${ENGINE}] Owner Console: a client's people, workspaces and switches, for
   const mia = d.body.people.find((p) => p.email === "member@test.local");
   assert.equal(mia.role, "Member");
   assert.deepEqual(mia.workspaces, ["Workspace A"]);
-  assert.deepEqual(d.body.people.find((p) => p.email === "admin@test.local").workspaces, ["All workspaces"]);
+  assert.deepEqual(d.body.people.find((p) => p.email === "admin@test.local").workspaces, ["All groups"]);
   assert.ok(d.body.workspaces.some((w) => w.name === "Workspace A" && w.members >= 2));
   assert.ok(!d.body.people.some((p) => p.email === "nora@northwind.test"), "only this org's people");
   assert.ok(d.body.flags.every((f) => f.enabled && f.platformEnabled));
@@ -1721,7 +1721,7 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await lead("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Internal Tools" })).status, 404);
   assert.equal((await lead("POST", `/api/connectors/links/${zl.body.link.id}/sync`)).status, 404);
   assert.equal((await lead("DELETE", `/api/connectors/${s.ado}`)).status, 404);
-  assert.match(flashOf((await connectTool(lead, "ado", "northwind", s.wsB)).start), /Workspace not found/, "A's Team Lead can't connect for B");
+  assert.match(flashOf((await connectTool(lead, "ado", "northwind", s.wsB)).start), /Group not found/, "A's Team Lead can't connect for B");
   assert.ok(!(await lead("GET", "/api/connectors")).body.connectors.some((c) => c.workspaceId === s.wsB), "nor see B's connection");
   assert.equal((await other("GET", `/api/connectors/${s.ado}/projects`)).status, 404);
   assert.equal((await other("DELETE", `/api/connectors/${s.ado}`)).status, 404);
@@ -2430,7 +2430,7 @@ test(`[${ENGINE}] guardrails: a rule that would refuse every work question is re
 test(`[${ENGINE}] workspaces: names are unique per org (ignoring case); Org Owners/Admins rename and change the code, audited`, async () => {
   const dup = await admin("POST", "/api/workspaces", { name: "  workspace a " });
   assert.equal(dup.status, 409);
-  assert.match(dup.body.error, /already a workspace called/);
+  assert.match(dup.body.error, /already a group called/);
   const c = await admin("POST", "/api/workspaces", { name: "Rename Me", code: "RN-1" });
   assert.equal(c.status, 200);
   s.wsC = c.body.id;
@@ -4899,7 +4899,7 @@ test(`[${ENGINE}] connectors: plans limit how many tool types (none, one, all) w
   const l = client();
   await firstSignIn(l, "lars@connteam.test", lead.tempPassword);
   assert.equal((await connectTool(l, "ado", "northwind", ws1)).to.search, "?connected=ado");
-  assert.match(flashOf((await connectTool(l, "ado", "northwind", ws2)).start), /Workspace not found/);
+  assert.match(flashOf((await connectTool(l, "ado", "northwind", ws2)).start), /Group not found/);
   assert.match(flashOf((await connectTool(l, "jira", undefined, ws1)).start), /Jira isn't allowed in your organization yet\. Ask the Org Owner/);
   assert.equal((await connectTool(t, "ado", "northwind", ws2)).to.search, "?connected=ado", "an admin connects for any group");
   assert.deepEqual((await t("GET", "/api/billing")).body.limits.find((x) => x.key === "connectors").used, 1, "two groups' connections, one tool type");

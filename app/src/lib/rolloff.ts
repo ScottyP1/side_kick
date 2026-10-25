@@ -130,7 +130,7 @@ export async function scheduleGroupRolloff(user: User, workspaceId: string, days
   return span("rolloff", "End a group", async () => {
     if (await groupRolloff(user.org_id, workspaceId)) throw new HttpError(409, "This group is already ending. Cancel it first to pick another date.");
     const ws = await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", workspaceId, user.org_id);
-    if (!ws) throw new HttpError(404, "Workspace not found, or you're not a member of it.");
+    if (!ws) throw new HttpError(404, "Group not found, or you're not a member of it.");
     const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", user.org_id);
     const chats = await all<TeamsConversation>("SELECT * FROM teams_conversations WHERE workspace_id = ? AND org_id = ?", workspaceId, user.org_id);
     const id = newId();
@@ -306,7 +306,7 @@ export const countsLine = (c: Record<string, number>) => Object.entries(c).filte
 export async function deleteGroupWithCertificate(orgId: string, workspaceId: string, actor: Pick<User, "org_id" | "name">, rolloff?: Rolloff | null): Promise<Certificate> {
   return span("rolloff", "Delete a group", async () => {
     const ws = await get<{ name: string; created_at: string }>("SELECT name, created_at FROM workspaces WHERE id = ? AND org_id = ?", workspaceId, orgId);
-    if (!ws) throw new HttpError(404, "Workspace not found, or you're not a member of it.");
+    if (!ws) throw new HttpError(404, "Group not found, or you're not a member of it.");
     const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", orgId);
     const counts = await groupCounts(orgId, workspaceId);
     const { unlinked } = await deleteWorkspace(orgId, workspaceId);

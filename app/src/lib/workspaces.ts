@@ -35,7 +35,7 @@ export async function assertUniqueName(orgId: string, name: string, exceptId: st
     "SELECT id FROM workspaces WHERE org_id = ? AND LOWER(name) = LOWER(?) AND id != ?",
     orgId, name, exceptId ?? "",
   );
-  if (clash) throw new HttpError(409, `There's already a workspace called “${name}”. Pick a different name.`);
+  if (clash) throw new HttpError(409, `There's already a group called “${name}”. Pick a different name.`);
 }
 
 /** How much a workspace holds, for the delete confirmation ("12 documents, 4 meetings…"). Scoped to the org. */

@@ -171,7 +171,7 @@ export const DELETE = handle(async (req: Request) => {
 /** A linked conversation in a workspace this user may manage (403 for roles that can't manage links, checked first; 404 otherwise). */
 async function ownLink(user: User, id: string | null | undefined): Promise<TeamsConversation> {
   // Role first, so other roles always get a plain 403 whichever chat they name.
-  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the workspace's Team Lead can do this.");
+  if (!isAdmin(user) && !isLead(user)) throw new HttpError(403, "Only Org Owners, Org Admins and the group's Team Lead can do this.");
   const conv = id ? await get<TeamsConversation>("SELECT * FROM teams_conversations WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
   if (!conv) throw new HttpError(404, "Linked Teams channel not found.");
   await requireManage(user, conv.workspace_id);

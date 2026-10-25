@@ -79,7 +79,7 @@ function OverviewTab() {
   const k = o.kpis;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
         <span className="muted">Showing</span>
         {[1, 7, 30].map((d) => (
           <button key={d} className={`btn small${days === d ? " primary" : ""}`} aria-pressed={days === d} onClick={() => setDays(d)}>
@@ -238,7 +238,7 @@ function TracesTab() {
       ) : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>When</th><th>Operation</th><th>Where</th><th>Who</th><th>Workspace</th><th>Took</th><th>Steps</th><th>Result</th></tr></thead>
+            <thead><tr><th>When</th><th>Operation</th><th>Where</th><th>Who</th><th>Group</th><th>Took</th><th>Steps</th><th>Result</th></tr></thead>
             <tbody>
               {shown.map((t) => {
                 const st = statusOf(t);
@@ -366,7 +366,7 @@ function MessagesTab() {
       ) : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>When</th><th>Where</th><th>Who</th><th>Workspace</th><th>Question</th><th>Answer</th></tr></thead>
+            <thead><tr><th>When</th><th>Where</th><th>Who</th><th>Group</th><th>Question</th><th>Answer</th></tr></thead>
             <tbody>
               {shown.map((m) => (
                 <tr key={m.id}>
@@ -402,7 +402,7 @@ function AuditTab() {
       ) : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>When</th><th>Who</th><th>What</th><th>Type</th><th>Workspace</th></tr></thead>
+            <thead><tr><th>When</th><th>Who</th><th>What</th><th>Type</th><th>Group</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>

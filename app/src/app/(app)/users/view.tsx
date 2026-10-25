@@ -25,10 +25,10 @@ const ROLES = ["Org Admin", "Team Lead", "Member", "Viewer"];
 const LEAD_ROLES = ["Member", "Viewer"];
 const ROLE_HELP: [string, string][] = [
   ["Org Owner", "Everything, plus the organization-wide guardrail switches and Microsoft sign-in"],
-  ["Org Admin", "People, workspaces, usage and billing (sees the plan; only the Org Owner pays or changes it) and audit log, across all workspaces"],
-  ["Team Lead", "A Member who also adds people to the workspaces they lead (as Member or Viewer), takes them off again, and links Teams chats to those workspaces"],
-  ["Member", "Their workspaces: upload documents, import meetings, ask, manage action items"],
-  ["Viewer", "Their workspaces, read-only"],
+  ["Org Admin", "People, groups, usage and billing (sees the plan; only the Org Owner pays or changes it) and audit log, across all groups"],
+  ["Team Lead", "A Member who also adds people to the groups they lead (as Member or Viewer), takes them off again, and links Teams chats to those groups"],
+  ["Member", "Their groups: upload documents, import meetings, ask, manage action items"],
+  ["Viewer", "Their groups, read-only"],
 ];
 
 export default function UsersPage() {
@@ -61,7 +61,7 @@ export default function UsersPage() {
     if (q.has("error")) toast(takeFlash(`Approving ${BRAND.name} in Microsoft didn't finish. Try again.`), "error");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const wsName = (id: string) => me.workspaces.find((w) => w.id === id)?.name ?? "Workspace";
+  const wsName = (id: string) => me.workspaces.find((w) => w.id === id)?.name ?? "Group";
 
   const add = async () => {
     setFormErr("");
@@ -69,7 +69,7 @@ export default function UsersPage() {
       const r = await api<{ tempPassword?: string; existing?: boolean }>("/api/users", { method: "POST", json: form });
       setInvite(false);
       if (r.tempPassword) setTemp({ email: form.email, password: r.tempPassword });
-      else toast(`${form.email} already had an account: added them to your workspaces`);
+      else toast(`${form.email} already had an account: added them to your groups`);
       setForm({ name: "", email: "", role: "Member", workspaces: [] });
       load();
     } catch (e) {
@@ -97,7 +97,7 @@ export default function UsersPage() {
   };
   const remove = async (p: P) => {
     // Same confirm-first pattern as removing a guardrail rule.
-    if (!window.confirm(`Remove ${p.name} (${p.email}) from the organization? They're signed out and lose access to every workspace. This can't be undone.`)) return;
+    if (!window.confirm(`Remove ${p.name} (${p.email}) from the organization? They're signed out and lose access to every group. This can't be undone.`)) return;
     try {
       await api(`/api/users/${p.id}`, { method: "DELETE" });
       // Drop the row now, so it doesn't linger while the list reloads.
@@ -117,7 +117,7 @@ export default function UsersPage() {
         <div>
           <div className="eyebrow">Users & access</div>
           <h1>{people ? `${people.length} ${people.length === 1 ? "person" : "people"}` : "People"}</h1>
-          <p>{lead ? "The people in the workspaces you lead. Add teammates to your workspaces, or take them off; an Org Admin changes roles." : "Add teammates and choose which workspaces they can see. People can sign in with their Microsoft work account once Microsoft sign-in is connected on Settings."}</p>
+          <p>{lead ? "The people in the groups you lead. Add teammates to your groups, or take them off; an Org Admin changes roles." : "Add teammates and choose which groups they can see. People can sign in with their Microsoft work account once Microsoft sign-in is connected on Settings."}</p>
         </div>
         <div className="actions">
           <button className="btn primary" onClick={() => setInvite(true)}><Icon n="plus" />Add person</button>
@@ -140,7 +140,7 @@ export default function UsersPage() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Person</th><th>Role</th><th>Workspaces</th><th>Last active</th><th /></tr>
+              <tr><th>Person</th><th>Role</th><th>Groups</th><th>Last active</th><th /></tr>
             </thead>
             <tbody>
               {people?.map((p) => (
@@ -169,7 +169,7 @@ export default function UsersPage() {
                     )}
                   </td>
                   <td>
-                    {["Org Owner", "Org Admin"].includes(p.role) ? <span className="muted">All workspaces</span> : (
+                    {["Org Owner", "Org Admin"].includes(p.role) ? <span className="muted">All groups</span> : (
                       <div className="chips">
                         {p.workspaces.map((w) => <span key={w} className="tag">{wsName(w)}</span>)}
                         {(!lead || LEAD_ROLES.includes(p.role)) && <button className="btn small ghost" onClick={() => setEditWs(p)}>Edit</button>}
@@ -201,7 +201,7 @@ export default function UsersPage() {
           <div className="field"><label htmlFor="prole">Role</label><select id="prole" className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roles.map((r) => roleOption(r))}</select>{leadNote && !lead && <span className="hint">{leadNote}</span>}</div>
           {!["Org Admin"].includes(form.role) && (
             <div className="field">
-              <label>Workspaces</label>
+              <label>Groups</label>
               {me.workspaces.map((w) => (
                 <label key={w.id} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}>
                   <input type="checkbox" checked={form.workspaces.includes(w.id)} onChange={(e) => setForm({ ...form, workspaces: e.target.checked ? [...form.workspaces, w.id] : form.workspaces.filter((x) => x !== w.id) })} />
@@ -214,7 +214,7 @@ export default function UsersPage() {
         </Modal>
       )}
       {editWs && (
-        <WsEditor person={editWs} workspaces={me.workspaces} onClose={() => setEditWs(null)} onSave={(ids) => { patch(editWs, { workspaces: ids }, `Updated ${editWs.name}'s workspaces`); setEditWs(null); }} />
+        <WsEditor person={editWs} workspaces={me.workspaces} onClose={() => setEditWs(null)} onSave={(ids) => { patch(editWs, { workspaces: ids }, `Updated ${editWs.name}'s groups`); setEditWs(null); }} />
       )}
     </>
   );
@@ -223,7 +223,7 @@ export default function UsersPage() {
 function WsEditor({ person, workspaces, onClose, onSave }: { person: P; workspaces: { id: string; name: string }[]; onClose: () => void; onSave: (ids: string[]) => void }) {
   const [sel, setSel] = useState(person.workspaces);
   return (
-    <Modal title={`${person.name}'s workspaces`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={() => onSave(sel)}>Save</button></>}>
+    <Modal title={`${person.name}'s groups`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={() => onSave(sel)}>Save</button></>}>
       {workspaces.map((w) => (
         <label key={w.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input type="checkbox" checked={sel.includes(w.id)} onChange={(e) => setSel(e.target.checked ? [...sel, w.id] : sel.filter((x) => x !== w.id))} />

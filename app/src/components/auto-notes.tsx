@@ -104,7 +104,7 @@ export function AutoNotesPanel({ role, onOpen }: { role: string; onOpen: (meetin
               <div className="muted">{r.reason}</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
                 {r.candidates.map((g) => (
-                  <button key={g.id} className="btn small" disabled={busy} onClick={() => post({ action: "assign", id: r.id, ws: g.id }, `Notes will go to ${g.name}`).catch(reportError)}>{g.name}</button>
+                  <button key={g.id} className="btn small wrap" disabled={busy} onClick={() => post({ action: "assign", id: r.id, ws: g.id }, `Notes will go to ${g.name}`).catch(reportError)}>{g.name}</button>
                 ))}
               </div>
             </div>

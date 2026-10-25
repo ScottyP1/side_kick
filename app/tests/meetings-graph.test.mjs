@@ -1351,18 +1351,18 @@ test(`[${ENGINE}] meetings that record by themselves: an organizer turning it of
 test(`[${ENGINE}] meetings that record by themselves: invitees who never signed in with Microsoft count by email (live case, Oct 25)`, async () => {
   // Like Cody's live meeting: the organizer (Quinn, in W1 and W2) has a Microsoft account id; the two invitees are W1
   // people with no Microsoft account id in Sidekick, invited by email in another case; the meeting lists no attendees.
-  for (const [name, email] of [["Nia Noid", "nia@a.test"], ["Oz Noid", "oz@a.test"]]) {
+  for (const [name, email] of [["Jo Noid", "jo.noid@a.test"], ["Oz Noid", "oz.noid@a.test"]]) {
     const u = await ann("POST", "/api/users", { name, email, role: "Member", workspaces: [s.w1] });
     assert.equal(u.status, 200, JSON.stringify(u.body));
   }
-  const live = schedule("live", { organizer: OID.quinn, emails: ["NIA@A.test", "Oz@A.Test", "quinn.other-address@a.test"], event: { organizer: { emailAddress: { address: "quinn.other-address@a.test" } } } });
-  const unknown = schedule("unknowns", { organizer: OID.quinn, emails: ["nia@a.test", "who1@a.test", "who2@a.test", "who3@a.test"] });
+  const live = schedule("live", { organizer: OID.quinn, emails: ["JO.NOID@A.test", "Oz.Noid@A.Test", "quinn.other-address@a.test"], event: { organizer: { emailAddress: { address: "quinn.other-address@a.test" } } } });
+  const unknown = schedule("unknowns", { organizer: OID.quinn, emails: ["jo.noid@a.test", "who1@a.test", "who2@a.test", "who3@a.test"] });
   // Turning the switch back on scans at once and looks again at meetings it left alone before.
   assert.equal((await ann("PUT", "/api/meetings/auto", { autoRecord: true })).status, 200);
   await drain();
   assert.equal(patched(live), 1, "two of W1's people invited by email plus the organizer: W1's meeting");
   assert.equal(await scalar(`SELECT workspace_id FROM meeting_autorecord WHERE online_meeting_id = '${live}'`), s.w1);
-  assert.equal(patched(unknown), 0, "Quinn and Nia are 2 of 5 invited: not most of the meeting");
+  assert.equal(patched(unknown), 0, "Quinn and Jo are 2 of 5 invited: not most of the meeting");
   assert.match(await scalar(`SELECT reason FROM meeting_autorecord WHERE online_meeting_id = '${unknown}'`), /Fewer than half/);
   // Admins and leads see how many upcoming meetings were left alone and why (no titles); Members don't.
   const st = (await ann("GET", "/api/meetings/auto")).body.autoRecord;

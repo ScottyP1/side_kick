@@ -37,11 +37,13 @@
  *   dead-letter list if it keeps failing: `meetings.fetch` (one per transcript: read the meeting, pick the group,
  *   download the transcript, check the plan, save the meeting) then `meetings.notes` (write the notes with Claude
  *   and post them to Teams once). Polling and subscription upkeep are recurring jobs. Payloads hold ids only.
- * - **Which group** (`pickGroup`): the group whose Teams chat is the meeting's own chat (Sidekick added to the
- *   meeting chat and assigned there, or the group chat a Meet now was started from); otherwise the group with the
- *   most of its people in the meeting (organizer, invitees; for an ad hoc call the people who spoke), needing at
- *   least two of them. A tie waits for an Org Owner/Admin or the Team Lead to pick a group
- *   (status `waiting`); a meeting that isn't any group's is skipped and nothing about it is kept but its ids.
+ * - **Which group** (lib/meeting-group.ts `matchGroup`, shared with automatic recording): the meeting's linked chat,
+ *   else the group with the most of its people (at least two; people added by email are recognised through the
+ *   tenant's directory), else a client name / group name / engagement code in the title naming exactly one of the
+ *   possible groups. Anything else **waits** (status `waiting`, `waiting_kind` `tie` or `unclear`) for an Org
+ *   Owner/Admin or a Team Lead to pick; only its ids, title and time are kept until then. A meeting of nobody's
+ *   group is skipped and nothing about it is kept but its ids. After a pick, the meeting's own-tenant people who
+ *   aren't in the group yet (`newcomers`) are offered with **Add to group** (`addMeetingPerson`).
  * - **Plan limits**: the meeting's length counts toward the month's meeting hours like an import; over the limit,
  *   paused AI, a read-only plan or a used-up AI credit (long meetings) skip the meeting with a plain reason shown
  *   on the Meetings page and in the audit log. Nothing is ever charged beyond the plan.
@@ -55,8 +57,8 @@
 import "server-only";
 import crypto from "node:crypto";
 import { all, get, newId, now, run, tx } from "./db";
-import { audit, auditAsSidekick, HttpError, type User } from "./auth";
-import { ConsentNeededError, graphCall } from "./directory";
+import { audit, auditAsSidekick, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, requireManage, type Role, type User } from "./auth";
+import { ConsentNeededError, directoryPerson, findOrCreateMicrosoftUser, graphCall, linkByEmail } from "./directory";
 import { entraConfigured } from "./entra";
 import { enqueue } from "./jobs";
 import { span } from "./trace";
@@ -71,6 +73,7 @@ import { processMeeting } from "./sidekick";
 import { postMeetingNotes } from "./teams/bot";
 import { remindAfterMeeting } from "./reminders";
 import { BRAND } from "./brand";
+import { isOid, knownPeople, matchGroup, sameTenant, type DirectoryCache, type Participant } from "./meeting-group";
 
 /** The Graph resource for every scheduled-meeting transcript in a tenant (one subscription per organization). */
 export const TRANSCRIPTS_RESOURCE = "communications/onlineMeetings/getAllTranscripts";
@@ -112,7 +115,16 @@ export type GraphMeeting = {
   started_at: string | null;
   ended_at: string | null;
   workspace_id: string | null;
+  /** JSON list of group ids someone may pick from (status `waiting`). */
   candidates: string | null;
+  /** Why it waits: `tie` (several groups equally) or `unclear` (fewer than two of one group's people recognised). */
+  waiting_kind: "tie" | "unclear" | null;
+  /** The Sidekick user who picked its group (null when Sidekick worked it out). */
+  picked_by: string | null;
+  /** Said at the top of the notes when the meeting title decided the group ("Picked Litware from the meeting title."). */
+  pick_note: string | null;
+  /** After a pick: JSON [{ oid, name, email }] of the meeting's own-tenant people who weren't in the group. */
+  newcomers: string | null;
   meeting_id: string | null;
   created_at: string;
   updated_at: string;
@@ -179,9 +191,12 @@ const plainError = (e: unknown) => (e instanceof HttpError ? e.message : `Checki
 /**
  * The automatic-notes status for the Meetings page: the switch, whether Microsoft is connected, the subscription,
  * the last check, and recent captured meetings (only in `workspaceIds`: the groups the person may see; waiting
- * and skipped ones only for those who may pick a group, `manager`).
+ * and skipped ones only for those who may pick a group, `manager`). A waiting meeting lists the groups this person
+ * may pick (`candidates`): its candidate groups among theirs, or for an `unclear` one and an Org Owner/Admin
+ * (`admin`) every group that isn't ending, its candidates first. A meeting someone picked a group for lists, for the
+ * managers of that group, its people who aren't in the group yet (`newcomers`, each with Add to group).
  */
-export async function autoNotesStatus(orgId: string, opts: { workspaceIds: string[]; manager: boolean }) {
+export async function autoNotesStatus(orgId: string, opts: { workspaceIds: string[]; manager: boolean; admin?: boolean }) {
   const row = await get<{ enabled: number; changed_by: string | null; changed_at: string | null; last_poll_at: string | null; last_ok_at: string | null; last_error: string | null; last_error_at: string | null }>(
     "SELECT enabled, changed_by, changed_at, last_poll_at, last_ok_at, last_error, last_error_at FROM auto_meetings WHERE org_id = ?", orgId,
   );
@@ -192,21 +207,41 @@ export async function autoNotesStatus(orgId: string, opts: { workspaceIds: strin
   );
   const allowed = new Set(opts.workspaceIds);
   const names = new Map((await all<{ id: string; name: string }>("SELECT id, name FROM workspaces WHERE org_id = ?", orgId)).map((w) => [w.id, w.name]));
+  const open = opts.admin && rows.some((r) => r.status === "waiting" && r.waiting_kind === "unclear")
+    ? (await all<{ id: string }>(`SELECT w.id FROM workspaces w WHERE w.org_id = ? AND ${NOT_ENDING} ORDER BY w.name`, orgId)).map((w) => w.id)
+    : [];
+  const pickable = (r: GraphMeeting) => {
+    const listed = (JSON.parse(r.candidates ?? "[]") as string[]).filter((id) => allowed.has(id));
+    return r.status === "waiting" && r.waiting_kind === "unclear" && opts.admin ? [...new Set([...listed, ...open])] : listed;
+  };
   const recent = rows
     .filter((r) => (r.workspace_id ? allowed.has(r.workspace_id) : opts.manager))
     .filter((r) => opts.manager || r.status === "captured" || r.status === "done")
     .slice(0, 30)
     .map((r) => {
-      const candidates = (JSON.parse(r.candidates ?? "[]") as string[]).filter((id) => allowed.has(id));
+      const candidates = pickable(r);
       return {
         id: r.id, title: r.title, status: r.status, reason: r.reason, startedAt: r.started_at, endedAt: r.ended_at, via: r.via,
         workspace: r.workspace_id ? { id: r.workspace_id, name: names.get(r.workspace_id) ?? "" } : null,
         meetingId: r.meeting_id,
         candidates: candidates.map((id) => ({ id, name: names.get(id) ?? "" })),
+        unclear: r.status === "waiting" && r.waiting_kind === "unclear",
+        newcomers: opts.manager && r.picked_by && r.newcomers && r.workspace_id ? (JSON.parse(r.newcomers) as Newcomer[]) : [],
       };
     })
     // A waiting meeting is only shown to someone who can pick at least one of its groups.
     .filter((r) => r.status !== "waiting" || r.candidates.length);
+  // People added since (or now an Org Owner/Admin) drop off the newcomers list.
+  for (const r of recent) {
+    if (!r.newcomers.length || !r.workspace) continue;
+    const oids = r.newcomers.map((p) => p.oid);
+    const done = new Set((await all<{ oid: string }>(
+      `SELECT LOWER(u.entra_oid) AS oid FROM users u WHERE u.org_id = ? AND LOWER(u.entra_oid) IN (${oids.map(() => "?").join(", ")})
+          AND (u.role IN ('Org Owner', 'Org Admin') OR EXISTS (SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = ? AND wm.user_id = u.id))`,
+      orgId, ...oids, r.workspace.id,
+    )).map((u) => u.oid));
+    r.newcomers = r.newcomers.filter((p) => !done.has(p.oid));
+  }
   return {
     enabled: Boolean(row?.enabled),
     connected: Boolean(await tenantOfOrg(orgId)),
@@ -259,8 +294,6 @@ export function decodeTranscriptThread(transcriptId: string): string | null {
  * refused before it's stored. Ids are always URL-encoded when put in a Graph path.
  */
 const isGraphId = (s: unknown): s is string => typeof s === "string" && s.length > 0 && s.length <= 512 && /^[\w\-=+./]+$/.test(s);
-/** Microsoft account ids are GUIDs. */
-const isOid = (s: unknown): s is string => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /**
  * Notes that a transcript exists for a meeting or ad hoc call and queues its `meetings.fetch` job, once per
@@ -557,6 +590,7 @@ export async function pollOrg(orgId: string, at = new Date()): Promise<{ found: 
     return { found: 0, organizers: 0 };
   }
   const since = (await get<{ changed_at: string | null }>("SELECT changed_at FROM auto_meetings WHERE org_id = ?", orgId))?.changed_at;
+  await linkOrganizersByEmail(orgId, tenant);
   const organizers = await all<{ oid: string; polled_until: string | null }>(
     `SELECT DISTINCT LOWER(u.entra_oid) AS oid, c.polled_until FROM users u
        JOIN workspace_members wm ON wm.user_id = u.id JOIN workspaces w ON w.id = wm.workspace_id AND w.org_id = u.org_id
@@ -606,6 +640,44 @@ export async function pollOrg(orgId: string, at = new Date()): Promise<{ found: 
   return { found, organizers: checked };
 }
 
+/** At most this many people without a Microsoft account id are looked up by email per poll (each only once). */
+const MAX_EMAIL_LOOKUPS_PER_POLL = 50;
+
+/**
+ * Group members who were added by email and never signed in with Microsoft have no account id, so their meetings
+ * couldn't be polled. Each is looked up once in the organization's own tenant by their email (lib/directory.ts
+ * `linkByEmail`: never a guest or another tenant); a match saves the account id (audited), so they're polled from
+ * now on. Tried once per person (a `lookup:<user id>` row in `graph_poll_cursors`), whatever the answer. A directory
+ * that can't be read yet, throttling or an outage stops the lookups for this poll without marking anyone (tried
+ * again next time); polling itself goes on.
+ */
+async function linkOrganizersByEmail(orgId: string, tenant: string): Promise<void> {
+  const people = await all<{ id: string; name: string; email: string }>(
+    `SELECT DISTINCT u.id, u.name, u.email FROM users u
+       JOIN workspace_members wm ON wm.user_id = u.id JOIN workspaces w ON w.id = wm.workspace_id AND w.org_id = u.org_id
+      WHERE u.org_id = ? AND u.entra_oid IS NULL AND ${NOT_ENDING}
+        AND NOT EXISTS (SELECT 1 FROM graph_poll_cursors c WHERE c.org_id = u.org_id AND c.organizer_oid = 'lookup:' || u.id)
+      ORDER BY u.id LIMIT ${MAX_EMAIL_LOOKUPS_PER_POLL}`,
+    orgId,
+  );
+  if (!people.length) return;
+  await span("microsoft", "Find meeting organizers added by email", async () => {
+    for (const u of people) {
+      try {
+        await linkByEmail(orgId, tenant, u, `Microsoft account linked when ${BRAND.name} looked for their Teams meetings by their email`);
+      } catch (e) {
+        // Best effort: polling goes on without them, and they're tried again next poll.
+        if (!(e instanceof ConsentNeededError)) console.error("Looking up a meeting organizer by email failed", e instanceof Error ? e.message : e);
+        return;
+      }
+      await run(
+        `INSERT INTO graph_poll_cursors (org_id, organizer_oid, polled_until) VALUES (?, ?, ?) ON CONFLICT (org_id, organizer_oid) DO NOTHING`,
+        orgId, `lookup:${u.id}`, now(),
+      );
+    }
+  }, { people: people.length });
+}
+
 /**
  * Every organization with automatic notes on and not paused (the recurring poll and upkeep fan out to these). None
  * when this server has no Microsoft app set up (a laptop or the demo world), so nothing tries to reach Microsoft.
@@ -619,44 +691,9 @@ export async function autoNotesOrgs(): Promise<string[]> {
 /* Which group a meeting belongs to                                    */
 /* ------------------------------------------------------------------ */
 
-/**
- * Picks the group a meeting belongs to:
- * 1. the group whose linked Teams chat is the meeting's own chat (`chatId`), if any;
- * 2. otherwise the group with the most of its people in the meeting (organizer and invitees, matched by Microsoft
- *    account id), at least two of them; the organizer counts as a tie-breaker.
- * Groups that are ending are never picked. Returns `{ workspaceId }`, `{ candidates }` (a tie: someone picks), or
- * null (no group's meeting).
- */
-export async function pickGroup(orgId: string, m: { chatId: string | null; organizerOid: string; attendeeOids: string[] }): Promise<{ workspaceId: string } | { candidates: string[] } | null> {
-  if (m.chatId) {
-    const chat = await get<{ workspace_id: string }>(
-      `SELECT c.workspace_id FROM teams_conversations c JOIN workspaces w ON w.id = c.workspace_id AND w.org_id = c.org_id
-        WHERE c.id = ? AND c.org_id = ? AND ${NOT_ENDING}`,
-      m.chatId, orgId,
-    );
-    if (chat) return { workspaceId: chat.workspace_id };
-  }
-  const oids = [...new Set([m.organizerOid, ...m.attendeeOids].filter(isOid).map((o) => o.toLowerCase()))].slice(0, 300);
-  if (!oids.length) return null;
-  const rows = await all<{ workspace_id: string; user_id: string; oid: string }>(
-    `SELECT wm.workspace_id, u.id AS user_id, LOWER(u.entra_oid) AS oid FROM users u
-       JOIN workspace_members wm ON wm.user_id = u.id JOIN workspaces w ON w.id = wm.workspace_id AND w.org_id = u.org_id
-      WHERE u.org_id = ? AND LOWER(u.entra_oid) IN (${oids.map(() => "?").join(", ")}) AND ${NOT_ENDING}`,
-    orgId, ...oids,
-  );
-  const people = new Map<string, Set<string>>();
-  const hasOrganizer = new Set<string>();
-  for (const r of rows) {
-    if (!people.has(r.workspace_id)) people.set(r.workspace_id, new Set());
-    people.get(r.workspace_id)!.add(r.user_id);
-    if (r.oid === m.organizerOid.toLowerCase()) hasOrganizer.add(r.workspace_id);
-  }
-  const scored = [...people].filter(([, p]) => p.size >= 2).map(([ws, p]) => ({ ws, score: p.size * 2 + (hasOrganizer.has(ws) ? 1 : 0) }));
-  if (!scored.length) return null;
-  const best = Math.max(...scored.map((s) => s.score));
-  const top = scored.filter((s) => s.score === best).map((s) => s.ws).sort();
-  return top.length === 1 ? { workspaceId: top[0] } : { candidates: top };
-}
+// The rule lives in lib/meeting-group.ts (shared with automatic recording); `pickGroup` is re-exported for callers
+// that import it from here.
+export { pickGroup } from "./meeting-group";
 
 /* ------------------------------------------------------------------ */
 /* Fetch a transcript (job meetings.fetch)                             */
@@ -675,7 +712,7 @@ type GraphOnlineMeeting = {
 };
 
 /** Marks a graph_meetings row with a new status (and a plain reason), only from the expected status. */
-async function setStatus(id: string, from: GraphMeeting["status"][], to: GraphMeeting["status"], fields: Partial<Pick<GraphMeeting, "reason" | "title" | "started_at" | "ended_at" | "workspace_id" | "candidates" | "meeting_id">> = {}) {
+async function setStatus(id: string, from: GraphMeeting["status"][], to: GraphMeeting["status"], fields: Partial<Pick<GraphMeeting, "reason" | "title" | "started_at" | "ended_at" | "workspace_id" | "candidates" | "meeting_id" | "waiting_kind" | "picked_by" | "pick_note" | "newcomers">> = {}) {
   const keys = Object.keys(fields) as (keyof typeof fields)[];
   const res = await run(
     `UPDATE graph_meetings SET status = ?, updated_at = ?${keys.map((k) => `, ${k} = ?`).join("")} WHERE id = ? AND status IN (${from.map(() => "?").join(", ")})`,
@@ -697,8 +734,10 @@ type CallInfo = {
   endedAt: string | null;
   /** The Teams chat the meeting or call belongs to (its thread id), if known. */
   chatId: string | null;
-  /** Invitees' Microsoft account ids (scheduled meetings); null for ad hoc calls (worked out from the speakers). */
-  attendeeOids: string[] | null;
+  /** The organizer (or, for an ad hoc call, whoever started transcription), with their tenant when Graph says. */
+  organizer: Participant;
+  /** Invitees as Graph lists them (scheduled meetings); null for ad hoc calls (worked out from the speakers). */
+  attendees: Participant[] | null;
   /** Whether anyone from outside the organization took part (guests, phone, another tenant). */
   guests: boolean;
   /** The Graph path of the transcript (its `/content` is downloaded). */
@@ -720,7 +759,7 @@ async function readCall(orgId: string, tenant: string, row: GraphMeeting): Promi
     const chat = chatId ? await get<{ name: string | null }>("SELECT name FROM teams_conversations WHERE id = ? AND org_id = ? AND workspace_id IS NOT NULL", chatId, orgId) : undefined;
     return {
       title: chat?.name ? cleanTitle(`${chat.name} call`) : "Teams call",
-      startedAt: t.createdDateTime ?? null, endedAt: t.endDateTime ?? null, chatId, attendeeOids: null,
+      startedAt: t.createdDateTime ?? null, endedAt: t.endDateTime ?? null, chatId, organizer: { oid: row.organizer_oid }, attendees: null,
       // Graph doesn't list an ad hoc call's people, so guests can't be told apart: treated as none.
       guests: false, transcriptPath,
     };
@@ -733,7 +772,8 @@ async function readCall(orgId: string, tenant: string, row: GraphMeeting): Promi
     title: cleanTitle(meeting.subject),
     startedAt: meeting.startDateTime ?? null, endedAt: meeting.endDateTime ?? null,
     chatId: meeting.chatInfo?.threadId ?? decodeMeetingId(row.online_meeting_id).threadId,
-    attendeeOids: attendees.map((a) => a.identity?.user?.id ?? "").filter(Boolean),
+    organizer: { oid: row.organizer_oid, tenantId: meeting.participants?.organizer?.identity?.user?.tenantId ?? null },
+    attendees: attendees.map((a) => ({ oid: a.identity?.user?.id ?? "", tenantId: a.identity?.user?.tenantId ?? null, guest: Boolean(a.identity?.guest || a.identity?.phone) })),
     // Client guests: anyone from another Microsoft organization (or a guest/phone) in the meeting.
     guests: attendees.some((a) => {
       const u = a.identity?.user;
@@ -758,6 +798,43 @@ export async function speakerOids(orgId: string, vtt: string): Promise<string[]>
   const byName = new Map<string, Set<string>>();
   for (const r of rows) byName.set(r.name, (byName.get(r.name) ?? new Set()).add(r.oid));
   return [...byName.values()].filter((oids) => oids.size === 1).map((oids) => [...oids][0]);
+}
+
+/** One of a meeting's people who isn't in the group it went to (shown to whoever picked the group). */
+export type Newcomer = { oid: string; name: string; email: string };
+
+/**
+ * The meeting's people from the organization's own tenant who aren't in `workspaceId` yet: Sidekick people who
+ * aren't members (Org Owners/Admins already see every group, so they're left out), and people with no Sidekick
+ * account yet, named from the directory. Guests, disabled accounts and other tenants never appear. At most 20.
+ * A directory that can't be read yet just leaves out the people Sidekick doesn't know.
+ */
+async function newcomersFor(orgId: string, tenant: string, workspaceId: string, participants: Participant[], cache: DirectoryCache): Promise<Newcomer[]> {
+  const ours = participants.filter((p) => sameTenant(p, tenant));
+  const known = await knownPeople(orgId, ours, cache);
+  const out: Newcomer[] = [];
+  let directoryOk = true;
+  for (const oid of [...new Set(ours.map((p) => p.oid.toLowerCase()))]) {
+    if (out.length >= 20) break;
+    const userId = known.get(oid);
+    if (userId) {
+      const u = await get<{ name: string; email: string; role: Role; member: number | null }>(
+        "SELECT u.name, u.email, u.role, (SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = ? AND wm.user_id = u.id) AS member FROM users u WHERE u.id = ? AND u.org_id = ?",
+        workspaceId, userId, orgId,
+      );
+      if (u && !u.member && u.role !== "Org Owner" && u.role !== "Org Admin") out.push({ oid, name: u.name, email: u.email });
+      continue;
+    }
+    if (!directoryOk) continue;
+    try {
+      const p = await directoryPerson(tenant, oid);
+      if (p && !p.guest && p.email) out.push({ oid, name: p.name.slice(0, 120), email: p.email });
+    } catch (e) {
+      if (!(e instanceof ConsentNeededError)) throw e;
+      directoryOk = false;
+    }
+  }
+  return out;
 }
 
 /**
@@ -804,24 +881,35 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
     return vttText;
   };
 
-  // The group: preset by someone who picked it (a waiting meeting), else worked out from the chat and the people.
+  // The group: preset by someone who picked it (a waiting meeting), else worked out (lib/meeting-group.ts).
+  const cache: DirectoryCache = new Map();
+  // The call's people: invitees, or for an ad hoc call the people who spoke (read once, when needed).
+  let speakers: Participant[] | null = null;
+  const people = async (): Promise<Participant[]> => call.attendees ?? (speakers ??= (await speakerOids(orgId, await download())).map((oid) => ({ oid })));
   let workspaceId = row.workspace_id;
+  let pickNote = row.pick_note;
   if (!workspaceId) {
-    let picked = await pickGroup(orgId, { chatId: call.chatId, organizerOid: row.organizer_oid, attendeeOids: call.attendeeOids ?? [] });
+    let match = await matchGroup(orgId, { chatId: call.chatId, organizer: call.organizer, attendees: call.attendees ?? [], title: adhoc ? null : title, cache });
     // An ad hoc call outside a linked chat: the people who spoke are its people.
-    if (!picked && call.attendeeOids === null) picked = await pickGroup(orgId, { chatId: null, organizerOid: row.organizer_oid, attendeeOids: await speakerOids(orgId, await download()) });
-    if (!picked) {
+    if (match.kind === "none" && call.attendees === null) match = await matchGroup(orgId, { chatId: null, organizer: call.organizer, attendees: await people(), cache });
+    if (match.kind === "none") {
       // Not any group's meeting: keep only the ids (no title), so nothing about other people's meetings is stored.
       await setStatus(row.id, ["queued"], "skipped", { reason: adhoc ? "Not a call of one group's people." : "Not a meeting of one group's people." });
       return { ...none, skipped: 1 };
     }
-    if ("candidates" in picked) {
-      await setStatus(row.id, ["queued"], "waiting", { ...timing, candidates: JSON.stringify(picked.candidates), reason: `People from several groups were in this ${adhoc ? "call" : "meeting"}. Pick the group it belongs to.` });
+    if (match.kind === "tie" || match.kind === "unclear") {
+      // Waits for a person: only its ids, title and time are kept until someone picks. Nothing is written yet.
+      const what = adhoc ? "call" : "meeting";
+      const reason = match.kind === "tie"
+        ? `People from several groups were in this ${what}. Pick the group it belongs to.`
+        : `${BRAND.name} recognised fewer than two people from one group in this ${what} (someone may be new to the group). Pick the group it belongs to.`;
+      await setStatus(row.id, ["queued"], "waiting", { ...timing, candidates: JSON.stringify(match.candidates), waiting_kind: match.kind, reason });
       return { ...none, waiting: 1 };
     }
-    workspaceId = picked.workspaceId;
+    workspaceId = match.workspaceId;
+    pickNote = match.note;
   }
-  const withGroup = { ...timing, workspace_id: workspaceId };
+  const withGroup = { ...timing, workspace_id: workspaceId, pick_note: pickNote };
 
   // The plan: read-only, paused or restricted AI, meeting hours, AI credit (as for an import).
   if ((await orgAccess(orgId)).mode === "read_only") return skip("Your plan is read-only, so no new notes are written.", withGroup);
@@ -856,9 +944,11 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
   const earlier = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM graph_meetings WHERE org_id = ? AND online_meeting_id = ? AND kind = ? AND meeting_id IS NOT NULL", orgId, row.online_meeting_id, row.kind))?.n ?? 0);
   const meetingTitle = earlier ? `${title} (part ${earlier + 1})` : title;
   const heldAt = (call.startedAt ?? now()).slice(0, 10);
+  // Picked by a person: the meeting's own-tenant people who aren't in that group yet, so the picker can add them.
+  const newcomers = row.picked_by ? JSON.stringify(await newcomersFor(orgId, tenant, workspaceId, [call.organizer, ...(await people())], cache)) : null;
   const meetingId = newId();
   const saved = await tx(async () => {
-    if (!(await setStatus(row.id, ["queued"], "captured", { ...withGroup, meeting_id: meetingId, reason: null }))) return false;
+    if (!(await setStatus(row.id, ["queued"], "captured", { ...withGroup, meeting_id: meetingId, reason: null, newcomers }))) return false;
     await run(
       `INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at, duration_min, source, graph_meeting_id)
        VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?, ?, 'teams', ?)`,
@@ -891,6 +981,10 @@ export async function writeNotes(orgId: string, meetingId: string): Promise<{ wr
   if (m.status !== "Ready") {
     await processMeeting(sidekickActor(orgId), m.id);
     written = 1;
+    // The meeting title decided the group: say so at the top of the notes, so a wrong pick is easy to spot.
+    const note = m.graph_meeting_id ? (await get<{ pick_note: string | null }>("SELECT pick_note FROM graph_meetings WHERE id = ? AND org_id = ?", m.graph_meeting_id, orgId))?.pick_note : null;
+    const summary = note ? (await get<{ summary: string | null; status: string }>("SELECT summary, status FROM meetings WHERE id = ? AND org_id = ?", m.id, orgId)) : undefined;
+    if (note && summary?.status === "Ready") await run("UPDATE meetings SET summary = ? WHERE id = ? AND org_id = ?", `${note}\n\n${summary.summary ?? ""}`.trim(), m.id, orgId);
   }
   let posted = 0;
   const claim = await run("UPDATE meetings SET notes_posted_at = ? WHERE id = ? AND org_id = ? AND notes_posted_at IS NULL", now(), m.id, orgId);
@@ -907,17 +1001,25 @@ export async function writeNotes(orgId: string, meetingId: string): Promise<{ wr
 /* ------------------------------------------------------------------ */
 
 /**
- * Someone picks the group for a waiting meeting (`ws` must be one of its candidate groups and one they manage:
- * the route checks `requireManage`), or asks to try a skipped/failed one again (Org Owners/Admins). The row goes
- * back to `queued` and a fresh fetch job is queued. Audited.
+ * Someone picks the group for a waiting meeting, or asks to try a skipped/failed one again (Org Owners/Admins). The
+ * picked group must be one they manage (the route checks `requireManage`) and one of the meeting's candidate
+ * groups; for an `unclear` meeting (fewer than two of one group's people recognised) an Org Owner/Admin may pick
+ * any group that isn't ending. Who picked is saved (`picked_by`), so they're shown the meeting's people who aren't
+ * in that group yet once the notes are written. The row goes back to `queued` and a fresh fetch job is queued.
+ * Audited.
  */
 export async function retryCapture(user: User, id: unknown, workspaceId: string | null): Promise<void> {
   const row = typeof id === "string" ? await get<GraphMeeting>("SELECT * FROM graph_meetings WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
   if (!row || !row.title) throw new HttpError(404, "Meeting not found.");
   if (workspaceId) {
-    if (!(JSON.parse(row.candidates ?? "[]") as string[]).includes(workspaceId)) throw new HttpError(400, "Pick one of the groups shown for this meeting.");
+    const anyGroup = row.waiting_kind === "unclear" && isAdmin(user);
+    if (anyGroup) {
+      if (!(await get(`SELECT 1 AS ok FROM workspaces w WHERE w.id = ? AND w.org_id = ? AND ${NOT_ENDING}`, workspaceId, user.org_id))) throw new HttpError(400, "That group is ending, so it can't get new meetings.");
+    } else if (!(JSON.parse(row.candidates ?? "[]") as string[]).includes(workspaceId)) {
+      throw new HttpError(400, "Pick one of the groups shown for this meeting.");
+    }
     // The candidates stay on the row, so a second pick is told it was already picked.
-    if (!(await setStatus(row.id, ["waiting"], "queued", { workspace_id: workspaceId, reason: null }))) throw new HttpError(409, "Someone already picked a group for this meeting.");
+    if (!(await setStatus(row.id, ["waiting"], "queued", { workspace_id: workspaceId, reason: null, picked_by: user.id }))) throw new HttpError(409, "Someone already picked a group for this meeting.");
     await audit(user, `Picked the group for the Teams meeting “${row.title}”`, "Data", workspaceId);
   } else {
     if (row.status !== "skipped" && row.status !== "failed") throw new HttpError(400, "Only a skipped or failed meeting can be tried again.");
@@ -925,6 +1027,46 @@ export async function retryCapture(user: User, id: unknown, workspaceId: string 
     await audit(user, `Asked ${BRAND.name} to try the Teams meeting “${row.title}” again`, "Data", row.workspace_id);
   }
   await enqueue("meetings.fetch", { orgId: user.org_id, payload: { id: row.id }, key: `meeting-fetch:${user.org_id}:${row.transcript_id}:${newId()}` });
+}
+
+/**
+ * **Add to group** for one of a picked meeting's newcomers (`autoNotesStatus` → `newcomers`): adds that person to the
+ * group the meeting went to. Who: an Org Owner/Admin, or a Team Lead of that group (`requireManage`); a Team Lead
+ * only adds Members and Viewers. The person must be on the meeting's newcomers list, and is looked up again in the
+ * organization's own Microsoft 365 directory (names and emails come from Microsoft, never from the browser; guests
+ * and other tenants are refused). Someone with no Sidekick account yet is created as a Member who signs in with
+ * Microsoft, within the plan's seats (`assertCanAdd`, 402 when full). Audited in the group's log.
+ */
+export async function addMeetingPerson(user: User, id: unknown, oid: unknown): Promise<{ name: string; created: boolean }> {
+  const row = typeof id === "string" ? await get<GraphMeeting>("SELECT * FROM graph_meetings WHERE id = ? AND org_id = ?", id, user.org_id) : undefined;
+  if (!row || !row.workspace_id || !row.title) throw new HttpError(404, "Meeting not found.");
+  const ws = await requireManage(user, row.workspace_id);
+  const who = typeof oid === "string" && row.newcomers ? (JSON.parse(row.newcomers) as Newcomer[]).find((p) => p.oid === oid.toLowerCase()) : undefined;
+  if (!who) throw new HttpError(404, "That person isn't listed for this meeting.");
+  const group = (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", ws, user.org_id))?.name ?? "the group";
+  return span("microsoft", "Add a meeting's person to the group", async () => {
+    type Person = { id: string; name: string; email: string; role: Role };
+    let person = await get<Person>("SELECT id, name, email, role FROM users WHERE org_id = ? AND LOWER(entra_oid) = ?", user.org_id, who.oid);
+    let created = false;
+    if (!person) {
+      const tenant = await tenantOfOrg(user.org_id);
+      if (!tenant) throw new HttpError(409, `${BRAND.name} isn't connected to your Microsoft 365 organization any more.`);
+      const p = await directoryPerson(tenant, who.oid);
+      if (!p || p.guest || !p.email) throw new HttpError(400, `${who.name} isn't a member of your Microsoft 365 organization, so they can't be added.`);
+      // A new account takes a seat on the plan; someone already in Sidekick by email doesn't.
+      if (!(await get("SELECT 1 AS ok FROM users WHERE org_id = ? AND lower(email) = ?", user.org_id, p.email))) await assertCanAdd(user.org_id, "seats");
+      const made = await findOrCreateMicrosoftUser(user.org_id, { objectId: p.id, name: p.name, email: p.email }, "Member");
+      person = { id: made.user.id, name: made.user.name, email: made.user.email, role: made.user.role };
+      created = made.created;
+      if (created) await audit(user, `Added ${person.name} (${person.email}) as Member (Microsoft sign-in) from a Teams meeting`, "Access");
+    }
+    if (person.role === "Org Owner" || person.role === "Org Admin") throw new HttpError(400, `${person.name} is an ${person.role} and already sees every group.`);
+    if (isLead(user) && !isAdmin(user) && !LEAD_ASSIGNABLE_ROLES.includes(person.role)) throw new HttpError(403, `${person.name} is a ${person.role}; ask an Org Admin to add them.`);
+    const added = await run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING", ws, person.id);
+    if (!added.changes) throw new HttpError(409, `${person.name} is already in ${group}.`);
+    await audit(user, `Added ${person.name} (${person.email}) to group “${group}” from the Teams meeting “${row.title}”`, "Access", ws);
+    return { name: person.name, created };
+  });
 }
 
 /**

@@ -587,6 +587,12 @@ ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS member_count INTEGER;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS members_checked_at TEXT;
 -- Meet now (ad hoc calls): which kind of Teams call a captured transcript came from ('meeting' scheduled, 'adhoc').
 ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'meeting';
+-- Which group a meeting belongs to (lib/meeting-group.ts): why it waits ('tie' | 'unclear'), who picked its group,
+-- the title-hint note, and its people not in the picked group yet (JSON, only after someone picked).
+ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS waiting_kind TEXT;
+ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS picked_by TEXT;
+ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS pick_note TEXT;
+ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS newcomers TEXT;
 -- Scale readiness: Graph subscriptions are looked up per organization (renewals, notes status).
 CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at);
 -- Upload guard (lib/upload-guard.ts): held documents (status 'Held', text in held_text until kept or moved), what

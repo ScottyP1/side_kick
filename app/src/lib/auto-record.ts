@@ -49,6 +49,7 @@ import { span } from "./trace";
 import { tenantOfOrg } from "./tenants";
 import { NOT_ENDING } from "./billing";
 import { autoNotesOn } from "./meetings-graph";
+import { pickGroup } from "./meeting-group";
 import { BRAND } from "./brand";
 
 /** How far ahead Sidekick looks for meetings to set. */
@@ -204,47 +205,40 @@ const cleanTitle = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, "
 
 /**
  * Whether a meeting is clearly one group's, and which: `{ workspaceId }`, or `{ reason }` to leave it alone.
- * Rules (see the file header), in order: nobody from another organization; the meeting chat linked to a group (not
- * ending) wins; otherwise the group with the most of the meeting's Sidekick people (the organizer breaks a tie, as in
- * automatic notes), which needs at least two of them and at least half of everyone invited (organizer included,
- * people Sidekick doesn't know count against it), and no tie. `organizerIds` / `invitedIds` are Sidekick user ids
- * (matched by Microsoft account id or email); `invitedCount` counts everyone invited but the organizer.
- * Kept in this file on purpose: automatic notes' `pickGroup` matches by Microsoft account id only, which misses
- * invitees who never signed in to Sidekick with Microsoft (found live on Oct 25, 2026).
+ * Rules (see the file header): nobody from another organization; then the shared group rule (lib/meeting-group.ts
+ * `pickGroup`, the same one automatic notes use: linked meeting chat, else most of a group's people, at least two,
+ * the organizer breaking a tie); a tie or an unclear meeting is left alone; and, unless the chat decided, the group's
+ * people must be at least half of everyone invited (organizer included; people Sidekick doesn't know count against it).
+ * `organizerOid` / `attendeeOids` are the meeting's Microsoft account ids (matched by the shared rule, by email through
+ * the directory where needed); `knownUserIds` are Sidekick people recognised from the calendar by email (invitees who
+ * never signed in with Microsoft and that the meeting doesn't list, as on Oct 25, 2026); `invitedCount` counts
+ * everyone invited but the organizer.
  */
-export async function decide(orgId: string, m: { chatId: string | null; organizerIds: string[]; invitedIds: string[]; invitedCount: number; outsiders: boolean }): Promise<{ workspaceId: string } | { reason: string }> {
+export async function decide(
+  orgId: string,
+  m: { chatId: string | null; organizerOid: string; attendeeOids: string[]; knownUserIds: string[]; invitedCount: number; outsiders: boolean },
+): Promise<{ workspaceId: string } | { reason: string }> {
   if (m.outsiders) return { reason: `People from outside your organization are invited. ${BRAND.name} never turns on recording for them.` };
+  const picked = await pickGroup(orgId, { chatId: m.chatId, organizerOid: m.organizerOid, attendeeOids: m.attendeeOids, knownUserIds: m.knownUserIds });
+  if (!picked) return { reason: "Not a group's meeting (fewer than two of a group's people invited)." };
+  if ("candidates" in picked) return { reason: "Several groups' people are invited, so it isn't clearly one group's meeting." };
   if (m.chatId) {
-    const chat = await get<{ workspace_id: string }>(
-      `SELECT c.workspace_id FROM teams_conversations c JOIN workspaces w ON w.id = c.workspace_id AND w.org_id = c.org_id
-        WHERE c.id = ? AND c.org_id = ? AND ${NOT_ENDING}`,
-      m.chatId, orgId,
-    );
-    if (chat) return { workspaceId: chat.workspace_id };
+    const linked = await get("SELECT 1 AS ok FROM teams_conversations WHERE id = ? AND org_id = ? AND workspace_id = ?", m.chatId, orgId, picked.workspaceId);
+    if (linked) return picked;
   }
-  const organizers = new Set(m.organizerIds);
-  const ids = [...new Set([...m.organizerIds, ...m.invitedIds])].slice(0, 300);
-  if (!ids.length) return { reason: "Not a group's meeting (fewer than two of a group's people invited)." };
-  const rows = await all<{ workspace_id: string; user_id: string }>(
-    `SELECT wm.workspace_id, wm.user_id FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id
-      WHERE w.org_id = ? AND wm.user_id IN (${ids.map(() => "?").join(", ")}) AND ${NOT_ENDING}`,
-    orgId, ...ids,
+  // Not by its chat: most of the meeting must be the group's people. Account ids are read after pickGroup, which
+  // may just have linked someone found by email in the directory.
+  const oids = [...new Set([m.organizerOid, ...m.attendeeOids].map((o) => o.toLowerCase()))];
+  const ids = [...new Set(m.knownUserIds)];
+  const inGroup = await get<{ n: number }>(
+    `SELECT COUNT(DISTINCT u.id) AS n FROM users u JOIN workspace_members wm ON wm.user_id = u.id
+      WHERE wm.workspace_id = ? AND u.org_id = ?
+        AND (LOWER(u.entra_oid) IN (${oids.map(() => "?").join(", ")})${ids.length ? ` OR u.id IN (${ids.map(() => "?").join(", ")})` : ""})`,
+    picked.workspaceId, orgId, ...oids, ...ids,
   );
-  const people = new Map<string, Set<string>>();
-  for (const r of rows) {
-    if (!people.has(r.workspace_id)) people.set(r.workspace_id, new Set());
-    people.get(r.workspace_id)!.add(r.user_id);
-  }
-  const scored = [...people]
-    .filter(([, p]) => p.size >= 2)
-    .map(([ws, p]) => ({ ws, size: p.size, score: p.size * 2 + ([...p].some((u) => organizers.has(u)) ? 1 : 0) }));
-  if (!scored.length) return { reason: "Not a group's meeting (fewer than two of a group's people invited)." };
-  const best = Math.max(...scored.map((x) => x.score));
-  const top = scored.filter((x) => x.score === best);
-  if (top.length > 1) return { reason: "Several groups' people are invited, so it isn't clearly one group's meeting." };
-  const total = Math.max(m.invitedCount + 1, ids.length);
-  if (top[0].size * 2 < total) return { reason: "Fewer than half of the people invited are in the group." };
-  return { workspaceId: top[0].ws };
+  const total = Math.max(m.invitedCount + 1, new Set([...oids, ...ids]).size);
+  if (Number(inGroup?.n ?? 0) * 2 < total) return { reason: "Fewer than half of the people invited are in the group." };
+  return picked;
 }
 
 /** Records what Sidekick did with one meeting (upsert by join link). Titles are kept only for set meetings. */
@@ -351,8 +345,9 @@ export async function scanOrg(orgId: string, at = new Date(), opts: { recheck?: 
           await saveRow(orgId, key, { organizer: oid, status: "skipped", reason: "Microsoft Teams didn't find this meeting.", startsAt });
           continue;
         }
-        // Invitees: Sidekick people by the meeting's account ids, plus calendar invitees by email (people who never
-        // signed in with Microsoft have no account id in Sidekick, but their email matches).
+        // Invitees: the meeting's account ids (matched by the shared rule), plus calendar invitees matched to Sidekick
+        // people by email (people who never signed in with Microsoft have no account id in Sidekick, and meetings made
+        // in Outlook may list no attendees).
         const attendees = m.participants?.attendees ?? [];
         const outsiders = attendees.some((a) => a.identity?.guest || (a.identity?.user?.tenantId && a.identity.user.tenantId.toLowerCase() !== tenant.toLowerCase()));
         const organizerIds = idsByOid.get(oid) ?? [];
@@ -360,13 +355,11 @@ export async function scanOrg(orgId: string, at = new Date(), opts: { recheck?: 
         const calendarInvitees = (e.attendees ?? [])
           .map((a) => (a.type !== "resource" ? a.emailAddress?.address?.toLowerCase() : null))
           .filter((x): x is string => !!x && x !== organizerEmail && !organizerIds.includes(idByEmail.get(x) ?? ""));
-        const invitedIds = [...new Set([
-          ...attendees.map((a) => a.identity?.user?.id?.toLowerCase()).filter(isOid).flatMap((o) => idsByOid.get(o) ?? []),
-          ...calendarInvitees.map((x) => idByEmail.get(x)).filter((x): x is string => !!x),
-        ])].filter((id) => !organizerIds.includes(id));
+        const attendeeOids = [...new Set(attendees.map((a) => a.identity?.user?.id?.toLowerCase()).filter(isOid))].filter((o) => o !== oid);
+        const knownUserIds = [...new Set(calendarInvitees.map((x) => idByEmail.get(x)).filter((x): x is string => !!x))];
         // Everyone invited but the organizer, whether Sidekick knows them or not (unknown people count against "most").
-        const invitedCount = Math.max(invitedIds.length, new Set(calendarInvitees).size);
-        const verdict = await decide(orgId, { chatId: m.chatInfo?.threadId ?? null, organizerIds, invitedIds, invitedCount, outsiders });
+        const invitedCount = Math.max(attendeeOids.length, new Set(calendarInvitees).size);
+        const verdict = await decide(orgId, { chatId: m.chatInfo?.threadId ?? null, organizerOid: oid, attendeeOids, knownUserIds, invitedCount, outsiders });
         const title = cleanTitle(m.subject ?? e.subject);
         if ("reason" in verdict) {
           await saveRow(orgId, key, { meetingId: m.id, organizer: oid, status: "skipped", reason: verdict.reason, startsAt });

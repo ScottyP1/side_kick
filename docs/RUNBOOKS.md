@@ -368,9 +368,11 @@ video; audited). Every 30 minutes (job `meetings.record` → `meetings.record.or
    with `Prefer: outlook.timezone="UTC"`, keeping Teams meetings they **organize** (not cancelled);
 2. looks each one up by its join link: `GET /v1.0/users/{oid}/onlineMeetings?$filter=JoinWebUrl eq '{joinUrl}'`;
 3. decides: the meeting chat is linked to a group, or ≥ 2 invitees and ≥ half of everyone invited (organizer included)
-   are one group's people. People are matched to Sidekick accounts by Microsoft account id **or by email** (calendar
-   invitees, case-insensitive), so invitees who never signed in to Sidekick with Microsoft still count (the first live
-   check, Oct 25, was skipped because only account ids were matched). **Never** with a guest or anyone from another
+   are one group's people, by the shared group rule (lib/meeting-group.ts, the same as automatic notes). People are
+   matched to Sidekick accounts by Microsoft account id (found through the directory by email when needed) **and**
+   calendar invitees by email (case-insensitive, passed as `knownUserIds`), so invitees who never signed in to Sidekick
+   with Microsoft still count, even when the meeting lists no attendees (the first live check, Oct 25, was skipped
+   because only account ids were matched). **Never** with a guest or anyone from another
    tenant; ties and nobody's meetings are left alone (titles not kept; looked at again after an hour, or at once on
    **Check now** / switching on; admins and Team Leads see "Left alone (N upcoming meetings): reason" under the switch);
 4. `PATCH /v1.0/users/{oid}/onlineMeetings/{id}` with `{ "recordAutomatically": true }` (nothing else), once per

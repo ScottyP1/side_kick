@@ -124,6 +124,28 @@ export async function checkWrongClient(orgId: string, text: string, target: Guar
   });
 }
 
+/**
+ * Which of `among` (group ids of the organization) a short text such as a Teams meeting title names: a group counts
+ * when its client name, group name (or the part before the dash) or engagement code appears in it, by the same
+ * rules as the wrong-client check: whole words, any case, names made only of common words ignored, and the
+ * organization's own name never counted. Returns the matching groups (possibly several or none); the caller
+ * decides what one match means. Pure matching, no AI. Used by lib/meeting-group.ts to break a tie between groups.
+ */
+export async function groupsNamedIn(orgId: string, text: string, among: string[]): Promise<{ id: string; name: string; client: string | null }[]> {
+  if (!among.length || !text.trim()) return [];
+  const groups = await all<{ id: string; name: string; client: string | null; code: string | null }>(
+    `SELECT id, name, client, code FROM workspaces WHERE org_id = ? AND id IN (${among.map(() => "?").join(", ")}) ORDER BY name`, orgId, ...among,
+  );
+  const org = (await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", orgId))?.name.toLowerCase() ?? "";
+  return groups
+    .filter((g) => {
+      const names = groupTerms(g).filter((t) => t.toLowerCase() !== org);
+      const code = g.code && g.code.trim().length >= 3 ? g.code.trim() : null;
+      return names.some((t) => countMentions(text, t) > 0) || (code ? countMentions(text, code) > 0 : false);
+    })
+    .map(({ id, name, client }) => ({ id, name, client }));
+}
+
 /** The question shown with a held upload ("This looks like it's about Litware – Data Platform…"). */
 export function heldQuestion(match: GuardMatch, firm: boolean): string {
   return firm

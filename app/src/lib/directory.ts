@@ -217,6 +217,62 @@ export async function directoryPerson(tenantId: string, objectId: string): Promi
   return u && u.accountEnabled !== false ? toPerson(u) : null;
 }
 
+/**
+ * Links a Microsoft account Sidekick doesn't know yet to the Sidekick person it belongs to, by email: the account
+ * is looked up in the organization's own tenant (`/users/{id}`), and its sign-in name (UPN) or mail is matched,
+ * case-insensitively, to a person of `orgId` who isn't linked to any Microsoft account yet. On a match the account
+ * id is saved on them (`users.entra_oid`, exactly as their first Microsoft sign-in would) and `why` is audited
+ * once. Returns that person, or null when there's no match.
+ *
+ * Never links across organizations or to outsiders: `tenantId` must be the tenant `orgId` is connected to, guests
+ * (`userType` Guest, even with a matching mail) and disabled accounts are refused, and an account another tenant
+ * owns isn't in this tenant's directory at all (404). Used for people added by email who never signed in with
+ * Microsoft: whoever adds Sidekick to a Teams chat (lib/teams/install.ts `recognizeAdder`) and the people of a
+ * Teams meeting (lib/meeting-group.ts). Directory errors (no consent yet, throttling) are thrown to the caller.
+ */
+export async function linkByDirectory(orgId: string, tenantId: string, objectId: string, why: string): Promise<{ id: string; name: string } | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(objectId)) return null;
+  if ((await get<{ entra_tenant_id: string | null }>("SELECT entra_tenant_id FROM orgs WHERE id = ?", orgId))?.entra_tenant_id?.toLowerCase() !== tenantId.toLowerCase()) return null;
+  const person = await directoryPerson(tenantId, objectId);
+  if (!person || person.guest) return null;
+  const emails = [...new Set([person.upn, person.email].filter(Boolean))];
+  if (!emails.length) return null;
+  const user = await get<{ id: string; org_id: string; name: string }>(
+    `SELECT id, org_id, name FROM users WHERE org_id = ? AND entra_oid IS NULL AND lower(email) IN (${emails.map(() => "?").join(",")}) ORDER BY created_at LIMIT 1`,
+    orgId, ...emails,
+  );
+  if (!user) return null;
+  // "AND entra_oid IS NULL": a sign-in at the same moment wins.
+  const done = await run("UPDATE users SET entra_oid = ? WHERE id = ? AND entra_oid IS NULL", objectId, user.id);
+  if (!done.changes) return null;
+  await audit(user, why, "Sign-in");
+  return { id: user.id, name: user.name };
+}
+
+/**
+ * The other way round from `linkByDirectory`: finds the Microsoft account of a Sidekick person who has none saved
+ * yet, by asking the organization's own tenant for their email (`/users/{email}`, which Graph answers for a sign-in
+ * name). The account must not be a guest or disabled, its sign-in name or mail must be that email
+ * (case-insensitive), and no other person of the organization may already have it. On a match the account id is
+ * saved and `why` audited once; returns it, else null. Same walls as `linkByDirectory`. Used by the meetings poll
+ * (lib/meetings-graph.ts) so people added by email are polled as meeting organizers too. Directory errors are
+ * thrown to the caller.
+ */
+export async function linkByEmail(orgId: string, tenantId: string, user: { id: string; name: string; email: string }, why: string): Promise<string | null> {
+  const email = user.email.trim().toLowerCase();
+  if (!email || email.length > 254 || !/^[^\s/?#'"]+@[^\s/?#'"]+$/.test(email)) return null;
+  if ((await get<{ entra_tenant_id: string | null }>("SELECT entra_tenant_id FROM orgs WHERE id = ?", orgId))?.entra_tenant_id?.toLowerCase() !== tenantId.toLowerCase()) return null;
+  const u = await graphGet<GraphUser>(tenantId, `/v1.0/users/${encodeURIComponent(email)}?$select=${SELECT}`);
+  if (!u || u.accountEnabled === false || u.userType === "Guest" || !/^[0-9a-f-]{36}$/i.test(u.id ?? "")) return null;
+  const p = toPerson(u);
+  if (p.upn !== email && p.email !== email) return null;
+  if (await get("SELECT 1 AS ok FROM users WHERE org_id = ? AND LOWER(entra_oid) = ?", orgId, u.id.toLowerCase())) return null;
+  const done = await run("UPDATE users SET entra_oid = ? WHERE id = ? AND org_id = ? AND entra_oid IS NULL", u.id, user.id, orgId);
+  if (!done.changes) return null;
+  await audit({ org_id: orgId, name: user.name }, why, "Sign-in");
+  return u.id;
+}
+
 /* ------------------------------------------------------------------ */
 /* Creating Sidekick people from Microsoft 365                         */
 /* ------------------------------------------------------------------ */

@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import { assertCanAdd, assertFeature } from "@/lib/limits";
 import { handle, readJson, requireText } from "@/lib/api";
 import { audit, createUser, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, managedWorkspaceIds, requireUser, ROLES, type Role, type User } from "@/lib/auth";
-import { all, get, run } from "@/lib/db";
+import { all, asSystem, get, run } from "@/lib/db";
 import { lockedEmails } from "@/lib/login-limit";
 
 /** Signed-in Org Owner, Org Admin or Team Lead, or 403. */
@@ -64,9 +64,10 @@ export const POST = handle(async (req: Request) => {
   const workspaces = (body.workspaces ?? []).filter((ws) => allowed.has(ws));
   if (isLead(admin)) {
     if (!LEAD_ASSIGNABLE_ROLES.includes(role)) throw new HttpError(403, "Team Leads can add people as Member or Viewer. Ask an Org Admin for other roles.");
-    if (!workspaces.length) throw new HttpError(400, "Pick at least one of your workspaces for this person.");
+    if (!workspaces.length) throw new HttpError(400, "Pick at least one of your groups for this person.");
   }
-  const existing = await get<{ id: string; org_id: string; name: string; role: Role }>("SELECT id, org_id, name, role FROM users WHERE email = ?", email);
+  // Emails are unique across every org, so this check looks across orgs (system work, lib/db.ts asSystem).
+  const existing = await asSystem("email is unique across orgs", () => get<{ id: string; org_id: string; name: string; role: Role }>("SELECT id, org_id, name, role FROM users WHERE email = ?", email));
   if (existing && isLead(admin) && existing.org_id === admin.org_id && LEAD_ASSIGNABLE_ROLES.includes(existing.role)) {
     for (const ws of workspaces) await run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING", ws, existing.id);
     await audit(admin, `Added ${existing.name} (${email}) to ${workspaces.length} of their workspaces`, "Access");

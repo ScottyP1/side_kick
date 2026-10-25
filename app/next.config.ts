@@ -55,8 +55,9 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   // Don't advertise the framework in an X-Powered-By header.
   poweredByHeader: false,
-  // The assistant button owns the bottom-left corner (components/dock.tsx); keep the dev-only indicator off it.
-  devIndicators: { position: "bottom-right" },
+  // The dev-only "N" indicator sat on the assistant button (bottom left) and then on the phone tab bar (bottom
+  // right), and shows up in demo screenshots. Off: build and runtime errors still open the error overlay.
+  devIndicators: false,
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

@@ -73,7 +73,7 @@ Everyone in a group sees that group's upcoming meetings that will record, under 
 - in the portal: the group → **Teams chats** → **Transcription reminders**, or
 - in one of the group's chats: `@Sidekick stop transcription reminders` (or `start transcription reminders`).
 
-Members and Viewers see the setting but can't change it. Each change is in the audit log, and so is each reminder Sidekick posts ("Reminded … to start transcription"). The **Teams chats** tab also shows the latest reminder. If Microsoft doesn't let Sidekick see the calls in a chat, the tab names that chat. Remove Sidekick from that chat in Teams and add it again.
+Members and Viewers see the setting but can't change it. Each change is in the audit log, and so is each reminder Sidekick posts ("Reminded … to start transcription"). The **Teams chats** tab also shows the latest reminder. If Microsoft doesn't let Sidekick see the calls in a chat, the tab names that chat. This means Teams didn't grant Sidekick its chat-reading permission there (the *resource-specific consent* for chats). Your Microsoft admin checks the tenant's chat consent setting (`Set-MgBetaChatRscConfiguration`; the default `ManagedByMicrosoft` may not allow it, `EnabledForAllApps` does). Then remove Sidekick from that chat in Teams and add it again, because the permission is granted when Sidekick is added.
 
 ## Add a past or outside meeting
 **Meetings → Add a past or outside meeting.** Upload the transcript (a Teams `.vtt` file, a Word file, or paste the text), give it a title and date, and tick **Client guests attended** if the client was there. Notes are usually ready in 20–60 seconds.

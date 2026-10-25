@@ -50,7 +50,7 @@ import { after } from "next/server";
 import { App, toThreadedConversationId, type HttpRouteHandler, type IHttpServerAdapter } from "@microsoft/teams.apps";
 import { stripMentionsText, type IMessageActivityInput } from "@microsoft/teams.api";
 import type { IAdaptiveCard } from "@microsoft/teams.cards";
-import { all, get, now, run } from "../db";
+import { all, asSystem, get, now, run, withOrg } from "../db";
 import { audit, canEdit, HttpError, type User } from "../auth";
 import { FeatureOffError } from "../owner";
 import { ask, endAskConversation } from "../sidekick";
@@ -146,11 +146,13 @@ export async function handleTeamsRequest(req: Request): Promise<Response> {
   const headers: Record<string, string> = {};
   req.headers.forEach((v, k) => (headers[k] = v));
   const kind = String(body.type ?? "activity") === "invoke" ? "Teams card button" : String(body.type) === "message" ? "Teams message" : `Teams ${String(body.type ?? "event")}`;
-  return withTrace({ name: kind, channel: "teams" }, async () => {
+  // Teams activities arrive by tenant and conversation, before any org is known, and the bot keeps chats that
+  // belong to no org yet: system work (lib/db.ts asSystem). Answering a question runs as the chat's org (below).
+  return asSystem("Teams bot", () => withTrace({ name: kind, channel: "teams" }, async () => {
     const res = await adapter.handler!({ body, headers });
     if (res.status >= 400) traceFailed(res.status, `Teams request answered ${res.status}`);
     return res.body === undefined ? new Response(null, { status: res.status }) : Response.json(res.body, { status: res.status });
-  });
+  }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -632,7 +634,8 @@ function registerHandlers(app: App) {
     // Teams expects a reply to its request within a few seconds; Claude can take longer, so the
     // answer is sent as a follow-up message after this request has already been acknowledged.
     after(() =>
-      withTrace({ name: "Teams answer", channel: "teams", orgId: conv.org_id, workspaceId: conv.workspace_id, actor: asker.name, detached: true }, async () => {
+      // The answer only ever reads the chat's own org (Postgres row-level security, lib/db.ts withOrg).
+      withOrg(conv.org_id!, () => withTrace({ name: "Teams answer", channel: "teams", orgId: conv.org_id, workspaceId: conv.workspace_id, actor: asker.name, detached: true }, async () => {
         try {
           const result = await ask(asker, conv.workspace_id!, question, guests, "teams", {
             teamsScope: { key: threadKey, idleMinutes: conv.kind === "channel" ? undefined : CHAT_FOLLOWUP_MINUTES },
@@ -652,7 +655,7 @@ function registerHandlers(app: App) {
           traceFailed(e instanceof HttpError ? e.status : 500, e instanceof Error ? e.message : String(e), undefined, { refusal: e instanceof FeatureOffError });
           await send(e instanceof HttpError ? e.message : "Sorry, I couldn't answer that just now. Please try again in a minute.").catch(() => {});
         }
-      }),
+      })),
     );
   });
 

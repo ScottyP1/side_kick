@@ -57,7 +57,7 @@
  */
 import "server-only";
 import crypto from "node:crypto";
-import { all, get, newId, now, run, tx } from "./db";
+import { all, asSystem, get, newId, now, run, setScopeOrg, tx } from "./db";
 import { audit, auditAsSidekick, HttpError, isAdmin, requireManage, workspaceIdsFor, type User } from "./auth";
 import { openSecret, sealSecret } from "./secret-box";
 import { indexText, removeIndexedMany } from "./search";
@@ -398,8 +398,13 @@ export async function startConnect(req: Request, user: User, kindRaw: unknown, s
 export async function finishConnect(req: Request, cookieState: string | undefined): Promise<{ kind: ConnectorKind; ws: string }> {
   const q = new URL(req.url).searchParams;
   const state = q.get("state") ?? "";
-  const saved = state ? await get<{ state: string; org_id: string; user_id: string; kind: ConnectorKind; verifier: string; site: string | null; expires_at: string; workspace_id: string | null }>("SELECT * FROM connector_states WHERE state = ?", state) : undefined;
-  if (saved) await run("DELETE FROM connector_states WHERE state = ?", state);
+  // The tool sends the person back with only the random state: finding it is a lookup across orgs (system work).
+  // Everything after runs as the org that started connecting (row-level security, lib/db.ts).
+  const saved = state ? await asSystem("connector sign-in", () => get<{ state: string; org_id: string; user_id: string; kind: ConnectorKind; verifier: string; site: string | null; expires_at: string; workspace_id: string | null }>("SELECT * FROM connector_states WHERE state = ?", state)) : undefined;
+  if (saved) {
+    await asSystem("connector sign-in", () => run("DELETE FROM connector_states WHERE state = ?", state));
+    setScopeOrg(saved.org_id);
+  }
   if (q.get("error")) {
     // Only the tool's error code is shown (never its free text: anyone can make a link to this address).
     const code = (q.get("error") ?? "").replace(/[^a-z_]/gi, "").slice(0, 40);

@@ -65,7 +65,7 @@ export const GET = handle(async () => {
  */
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
-  if (!isAdmin(user)) throw new HttpError(403, "Only Org Owners and Org Admins can create workspaces.");
+  if (!isAdmin(user)) throw new HttpError(403, "Only Org Owners and Org Admins can create groups.");
   const body = await readJson<{ name?: string; code?: string; client?: string; lead?: string; members?: unknown }>(req);
   const name = requireText(body.name, "Workspace name", MAX_NAME);
   const code = typeof body.code === "string" ? body.code.trim() || null : null;

@@ -31,7 +31,7 @@
  * checks `requireWorkspace`); `setCallNudge` and `callNudgeFromTeams` check `requireManage` themselves.
  */
 import "server-only";
-import { all, get, now, run } from "./db";
+import { all, get, now, run, withOrg } from "./db";
 import { audit, auditAsSidekick, HttpError, requireManage, type User } from "./auth";
 import { ConsentNeededError, graphCall, GraphThrottledError } from "./directory";
 import { autoNotesOrgs } from "./meetings-graph";
@@ -53,7 +53,7 @@ const MESSAGES_PER_READ = 25;
 const MAX_CHATS_PER_ORG = 300;
 
 /** Shown on the Teams chats tab for a chat Graph won't let Sidekick read. */
-export const CHAT_DENIED = `${BRAND.name} can't see calls in this chat yet. Remove ${BRAND.name} from the chat and add it again (Teams then grants the chat-reading permission), or ask your Microsoft admin to check the app's permissions.`;
+export const CHAT_DENIED = `${BRAND.name} can't see calls in this chat yet: Microsoft hasn't granted it the chat-reading permission there. Your Microsoft admin checks the Teams chat consent setting (${BRAND.name}'s help explains how), then remove ${BRAND.name} from the chat and add it again.`;
 
 /** The nudge card's wording (fixed text, the same in every chat). */
 export const NUDGE_TITLE = "Turn on transcription?";
@@ -273,13 +273,16 @@ async function watchOrg(orgId: string, at: Date): Promise<{ callsSeen: number; n
  * The `calls.watch` job (every minute): checks every organization with automatic notes on (lib/meetings-graph.ts
  * `autoNotesOrgs`; none on a server without a Microsoft app) and posts the nudges that are due. One organization's
  * Graph trouble (throttling, an outage) never stops the others; it's logged and that organization is retried next
- * minute. Returns counts for the job report: calls seen, nudges posted, chats Graph wouldn't let Sidekick read.
+ * minute. The list of organizations is read as the job queue's system work; each organization's chats, rows and
+ * posts then run scoped to that organization (`withOrg`). Returns counts for the job report: calls seen, nudges
+ * posted, chats Graph wouldn't let Sidekick read.
  */
 export async function watchCalls(at = new Date()): Promise<{ callsSeen: number; nudged: number; chatsUnreadable: number }> {
   const total = { callsSeen: 0, nudged: 0, chatsUnreadable: 0 };
   for (const orgId of await autoNotesOrgs()) {
     try {
-      const r = await span("job", "Watch calls in a company's Teams chats", () => watchOrg(orgId, at), { org: orgId });
+      // Each organization's check only reaches its own rows (Postgres row-level security, lib/db.ts withOrg).
+      const r = await withOrg(orgId, () => span("job", "Watch calls in a company's Teams chats", () => watchOrg(orgId, at), { org: orgId }));
       total.callsSeen += r.callsSeen;
       total.nudged += r.nudged;
       total.chatsUnreadable += r.chatsUnreadable;

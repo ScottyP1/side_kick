@@ -68,7 +68,7 @@ Top-ups and terms are recorded in the operator log and the client's own audit lo
 
 ## One client's page
 Click a client on **Clients** to see:
-- **People**: everyone in that organization with their role, the workspaces they can use ("All workspaces" for Org Owners and Org Admins), whether they sign in with Microsoft or a password, and when they were last active.
+- **People**: everyone in that organization with their role, the workspaces they can use ("All groups" for Org Owners and Org Admins), whether they sign in with Microsoft or a password, and when they were last active.
 - **Plan**: plan, status and the controls to change them (see above).
 - **Limits this month**, **AI credit** (with top-ups and AI use by model) and **Plan terms** (see "Plan limits, AI credit and plan terms").
 - **Workspaces**: each one with its number of members, documents and meetings.

@@ -21,9 +21,10 @@ import { ActionCard, ChatInput, ChatThread, runAction, useConversation, type Car
 import { Icon } from "./ui";
 import { BRAND } from "@/lib/brand";
 
-/** Starter prompts, by what the person's role can do. */
-function suggestionsFor(role: string, admin: boolean): string[] {
-  if (admin) return ["Create a workspace", "Add a person to a workspace", "Link a Teams chat", "What did we spend on AI this month?"];
+/** Starter prompts, by what the person's role can do (someone in no group yet can only ask how to get started). */
+function suggestionsFor(role: string, admin: boolean, inGroup: boolean): string[] {
+  if (admin) return ["Create a group", "Add a person to a group", "Link a Teams chat", "What did we spend on AI this month?"];
+  if (!inGroup) return ["What can my role do?", "How do I get added to a group?", `How do I use ${BRAND.name} in Teams?`];
   if (role === "Viewer") return ["What can my role do?", "How do I find a decision from a meeting?", "What are knowledge gaps?"];
   return ["How do I add a past meeting?", "Refresh the knowledge map", `How do I use ${BRAND.name} in Teams?`];
 }
@@ -73,14 +74,14 @@ export function Assistant({ onThinking, inputRef, compact }: { onThinking?: (on:
         inputRef={inputRef}
         onSend={(m) => chat.send(m)}
         busy={thinking}
-        placeholder={me.user.admin ? `Ask about ${BRAND.name}, or say “create a workspace for Fabrikam”…` : `Ask how something works in ${BRAND.name}…`}
+        placeholder={me.user.admin ? `Ask about ${BRAND.name}, or say “create a group for Fabrikam”…` : `Ask how something works in ${BRAND.name}…`}
         label={`Message the ${BRAND.name} assistant`}
       />
       {chat.error && <p className="err" style={{ margin: 0 }}>{chat.error}</p>}
       {chat.notice && <div className="callout info" role="status"><Icon n="lock" /><div>{chat.notice}</div></div>}
       {chat.turns.length === 0 ? (
         <div className="assist-chips">
-          {suggestionsFor(me.user.role, me.user.admin).map((s) => (
+          {suggestionsFor(me.user.role, me.user.admin, me.workspaces.length > 0).map((s) => (
             <button key={s} type="button" className="btn small ghost assist-chip" onClick={() => chat.send(s)}>{s}</button>
           ))}
         </div>

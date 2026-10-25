@@ -5,7 +5,7 @@
  * modals, date/money formatting and `CitedText` (shows [S1] citations as small source badges).
  */
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { BRAND } from "@/lib/brand";
 
 /* ---------- API helper: JSON in/out, readable errors, nothing fails silently ---------- */
@@ -258,20 +258,39 @@ export const Switch = ({ on, onChange, label }: { on: boolean; onChange: (v: boo
   <button className="switch" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} />
 );
 
+/** What Tab can reach inside a dialog (visible, enabled controls and links). */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * A dialog over the page with a title, body and footer buttons. Escape or the X closes it. `wide` for charts/tables.
  * It covers everything fixed on the page (globals.css `.modal-bg`): on phones the bottom tab bar hides while it is open
  * and the footer stays pinned in view, so its buttons are never under the bar.
+ * Keyboard: opening it moves focus to the dialog itself (screen readers read its title; phones don't pop the keyboard
+ * up), Tab and Shift+Tab stay inside it, and closing it puts focus back on whatever opened it.
  */
 export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    box.current?.focus();
+    return () => opener?.focus?.();
+  }, []);
+  const trap = (e: ReactKeyboardEvent) => {
+    if (e.key !== "Tab" || !box.current) return;
+    const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+    if (!all.length) return;
+    const [first, last] = [all[0], all[all.length - 1]];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === box.current)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
   return (
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+      <div ref={box} className={`modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={trap}>
         <div className="panel-h">
           <h2>{title}</h2>
           <button className="btn ghost small" onClick={onClose} aria-label="Close">

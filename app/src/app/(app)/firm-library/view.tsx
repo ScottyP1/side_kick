@@ -254,8 +254,8 @@ export default function FirmLibraryPage() {
               <tbody>
                 {docs?.map((d) => (
                   <tr key={d.id} id={`firm-${d.id}`} className={focus === d.id ? "focus-row" : undefined}>
-                    <td>
-                      <b style={{ wordBreak: "break-word" }}>{d.title}</b>
+                    <td style={{ minWidth: 220 }}>
+                      <b style={{ overflowWrap: "break-word" }}>{d.title}</b>
                       <div className="muted" style={{ fontSize: 12 }}>{d.name}{d.status === "Ready" ? ` · ${d.chunk_count} passage${d.chunk_count === 1 ? "" : "s"}` : ""}</div>
                       {d.superseded_title && <div style={{ fontSize: 12.5, color: "var(--warn)" }}>Superseded by “{d.superseded_title}”</div>}
                       {d.error && <div style={{ color: "var(--bad)", fontSize: 12.5 }}>{d.error}</div>}

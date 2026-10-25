@@ -17,7 +17,7 @@
  */
 import "server-only";
 import { HttpError } from "./auth";
-import { all, get, run, tx } from "./db";
+import { all, asSystem, get, run, tx } from "./db";
 import { removeWorkspaceIndex } from "./search";
 
 /** Longest workspace name and engagement code, in characters. */
@@ -35,7 +35,7 @@ export async function assertUniqueName(orgId: string, name: string, exceptId: st
     "SELECT id FROM workspaces WHERE org_id = ? AND LOWER(name) = LOWER(?) AND id != ?",
     orgId, name, exceptId ?? "",
   );
-  if (clash) throw new HttpError(409, `There's already a workspace called “${name}”. Pick a different name.`);
+  if (clash) throw new HttpError(409, `There's already a group called “${name}”. Pick a different name.`);
 }
 
 /** How much a workspace holds, for the delete confirmation ("12 documents, 4 meetings…"). Scoped to the org. */
@@ -62,7 +62,8 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
   return tx(async () => {
     const ws = [workspaceId, orgId];
     const linked = await all<{ id: string }>("SELECT id FROM teams_conversations WHERE workspace_id = ? AND org_id = ?", ...ws);
-    await run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL WHERE workspace_id = ? AND org_id = ?", ...ws);
+    // The chats leave the org (org_id NULL), which row-level security only allows as system work (lib/db.ts).
+    await asSystem("Teams chats without an org", () => run("UPDATE teams_conversations SET org_id = NULL, workspace_id = NULL, linked_by = NULL, linked_at = NULL WHERE workspace_id = ? AND org_id = ?", ...ws));
     await run("DELETE FROM guard_rule_versions WHERE org_id = ? AND rule_id IN (SELECT id FROM guard_custom_rules WHERE workspace_id = ? AND org_id = ?)", orgId, ...ws);
     // Ask and Teams conversations in this group (follow-ups), with their turns.
     await run("DELETE FROM conversation_turns WHERE conversation_id IN (SELECT id FROM conversations WHERE workspace_id = ? AND org_id = ?)", ...ws);

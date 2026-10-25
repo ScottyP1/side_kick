@@ -13,7 +13,7 @@ import { BRAND } from "@/lib/brand";
 
 const ROLES: Record<string, [string, string]> = {
   extract: ["Meeting notes", "Reads a transcript and writes the summary, decisions, action items, open questions and facts."],
-  ask: ["Answering questions", "Answers from this workspace's documents and meetings only, with a source for every claim."],
+  ask: ["Answering questions", "Answers from this group's documents and meetings only, with a source for every claim."],
   insights: ["Knowledge map", "Groups what the team knows into topics, scores coverage and finds gaps."],
   guard: ["Guardrail check", `Checks every question against your organization's guardrails before ${BRAND.name} answers (see Guardrails).`],
   remind: ["Reminders in Teams", `Words the daily and after-meeting reminder cards from items ${BRAND.name} picked itself; every point cites its source.`],

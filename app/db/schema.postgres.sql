@@ -649,3 +649,85 @@ ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS auto_record_by TEXT;
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS auto_record_at TEXT;
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS record_checked_at TEXT;
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS record_error TEXT;
+-- ---------------------------------------------------------------------------------------------------------
+-- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
+-- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and
+-- workspace_members, only shows and accepts rows of the org in the connection's app.org_id setting, unless
+-- app.bypass = 'on' (named system work: lib/db.ts asSystem). lib/db.ts sets both on every connection it hands
+-- out and runs app queries as the role sidekick_app, which has no way around the policies.
+-- Idempotent and cheap to re-run: each step checks first, so a normal start changes nothing.
+-- Rollback: start the app with SIDEKICK_RLS=off; this block then turns row-level security off on every table
+-- (lib/db.ts passes the switch in the sidekick.rls setting). See docs/RUNBOOKS.md → "Row-level security".
+-- ---------------------------------------------------------------------------------------------------------
+DO $rls$
+DECLARE
+  on_ BOOLEAN := coalesce(current_setting('sidekick.rls', true), 'on') <> 'off';
+  t RECORD;
+  old_ RECORD;
+  check_ TEXT;
+  -- Each setting is read in a sub-select, so Postgres reads it once per query instead of once per row.
+  pass CONSTANT TEXT := '(SELECT current_setting(''app.bypass'', true)) = ''on''';
+BEGIN
+  -- The app role: no login, no BYPASSRLS, row access only. Roles are shared by every database on the server.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sidekick_app') THEN
+    BEGIN
+      CREATE ROLE sidekick_app NOLOGIN NOBYPASSRLS;
+    EXCEPTION WHEN duplicate_object THEN NULL; -- another database or app copy created it at the same moment
+    WHEN insufficient_privilege THEN RAISE NOTICE 'Row-level security: may not create role sidekick_app; the owner role is used (FORCE).';
+    END;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sidekick_app') THEN
+    IF NOT pg_has_role(current_user, 'sidekick_app', 'MEMBER') THEN
+      BEGIN
+        EXECUTE format('GRANT sidekick_app TO %I', current_user); -- lets this login SET ROLE sidekick_app
+      EXCEPTION WHEN insufficient_privilege THEN RAISE NOTICE 'Row-level security: may not join role sidekick_app.';
+      END;
+    END IF;
+    GRANT USAGE ON SCHEMA public TO sidekick_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO sidekick_app;
+    GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO sidekick_app;
+  END IF;
+
+  FOR t IN
+    SELECT c.relname AS tbl,
+           CASE WHEN c.relname = 'orgs' THEN 'id'
+                WHEN c.relname = 'workspace_members' THEN NULL
+                ELSE 'org_id' END AS col,
+           c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relkind = 'r'
+       AND (c.relname IN ('orgs', 'workspace_members')
+            OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'org_id' AND NOT a.attisdropped))
+  LOOP
+    IF NOT on_ THEN
+      IF t.enabled OR t.forced THEN
+        EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY, DISABLE ROW LEVEL SECURITY', t.tbl);
+      END IF;
+      CONTINUE;
+    END IF;
+    -- workspace_members has no org_id: a membership is visible when its workspace is (workspaces has the policy).
+    check_ := CASE WHEN t.col IS NULL
+      THEN format('%s OR EXISTS (SELECT 1 FROM workspaces w WHERE w.id = workspace_members.workspace_id)', pass)
+      ELSE format('%s OR %I = (SELECT current_setting(''app.org_id'', true))', pass, t.col) END;
+    -- Older app versions (still answering during a deploy, or after a rollback) never set app.org_id and connect as
+    -- the owner: they keep working. The current app sets it on every connection before its first query, and its
+    -- org work runs as sidekick_app, which this clause never lets through.
+    check_ := check_ || ' OR ((SELECT current_setting(''app.org_id'', true)) IS NULL AND (SELECT current_user) <> ''sidekick_app'')';
+    -- The policy's name carries a version: a changed rule gets a new name, and older versions are dropped.
+    FOR old_ IN SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = t.tbl AND policyname LIKE 'sidekick_org_v%' AND policyname <> 'sidekick_org_v3' LOOP
+      EXECUTE format('DROP POLICY %I ON %I', old_.policyname, t.tbl);
+    END LOOP;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = t.tbl AND policyname = 'sidekick_org_v3') THEN
+      EXECUTE format('CREATE POLICY sidekick_org_v3 ON %I USING (%s) WITH CHECK (%s)', t.tbl, check_, check_);
+    END IF;
+    -- The policy filters on org_id; an index starting with org_id keeps that cheap on queries without one.
+    IF t.col = 'org_id' AND NOT EXISTS (
+      SELECT 1 FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+       WHERE i.indrelid = format('%I', t.tbl)::regclass AND a.attname = 'org_id') THEN
+      EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I (org_id)', t.tbl || '_org_rls', t.tbl);
+    END IF;
+    IF NOT t.enabled THEN EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t.tbl); END IF;
+    IF NOT t.forced THEN EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t.tbl); END IF;
+  END LOOP;
+END
+$rls$;

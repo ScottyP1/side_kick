@@ -43,7 +43,7 @@
 import "server-only";
 import crypto from "node:crypto";
 import os from "node:os";
-import { all, DIALECT, get, newId, now, run, tx } from "./db";
+import { all, asSystem, DIALECT, get, newId, now, run, tx, withOrg } from "./db";
 import { failureReason, withTrace } from "./trace";
 
 /** A job as stored. */
@@ -138,6 +138,13 @@ export async function enqueue(
   opts: { orgId?: string | null; workspaceId?: string | null; payload?: Record<string, unknown>; key?: string | null; runAt?: Date; maxAttempts?: number } = {},
 ): Promise<{ id: string; created: boolean }> {
   if (!kinds.has(kind)) throw new Error(`Unknown job kind ${kind}`);
+  // The queue is shared by every org (idempotency keys, jobs with no org): system work, lib/db.ts asSystem. A job
+  // for an org still runs as that org (`runClaimed`).
+  return asSystem("job queue", () => insertJob(kind, opts));
+}
+
+/** `enqueue`'s insert, inside the job queue's system scope. */
+async function insertJob(kind: string, opts: Parameters<typeof enqueue>[1] & object): Promise<{ id: string; created: boolean }> {
   const id = newId();
   const t = now();
   const values = [
@@ -284,7 +291,10 @@ export async function runClaimed(job: Job, workerId = WORKER_ID): Promise<{ ok: 
   try {
     const result = await withTrace({ name: `Job: ${label}`, channel: "system", kind: "job", orgId: job.org_id, workspaceId: job.workspace_id, detached: true }, async () => {
       if (!def) throw new Error(`Unknown job kind ${job.kind}`);
-      return def.run({ job, payload: JSON.parse(job.payload || "{}") as Record<string, unknown> });
+      const work = () => def.run({ job, payload: JSON.parse(job.payload || "{}") as Record<string, unknown> });
+      // A job for one organization only reaches that org's rows (row-level security, lib/db.ts); jobs for no
+      // org (the watchers' fan-out, retention, roll-offs) stay system work.
+      return job.org_id ? withOrg(job.org_id, work) : work();
     });
     await completeJob(job, workerId, result);
     return { ok: true, result };
@@ -305,6 +315,12 @@ export type WorkerReport = { ran: number; failed: number; counts: Record<string,
  * limits both to those kinds. Safe to call from every app copy at once.
  */
 export async function runWorker(opts: { maxJobs?: number; maxMs?: number; sweep?: boolean; workerId?: string; kinds?: string[]; concurrency?: number } = {}): Promise<WorkerReport> {
+  // The queue itself spans every org (claims, leases, recurring slots): system work. Each job then runs in its org.
+  return asSystem("job queue", () => workerLoop(opts));
+}
+
+/** `runWorker`'s body, inside the job queue's system scope. */
+async function workerLoop(opts: Parameters<typeof runWorker>[0] & object): Promise<WorkerReport> {
   const started = Date.now();
   const report: WorkerReport = { ran: 0, failed: 0, counts: {} };
   await enqueueRecurring(new Date(), { force: opts.sweep, kinds: opts.kinds });

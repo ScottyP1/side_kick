@@ -71,7 +71,7 @@ export default function HelpView() {
 
   return (
     <>
-      <div className="page-head"><div><h1>Help &amp; support</h1><p>Most answers are in the <Link href="/docs">help center</Link>. The Help chat (the round button, bottom left → I need help) can check your setup and fix common problems. For anything else, contact the {BRAND.name} team here.</p></div></div>
+      <div className="page-head"><div><div className="eyebrow">Help &amp; support</div><h1>How can we help?</h1><p>Most answers are in the <Link href="/docs">help center</Link>. The Help chat (the round assistant button → I need help) can check your setup and fix common problems. For anything else, contact the {BRAND.name} team here.</p></div></div>
       <InstallAppHint />
       <div className="grid g2">
         <form className="panel" onSubmit={submit}>

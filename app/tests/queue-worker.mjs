@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 const db = await import("../src/lib/db.ts");
 const jobs = await import("../src/lib/jobs.ts");
+db.useSystemScopeForProcess("queue worker test process"); // like a script: no request, many orgs
 const worker = process.argv[2] ?? "worker";
 const barrier = process.argv[3];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

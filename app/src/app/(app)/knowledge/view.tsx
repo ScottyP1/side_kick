@@ -193,7 +193,7 @@ export default function KnowledgePage() {
           {[
             ["Passages indexed", index.passages.toLocaleString(), "from documents and meeting transcripts"],
             ["Documents", String(docs?.filter((d) => d.status === "Ready").length ?? 0), `${docs?.filter((d) => d.status === "Failed").length ?? 0} failed`],
-            ["Questions asked", String(index.questions), "in this workspace"],
+            ["Questions asked", String(index.questions), "in this group"],
             ["Answered from sources", index.questions ? `${Math.round((index.answered / index.questions) * 100)}%` : "—", "the rest become knowledge gaps"],
           ].map(([l, v, d]) => (
             <div key={l}>
@@ -228,8 +228,8 @@ export default function KnowledgePage() {
               <tbody>
                 {docs?.map((d) => (
                   <tr key={d.id} id={`doc-${d.id}`} className={focus === d.id ? "focus-row" : undefined}>
-                    <td>
-                      <b style={{ wordBreak: "break-word" }}>{d.name}</b>
+                    <td style={{ minWidth: 200 }}>
+                      <b style={{ overflowWrap: "break-word" }}>{d.name}</b>
                       {d.error && <div style={{ color: "var(--bad)", fontSize: 12.5 }}>{d.error}</div>}
                       {d.status === "Ready" && <div className="muted" style={{ fontSize: 12 }}>{d.chunk_count} passage{d.chunk_count === 1 ? "" : "s"}</div>}
                       {d.match && (d.status === "Held" || d.guard_status === "kept") && canEdit && (

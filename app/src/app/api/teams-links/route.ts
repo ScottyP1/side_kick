@@ -81,8 +81,10 @@ async function waitingChats(user: User, withMembers = false) {
   const scope = await waitingScope(user);
   if (!scope) return [];
   const rows = await all<Waiting>(
-    `SELECT id, kind, name, added_by, created_at, waiting_since, last_seen_at, service_url FROM teams_conversations WHERE ${scope.sql} ORDER BY created_at DESC LIMIT 100`,
-    ...scope.params,
+    // No name saved (Teams left it out): the Sidekick person whose Microsoft account added it, if there is one.
+    `SELECT id, kind, name, COALESCE(added_by, (SELECT u.name FROM users u WHERE u.org_id = ? AND u.entra_oid = teams_conversations.added_by_oid)) AS added_by,
+            created_at, waiting_since, last_seen_at, service_url FROM teams_conversations WHERE ${scope.sql} ORDER BY created_at DESC LIMIT 100`,
+    user.org_id, ...scope.params,
   );
   return Promise.all(rows.map(async ({ service_url, ...r }, i) => ({
     ...r,

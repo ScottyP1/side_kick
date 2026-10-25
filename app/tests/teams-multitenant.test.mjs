@@ -811,6 +811,14 @@ test(`[${ENGINE}] stuck chats: Microsoft refuses the self-removal, admins see it
   assert.ok((await ann("GET", "/api/teams-links")).body.waiting.some((w) => w.id === STUCK), "so does the Org Owner");
   assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE id = '19:stuck@thread.v2' AND leaving IS NULL AND added_by_oid IS NOT NULL"), 1);
 
+  // Teams often leaves the adder's name out of the install event: the portal still shows who it was.
+  const NONAME = "19:no-name@thread.v2";
+  const nn = sent.length;
+  await install(NONAME, { id: GRACE.id, aadObjectId: GRACE.aadObjectId });
+  await waitFor(NONAME, /not set up for this chat yet/, nn);
+  assert.equal((await grace("GET", "/api/teams-links")).body.waiting.find((w) => w.id === NONAME)?.added_by, "Grace Kim", "never \"Someone in Teams\" when Sidekick knows who it was");
+  assert.equal(await count("SELECT COUNT(*) FROM teams_conversations WHERE added_by = 'Someone in Teams'"), 0);
+
   // A re-add straight over a chat still marked leaving (no removal in between) also starts afresh.
   const AGAIN = "19:again@thread.v2";
   DENY_SELF_REMOVAL.add(AGAIN);

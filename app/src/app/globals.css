@@ -223,15 +223,24 @@ a.app-tile{text-decoration:none;color:inherit}
 .utt.hand{background:var(--hand-soft);border-radius:8px;padding:8px}
 .ts{font-family:var(--f-mono);font-size:11.5px;color:var(--faint)}
 
-.modal-bg{position:fixed;inset:0;background:rgba(10,16,15,.45);display:grid;place-items:center;padding:16px;z-index:50}
-.modal{background:var(--surface);border-radius:12px;border:1px solid var(--line);width:min(560px,100%);max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.25)}
-.modal .panel-h{position:sticky;top:0;background:var(--surface)}
-.modal-f{display:flex;justify-content:flex-end;gap:8px;padding:14px 16px;border-top:1px solid var(--line)}
+/* Dialogs (components/ui.tsx Modal) sit above everything fixed on the page: the phone tab bar (50), the assistant
+   button and panel (55/56) and the phone menu (70); only toasts (90) go over them, so an error stays readable. The
+   phone tab bar is also hidden while a dialog is open, the dialog keeps clear of the iPhone notch and home indicator,
+   and its footer buttons stay pinned in view however long the dialog is. */
+.modal-bg{position:fixed;inset:0;background:rgba(10,16,15,.45);display:grid;place-items:center;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px));z-index:80}
+.modal{background:var(--surface);border-radius:12px;border:1px solid var(--line);width:min(560px,100%);max-height:min(90vh,calc(100dvh - 32px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)));overflow:auto;overscroll-behavior:contain;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.modal .panel-h{position:sticky;top:0;z-index:1;background:var(--surface);flex-wrap:nowrap;align-items:flex-start}
+.modal .panel-h h2{min-width:0;overflow-wrap:anywhere}
+.modal .panel-h > .btn{flex:none}
+.modal-f{position:sticky;bottom:0;z-index:1;background:var(--surface);display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:14px 16px;border-top:1px solid var(--line)}
+/* a long label ("Upload to Contoso Retail – Cloud Migration") wraps inside the dialog instead of spilling off a phone */
+.modal-f .btn{max-width:100%;white-space:normal;text-align:center;justify-content:center}
+body:has(.modal-bg) .tabbar{display:none}
 .steps{display:flex;gap:6px;flex-wrap:wrap}
 .steps span{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--sunken);color:var(--muted)}
 .steps span.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 
-.toasts{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;z-index:60}
+.toasts{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;z-index:90}
 .toast{background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);font-size:13.5px;max-width:340px;display:flex;gap:8px;align-items:flex-start}
 .toast.error{background:var(--bad);color:#fff}
 .toast .ico{flex:none;margin-top:1px}

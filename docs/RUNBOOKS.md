@@ -242,9 +242,14 @@ pwsh -File app/scripts/teams-access-policy.ps1
 ```
 The script reuses the `az login` session (a Global Administrator) because Teams PowerShell's own sign-in crashes on
 macOS and its device-code sign-in is blocked by Entra security defaults (error 530035). It creates and grants the
-`Sidekick-Meetings` policy org-wide and sets **Transcription: On** in the Global meeting policy; it ends with `DONE`.
+`Sidekick-Meetings` policy org-wide, sets **Transcription: On** in the Global meeting policy, and turns on the tenant's
+**Transcript API access** (`Set-CsTeamsMeetingConfiguration -EnableGraphTranscriptAccess $true`, plus
+`-EnableAttributedTranscripts $true` for speaker names); it ends with `DONE`. Microsoft made Transcript API access a
+separate switch in 2026, **off by default**: without it Graph answers 403 `GraphAccessToTranscriptsDisabled` even with
+every permission approved, and the Meetings page says "doesn't let apps read meeting transcripts yet". (Some tenants
+also show it in the Teams admin center → Meetings → Meeting settings → Transcript API access; ours didn't.)
 Changes can take up to 30 minutes to apply. Customers' Teams admins (usually on Windows) run the equivalent:
-`Connect-MicrosoftTeams; New-CsApplicationAccessPolicy -Identity Sidekick-Meetings -AppIds '<Entra app id>'; Grant-CsApplicationAccessPolicy -PolicyName Sidekick-Meetings -Global`
+`Connect-MicrosoftTeams; New-CsApplicationAccessPolicy -Identity Sidekick-Meetings -AppIds '<Entra app id>'; Grant-CsApplicationAccessPolicy -PolicyName Sidekick-Meetings -Global; Set-CsTeamsMeetingConfiguration -Identity Global -EnableGraphTranscriptAccess $true -EnableAttributedTranscripts $true`
 (send them this section). Sidekick can only write notes for meetings with a transcript.
 
 ### 5. New Teams package (version 1.4.0: Meetings tab, chat/channel/meeting tab)

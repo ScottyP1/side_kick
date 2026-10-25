@@ -10,7 +10,7 @@ There are two ways meetings get to Sidekick:
 
 ### Turning it on (Org Owners and Org Admins)
 1. Connect Sidekick to your Microsoft 365 organization: **Settings → Microsoft sign-in**.
-2. A Microsoft admin of your organization approves Sidekick to read meeting transcripts, once for the whole organization, and allows Sidekick in Teams' meeting settings. Your IT team has the exact steps from the Sidekick team.
+2. A Microsoft admin of your organization approves Sidekick to read meeting transcripts, once for the whole organization, and allows Sidekick in Teams' meeting settings, including turning on **Transcript API access** (Microsoft Graph access to transcripts, off by default in new Microsoft 365 organizations). Your IT team has the exact steps from the Sidekick team.
 3. Make sure Teams records transcripts for your meetings (Teams meeting policy: transcription on). Sidekick can only write notes for meetings that have a transcript.
 4. On **Meetings**, press **Turn on** under *Automatic notes after Teams meetings*.
 

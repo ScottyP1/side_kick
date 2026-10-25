@@ -118,7 +118,8 @@ export function retryAfterMs(header: string | null, at = Date.now()): number {
 
 /**
  * One call to Microsoft Graph for this tenant with Sidekick's app token. 401/403 become `ConsentNeededError`
- * (with `deniedMessage` when given), 404 returns null, 429/503 wait up to 5 s in place (twice at most) and
+ * (with `deniedMessage` when given, or the `deniedCodes` message matching Graph's `innerError.code`, for refusals
+ * that need a different fix than approving a permission, like a tenant switch that is off), 404 returns null, 429/503 wait up to 5 s in place (twice at most) and
  * otherwise throw `GraphThrottledError` with Graph's Retry-After, other failures 502. Returns the JSON body (null
  * when empty), or the body as text with `raw` (a transcript download). `body` is sent as JSON (POST/PATCH).
  * Used here for the directory, by lib/teams/install.ts to remove Sidekick from a chat or team, and by
@@ -128,7 +129,7 @@ export async function graphCall<T>(
   tenantId: string,
   method: "GET" | "DELETE" | "POST" | "PATCH",
   path: string,
-  opts: { headers?: Record<string, string>; deniedMessage?: string; body?: unknown; raw?: boolean } = {},
+  opts: { headers?: Record<string, string>; deniedMessage?: string; deniedCodes?: Record<string, string>; body?: unknown; raw?: boolean } = {},
 ): Promise<T | null> {
   for (let attempt = 0; ; attempt++) {
     const token = await graphToken(tenantId);
@@ -137,7 +138,8 @@ export async function graphCall<T>(
     if (!res) throw new HttpError(502, "Couldn't reach Microsoft Graph. Try again in a minute.");
     if (res.status === 401 || res.status === 403) {
       tokens.delete(tenantId);
-      throw new ConsentNeededError(opts.deniedMessage);
+      const code = opts.deniedCodes ? await graphErrorCode(res) : null;
+      throw new ConsentNeededError((code && opts.deniedCodes?.[code]) || opts.deniedMessage);
     }
     if (res.status === 404) return null;
     if (res.status === 429 || res.status === 503) {
@@ -153,6 +155,13 @@ export async function graphCall<T>(
     if (opts.raw) return text as T;
     return (text ? JSON.parse(text) : null) as T | null;
   }
+}
+
+/** Graph's most specific error code from a failed response (`innerError.code`, else `error.code`), or null. */
+async function graphErrorCode(res: Response): Promise<string | null> {
+  const body = (await res.json().catch(() => null)) as { error?: { code?: unknown; innerError?: { code?: unknown } } } | null;
+  const code = body?.error?.innerError?.code ?? body?.error?.code;
+  return typeof code === "string" ? code : null;
 }
 
 const graphGet = <T>(tenantId: string, path: string, headers: Record<string, string> = {}) =>

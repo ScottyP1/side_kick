@@ -4,7 +4,9 @@
  * The "Automatic notes after Teams meetings" panel on the Meetings page (data from GET /api/meetings/auto,
  * lib/meetings-graph.ts). Shows whether it's on, the last check and any problem in plain words, and recent Teams
  * meetings Sidekick heard about. Org Owners/Admins turn it on or off and press **Check now**; they and Team Leads
- * pick the group for a meeting several groups were in; Org Owners/Admins can try a skipped or failed one again.
+ * pick the group for a meeting that isn't clearly one group's (several groups' people, or fewer than two of one
+ * group's people recognised), then see that meeting's people who aren't in the group yet, each with **Add to
+ * group**; Org Owners/Admins can try a skipped or failed one again.
  * Everyone else sees only meetings captured into their own groups. `onCaptured` lets the page reload its list.
  *
  * Below it, once automatic notes are on, **Group meetings record and transcribe by themselves** (lib/auto-record.ts):
@@ -25,6 +27,10 @@ type Recent = {
   workspace: { id: string; name: string } | null;
   meetingId: string | null;
   candidates: { id: string; name: string }[];
+  /** Fewer than two of one group's people were recognised (rather than a tie). */
+  unclear?: boolean;
+  /** After someone picked its group: the meeting's people who aren't in that group yet. */
+  newcomers?: { oid: string; name: string; email: string }[];
 };
 /** The automatic-recording part of the status (lib/auto-record.ts `autoRecordStatus`). */
 type AutoRecord = {
@@ -84,6 +90,7 @@ export function AutoNotesPanel({ role, onOpen }: { role: string; onOpen: (meetin
   if (!manager && !s.enabled) return null;
   const waiting = s.recent.filter((r) => r.status === "waiting");
   const others = s.recent.filter((r) => r.status !== "waiting").slice(0, 8);
+  const toAdd = s.recent.filter((r) => r.status !== "waiting" && r.newcomers?.length && r.workspace).slice(0, 5);
 
   return (
     <div className="panel">
@@ -122,6 +129,23 @@ export function AutoNotesPanel({ role, onOpen }: { role: string; onOpen: (meetin
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
                 {r.candidates.map((g) => (
                   <button key={g.id} className="btn small wrap" disabled={busy} onClick={() => post({ action: "assign", id: r.id, ws: g.id }, `Notes will go to ${g.name}`).catch(reportError)}>{g.name}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+        {manager && toAdd.map((r) => (
+          <div key={`add-${r.id}`} className="callout">
+            <Icon n="users" />
+            <div style={{ flex: 1 }}>
+              <b>People in this meeting who aren&apos;t in {r.workspace!.name} yet</b>
+              <div className="muted">{r.title}{r.startedAt ? ` · ${fmtDate(r.startedAt)}` : ""}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                {r.newcomers!.map((p) => (
+                  <div key={p.oid} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{p.name} <span className="muted">{p.email}</span></span>
+                    <button className="btn small" disabled={busy} onClick={() => post({ action: "add-person", id: r.id, oid: p.oid }, `${p.name} is now in ${r.workspace!.name}`).catch(reportError)}>Add to group</button>
+                  </div>
                 ))}
               </div>
             </div>

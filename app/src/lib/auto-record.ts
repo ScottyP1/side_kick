@@ -45,7 +45,8 @@ import { enqueue } from "./jobs";
 import { span } from "./trace";
 import { tenantOfOrg } from "./tenants";
 import { NOT_ENDING } from "./billing";
-import { autoNotesOn, pickGroup } from "./meetings-graph";
+import { autoNotesOn } from "./meetings-graph";
+import { pickGroup } from "./meeting-group";
 import { BRAND } from "./brand";
 
 /** How far ahead Sidekick looks for meetings to set. */

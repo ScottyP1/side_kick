@@ -116,7 +116,7 @@ let fakeInFlight = 0;
  * The recorded model is "fake-claude", or "fake-claude:<model>" when the call didn't use the feature's
  * normal model (essentials mode).
  */
-async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: string, attempt = 0): Promise<unknown> {
+async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: string, attempt = 0, system = ""): Promise<unknown> {
   // "__BUSY_<n>__": the first n attempts fail like an overloaded API (529), so tests can check the retries.
   if (attempt < Number(content.match(/__BUSY_(\d+)__/)?.[1] ?? 0)) throw new FakeBusyError();
   // For the load test (scripts/load-test.mjs): SIDEKICK_FAKE_CLAUDE_CAPACITY refuses calls beyond that many at once
@@ -174,6 +174,9 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
     return { found: ids.length > 0, answer: ids.length ? `Test answer from ${ids.join(", ")} [S1].` : "Not in the sources.", source_ids: ids.slice(0, 2), conflict };
   }
   if (feature === "extract") {
+    // "__COMMITMENTS__" in a transcript: action items are worked out from what people said, following the rules the
+    // notes prompt states (so a test catches the prompt losing them). Otherwise the canned notes below.
+    if (content.includes("__COMMITMENTS__")) return fakeCommitments(content, system);
     return {
       summary: "Test summary of the meeting.",
       decisions: [{ text: "Test decision", made_by: "Priya Raman" }],
@@ -217,6 +220,30 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
       ]
     : [];
   return { topics: [{ name: "Test topic", summary: "About the test", coverage: 150, key_facts: [], document_titles: [], meeting_titles: [] }], gaps };
+}
+
+/**
+ * Test-mode notes for a "__COMMITMENTS__" transcript: action items are the commitments in it, however phrased, as the
+ * notes prompt (MEETING_SYSTEM) asks: a speaker saying they'll do something ("I'll…", "let me…", "leave it with
+ * me"), or agreeing ("yes", "sure", "on it", "will do") right after someone asked them to do something (the owner
+ * is whoever agreed). Ideas only floated ("maybe we could…") are left out. It only understands a phrasing when the
+ * prompt names it, so dropping a rule from the prompt makes the test fail.
+ */
+function fakeCommitments(content: string, system: string) {
+  const said = (phrase: string) => system.toLowerCase().includes(phrase);
+  const own = [said("i'll") && "i'll", said("let me") && "let me", said("leave it with me") && "leave it with me", said("i can take") && "i can take"].filter(Boolean) as string[];
+  const yes = ["yes", "sure", "on it", "will do"].filter(said);
+  const floated = said("floated") ? /\b(maybe we could|it might be worth|someone should)\b/i : null;
+  const lines = [...content.matchAll(/^\[[^\]]*\]\s*([^:\n]+):\s*(.+)$/gm)].map((m) => ({ who: m[1].trim(), text: m[2].trim() }));
+  const items: { text: string; owner: string | null; due: null; due_date: null }[] = [];
+  lines.forEach((l, i) => {
+    const lower = l.text.toLowerCase();
+    if (floated?.test(l.text)) return;
+    const prev = lines[i - 1];
+    if (own.some((p) => lower.includes(p))) items.push({ text: l.text, owner: l.who, due: null, due_date: null });
+    else if (prev && prev.who !== l.who && prev.text.trim().endsWith("?") && yes.some((p) => lower.startsWith(p))) items.push({ text: prev.text, owner: l.who, due: null, due_date: null });
+  });
+  return { summary: "Test summary of the meeting.", decisions: [], action_items: items, open_questions: [], pending_decisions: [], facts: [] };
 }
 
 // Common words skipped when the fake guard matches a question against a custom rule.
@@ -511,7 +538,7 @@ async function structuredCall<S extends z.ZodType>(
   opts: { system: string; content: string; schema: S; effort?: "low" | "medium" | "high"; maxTokens?: number },
   model: string,
 ): Promise<z.infer<S>> {
-  if (FAKE_CLAUDE) return withRetry((attempt) => fakeClaude(feature, ctx, opts.content, model, attempt)) as Promise<z.infer<S>>;
+  if (FAKE_CLAUDE) return withRetry((attempt) => fakeClaude(feature, ctx, opts.content, model, attempt, opts.system)) as Promise<z.infer<S>>;
   const started = Date.now();
   let ok = 0;
   let error: string | null = null;
@@ -638,9 +665,9 @@ async function collectBatch(batchId: string): Promise<number> {
   const results = new Map<string, { output: unknown | null; error: string | null; usage: Usage }>();
   if (batchId.startsWith("fake_")) {
     for (const it of items) {
-      const req = JSON.parse(it.request_json ?? "{}") as { content: string };
+      const req = JSON.parse(it.request_json ?? "{}") as { content: string; system?: string };
       try {
-        results.set(it.id, { output: await fakeClaude(it.feature, { orgId: it.org_id, workspaceId: it.workspace_id }, req.content, it.model), error: null, usage: NO_USAGE });
+        results.set(it.id, { output: await fakeClaude(it.feature, { orgId: it.org_id, workspaceId: it.workspace_id }, req.content, it.model, 0, req.system ?? ""), error: null, usage: NO_USAGE });
       } catch (e) {
         results.set(it.id, { output: null, error: e instanceof Error ? e.message : "Failed", usage: NO_USAGE });
       }

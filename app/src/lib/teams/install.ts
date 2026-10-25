@@ -43,7 +43,7 @@ import { span } from "../trace";
 import { noticeCard } from "./cards";
 import { postCard, stillInChat, type TeamsConversation } from "./bot";
 import { BRAND } from "../brand";
-import { directoryPerson } from "../directory";
+import { directoryPerson, linkByDirectory } from "../directory";
 
 /** How long a chat may wait to be assigned before Sidekick leaves it. */
 export const WAITING_DAYS = 7;
@@ -90,26 +90,12 @@ export async function recognizeAdder(orgId: string, tenantId: string | null, obj
   if (await get("SELECT 1 AS ok FROM users WHERE org_id = ? AND entra_oid = ?", orgId, objectId)) return "known";
   if (!tenantId || (await get<{ entra_tenant_id: string | null }>("SELECT entra_tenant_id FROM orgs WHERE id = ?", orgId))?.entra_tenant_id !== tenantId) return "unknown";
   return span("microsoft", "Recognise who added Sidekick", async () => {
-    let person;
     try {
-      person = await directoryPerson(tenantId, objectId);
+      return (await linkByDirectory(orgId, tenantId, objectId, `Microsoft account linked when they added ${BRAND.name} to a Teams chat`)) ? "linked" : "unknown";
     } catch (e) {
       console.error(`Couldn't look up who added ${BRAND.name} in Microsoft 365`, e instanceof Error ? e.message : e);
       return "unknown";
     }
-    if (!person || person.guest) return "unknown";
-    const emails = [...new Set([person.upn, person.email].filter(Boolean))];
-    if (!emails.length) return "unknown";
-    const user = await get<{ id: string; org_id: string; name: string }>(
-      `SELECT id, org_id, name FROM users WHERE org_id = ? AND entra_oid IS NULL AND lower(email) IN (${emails.map(() => "?").join(",")}) ORDER BY created_at LIMIT 1`,
-      orgId, ...emails,
-    );
-    if (!user) return "unknown";
-    // "AND entra_oid IS NULL": a sign-in at the same moment wins.
-    const done = await run("UPDATE users SET entra_oid = ? WHERE id = ? AND entra_oid IS NULL", objectId, user.id);
-    if (!done.changes) return "unknown";
-    await audit(user, `Microsoft account linked when they added ${BRAND.name} to a Teams chat`, "Sign-in");
-    return "linked";
   });
 }
 

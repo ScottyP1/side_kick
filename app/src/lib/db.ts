@@ -904,6 +904,10 @@ function migrate(conn: DatabaseSync) {
   if (!has("teams_conversations", "members_checked_at")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN members_checked_at TEXT");
   // Meet now (ad hoc calls): which kind of Teams call a captured transcript came from ('meeting' scheduled, 'adhoc').
   if (!has("graph_meetings", "kind")) conn.exec("ALTER TABLE graph_meetings ADD COLUMN kind TEXT NOT NULL DEFAULT 'meeting'");
+  // Which group a meeting belongs to (lib/meeting-group.ts): why a meeting waits ('tie' | 'unclear'), who picked
+  // its group, the note for the notes when the title decided ("Picked Litware from the meeting title."), and the
+  // meeting's people who aren't in the picked group yet (JSON [{oid, name, email}], only after someone picked).
+  for (const col of ["waiting_kind", "picked_by", "pick_note", "newcomers"]) if (!has("graph_meetings", col)) conn.exec(`ALTER TABLE graph_meetings ADD COLUMN ${col} TEXT`);
   // Upload guard (lib/upload-guard.ts): a document or firm document that looks like it belongs to another client is
   // saved Held (status 'Held', text kept in held_text, not indexed) until the uploader keeps or moves it.
   // guard_status: null = never flagged, 'kept' = flagged and kept (a Needs attention finding), 'reviewed' = a

@@ -23,7 +23,7 @@ People ──► Browser: website · portal · Owner Console ─┤
                            ▼        ▼            ▼              ▼
                      Postgres   Azure AI      Claude API     Microsoft Graph / Entra ID
                      (all data) Search        (Anthropic)    (sign-in, directory, Teams,
-                                (finding      answers, notes  meeting transcripts later)
+                                (finding      answers, notes  meeting transcripts)
                                  passages)    reminders, checks
                            ▲
                  Secrets: Azure Key Vault · Logs/alerts: Log Analytics + App Insights
@@ -39,7 +39,7 @@ People often expect a separate "backend". Sidekick deliberately has **one** app 
 | **Front end** (what people see) | React pages rendered by Next.js: the public website, the portal, the Owner Console, the bottom-left assistant | `app/src/app/` (pages), `app/src/components/` |
 | **Back end** (the logic and data) | Next.js **API routes** (`/api/...`) running on Node.js on the server: sign-in, groups, documents, Ask, meetings, billing, support… | `app/src/app/api/` (routes), `app/src/lib/` (the business logic) |
 | **Teams bot** | The same app answers Teams at `/api/messages` | `app/src/lib/teams/` |
-| **Background work** | Daily reminders, roll-off deletions, help-bot clean-up run on a timer inside the app (a proper job queue is planned) | `app/src/instrumentation.ts`, `lib/reminders.ts`, `lib/rolloff.ts` |
+| **Background work** | A job queue in the database (`jobs` table) runs meeting notes, reminders, connector syncs, watchers and roll-off deletions; a heartbeat inside the app ticks it every 30 seconds | `app/src/instrumentation.ts`, `lib/jobs.ts`, `lib/job-kinds.ts` |
 
 So your **backend = Next.js API routes on Node.js 26**, in the same container as the front end.
 
@@ -54,7 +54,7 @@ So your **backend = Next.js API routes on Node.js 26**, in the same container as
 | Database | **PostgreSQL 17** (Azure Database for PostgreSQL Flexible Server, Central US); **SQLite** for local copies | Every record: organizations, groups, people, documents' text, meetings, action items, chats, tickets, audit log, usage |
 | Search | **Azure AI Search** (hybrid: keywords + meaning) with **embeddings** from Azure AI Foundry (`text-embedding-3-small`); a local keyword index as the fallback | Finds the right passages for each question, always walled to one company and group (+ the firm library) |
 | AI | **Claude** via the Anthropic API (`@anthropic-ai/sdk`): **Claude Opus 5.5** by default; **Claude Haiku 5.5** for the cheap jobs (public help bot, rewriting follow-ups); each feature's model is a setting | Answers with sources, meeting notes, reminders, guardrail checks, the assistants |
-| Microsoft / Teams | **Microsoft Teams SDK** (`@microsoft/teams.*`), **Azure Bot**, **Microsoft Entra ID** sign-in (`jose` verifies tokens), **Microsoft Graph** (directory import; meeting transcripts in the meetings wave) | Sidekick in Teams chats/channels, "Sign in with Microsoft", importing people |
+| Microsoft / Teams | **Microsoft Teams SDK** (`@microsoft/teams.*`), **Azure Bot**, **Microsoft Entra ID** sign-in (`jose` verifies tokens), **Microsoft Graph** (directory import, removing itself from chats, meeting transcripts for automatic notes) | Sidekick in Teams chats/channels, "Sign in with Microsoft", importing people |
 | Documents | `unpdf` (PDF), `mammoth` (Word) | Reads uploads into text |
 | Sign-in security | Passwords (hashed), **passkeys** (`@simplewebauthn`), authenticator apps (encrypted secrets), sign-in limits | Accounts and two-step sign-in |
 | Validation | `zod` | Checks inputs and Claude's structured outputs |
@@ -74,5 +74,7 @@ So your **backend = Next.js API routes on Node.js 26**, in the same container as
 ## Running it
 
 - **Live**: Azure (see `docs/HOSTING.md`); every merge to `main` deploys itself.
+- **Visual walkthrough**: `docs/HOW-IT-WORKS.html` (services, client setup, a question's and a meeting's journey,
+  the walls between clients, common questions).
 - **On the Mac**: `npm --prefix app run dev` (or the `sidekick-preview` / `e2e-*` copies with their own data);
   SQLite and fake Claude unless configured otherwise. Tests: `npm --prefix app test` (both databases + build).

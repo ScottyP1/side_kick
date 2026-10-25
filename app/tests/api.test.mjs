@@ -4011,12 +4011,14 @@ test(`[${ENGINE}] watchers: each check opens a finding with a next step, for the
   await dbExec(`UPDATE orgs SET entra_tenant_id = 'watch-tenant' WHERE id = '${w.org}'`);
   await dbExec(`INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at, waiting_since) VALUES ('conv-watch-wait', '${SERVICE_URL}', 'watch-tenant', 'groupChat', 'Waiting crew', '${new Date().toISOString()}', '${new Date().toISOString()}', '${new Date().toISOString()}')`);
   await dbExec(`INSERT INTO connector_health (org_id, workspace_id, connector, label, status, message, checked_at, broken_since) VALUES ('${w.org}', '', 'jira', 'Jira', 'broken', 'The access token expired.', '${new Date().toISOString()}', '${new Date().toISOString()}')`);
+  // A chat Sidekick should leave, but Microsoft refused (the self-removal permission isn't approved); tried just now.
+  await dbExec(`INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at, leaving, leave_tried_at, leave_error) VALUES ('conv-watch-stuck', '${SERVICE_URL}', 'watch-tenant', 'groupChat', 'Stuck crew', '${new Date().toISOString()}', '${new Date().toISOString()}', 'installer', '${new Date().toISOString()}', 'consent')`);
 
   const out = await jobTick();
-  // The Org Owner sees all ten kinds, each with a next step and a link.
+  // The Org Owner sees all eleven kinds, each with a next step and a link.
   const all = await wa("GET", "/api/findings");
-  assert.deepEqual(kindsOf(all), ["broken_connector", "chat_removed", "chat_waiting", "failed_replies", "no_lead", "no_notes_chat", "overdue_items", "stale_doc", "unanswered", "unowned_items"], JSON.stringify(out));
-  assert.ok(out.opened >= 10, JSON.stringify(out));
+  assert.deepEqual(kindsOf(all), ["broken_connector", "chat_removed", "chat_waiting", "failed_replies", "no_lead", "no_notes_chat", "overdue_items", "self_removal", "stale_doc", "unanswered", "unowned_items"], JSON.stringify(out));
+  assert.ok(out.opened >= 11, JSON.stringify(out));
   for (const f of all.body.findings) assert.ok(f.nextStep && f.actionHref && f.canAct, JSON.stringify(f));
   const byKind = Object.fromEntries(all.body.findings.map((f) => [f.kind, f]));
   assert.equal(byKind.no_lead.workspaceId, w.g2, "group 2 has no Team Lead");
@@ -4026,6 +4028,9 @@ test(`[${ENGINE}] watchers: each check opens a finding with a next step, for the
   assert.match(byKind.failed_replies.title, /Wave 2 crew/);
   assert.match(byKind.chat_removed.detail, /Ray Remover/);
   assert.match(byKind.chat_waiting.title, /1 Teams chat waiting/);
+  assert.match(byKind.self_removal.title, /isn't allowed to remove itself from Teams chats/);
+  assert.match(byKind.self_removal.detail, /Stuck crew.*TeamsAppInstallation\.ReadWriteSelfForChat\.All/);
+  assert.match(byKind.self_removal.nextStep, /Approve Sidekick for your organization/);
   assert.match(byKind.unanswered.detail, /purple elephant/);
   assert.match(byKind.broken_connector.title, /Jira isn't working/);
   // The Team Lead: their group's members and managers findings, nothing organization-wide or from group 2.
@@ -4107,6 +4112,9 @@ test(`[${ENGINE}] watchers: findings aren't duplicated, can be snoozed, and reso
   assert.equal((await max("POST", "/api/ask", { ws: w.g1, question: "What is the purple elephant budget?" })).body.found, true);
   await dbExec(`UPDATE connector_health SET status = 'ok', broken_since = NULL WHERE org_id = '${w.org}'`);
   await dbExec(`DELETE FROM teams_conversations WHERE id = 'conv-watch-wait'`);
+  // Someone removes Sidekick from the stuck chat in Teams: forgotten, so the leaving timer stops trying.
+  await toBot(activity({ type: "installationUpdate", action: "remove", from: { id: "29:x", name: "Ray Remover" }, conversation: { id: "conv-watch-stuck", conversationType: "groupChat", tenantId: "watch-tenant" } }));
+  assert.equal(Number(await dbValue("SELECT COUNT(*) FROM teams_conversations WHERE id = 'conv-watch-stuck'")), 0);
   const n = sent.length;
   assert.equal((await importMeeting(max, w.g1, "Second check-in", "All good now.")).status, 200);
   await waitForSent((m) => sent.indexOf(m) >= n && m.url.includes("conv-watch-1"));
@@ -4114,7 +4122,7 @@ test(`[${ENGINE}] watchers: findings aren't duplicated, can be snoozed, and reso
   // A Starter plan has no Team Leads, so the Team Lead watcher doesn't run for it.
   await dbExec(`INSERT INTO subscriptions (org_id, plan, status, provider, updated_at, created_at) VALUES ('${w.org}', 'starter', 'active', 'mock', '${new Date().toISOString()}', '${new Date().toISOString()}')`);
   const out = await jobTick();
-  assert.ok(out.resolved >= 9, JSON.stringify(out));
+  assert.ok(out.resolved >= 10, JSON.stringify(out));
   assert.deepEqual(kindsOf(await wa("GET", "/api/findings")), ["no_notes_chat"], "only group 2's missing notes chat is left");
   assert.ok(Number(await dbValue(`SELECT COUNT(*) FROM findings WHERE org_id = '${w.org}' AND status = 'resolved'`)) >= 9);
   await dbExec(`DELETE FROM subscriptions WHERE org_id = '${w.org}'`);

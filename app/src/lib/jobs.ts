@@ -128,6 +128,10 @@ export function backoffMs(attempts: number, random = Math.random()): number {
 /**
  * Adds a job to the queue. With `key` (idempotency key), a job with the same key that's already there is kept
  * instead and its id returned (`created: false`). `runAt` delays it. Never put document text in `payload`.
+ * A job for an organization is only added while that organization exists: a fan-out that read the list of
+ * organizations just before one was deleted (`watch.all`, the meetings sweeps) can't leave work behind for it
+ * (lib/rolloff.ts deletes the organization's jobs). On Postgres the check waits for a deletion in progress (the
+ * deletion holds the organization's row), so it sees the outcome. Such a job returns `created: false`.
  */
 export async function enqueue(
   kind: string,
@@ -136,12 +140,20 @@ export async function enqueue(
   if (!kinds.has(kind)) throw new Error(`Unknown job kind ${kind}`);
   const id = newId();
   const t = now();
-  const res = await run(
-    `INSERT INTO jobs (id, kind, org_id, workspace_id, payload, idempotency_key, status, run_at, attempts, max_attempts, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING`,
+  const values = [
     id, kind, opts.orgId ?? null, opts.workspaceId ?? null, JSON.stringify(opts.payload ?? {}), opts.key ?? null,
     (opts.runAt ?? new Date()).toISOString(), opts.maxAttempts ?? kinds.get(kind)!.maxAttempts ?? DEFAULT_ATTEMPTS, t, t,
-  );
+  ];
+  const columns = "INSERT INTO jobs (id, kind, org_id, workspace_id, payload, idempotency_key, status, run_at, attempts, max_attempts, created_at, updated_at)";
+  const res = opts.orgId
+    ? await run(
+      `${columns}
+       SELECT ?, ?, ?, ?, ?, ?, 'queued', ?, 0, CAST(? AS INTEGER), ?, ?
+        WHERE EXISTS (SELECT 1 FROM orgs WHERE id = ?${DIALECT === "postgres" ? " FOR KEY SHARE" : ""})
+       ON CONFLICT (idempotency_key) DO NOTHING`,
+      ...values, opts.orgId,
+    )
+    : await run(`${columns} VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING`, ...values);
   if (res.changes) return { id, created: true };
   const existing = await get<{ id: string }>("SELECT id FROM jobs WHERE idempotency_key = ?", opts.key ?? "");
   return { id: existing?.id ?? id, created: false };

@@ -1070,6 +1070,21 @@ test(`[${engine}] job queue: old finished jobs are pruned; health counts per com
   assert.equal((await db.get("SELECT COUNT(*) AS n FROM jobs WHERE org_id = ?", org)).n, 0);
 });
 
+test(`[${engine}] job queue: no new work for an organization that's gone (a fan-out racing a deletion leaves nothing behind)`, async () => {
+  jobs.defineJob("test.gone", { label: "Test: gone org", run: async () => ({}) });
+  const org = db.newId();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Soon Gone Co", db.now());
+  assert.equal((await jobs.enqueue("test.gone", { orgId: org, key: `gone:${org}:1` })).created, true);
+  await db.run("DELETE FROM jobs WHERE org_id = ?", org);
+  await db.run("DELETE FROM orgs WHERE id = ?", org);
+  // e.g. watch.all read the organizations just before the deletion and enqueues after it.
+  assert.equal((await jobs.enqueue("test.gone", { orgId: org, key: `gone:${org}:2` })).created, false);
+  assert.equal((await jobs.enqueue("test.gone", { orgId: org })).created, false);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM jobs WHERE org_id = ?", org)).n, 0);
+  // System jobs (no organization) are unaffected.
+  assert.equal((await jobs.enqueue("test.gone", { key: `gone:system:${org}` })).created, true);
+});
+
 /* ---------- Scale readiness (docs/SCALE.md): fair queue, fair Claude turns, retention, indexes ---------- */
 
 test(`[${engine}] job queue: fair between companies (a flood from one doesn't hold up the others; at most 2 running each)`, async () => {

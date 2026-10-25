@@ -7,27 +7,40 @@
  * Concepts
  * - **Automatic notes switch** (`auto_meetings`): off until an Org Owner/Admin turns it on (Meetings page). It
  *   needs the organization connected to its Microsoft tenant (Settings → Microsoft sign-in) and the tenant's
- *   Microsoft admin to approve the transcript permission (`OnlineMeetingTranscript.Read.All`, plus Teams' application
- *   access policy: docs/RUNBOOKS.md → Automatic meeting notes). Teams must be set to record transcripts.
+ *   Microsoft admin to approve the transcript permissions (`OnlineMeetingTranscript.Read.All` for scheduled meetings,
+ *   `CallTranscripts.Read.All` for calls started with Meet now, plus Teams' application access policy:
+ *   docs/RUNBOOKS.md → Automatic meeting notes). Teams must be set to record transcripts.
+ * - **Two kinds of Teams call** (`graph_meetings.kind`), found and fetched through different Graph paths:
+ *   - `meeting`: a scheduled Teams meeting (an *online meeting*: subject, times, chat and invitees can be read).
+ *   - `adhoc`: an *ad hoc call*, e.g. **Meet now** pressed inside a group chat (the main case for teams that work in
+ *     group chats). Graph knows only the call id and its transcripts: no subject and no invite list. The chat it was
+ *     started from is read out of the transcript id (it embeds the chat's thread id), so a Meet now in a group's
+ *     linked chat lands in that group; otherwise the people who spoke (matched by name) count as its people.
+ *   Graph files an ad hoc transcript under the person who *started transcription*, so every group member who
+ *   signed in with Microsoft is polled. The Graph version for these paths is a setting (`ADHOC_GRAPH_VERSION`).
+ *   A missing `CallTranscripts.Read.All` only stops the ad hoc half: scheduled meetings keep working and the
+ *   Meetings page asks the admin to approve the new call transcripts permission.
  * - **Two ways to hear about a meeting**, both ending in the same `recordTranscript` (one row per transcript in
  *   `graph_meetings`, so a meeting found both ways is captured once):
- *   1. **Change notifications** (fast): one Graph subscription per organization on
- *      `communications/onlineMeetings/getAllTranscripts`. Graph POSTs to /api/graph/notifications when a
- *      transcript is ready. Graph first checks the address with a **validation token** (echoed back as plain
+ *   1. **Change notifications** (fast): two Graph subscriptions per organization, on
+ *      `communications/onlineMeetings/getAllTranscripts` and `communications/adhocCalls/getAllTranscripts`. Graph
+ *      POSTs to /api/graph/notifications when a transcript is ready. Graph first checks the address with a **validation token** (echoed back as plain
  *      text), and every notification carries our random **client state**, compared before anything is done.
  *      Subscriptions last at most ~3 days, so a recurring job **renews** them a day ahead and recreates any Graph
  *      dropped (404 on renewal, or a `subscriptionRemoved` lifecycle event at /api/graph/lifecycle).
  *   2. **Polling fallback** (safe): every 15 minutes, for each person in a group who signed in with Microsoft,
- *      Graph's `getAllTranscripts` lists transcripts of meetings they organized since the last check
- *      (`graph_poll_cursors`). Catches anything a notification missed (and works where Graph can't reach us,
- *      e.g. on a laptop).
+ *      Graph's `getAllTranscripts` lists transcripts of meetings they organized, and of ad hoc calls they
+ *      started, since the last check (`graph_poll_cursors`; ad hoc calls keep their own cursor, `adhoc:<oid>`, so
+ *      calls held before the call permission was approved are still found once it is). Catches anything a
+ *      notification missed (and works where Graph can't reach us, e.g. on a laptop).
  * - **Jobs** (lib/jobs.ts, registered in lib/job-kinds.ts), so every step runs once, retries and lands in the
  *   dead-letter list if it keeps failing: `meetings.fetch` (one per transcript: read the meeting, pick the group,
  *   download the transcript, check the plan, save the meeting) then `meetings.notes` (write the notes with Claude
  *   and post them to Teams once). Polling and subscription upkeep are recurring jobs. Payloads hold ids only.
  * - **Which group** (`pickGroup`): the group whose Teams chat is the meeting's own chat (Sidekick added to the
- *   meeting chat and assigned there); otherwise the group with the most of its people in the meeting (organizer,
- *   invitees), needing at least two of them. A tie waits for an Org Owner/Admin or the Team Lead to pick a group
+ *   meeting chat and assigned there, or the group chat a Meet now was started from); otherwise the group with the
+ *   most of its people in the meeting (organizer, invitees; for an ad hoc call the people who spoke), needing at
+ *   least two of them. A tie waits for an Org Owner/Admin or the Team Lead to pick a group
  *   (status `waiting`); a meeting that isn't any group's is skipped and nothing about it is kept but its ids.
  * - **Plan limits**: the meeting's length counts toward the month's meeting hours like an import; over the limit,
  *   paused AI, a read-only plan or a used-up AI credit (long meetings) skip the meeting with a plain reason shown
@@ -59,8 +72,19 @@ import { postMeetingNotes } from "./teams/bot";
 import { remindAfterMeeting } from "./reminders";
 import { BRAND } from "./brand";
 
-/** The Graph resource for every transcript in a tenant (one subscription per organization). */
+/** The Graph resource for every scheduled-meeting transcript in a tenant (one subscription per organization). */
 export const TRANSCRIPTS_RESOURCE = "communications/onlineMeetings/getAllTranscripts";
+/** The Graph resource for every ad hoc call transcript in a tenant (Meet now; needs `CallTranscripts.Read.All`). */
+export const ADHOC_TRANSCRIPTS_RESOURCE = "communications/adhocCalls/getAllTranscripts";
+/**
+ * The Graph version used for ad hoc call paths: "v1.0" (default) or "beta" (`SIDEKICK_GRAPH_ADHOC_VERSION`).
+ * Microsoft documents the adhocCalls APIs in v1.0, but its Teams transcripts overview says ad hoc calls work "only in
+ * beta" and its own sample uses beta; this switch lets the live server follow whichever the probe
+ * (app/scripts/probe-call-transcripts.mjs) shows actually lists Meet now transcripts, without a code change.
+ */
+export const ADHOC_GRAPH_VERSION = process.env.SIDEKICK_GRAPH_ADHOC_VERSION === "beta" ? "beta" : "v1.0";
+/** Which kind of Teams call a `graph_meetings` row is: a scheduled online meeting, or an ad hoc call (Meet now). */
+export type CallKind = "meeting" | "adhoc";
 /** How long a new or renewed subscription lasts. Graph allows up to 4,230 minutes for transcripts; stay below. */
 const SUBSCRIPTION_MINUTES = 4_200;
 /** Renew a subscription once it has less than this left (the hourly upkeep job then has many tries). */
@@ -76,7 +100,9 @@ const MAX_ORGANIZERS_PER_POLL = 200;
 export type GraphMeeting = {
   id: string;
   org_id: string;
+  /** The online meeting id (kind `meeting`) or the ad hoc call id (kind `adhoc`). */
   online_meeting_id: string;
+  kind: CallKind;
   transcript_id: string;
   organizer_oid: string;
   via: "notification" | "poll";
@@ -213,26 +239,47 @@ export function decodeMeetingId(meetingId: string): { organizerOid: string | nul
   }
 }
 
-/** Graph ids are base64-ish; anything else (quotes, slashes, very long) is refused before it's stored or used in a path. */
-const isGraphId = (s: unknown): s is string => typeof s === "string" && s.length > 0 && s.length <= 512 && /^[\w\-=+.]+$/.test(s);
+/**
+ * The chat thread id an ad hoc call's transcript id carries, or null. Ad hoc transcript ids are base64 of a few
+ * bytes, then "19:<chat>@thread.v2" (group chats; "@unq.gbl.spaces" for one-to-one chats), then "#<call id>-…".
+ * Used to tell which Teams chat a Meet now call was started from (Graph's ad hoc call has no chat field).
+ */
+export function decodeTranscriptThread(transcriptId: string): string | null {
+  try {
+    const text = Buffer.from(transcriptId, "base64").toString("latin1");
+    const m = /19:[\w.:-]+?@(?:thread\.v2|thread\.skype|unq\.gbl\.spaces)/.exec(text);
+    return m ? m[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Graph ids are base64 (with "/" possible in transcript ids) or GUIDs; anything else (quotes, spaces, very long) is
+ * refused before it's stored. Ids are always URL-encoded when put in a Graph path.
+ */
+const isGraphId = (s: unknown): s is string => typeof s === "string" && s.length > 0 && s.length <= 512 && /^[\w\-=+./]+$/.test(s);
 /** Microsoft account ids are GUIDs. */
 const isOid = (s: unknown): s is string => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /**
- * Notes that a transcript exists for a meeting and queues its `meetings.fetch` job, once per transcript per
- * organization (the row is unique and the job key is the transcript id). Only ids are stored at this point.
- * Returns true when it was new. Ignored when automatic notes are off.
+ * Notes that a transcript exists for a meeting or ad hoc call and queues its `meetings.fetch` job, once per
+ * transcript per organization (the row is unique and the job key is the transcript id). Only ids are stored at
+ * this point. `meetingId` is the online meeting id, or the call id when `kind` is `adhoc` (then `organizerOid`,
+ * the person who started the call, is required: a call id doesn't contain it). Returns true when it was new.
+ * Ignored when automatic notes are off. Called by notifications and polling only.
  */
-export async function recordTranscript(orgId: string, t: { meetingId: string; transcriptId: string; organizerOid?: string | null; via: "notification" | "poll" }): Promise<boolean> {
+export async function recordTranscript(orgId: string, t: { meetingId: string; transcriptId: string; organizerOid?: string | null; via: "notification" | "poll"; kind?: CallKind }): Promise<boolean> {
+  const kind: CallKind = t.kind === "adhoc" ? "adhoc" : "meeting";
   if (!isGraphId(t.meetingId) || !isGraphId(t.transcriptId)) return false;
   if (!(await autoNotesOn(orgId))) return false;
-  const organizer = isOid(t.organizerOid) ? t.organizerOid.toLowerCase() : decodeMeetingId(t.meetingId).organizerOid;
+  const organizer = isOid(t.organizerOid) ? t.organizerOid.toLowerCase() : kind === "meeting" ? decodeMeetingId(t.meetingId).organizerOid : null;
   if (!organizer) return false;
   const id = newId();
   const res = await run(
-    `INSERT INTO graph_meetings (id, org_id, online_meeting_id, transcript_id, organizer_oid, via, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?) ON CONFLICT (org_id, transcript_id) DO NOTHING`,
-    id, orgId, t.meetingId, t.transcriptId, organizer, t.via, now(), now(),
+    `INSERT INTO graph_meetings (id, org_id, online_meeting_id, kind, transcript_id, organizer_oid, via, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?) ON CONFLICT (org_id, transcript_id) DO NOTHING`,
+    id, orgId, t.meetingId, kind, t.transcriptId, organizer, t.via, now(), now(),
   );
   if (!res.changes) return false;
   await enqueue("meetings.fetch", { orgId, payload: { id }, key: `meeting-fetch:${orgId}:${t.transcriptId}` });
@@ -253,13 +300,24 @@ async function trustedSubscription(n: { subscriptionId?: unknown; clientState?: 
   return sub && sameSecret(sub.client_state, n.clientState) ? sub : null;
 }
 
-/** The meeting, transcript and (when present) organizer ids in a notification's resource path. */
-export function parseTranscriptResource(resource: unknown): { meetingId: string; transcriptId: string; organizerOid: string | null } | null {
+/**
+ * The meeting (or call), transcript and (when present) organizer ids in a notification's resource path, and which
+ * kind it is. Graph writes both `onlineMeetings('…')/transcripts('…')` and `adhocCalls/…/transcripts/…` styles
+ * (and `adhoccalls` in lower case), so all are accepted.
+ */
+export function parseTranscriptResource(resource: unknown): { meetingId: string; transcriptId: string; organizerOid: string | null; kind: CallKind } | null {
   if (typeof resource !== "string" || resource.length > 2000) return null;
-  const m = /onlineMeetings\('([^']+)'\)\/transcripts\('([^']+)'\)/i.exec(resource) ?? /onlineMeetings\/([^/]+)\/transcripts\/([^/?]+)/i.exec(resource);
+  const ids = (name: string) =>
+    new RegExp(`${name}\\('([^']+)'\\)\\/transcripts\\('([^']+)'\\)`, "i").exec(resource) ??
+    new RegExp(`${name}\\/([^/(]+)\\/transcripts\\('([^']+)'\\)`, "i").exec(resource) ??
+    new RegExp(`${name}\\('([^']+)'\\)\\/transcripts\\/([^/?(]+)`, "i").exec(resource) ??
+    new RegExp(`${name}\\/([^/(]+)\\/transcripts\\/([^/?(]+)`, "i").exec(resource);
+  const meeting = ids("onlineMeetings");
+  const adhoc = meeting ? null : ids("adhocCalls");
+  const m = meeting ?? adhoc;
   if (!m) return null;
   const user = /users\('([^']+)'\)/i.exec(resource) ?? /users\/([^/]+)\//i.exec(resource);
-  return { meetingId: m[1], transcriptId: m[2], organizerOid: user && isOid(user[1]) ? user[1] : null };
+  return { meetingId: m[1], transcriptId: m[2], organizerOid: user && isOid(user[1]) ? user[1] : null, kind: adhoc ? "adhoc" : "meeting" };
 }
 
 /**
@@ -345,11 +403,19 @@ export function notificationBase(): string | null {
   return portalUrl("");
 }
 
+/** The transcript subscriptions Sidekick keeps per organization, and the refusal message for each. */
+const SUBSCRIBED: { resource: string; denied: () => string }[] = [
+  { resource: TRANSCRIPTS_RESOURCE, denied: () => TRANSCRIPT_DENIED },
+  { resource: ADHOC_TRANSCRIPTS_RESOURCE, denied: () => ADHOC_DENIED },
+];
+
 /**
- * Keeps one live transcript subscription for the organization while automatic notes are on: renews it when it
- * has less than a day left (a 404 means Graph dropped it: a new one is made), creates one when there's none, and
- * deletes it when the switch is off. Returns what it did. Consent problems are recorded for the Meetings page and
- * don't fail the job (polling reports the same); throttling and network errors do (retried).
+ * Keeps one live subscription per transcript resource (scheduled meetings, ad hoc calls) for the organization
+ * while automatic notes are on: renews one when it has less than a day left (a 404 means Graph dropped it: a new
+ * one is made), creates one when there's none, and deletes them when the switch is off. Each resource is handled
+ * on its own, so a missing call transcripts permission never stops the scheduled-meeting subscription. Returns
+ * what it did. Consent problems are recorded for the Meetings page and don't fail the job (polling reports the
+ * same); throttling and network errors do (retried). Called by the `meetings.subscription` job only.
  */
 export async function ensureSubscription(orgId: string, at = new Date()): Promise<{ created: number; renewed: number; removed: number }> {
   const out = { created: 0, renewed: 0, removed: 0 };
@@ -357,65 +423,81 @@ export async function ensureSubscription(orgId: string, at = new Date()): Promis
   if (!entraConfigured()) return out;
   const on = await autoNotesOn(orgId);
   const tenant = await tenantOfOrg(orgId);
-  const subs = await all<{ id: string; tenant_id: string; expires_at: string }>("SELECT id, tenant_id, expires_at FROM graph_subscriptions WHERE org_id = ?", orgId);
+  const subs = await all<{ id: string; tenant_id: string; resource: string; expires_at: string }>("SELECT id, tenant_id, resource, expires_at FROM graph_subscriptions WHERE org_id = ?", orgId);
   const base = notificationBase();
-  // Off, disconnected from Microsoft, or moved to another tenant: remove what's there (best effort).
+  // Off, disconnected from Microsoft, moved to another tenant, or a resource no longer used: remove (best effort).
   for (const s of subs) {
-    if (on && tenant === s.tenant_id && base) continue;
+    if (on && tenant === s.tenant_id && base && SUBSCRIBED.some((r) => r.resource === s.resource)) continue;
     await span("microsoft", "Remove a Microsoft Graph subscription", () => graphCall(s.tenant_id, "DELETE", `/v1.0/subscriptions/${encodeURIComponent(s.id)}`)).catch((e) => console.error("Couldn't remove the Graph subscription", e));
     await run("DELETE FROM graph_subscriptions WHERE id = ?", s.id);
     out.removed++;
   }
   if (!on || !tenant || !base) return out;
   const expiry = new Date(at.getTime() + SUBSCRIPTION_MINUTES * 60_000).toISOString();
-  try {
-    const live = subs.filter((s) => s.tenant_id === tenant);
-    for (const s of live) {
-      if (new Date(s.expires_at).getTime() - at.getTime() > RENEW_BEFORE_MS) return out;
-      const renewed = await span("microsoft", "Renew the Microsoft Graph subscription", () =>
-        graphCall<{ expirationDateTime?: string }>(tenant, "PATCH", `/v1.0/subscriptions/${encodeURIComponent(s.id)}`, { body: { expirationDateTime: expiry } }),
-      );
-      if (renewed) {
-        await run("UPDATE graph_subscriptions SET expires_at = ?, renewed_at = ? WHERE id = ?", renewed.expirationDateTime ?? expiry, now(), s.id);
-        out.renewed++;
-        return out;
-      }
-      // 404: Graph no longer has it (expired or removed). Make a new one below.
-      await run("DELETE FROM graph_subscriptions WHERE id = ?", s.id);
+  let denied: string | null = null;
+  for (const { resource, denied: deniedMessage } of SUBSCRIBED) {
+    try {
+      const done = await keepSubscription(orgId, tenant, resource, deniedMessage(), subs.filter((s) => s.tenant_id === tenant && s.resource === resource), base, expiry, at);
+      if (done === "renewed") out.renewed++;
+      if (done === "created") out.created++;
+    } catch (e) {
+      if (!(e instanceof ConsentNeededError)) throw e;
+      // The first refusal is the one to fix first (scheduled meetings come before ad hoc calls).
+      denied ??= e.message;
     }
-    const clientState = crypto.randomBytes(32).toString("base64url");
-    const made = await span("microsoft", "Create a Microsoft Graph subscription", () =>
-      graphCall<{ id?: string; expirationDateTime?: string }>(tenant, "POST", "/v1.0/subscriptions", {
-        body: {
-          changeType: "created",
-          notificationUrl: `${base}/api/graph/notifications`,
-          lifecycleNotificationUrl: `${base}/api/graph/lifecycle`,
-          resource: TRANSCRIPTS_RESOURCE,
-          expirationDateTime: expiry,
-          clientState,
-          latestSupportedTlsVersion: "v1_2",
-        },
-        deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES,
-      }),
-    );
-    if (!made?.id || !isGraphId(made.id)) throw new HttpError(502, "Microsoft Graph didn't confirm the meeting subscription.");
-    await run(
-      "INSERT INTO graph_subscriptions (id, org_id, tenant_id, resource, client_state, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      made.id, orgId, tenant, TRANSCRIPTS_RESOURCE, clientState, made.expirationDateTime ?? expiry, now(),
-    );
-    out.created++;
-  } catch (e) {
-    if (e instanceof ConsentNeededError) {
-      await noteCheck(orgId, e.message);
-      return out;
-    }
-    throw e;
   }
+  if (denied) await noteCheck(orgId, denied);
   return out;
+}
+
+/** Renews or creates the organization's subscription on one transcript resource; "kept" when nothing was due. */
+async function keepSubscription(
+  orgId: string, tenant: string, resource: string, deniedMessage: string,
+  live: { id: string; expires_at: string }[], base: string, expiry: string, at: Date,
+): Promise<"kept" | "renewed" | "created"> {
+  for (const s of live) {
+    if (new Date(s.expires_at).getTime() - at.getTime() > RENEW_BEFORE_MS) return "kept";
+    const renewed = await span("microsoft", "Renew the Microsoft Graph subscription", () =>
+      graphCall<{ expirationDateTime?: string }>(tenant, "PATCH", `/v1.0/subscriptions/${encodeURIComponent(s.id)}`, { body: { expirationDateTime: expiry }, deniedMessage, deniedCodes: TRANSCRIPT_DENIED_CODES }),
+    );
+    if (renewed) {
+      await run("UPDATE graph_subscriptions SET expires_at = ?, renewed_at = ? WHERE id = ?", renewed.expirationDateTime ?? expiry, now(), s.id);
+      return "renewed";
+    }
+    // 404: Graph no longer has it (expired or removed). Make a new one below.
+    await run("DELETE FROM graph_subscriptions WHERE id = ?", s.id);
+  }
+  const clientState = crypto.randomBytes(32).toString("base64url");
+  const made = await span("microsoft", "Create a Microsoft Graph subscription", () =>
+    graphCall<{ id?: string; expirationDateTime?: string }>(tenant, "POST", "/v1.0/subscriptions", {
+      body: {
+        changeType: "created",
+        notificationUrl: `${base}/api/graph/notifications`,
+        lifecycleNotificationUrl: `${base}/api/graph/lifecycle`,
+        resource,
+        expirationDateTime: expiry,
+        clientState,
+        latestSupportedTlsVersion: "v1_2",
+      },
+      deniedMessage, deniedCodes: TRANSCRIPT_DENIED_CODES,
+    }), { resource: resource === ADHOC_TRANSCRIPTS_RESOURCE ? "adhoc" : "meeting" },
+  );
+  if (!made?.id || !isGraphId(made.id)) throw new HttpError(502, "Microsoft Graph didn't confirm the meeting subscription.");
+  await run(
+    "INSERT INTO graph_subscriptions (id, org_id, tenant_id, resource, client_state, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    made.id, orgId, tenant, resource, clientState, made.expirationDateTime ?? expiry, now(),
+  );
+  return "created";
 }
 
 /** The plain message when Microsoft refuses transcript access (consent or Teams' access policy missing). */
 export const TRANSCRIPT_DENIED = `${BRAND.name} can't read your Teams meeting transcripts yet. A Microsoft admin of your organization needs to approve the meeting transcripts permission and allow ${BRAND.name} in Teams (see "Automatic notes" in the help center).`;
+
+/**
+ * The plain message when Microsoft refuses ad hoc call transcripts (Meet now) while scheduled meetings may work: the
+ * tenant approved Sidekick before `CallTranscripts.Read.All` was added, so its Microsoft admin approves again.
+ */
+export const ADHOC_DENIED = `${BRAND.name} can't read transcripts of Teams calls started with Meet now (for example in a group chat) yet. A Microsoft admin of your organization needs to approve the new call transcripts permission (Users & access → Approve ${BRAND.name} for your organization). Scheduled Teams meetings aren't affected.`;
 
 /**
  * Messages for Graph refusals that need a tenant switch rather than a permission: since Microsoft's 2026 change,
@@ -432,13 +514,40 @@ export const TRANSCRIPT_DENIED_CODES: Record<string, string> = {
 /* Polling fallback (job meetings.poll.org)                            */
 /* ------------------------------------------------------------------ */
 
-/** A transcript as Graph lists it. */
-type GraphTranscript = { id?: string; meetingId?: string; createdDateTime?: string; endDateTime?: string; meetingOrganizer?: { user?: { id?: string } } };
+/** A transcript as Graph lists it (`callId` is set for ad hoc calls, whose `meetingId` is null). */
+type GraphTranscript = { id?: string; meetingId?: string | null; callId?: string | null; createdDateTime?: string; endDateTime?: string; meetingOrganizer?: { user?: { id?: string } } };
+
+/** The cursor key for one organizer's ad hoc calls in `graph_poll_cursors` (scheduled meetings use the bare oid). */
+const adhocCursor = (oid: string) => `adhoc:${oid}`;
 
 /**
- * Asks Graph for transcripts of meetings organized by the organization's people (everyone in a group who has
- * signed in with Microsoft) since the last poll, and records each one. Progress is saved per organizer, so a
- * throttled run picks up where it stopped. Returns how many new transcripts it found and how many people it checked.
+ * Lists every page of one `getAllTranscripts` address and records each transcript. Next pages come as full Graph
+ * addresses; only the path is used, always against Graph itself. Returns how many were new.
+ */
+async function listTranscripts(orgId: string, tenant: string, first: string, kind: CallKind, organizer: string, deniedMessage: string): Promise<number> {
+  let found = 0;
+  let path: string | null = first;
+  for (let page = 0; path && page < 20; page++) {
+    const res: { value?: GraphTranscript[]; "@odata.nextLink"?: string } | null = await span("microsoft", kind === "adhoc" ? "List Teams call transcripts" : "List Teams meeting transcripts", () =>
+      graphCall<{ value?: GraphTranscript[]; "@odata.nextLink"?: string }>(tenant, "GET", path!, { deniedMessage, deniedCodes: TRANSCRIPT_DENIED_CODES }),
+    );
+    for (const t of res?.value ?? []) {
+      const meetingId = kind === "adhoc" ? t.callId : t.meetingId;
+      if (t.id && meetingId && (await recordTranscript(orgId, { meetingId, transcriptId: t.id, organizerOid: t.meetingOrganizer?.user?.id ?? organizer, via: "poll", kind }))) found++;
+    }
+    const next: string | undefined = res?.["@odata.nextLink"];
+    path = next ? next.replace(/^https?:\/\/[^/]+/i, "") : null;
+  }
+  return found;
+}
+
+/**
+ * Asks Graph for transcripts of meetings organized, and ad hoc calls (Meet now) started, by the organization's
+ * people (everyone in a group who has signed in with Microsoft) since the last poll, and records each one.
+ * Progress is saved per organizer and kind, so a throttled run picks up where it stopped. When Microsoft refuses
+ * the ad hoc calls (call transcripts permission not approved yet) the scheduled meetings are still polled, the
+ * Meetings page says what to approve, and the ad hoc cursor stays put so those calls are found once approved.
+ * Returns how many new transcripts it found and how many people it checked. Called by `meetings.poll.org` only.
  */
 export async function pollOrg(orgId: string, at = new Date()): Promise<{ found: number; organizers: number }> {
   if (!entraConfigured() || !(await autoNotesOn(orgId))) return { found: 0, organizers: 0 };
@@ -456,31 +565,35 @@ export async function pollOrg(orgId: string, at = new Date()): Promise<{ found: 
       ORDER BY c.polled_until`,
     orgId,
   );
+  const adhocCursors = new Map((await all<{ organizer_oid: string; polled_until: string }>(
+    "SELECT organizer_oid, polled_until FROM graph_poll_cursors WHERE org_id = ? AND organizer_oid LIKE 'adhoc:%'", orgId,
+  )).map((c) => [c.organizer_oid, c.polled_until]));
+  const saveCursor = (key: string, to: string) => run(
+    `INSERT INTO graph_poll_cursors (org_id, organizer_oid, polled_until) VALUES (?, ?, ?)
+     ON CONFLICT (org_id, organizer_oid) DO UPDATE SET polled_until = excluded.polled_until`,
+    orgId, key, to,
+  );
+  const firstFrom = Math.max(new Date(since ?? 0).getTime() - 3600_000, at.getTime() - FIRST_POLL_LOOKBACK_MS);
+  const fromCursor = (polledUntil: string | null | undefined) => new Date(polledUntil ? new Date(polledUntil).getTime() - POLL_OVERLAP_MS : firstFrom).toISOString();
   let found = 0;
   let checked = 0;
+  let adhocDenied: string | null = null;
   try {
     for (const o of organizers.slice(0, MAX_ORGANIZERS_PER_POLL)) {
       if (!isOid(o.oid)) continue;
-      const firstFrom = Math.max(new Date(since ?? 0).getTime() - 3600_000, at.getTime() - FIRST_POLL_LOOKBACK_MS);
-      const from = new Date(o.polled_until ? new Date(o.polled_until).getTime() - POLL_OVERLAP_MS : firstFrom).toISOString();
       const to = at.toISOString();
-      let path: string | null = `/v1.0/users/${o.oid}/onlineMeetings/getAllTranscripts(meetingOrganizerUserId='${o.oid}',startDateTime=${from},endDateTime=${to})`;
-      for (let page = 0; path && page < 20; page++) {
-        const res: { value?: GraphTranscript[]; "@odata.nextLink"?: string } | null = await span("microsoft", "List Teams meeting transcripts", () =>
-          graphCall<{ value?: GraphTranscript[]; "@odata.nextLink"?: string }>(tenant, "GET", path!, { deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }),
-        );
-        for (const t of res?.value ?? []) {
-          if (t.id && t.meetingId && (await recordTranscript(orgId, { meetingId: t.meetingId, transcriptId: t.id, organizerOid: t.meetingOrganizer?.user?.id ?? o.oid, via: "poll" }))) found++;
+      found += await listTranscripts(orgId, tenant, `/v1.0/users/${o.oid}/onlineMeetings/getAllTranscripts(meetingOrganizerUserId='${o.oid}',startDateTime=${fromCursor(o.polled_until)},endDateTime=${to})`, "meeting", o.oid, TRANSCRIPT_DENIED);
+      await saveCursor(o.oid, to);
+      if (!adhocDenied) {
+        try {
+          found += await listTranscripts(orgId, tenant, `/${ADHOC_GRAPH_VERSION}/users/${o.oid}/adhocCalls/getAllTranscripts(userId='${o.oid}',startDateTime=${fromCursor(adhocCursors.get(adhocCursor(o.oid)))},endDateTime=${to})`, "adhoc", o.oid, ADHOC_DENIED);
+          await saveCursor(adhocCursor(o.oid), to);
+        } catch (e) {
+          // Not approved (or Teams' transcript switch off): stop asking about calls this round, keep the meetings.
+          if (!(e instanceof ConsentNeededError)) throw e;
+          adhocDenied = e.message;
         }
-        // Next pages come as full Graph addresses; only the path is used, always against Graph itself.
-        const next: string | undefined = res?.["@odata.nextLink"];
-        path = next ? next.replace(/^https?:\/\/[^/]+/i, "") : null;
       }
-      await run(
-        `INSERT INTO graph_poll_cursors (org_id, organizer_oid, polled_until) VALUES (?, ?, ?)
-         ON CONFLICT (org_id, organizer_oid) DO UPDATE SET polled_until = excluded.polled_until`,
-        orgId, o.oid, to,
-      );
       checked++;
     }
   } catch (e) {
@@ -489,7 +602,7 @@ export async function pollOrg(orgId: string, at = new Date()): Promise<{ found: 
     if (e instanceof ConsentNeededError) return { found, organizers: checked };
     throw e;
   }
-  await noteCheck(orgId, null);
+  await noteCheck(orgId, adhocDenied);
   return { found, organizers: checked };
 }
 
@@ -572,14 +685,89 @@ async function setStatus(id: string, from: GraphMeeting["status"][], to: GraphMe
 }
 
 /** "Contoso weekly" as a short, single-line title (meeting subjects can be long or empty). */
-const cleanTitle = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, 200) || "Teams meeting";
+const cleanTitle = (s: string | null | undefined, fallback = "Teams meeting") => (s ?? "").replace(/\s+/g, " ").trim().slice(0, 200) || fallback;
+
+/** An ad hoc call's transcript as Graph describes it (its times; the call itself has no subject or invitees). */
+type GraphCallTranscript = { createdDateTime?: string | null; endDateTime?: string | null };
+
+/** What `fetchTranscript` needs to know about a meeting or call, whichever kind it is. */
+type CallInfo = {
+  title: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  /** The Teams chat the meeting or call belongs to (its thread id), if known. */
+  chatId: string | null;
+  /** Invitees' Microsoft account ids (scheduled meetings); null for ad hoc calls (worked out from the speakers). */
+  attendeeOids: string[] | null;
+  /** Whether anyone from outside the organization took part (guests, phone, another tenant). */
+  guests: boolean;
+  /** The Graph path of the transcript (its `/content` is downloaded). */
+  transcriptPath: string;
+};
 
 /**
- * Runs one captured transcript: reads the meeting (title, times, chat, people), picks the group, downloads the
+ * Reads what Graph knows about a captured row's meeting or call: for a scheduled meeting the online meeting
+ * (subject, times, chat, invitees); for an ad hoc call the transcript's own times, the chat its id embeds, and
+ * that chat's name as the title ("Wave 2 cutover call") when Sidekick knows the chat. Null when Graph no longer
+ * has it (404).
+ */
+async function readCall(orgId: string, tenant: string, row: GraphMeeting): Promise<CallInfo | null> {
+  if (row.kind === "adhoc") {
+    const transcriptPath = `/${ADHOC_GRAPH_VERSION}/users/${row.organizer_oid}/adhocCalls/${encodeURIComponent(row.online_meeting_id)}/transcripts/${encodeURIComponent(row.transcript_id)}`;
+    const t = await span("microsoft", "Read the Teams call transcript", () => graphCall<GraphCallTranscript>(tenant, "GET", transcriptPath, { deniedMessage: ADHOC_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }));
+    if (!t) return null;
+    const chatId = decodeTranscriptThread(row.transcript_id);
+    const chat = chatId ? await get<{ name: string | null }>("SELECT name FROM teams_conversations WHERE id = ? AND org_id = ? AND workspace_id IS NOT NULL", chatId, orgId) : undefined;
+    return {
+      title: chat?.name ? cleanTitle(`${chat.name} call`) : "Teams call",
+      startedAt: t.createdDateTime ?? null, endedAt: t.endDateTime ?? null, chatId, attendeeOids: null,
+      // Graph doesn't list an ad hoc call's people, so guests can't be told apart: treated as none.
+      guests: false, transcriptPath,
+    };
+  }
+  const base = `/v1.0/users/${row.organizer_oid}/onlineMeetings/${encodeURIComponent(row.online_meeting_id)}`;
+  const meeting = await span("microsoft", "Read the Teams meeting", () => graphCall<GraphOnlineMeeting>(tenant, "GET", base, { deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }));
+  if (!meeting) return null;
+  const attendees = meeting.participants?.attendees ?? [];
+  return {
+    title: cleanTitle(meeting.subject),
+    startedAt: meeting.startDateTime ?? null, endedAt: meeting.endDateTime ?? null,
+    chatId: meeting.chatInfo?.threadId ?? decodeMeetingId(row.online_meeting_id).threadId,
+    attendeeOids: attendees.map((a) => a.identity?.user?.id ?? "").filter(Boolean),
+    // Client guests: anyone from another Microsoft organization (or a guest/phone) in the meeting.
+    guests: attendees.some((a) => {
+      const u = a.identity?.user;
+      return Boolean(a.identity?.guest || a.identity?.phone || (u?.tenantId && u.tenantId.toLowerCase() !== tenant.toLowerCase()));
+    }),
+    transcriptPath: `${base}/transcripts/${encodeURIComponent(row.transcript_id)}`,
+  };
+}
+
+/**
+ * The Microsoft account ids of the organization's people who spoke in a transcript (WebVTT `<v Name>` voices),
+ * matched by their name in Sidekick. A name two people share is left out. Used for ad hoc calls, whose people
+ * Graph doesn't list.
+ */
+export async function speakerOids(orgId: string, vtt: string): Promise<string[]> {
+  const names = [...new Set([...vtt.matchAll(/<v\s+([^>]{1,120})>/g)].map((m) => m[1].trim().toLowerCase()).filter(Boolean))].slice(0, 100);
+  if (!names.length) return [];
+  const rows = await all<{ name: string; oid: string }>(
+    `SELECT LOWER(name) AS name, LOWER(entra_oid) AS oid FROM users WHERE org_id = ? AND entra_oid IS NOT NULL AND LOWER(name) IN (${names.map(() => "?").join(", ")})`,
+    orgId, ...names,
+  );
+  const byName = new Map<string, Set<string>>();
+  for (const r of rows) byName.set(r.name, (byName.get(r.name) ?? new Set()).add(r.oid));
+  return [...byName.values()].filter((oids) => oids.size === 1).map((oids) => [...oids][0]);
+}
+
+/**
+ * Runs one captured transcript: reads the meeting or ad hoc call (`readCall`), picks the group, downloads the
  * transcript, checks the plan (meeting hours, paused AI, read-only plan, AI credit) and saves it as a meeting in
- * that group (status Processing), then queues `meetings.notes`. Safe to run twice: only a `queued` row is worked
- * on, and the switch to `captured` is a compare-and-set. A transcript Graph hasn't finished yet (404) throws, so
- * the job tries again a little later. Returns counts for the job.
+ * that group (status Processing), then queues `meetings.notes`. For an ad hoc call the group is the linked chat
+ * it was started from, else the transcript is downloaded first and its speakers count as the call's people.
+ * Safe to run twice: only a `queued` row is worked on, and the switch to `captured` is a compare-and-set. A
+ * transcript Graph hasn't finished yet (404) throws, so the job tries again a little later. Returns counts for
+ * the job. Called by the `meetings.fetch` job only.
  */
 export async function fetchTranscript(orgId: string, rowId: string): Promise<{ captured: number; skipped: number; waiting: number }> {
   const none = { captured: 0, skipped: 0, waiting: 0 };
@@ -598,24 +786,37 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
   if (!(await autoNotesOn(orgId))) return skip("Automatic notes were turned off.");
   const tenant = await tenantOfOrg(orgId);
   if (!tenant) return skip(`${BRAND.name} isn't connected to your Microsoft 365 organization any more.`);
-  const base = `/v1.0/users/${row.organizer_oid}/onlineMeetings/${encodeURIComponent(row.online_meeting_id)}`;
-  const meeting = await span("microsoft", "Read the Teams meeting", () => graphCall<GraphOnlineMeeting>(tenant, "GET", base, { deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }));
-  if (!meeting) return skip("Microsoft Teams no longer has this meeting.");
-  const title = cleanTitle(meeting.subject);
-  const timing = { title, started_at: meeting.startDateTime ?? null, ended_at: meeting.endDateTime ?? null };
+  const adhoc = row.kind === "adhoc";
+  const call = await readCall(orgId, tenant, row);
+  if (!call) return skip(adhoc ? "Microsoft Teams no longer has this call." : "Microsoft Teams no longer has this meeting.");
+  const { title } = call;
+  const timing = { title, started_at: call.startedAt, ended_at: call.endedAt };
+
+  // The transcript, downloaded once (an ad hoc call may need it to pick the group).
+  let vttText: string | null | undefined;
+  const download = async () => {
+    if (vttText === undefined) {
+      vttText = await span("microsoft", adhoc ? "Download the call transcript" : "Download the meeting transcript", () =>
+        graphCall<string>(tenant, "GET", `${call.transcriptPath}/content?$format=text/vtt`, { raw: true, deniedMessage: adhoc ? ADHOC_DENIED : TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }),
+      );
+    }
+    if (vttText === null) throw new HttpError(503, "The transcript isn't ready in Microsoft Teams yet. It will be fetched again shortly.");
+    return vttText;
+  };
 
   // The group: preset by someone who picked it (a waiting meeting), else worked out from the chat and the people.
   let workspaceId = row.workspace_id;
   if (!workspaceId) {
-    const attendees = (meeting.participants?.attendees ?? []).map((a) => a.identity?.user?.id ?? "").filter(Boolean);
-    const picked = await pickGroup(orgId, { chatId: meeting.chatInfo?.threadId ?? decodeMeetingId(row.online_meeting_id).threadId, organizerOid: row.organizer_oid, attendeeOids: attendees });
+    let picked = await pickGroup(orgId, { chatId: call.chatId, organizerOid: row.organizer_oid, attendeeOids: call.attendeeOids ?? [] });
+    // An ad hoc call outside a linked chat: the people who spoke are its people.
+    if (!picked && call.attendeeOids === null) picked = await pickGroup(orgId, { chatId: null, organizerOid: row.organizer_oid, attendeeOids: await speakerOids(orgId, await download()) });
     if (!picked) {
       // Not any group's meeting: keep only the ids (no title), so nothing about other people's meetings is stored.
-      await setStatus(row.id, ["queued"], "skipped", { reason: "Not a meeting of one group's people." });
+      await setStatus(row.id, ["queued"], "skipped", { reason: adhoc ? "Not a call of one group's people." : "Not a meeting of one group's people." });
       return { ...none, skipped: 1 };
     }
     if ("candidates" in picked) {
-      await setStatus(row.id, ["queued"], "waiting", { ...timing, candidates: JSON.stringify(picked.candidates), reason: "People from several groups were in this meeting. Pick the group it belongs to." });
+      await setStatus(row.id, ["queued"], "waiting", { ...timing, candidates: JSON.stringify(picked.candidates), reason: `People from several groups were in this ${adhoc ? "call" : "meeting"}. Pick the group it belongs to.` });
       return { ...none, waiting: 1 };
     }
     workspaceId = picked.workspaceId;
@@ -632,15 +833,12 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
     throw e;
   }
 
-  const vtt = await span("microsoft", "Download the meeting transcript", () =>
-    graphCall<string>(tenant, "GET", `${base}/transcripts/${encodeURIComponent(row.transcript_id)}/content?$format=text/vtt`, { raw: true, deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }),
-  );
-  if (vtt === null) throw new HttpError(503, "The transcript isn't ready in Microsoft Teams yet. It will be fetched again shortly.");
+  const vtt = await download();
   const transcript = (vtt.trimStart().startsWith("WEBVTT") ? vttToTranscript(vtt) : vtt).trim();
-  if (!transcript) return skip("The meeting's transcript was empty.", withGroup);
+  if (!transcript) return skip(`The ${adhoc ? "call" : "meeting"}'s transcript was empty.`, withGroup);
   if (transcript.length > MAX_TRANSCRIPT_CHARS) return skip("The transcript is longer than about five hours of talk, so no notes were written.", withGroup);
 
-  const spanMin = meeting.startDateTime && meeting.endDateTime ? Math.ceil((Date.parse(meeting.endDateTime) - Date.parse(meeting.startDateTime)) / 60_000) : NaN;
+  const spanMin = call.startedAt && call.endedAt ? Math.ceil((Date.parse(call.endedAt) - Date.parse(call.startedAt)) / 60_000) : NaN;
   const minutes = Number.isFinite(spanMin) && spanMin > 0 && spanMin < 24 * 60 ? spanMin : transcriptMinutes(transcript);
   try {
     await assertCanAdd(orgId, "meetingHours", minutes / 60);
@@ -654,27 +852,22 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
     throw e;
   }
 
-  // Client guests: anyone from another Microsoft organization (or a guest/phone) in the meeting.
-  const guests = (meeting.participants?.attendees ?? []).some((a) => {
-    const u = a.identity?.user;
-    return Boolean(a.identity?.guest || a.identity?.phone || (u?.tenantId && u.tenantId.toLowerCase() !== tenant.toLowerCase()));
-  });
   // A second transcript of the same meeting (transcription stopped and started again) is a part of its own.
-  const earlier = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM graph_meetings WHERE org_id = ? AND online_meeting_id = ? AND meeting_id IS NOT NULL", orgId, row.online_meeting_id))?.n ?? 0);
+  const earlier = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM graph_meetings WHERE org_id = ? AND online_meeting_id = ? AND kind = ? AND meeting_id IS NOT NULL", orgId, row.online_meeting_id, row.kind))?.n ?? 0);
   const meetingTitle = earlier ? `${title} (part ${earlier + 1})` : title;
-  const heldAt = (meeting.startDateTime ?? now()).slice(0, 10);
+  const heldAt = (call.startedAt ?? now()).slice(0, 10);
   const meetingId = newId();
   const saved = await tx(async () => {
     if (!(await setStatus(row.id, ["queued"], "captured", { ...withGroup, meeting_id: meetingId, reason: null }))) return false;
     await run(
       `INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at, duration_min, source, graph_meeting_id)
        VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?, ?, 'teams', ?)`,
-      meetingId, orgId, workspaceId, meetingTitle, heldAt, guests ? 1 : 0, transcript, "Microsoft Teams", now(), minutes, row.id,
+      meetingId, orgId, workspaceId, meetingTitle, heldAt, call.guests ? 1 : 0, transcript, "Microsoft Teams", now(), minutes, row.id,
     );
     return true;
   });
   if (!saved) return none;
-  await auditAsSidekick(orgId, `Captured the Teams meeting “${meetingTitle}” (${minutes} min)`, "Data", workspaceId);
+  await auditAsSidekick(orgId, `Captured the Teams ${adhoc ? "call" : "meeting"} “${meetingTitle}” (${minutes} min)`, "Data", workspaceId);
   await enqueue("meetings.notes", { orgId, workspaceId, payload: { meetingId }, key: `meeting-notes:${meetingId}` });
   return { ...none, captured: 1 };
 }

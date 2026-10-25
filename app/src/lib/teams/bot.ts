@@ -55,7 +55,7 @@ import { CHAT_FOLLOWUP_MINUTES } from "../conversations";
 import { recordFeedback } from "../feedback";
 import { failureReason, span, traceFailed, traceScope, withTrace } from "../trace";
 import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, noticeCard, notSetUpCard, REMIND_PREFIX, unknownTenantCard, VERBS, type ActionItemInput } from "./cards";
-import { holdForUnknownAdder, leaveChat, mayAddSidekick, recognizeAdder, reopenChat, UNKNOWN_ADDER, WAITING_DAYS } from "./install";
+import { adderName, holdForUnknownAdder, leaveChat, mayAddSidekick, recognizeAdder, reopenChat, UNKNOWN_ADDER, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
 import { recordChatMessage, reminderAction } from "../reminders";
@@ -253,7 +253,7 @@ async function lookupChannelName(a: InboundActivity, conversationId: string): Pr
  * Names: a real name from the activity always wins; a channel without one is looked up in Teams once
  * (while the saved name is still a placeholder); placeholders never overwrite a real name.
  */
-async function touchConversation(a: InboundActivity, addedBy?: { name: string; oid: string | null }): Promise<TeamsConversation> {
+async function touchConversation(a: InboundActivity, addedBy?: { name: string | null; oid: string | null }): Promise<TeamsConversation> {
   const id = baseConversationId(a.conversation.id);
   const kind = a.conversation.conversationType ?? "personal";
   let name = activityName(a);
@@ -494,7 +494,8 @@ function registerHandlers(app: App) {
   app.on("install.add", async ({ activity, send }) => {
     const gate = await tenantGate(activity);
     if (!gate.ok) return void (await send(signupCard()));
-    const addedBy = { name: activity.from.name ?? "Someone in Teams", oid: activity.from.aadObjectId ?? null };
+    // The adder's real name: from Teams, else their Sidekick person or the directory (never "Someone" when known).
+    const addedBy = { name: await adderName(gate.org?.id, tenantOf(activity), activity.from), oid: activity.from.aadObjectId ?? null };
     let conv = await touchConversation(activity, addedBy);
     // Added (back): the chat starts afresh, even if Sidekick was on its way out of it before.
     await reopenChat(conv.id, addedBy);
@@ -552,7 +553,7 @@ function registerHandlers(app: App) {
     // after signing in to the portal with Microsoft) mentioning it starts the chat afresh, as if they added it.
     if (conv.leaving === UNKNOWN_ADDER && gate.org && !conv.workspace_id && (mentionsSidekick(activity) || startsWithPlainMention(activity.text))) {
       if ((await recognizeAdder(gate.org.id, conv.tenant_id, activity.from.aadObjectId)) !== "unknown" && (await mayAddSidekick(gate.org.id, activity.from.aadObjectId))) {
-        await reopenChat(conv.id, { name: activity.from.name ?? "Someone in Teams", oid: activity.from.aadObjectId ?? null });
+        await reopenChat(conv.id, { name: await adderName(gate.org.id, conv.tenant_id, activity.from), oid: activity.from.aadObjectId ?? null });
         return void (await send(notSetUpCard(conv.kind, WAITING_DAYS)));
       }
       return;

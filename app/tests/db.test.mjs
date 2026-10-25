@@ -101,6 +101,26 @@ test(`[${engine}] "Meeting notes go to": the old per-chat switch becomes one cho
   assert.equal(await choice(unset), null);
 });
 
+test(`[${engine}] adder names: "Someone in Teams" becomes the linked Sidekick person, once`, async () => {
+  const org = db.newId();
+  const tenant = db.newId();
+  const t = db.now();
+  await db.run("INSERT INTO orgs (id, name, entra_tenant_id, created_at) VALUES (?, ?, ?, ?)", org, "Adder Co", tenant, t);
+  await db.run("INSERT INTO users (id, org_id, name, email, role, password_hash, entra_oid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", db.newId(), org, "Grace Kim", `${org}@adder.test`, "Team Lead", "x", `oid-${org}`, t);
+  const chat = (id, by, oid) => db.run("INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, added_by, added_by_oid, created_at, last_seen_at) VALUES (?, 'https://x', ?, 'groupChat', ?, ?, ?, ?, ?)", id, tenant, id, by, oid, t, t);
+  const [known, stranger, named] = [`${org}-known`, `${org}-stranger`, `${org}-named`];
+  await chat(known, "Someone in Teams", `oid-${org}`);
+  await chat(stranger, "Someone in Teams", "oid-nobody");
+  await chat(named, "Grace K. (Teams)", `oid-${org}`);
+  await db.runDataMigrations();
+  const by = async (id) => (await db.get("SELECT added_by FROM teams_conversations WHERE id = ?", id)).added_by;
+  assert.equal(await by(known), "Grace Kim", "the Sidekick person whose Microsoft account added it");
+  assert.equal(await by(stranger), null, "nobody known: no placeholder, the portal says someone in Teams");
+  assert.equal(await by(named), "Grace K. (Teams)", "a real Teams name is kept");
+  await db.runDataMigrations();
+  assert.equal(await by(known), "Grace Kim");
+});
+
 test(`[${engine}] "@Sidekick post meeting notes here": the command words`, async () => {
   const r = await import("../src/lib/notes-chat-rules.ts");
   for (const t of ["post meeting notes here", "Post meeting notes here.", "notes here", "send meeting notes here", "meeting notes here please", "put the notes here", "Please post the meeting notes in here!"]) {

@@ -114,6 +114,28 @@ export async function recognizeAdder(orgId: string, tenantId: string | null, obj
 }
 
 /**
+ * The name to show for whoever added Sidekick (the portal's "Added by … on …"), never a placeholder when Sidekick
+ * can tell who it was. In order: the Teams display name on the activity (Teams often leaves it out of install
+ * events), the Sidekick person whose Microsoft account it is (in `orgId`), the tenant's directory (best effort,
+ * only when the Microsoft admin approved it), else null, which the portal shows as "someone in Teams".
+ * Called by the bot when Sidekick is added to a chat, or a held chat starts afresh.
+ */
+export async function adderName(orgId: string | undefined, tenantId: string | null, from: { name?: string; aadObjectId?: string }): Promise<string | null> {
+  if (from.name?.trim()) return from.name.trim().slice(0, 120);
+  if (!from.aadObjectId) return null;
+  if (orgId) {
+    const u = await get<{ name: string }>("SELECT name FROM users WHERE org_id = ? AND entra_oid = ?", orgId, from.aadObjectId);
+    if (u) return u.name.slice(0, 120);
+  }
+  if (!tenantId) return null;
+  try {
+    return (await directoryPerson(tenantId, from.aadObjectId))?.name.slice(0, 120) ?? null;
+  } catch {
+    return null; // directory not approved yet: the name stays unknown, nothing else depends on it
+  }
+}
+
+/**
  * Someone Sidekick doesn't know added it to a chat (`recognizeAdder` said `unknown`): says so plainly and how to
  * fix it, and holds the chat (`leaving = 'unknown'`): nothing is read, saved or answered, it doesn't wait to be
  * assigned, and Sidekick stays (so the person can try again without anyone removing it). `reopenChat` ends the hold.
@@ -127,12 +149,12 @@ export async function holdForUnknownAdder(conv: TeamsConversation): Promise<void
 /**
  * Sidekick was added (again) to a chat, or a held chat's adder is now recognised: the chat starts afresh. Not
  * leaving any more, a new 7-day wait, and `by` recorded as the person who added it (so they see it under
- * "Waiting to be assigned"). An assigned chat keeps its group.
+ * "Waiting to be assigned"; null when Sidekick can't tell their name, see `adderName`). An assigned chat keeps its group.
  */
-export async function reopenChat(convId: string, by: { name: string; oid: string | null }): Promise<void> {
+export async function reopenChat(convId: string, by: { name: string | null; oid: string | null }): Promise<void> {
   await run(
     "UPDATE teams_conversations SET leaving = NULL, leave_tried_at = NULL, leave_error = NULL, added_by = ?, added_by_oid = COALESCE(?, added_by_oid), waiting_since = CASE WHEN workspace_id IS NULL THEN ? ELSE waiting_since END WHERE id = ?",
-    by.name.slice(0, 120), by.oid, now(), convId,
+    by.name?.slice(0, 120) ?? null, by.oid, now(), convId,
   );
 }
 

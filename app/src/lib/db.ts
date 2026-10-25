@@ -819,6 +819,11 @@ function migrate(conn: DatabaseSync) {
  *   become the chosen notes chats (`notes_chats`, `notes_choice = 'chosen'`), or `'none'` if every chat was off. Groups
  *   where every chat got notes by default keep no choice (`NULL`): notes then go to one default chat and the group's
  *   Team Lead is asked to pick. Only groups without a choice are touched, so a second run changes nothing.
+ * - **Real adder names** (October 2026, the `adderNames` steps; lib/teams/install.ts `adderName`): until then, when
+ *   Teams left the adder's name out of the install event, the bot saved the placeholder "Someone in Teams". Such rows
+ *   get the name of the Sidekick person whose Microsoft account added the chat (in the org tied to the chat's
+ *   tenant), or NULL when there is none (the portal still says "someone in Teams"). The placeholder is gone after the
+ *   first run, so a second run changes nothing.
  */
 const DATA_MIGRATIONS: { name: string; sql: string; params: () => Param[] }[] = (() => {
   const t = () => new Date().toISOString();
@@ -867,6 +872,13 @@ const DATA_MIGRATIONS: { name: string; sql: string; params: () => Param[] }[] = 
                    notes_choice_by = ?, notes_choice_at = ?
              WHERE notes_choice IS NULL AND ${notesOffIn("workspaces.id")}`,
       params: () => [BRAND.name, t()],
+    },
+    {
+      name: "adderNames: the Sidekick person's name instead of the placeholder",
+      sql: `UPDATE teams_conversations SET added_by = (SELECT u.name FROM users u JOIN orgs o ON o.id = u.org_id
+                     WHERE o.entra_tenant_id = teams_conversations.tenant_id AND u.entra_oid = teams_conversations.added_by_oid)
+             WHERE added_by = 'Someone in Teams'`,
+      params: () => [],
     },
     {
       name: "retireBillingAdmins: Billing Admin becomes Member",

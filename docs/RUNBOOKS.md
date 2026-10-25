@@ -332,8 +332,41 @@ automatic notes are on. Each group can switch it off: group → **Teams chats** 
   starts or only when the transcript is ready, so the card says "if someone already started it, ignore this". (2) The
   Oct 25 probe got a 403 from app-only `GET /chats/{id}/messages`. That was probably a chat without Sidekick in it, so
   no permission had been granted there. A chat Graph refuses is listed on the group's Teams chats tab ("can't see calls
-  in …"). Fix: remove Sidekick from that chat and add it again. If every chat is refused, check that the tenant allows
-  chat resource-specific consent, or add the tenant-wide `Chat.Read.WhereInstalled` application permission instead.
+  in …"). See the next item for the cause and the fix.
+- **Sidekick can't see calls in a chat (403, no RSC grant).** Seen live on Oct 25 in the Wave 2 cutover chat. Sidekick
+  is installed and answering there, but app-only `GET /chats/{id}/messages` said "Resource specific consent grants on
+  the request ''": no grant for that chat reached the token.
+  - **Ruled out: app id mismatch.** The live package 1.5.0 names the same app (`ba9f8d71…`) as the bot, in
+    `webApplicationInfo`, and as the Graph token's client.
+  - **Likely causes, in order:**
+    1. **The tenant's chat RSC setting.** It's `ManagedByMicrosoft` by default: "can be changed at any time at
+       Microsoft's discretion" (Learn, *Grant RSC permissions*). Under that setting Microsoft may not let chat members
+       consent to `ChatMessage.Read.Chat`, so the app installs without the grant. It could also be `DisabledForAllApps`.
+    2. **An older install in that chat.** A chat keeps the Sidekick version it was added with until someone updates the
+       app there, and consent covers that version's permissions.
+  - **Check:** `pwsh -File app/scripts/check-chat-rsc.ps1 -ChatId '<chat id>'` as a Global Administrator, using Graph
+    PowerShell's browser sign-in (az tokens don't carry these scopes). It prints:
+    - the chat RSC setting (inferred from the authorization policy's `permissionGrantPoliciesAssigned`)
+    - Sidekick's grants in the chat (`GET /beta/chats/{id}/permissionGrants`)
+    - the version installed in the chat versus the org catalog
+
+    Not yet run. The same two GETs work in Graph Explorer.
+  - **Fix:** run the script again with `-EnableChatRsc` (runs `Set-MgBetaChatRscConfiguration -State EnabledForAllApps`,
+    as documented on Learn), then **remove Sidekick from the chat and add it again**. Consent happens on install, and
+    the Teams chats tab clears within a minute.
+    - Trade-off: `EnabledForAllApps` lets chat members consent to RSC for **any** allowed app, not just Sidekick. The
+      tenant's app permission policies still decide which apps can be installed at all.
+    - If only the version was old, re-adding is enough.
+  - **Not recommended: `Chat.Read.WhereInstalled`** (application permission, admin-consented once, no per-chat consent):
+    - It reads **every message in every chat where Sidekick is installed** across the tenant, so customers' admins must
+      trust Sidekick tenant-wide, a harder sell than per-chat consent.
+    - In app-only use without RSC it's a Teams **protected API**: Microsoft's approval form must be filled in first.
+      Vendors report reviews taking up to two weeks, and each customer tenant is listed.
+    - Only worth it if a customer's policy blocks chat RSC entirely.
+  - **Not built:** Sidekick could upgrade itself in a chat with `consentedPermissionSet` through
+    `POST /chats/{id}/installedApps/{id}/upgrade`. That needs a new application permission,
+    `TeamsAppInstallation.ReadWriteAndConsentSelfForChat.All`; the `ReadWriteSelf…` permission Sidekick already has
+    can't consent to RSC.
 - **Live check:** in a linked group chat, start **Meet now** with Jojo and User2 and don't transcribe. Within about
   3 minutes the card appears, Activity shows "Transcription reminder", and the audit log has "Reminded … to start
   transcription". In a second call, start transcription at once: no card (unless the transcript event only appears at

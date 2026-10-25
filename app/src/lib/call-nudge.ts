@@ -53,7 +53,7 @@ const MESSAGES_PER_READ = 25;
 const MAX_CHATS_PER_ORG = 300;
 
 /** Shown on the Teams chats tab for a chat Graph won't let Sidekick read. */
-export const CHAT_DENIED = `${BRAND.name} can't see calls in this chat yet. Remove ${BRAND.name} from the chat and add it again (Teams then grants the chat-reading permission), or ask your Microsoft admin to check the app's permissions.`;
+export const CHAT_DENIED = `${BRAND.name} can't see calls in this chat yet: Microsoft hasn't granted it the chat-reading permission there. Your Microsoft admin checks the Teams chat consent setting (${BRAND.name}'s help explains how), then remove ${BRAND.name} from the chat and add it again.`;
 
 /** The nudge card's wording (fixed text, the same in every chat). */
 export const NUDGE_TITLE = "Turn on transcription?";

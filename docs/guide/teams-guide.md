@@ -114,6 +114,9 @@ Pick each person from Teams' mention list (so they become real mentions). Sideki
 
 Sidekick needs to know who's asking: sign in to the Sidekick portal with Microsoft once. Anyone else gets a polite "only this workspace's Team Lead or an Org Admin can…". Every change is in the audit log ("… from Teams").
 
+## Choosing where meeting notes go, from the chat
+In one of a group's chats, its **Team Lead** (or an **Org Owner/Admin**) can type `@Sidekick post meeting notes here` (or "notes here", "send meeting notes here") to send the group's meeting notes to this chat, or `@Sidekick stop posting notes here` to stop. Sidekick replies "Done ✓ Meeting notes for *group* will be posted here." Anyone else gets "Only the Team Lead or an admin can change where notes go." In a chat with client guests it works too, but notes of internal-only meetings never go there (Sidekick says so). It's the same choice as **Meeting notes go to** in the portal, and it's in the audit log. Details: [Meetings and automatic notes](meetings.md#the-notes-chat-in-teams).
+
 ## Commands
 | Type | Does |
 |---|---|
@@ -122,6 +125,8 @@ Sidekick needs to know who's asking: sign in to the Sidekick portal with Microso
 | `@Sidekick link` | Show the link code, or which workspace this chat is linked to |
 | `@Sidekick add @name` | Add someone to this chat's workspace (Team Lead or Org Admin) |
 | `@Sidekick remove @name` | Take someone off this chat's workspace (Team Lead or Org Admin) |
+| `@Sidekick post meeting notes here` | Send this group's meeting notes to this chat (Team Lead or admin) |
+| `@Sidekick stop posting notes here` | Stop sending meeting notes to this chat (Team Lead or admin) |
 | `@Sidekick help` | Show what Sidekick can do here |
 
 ## What Sidekick can and can't see

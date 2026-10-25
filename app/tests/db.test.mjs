@@ -101,6 +101,19 @@ test(`[${engine}] "Meeting notes go to": the old per-chat switch becomes one cho
   assert.equal(await choice(unset), null);
 });
 
+test(`[${engine}] "@Sidekick post meeting notes here": the command words`, async () => {
+  const r = await import("../src/lib/notes-chat-rules.ts");
+  for (const t of ["post meeting notes here", "Post meeting notes here.", "notes here", "send meeting notes here", "meeting notes here please", "put the notes here", "Please post the meeting notes in here!"]) {
+    assert.equal(r.parseNotesCommand(t), "here", t);
+  }
+  for (const t of ["stop posting notes here", "Stop posting meeting notes here", "don't post notes here", "Don’t send meeting notes here any more", "no notes here", "do not post the notes here"]) {
+    assert.equal(r.parseNotesCommand(t), "stop", t);
+  }
+  for (const t of ["what notes are here?", "post the meeting notes from Tuesday here", "where do notes go", "summarise the notes here and the risks", ""]) {
+    assert.equal(r.parseNotesCommand(t), null, `a question, not a command: ${t}`);
+  }
+});
+
 test(`[${engine}] "Meeting notes go to": the default chat and the card's footer`, async () => {
   const r = await import("../src/lib/notes-chat-rules.ts");
   const c = (id, name, guests = 0, kind = "groupChat") => ({ id, name, kind, guests });

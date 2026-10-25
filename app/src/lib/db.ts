@@ -729,6 +729,9 @@ function migrate(conn: DatabaseSync) {
   // "Meeting notes go to" (lib/notes-chats.ts): the group's choice, who made it and when; where a meeting's notes went.
   for (const col of ["notes_choice", "notes_choice_by", "notes_choice_at"]) if (!has("workspaces", col)) conn.exec(`ALTER TABLE workspaces ADD COLUMN ${col} TEXT`);
   for (const col of ["notes_posted_to", "notes_sent_at"]) if (!has("meetings", col)) conn.exec(`ALTER TABLE meetings ADD COLUMN ${col} TEXT`);
+  // Notes picker polish: how many people a linked chat has (from the Teams roster, checked at most daily) and when.
+  if (!has("teams_conversations", "member_count")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN member_count INTEGER");
+  if (!has("teams_conversations", "members_checked_at")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN members_checked_at TEXT");
   // Upload guard (lib/upload-guard.ts): a document or firm document that looks like it belongs to another client is
   // saved Held (status 'Held', text kept in held_text, not indexed) until the uploader keeps or moves it.
   // guard_status: null = never flagged, 'kept' = flagged and kept (a Needs attention finding), 'reviewed' = a

@@ -46,9 +46,21 @@ Many teams have more than one chat for an engagement (say, one for the core team
 - tick **one chat** (the usual choice) or several, or
 - **Don't post notes in Teams**: notes then stay on the Meetings page in Sidekick.
 
-Then **Save**. Org Owners and Org Admins can choose for any group; Members and Viewers see the same list read-only. Every change is in the audit log.
+Then **Save choice** (or **Save** once a choice exists). Org Owners and Org Admins can choose for any group; Members and Viewers see the same list read-only. Every change is in the audit log.
 
-Chats with **client guests** are marked and greyed: only notes from meetings the client attended go there. Notes from internal meetings never go to a chat with client guests, whatever is ticked.
+Only the group's own linked chats are listed, never anyone's other Teams chats. If a group has **six or more** chats, a search box appears and each chat shows how many people are in it and when it was last active, so similar chats are easy to tell apart.
+
+**Send test message** (next to each chat, for the Team Lead and admins) posts a small card in that chat: "👋 This is where *group*'s meeting notes will go (sent from the Sidekick portal by *you*)". Use it to check you've picked the right chat. Each chat takes one test message a minute; if Teams refuses the post (for example, Sidekick was removed from that chat), the portal says why.
+
+**From the chat itself**: in one of the group's chats, the Team Lead (or an Org Owner or Org Admin) can type:
+
+> @Sidekick post meeting notes here
+>
+> @Sidekick stop posting notes here
+
+Close variants work too ("notes here", "send meeting notes here", "don't post notes here"). Sidekick replies "Done ✓ Meeting notes for *group* will be posted here." **Post here** adds this chat to the chats already chosen; **stop** takes it off (if no chat is left, notes stay in the portal). Anyone else gets "Only the Team Lead or an admin can change where notes go." Sidekick has to recognise you: sign in to the portal with Microsoft once. Changes made in Teams are in the audit log with "(from Teams)".
+
+Chats with **client guests** are marked: only notes from meetings the client attended go there. That holds when you choose the chat from Teams too: Sidekick accepts and explains that internal meetings' notes never go there. Notes from internal meetings never go to a chat with client guests, whatever is ticked.
 
 **Before anyone chooses**, notes go to **one** chat only: a chat with "notes" in its name if there is one, otherwise the group's first chat without client guests. A group with two or more chats and no choice yet shows **Pick which chat gets meeting notes** under *Needs attention* for its Team Lead, with a button to the Teams chats tab. (Groups that had switched notes off in some chats before this choice existed keep that: the chats that still had notes on are the chosen ones.)
 
@@ -73,5 +85,5 @@ Sidekick also works as a Teams app with a **Meetings** tab:
 You're signed in automatically with your Microsoft account (Teams single sign-on). You see only the groups you belong to, and can mark action items done and save things to knowledge with your own role. If the tab says you don't have an account yet, ask your Sidekick admin to add you, then sign in to the Sidekick portal with Microsoft once.
 
 <!-- help-center:skip -->
-For developers: lib/meetings-graph.ts (capture), lib/notes-chats.ts ("Meeting notes go to"), lib/saved-items.ts (Save to knowledge), lib/teams/tab.ts (tab); tests in app/tests/meetings-graph.test.mjs. Microsoft setup steps for Cody: docs/RUNBOOKS.md → Automatic meeting notes.
+For developers: lib/meetings-graph.ts (capture), lib/notes-chats.ts ("Meeting notes go to", the Teams command), lib/notes-chat-rules.ts (default chat, command words), /api/workspaces/:id/notes-chats/test (test message), lib/saved-items.ts (Save to knowledge), lib/teams/tab.ts (tab); tests in app/tests/meetings-graph.test.mjs. Microsoft setup steps for Cody: docs/RUNBOOKS.md → Automatic meeting notes.
 <!-- /help-center:skip -->

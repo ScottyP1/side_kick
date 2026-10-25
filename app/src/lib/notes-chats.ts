@@ -16,18 +16,30 @@
  * - Chosen chats that were since unassigned or removed in Teams simply drop out; if none is left the group is back to
  *   "no choice yet" behaviour (the default chat, and the finding when it has 2+ chats).
  *
+ * - **From Teams**: in a linked chat the Team Lead (or an Org Owner/Admin) can say "@Sidekick post meeting notes here"
+ *   or "stop posting notes here" (`parseNotesCommand`, `notesHereFromTeams`): the same rules and audit as the picker.
+ * - **Telling chats apart**: each chat carries its member count (from the Teams roster, refreshed at most daily by
+ *   lib/teams/bot.ts `refreshMemberCount`) and its last activity, which the picker shows once a group has 6+ chats.
+ *
  * Who may call: `notesPlan` for anyone who can see the group (the caller checks `requireWorkspace`);
- * `setNotesChats` only after `requireManage` (it checks again).
+ * `setNotesChats` and `notesHereFromTeams` check `requireManage` themselves.
  */
 import "server-only";
 import { all, get, now, run, tx } from "./db";
 import { audit, HttpError, requireManage, type User } from "./auth";
 import { parsePosted, pickDefaultNotesChat, type PostedChat } from "./notes-chat-rules";
+import { BRAND } from "./brand";
 
-export { parsePosted, pickDefaultNotesChat, postedToLine, type PostedChat } from "./notes-chat-rules";
+export { parseNotesCommand, parsePosted, pickDefaultNotesChat, postedToLine, type PostedChat } from "./notes-chat-rules";
 
-/** A linked chat as the picker and the poster see it. */
-export type NotesChat = { id: string; name: string | null; kind: string; guests: number; linked_at: string | null };
+/**
+ * A linked chat as the picker and the poster see it. `member_count` is the Teams roster size (null until Sidekick
+ * checked it); `last_seen_at` is the last time anything happened there that Sidekick saw (its "last activity").
+ */
+export type NotesChat = {
+  id: string; name: string | null; kind: string; guests: number; linked_at: string | null;
+  member_count: number | null; last_seen_at: string | null;
+};
 
 /** The group's notes choice: `chosen` (chats picked), `none` (no notes in Teams), `unset` (nobody chose yet). */
 export type NotesMode = "chosen" | "none" | "unset";
@@ -55,7 +67,7 @@ export type NotesPlan = {
 /** The group's linked chats (not removed in Teams, Sidekick not leaving), oldest link first. */
 async function linkedChats(orgId: string, workspaceId: string): Promise<NotesChat[]> {
   return all<NotesChat>(
-    `SELECT id, name, kind, guests, linked_at FROM teams_conversations
+    `SELECT id, name, kind, guests, linked_at, member_count, last_seen_at FROM teams_conversations
       WHERE org_id = ? AND workspace_id = ? AND removed_at IS NULL AND leaving IS NULL ORDER BY linked_at, id`,
     orgId, workspaceId,
   );
@@ -123,12 +135,72 @@ export async function setNotesChats(user: User, workspaceId: string, body: unkno
   const chats = await linkedChats(user.org_id, ws);
   const picked = none ? [] : chats.filter((c) => (ids as string[]).includes(c.id));
   if (!none && picked.length !== (ids as string[]).length) throw new HttpError(400, "One of those chats isn't assigned to this group any more. Reload the page and pick again.");
+  await saveChoice(user, ws, picked, "");
+  return notesPlan(user.org_id, ws);
+}
+
+/**
+ * Writes a checked choice (no chats = "Don't post notes in Teams") and audits it; `via` is appended to the audit line
+ * (" from Teams"). Callers have done `requireManage` and made sure every chat is linked to this group.
+ */
+async function saveChoice(user: User, ws: string, picked: NotesChat[], via: string): Promise<void> {
+  const none = !picked.length;
   await tx(async () => {
     await run("DELETE FROM notes_chats WHERE workspace_id = ? AND org_id = ?", ws, user.org_id);
     for (const c of picked) await run("INSERT INTO notes_chats (workspace_id, conversation_id, org_id) VALUES (?, ?, ?)", ws, c.id, user.org_id);
     await run("UPDATE workspaces SET notes_choice = ?, notes_choice_by = ?, notes_choice_at = ? WHERE id = ? AND org_id = ?", none ? "none" : "chosen", user.name, now(), ws, user.org_id);
   });
   const where = none ? "not posted in Teams (portal only)" : picked.map((c) => `“${c.name ?? "Teams chat"}”`).join(", ");
-  await audit(user, `Meeting notes now go to: ${where}`, "Policy change", ws);
-  return notesPlan(user.org_id, ws);
+  await audit(user, `Meeting notes now go to: ${where}${via}`, "Policy change", ws);
+}
+
+/** A linked chat of this group by id (not removed, Sidekick not leaving), or a 404 for anything else. */
+export async function linkedChat(orgId: string, workspaceId: string, chatId: unknown): Promise<NotesChat> {
+  const c = typeof chatId === "string" ? (await linkedChats(orgId, workspaceId)).find((x) => x.id === chatId) : undefined;
+  if (!c) throw new HttpError(404, "That chat isn't assigned to this group any more. Reload the page.");
+  return c;
+}
+
+/* ------------------------------------------------------------------ */
+/* "@Sidekick post meeting notes here" in a linked Teams chat          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Runs "post meeting notes here" (`here`) or "stop posting notes here" (`stop`) for the Teams chat `chatId`, linked to
+ * group `workspaceId`, as `actor` (lib/teams/bot.ts `teamsActor`: a recognised Sidekick person, or a `teams:` guest who
+ * acts as a Member). Same rule as the portal: only the group's Team Lead or an Org Owner/Admin (`requireManage`).
+ * - `here` adds this chat to the chats that get notes (others chosen before keep them; "no choice yet" or "Don't post
+ *   notes in Teams" becomes just this chat). A chat with client guests is accepted, but the reply says internal-only
+ *   meetings' notes never come here (the wall in `notesTargetsFor`).
+ * - `stop` takes this chat off; if no chat is left, notes stay in the portal ("Don't post notes in Teams").
+ * Audited like the picker, with "from Teams". Returns the fixed reply text for the chat (no Claude involved).
+ */
+export async function notesHereFromTeams(actor: User, workspaceId: string, groupName: string, chatId: string, action: "here" | "stop"): Promise<string> {
+  const noRight = "Only the Team Lead or an admin can change where notes go.";
+  if (actor.id.startsWith("teams:")) return `${noRight} If that's you, sign in to the ${BRAND.name} portal with Microsoft once so I recognise you here.`;
+  try {
+    await requireManage(actor, workspaceId);
+  } catch (e) {
+    if (e instanceof HttpError && (e.status === 403 || e.status === 404)) return noRight;
+    throw e;
+  }
+  const plan = await notesPlan(actor.org_id, workspaceId);
+  const chat = plan.chats.find((c) => c.id === chatId);
+  if (!chat) return `This chat isn't assigned to ${groupName} any more, so I can't send its notes here.`;
+  const chosen = plan.mode === "chosen" ? plan.chats.filter((c) => plan.targets.includes(c.id)) : [];
+  const guestNote = chat.guests ? " Client guests are in this chat, so only notes of meetings the client attended come here: internal meetings' notes never do." : "";
+  const others = (list: NotesChat[]) => list.filter((c) => c.id !== chatId).map((c) => `“${c.name ?? "Teams chat"}”`).join(", ");
+  if (action === "here") {
+    if (plan.mode === "chosen" && plan.targets.includes(chatId)) return `Meeting notes for ${groupName} already go here.${guestNote}`;
+    const picked = [...chosen, chat];
+    await saveChoice(actor, workspaceId, picked, " (from Teams)");
+    const also = others(picked);
+    return `Done ✓ Meeting notes for ${groupName} will be posted here.${also ? ` They also still go to ${also}.` : ""}${guestNote}`;
+  }
+  if (!plan.targets.includes(chatId)) return `Meeting notes for ${groupName} don't come here, so there's nothing to stop.`;
+  const left = chosen.filter((c) => c.id !== chatId);
+  await saveChoice(actor, workspaceId, left, " (from Teams)");
+  return left.length
+    ? `Done ✓ Meeting notes for ${groupName} won't be posted here any more. They still go to ${others(left)}.`
+    : `Done ✓ Meeting notes for ${groupName} won't be posted here any more. No other chat gets them now, so they stay in the ${BRAND.name} portal. Mention me with “post meeting notes here” in another chat, or pick one on the group's Teams chats tab.`;
 }

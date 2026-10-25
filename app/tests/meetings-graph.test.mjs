@@ -26,6 +26,11 @@
  *   once), only when clearly one group's (meeting chat linked, or most invitees), never with outsiders; a change
  *   Teams refuses is listed; an organizer switching it off again is left alone; skipped ones looked at again after a
  *   day; the group's people see their own upcoming meetings; switched off means no calendar reads;
+ * - "Is this meeting being transcribed?" for scheduled meetings (lib/meeting-nudge.ts): a group's meeting that started
+ *   2+ minutes ago gets one card in its own chat when Sidekick is there (from the chat's call events), else in the
+ *   group's notes chat naming the meeting; nothing when transcribing (call event or a listed transcript), when the
+ *   group switched reminders off, when the meeting records by itself, for ties or meetings not started yet; a refused
+ *   calendar read is shown on the Teams chats tab;
  * - isolation: another organization sees none of it.
  *
  * Nothing real is touched: its own data folder or the TEST_DATABASE_URL database (wiped first), fake Claude, Teams in
@@ -134,6 +139,7 @@ const patches = []; // every PATCH of an online meeting: { organizer, id, body }
 const lookups = []; // every online meeting lookup by join link: { organizer, url }
 const calendarReads = []; // every calendarView read: { organizer, start, end, select }
 const patchRefused = new Set(); // online meeting ids whose PATCH Graph answers 400
+const transcriptLists = []; // every list of one meeting's transcripts: { organizer, id } (lib/meeting-nudge.ts)
 const vtt = (lines) => `WEBVTT\n\n${lines.map(([who, text], i) => `00:${String(i).padStart(2, "0")}:01.000 --> 00:${String(i).padStart(2, "0")}:09.000\n<v ${who}>${text}</v>`).join("\n\n")}\n`;
 
 async function validateWith(url) {
@@ -265,6 +271,14 @@ const microsoft = http.createServer((req, res) => {
       lookups.push({ organizer: byLink[1], url: joinUrl });
       const m = [...MEETINGS.values()].find((x) => x.joinUrl && x.joinUrl === joinUrl && x.organizer === byLink[1]);
       return send(200, { value: m ? [m.body] : [] });
+    }
+    // One meeting's transcripts (lib/meeting-nudge.ts checks before reminding from the notes chat).
+    const tlist = p.match(/^\/v1\.0\/users\/([^/]+)\/onlineMeetings\/([^/]+)\/transcripts$/);
+    if (tlist && req.method === "GET") {
+      transcriptLists.push({ organizer: tlist[1], id: tlist[2] });
+      const m = MEETINGS.get(tlist[2]);
+      if (!m || m.organizer !== tlist[1]) return send(404, { error: { code: "NotFound" } });
+      return send(200, { value: TRANSCRIPTS.filter((t) => t.meetingId === tlist[2]).map((t) => ({ id: t.id, meetingId: t.meetingId, createdDateTime: t.createdDateTime })) });
     }
     const meeting = p.match(/^\/v1\.0\/users\/([^/]+)\/onlineMeetings\/([^/]+)$/);
     if (meeting && req.method === "PATCH") {
@@ -1222,7 +1236,8 @@ function schedule(name, { organizer, attendees = [], guests = [], emails = [], c
     EVENTS.push({
       calendar: organizer,
       event: {
-        subject: `Planned ${name}`, start: { dateTime: at.toISOString().slice(0, 19) + ".0000000", timeZone: "UTC" }, isOrganizer: true, isCancelled: false, isOnlineMeeting: true,
+        subject: `Planned ${name}`, start: { dateTime: at.toISOString().slice(0, 19) + ".0000000", timeZone: "UTC" },
+        end: { dateTime: new Date(at.getTime() + 1800_000).toISOString().slice(0, 19) + ".0000000", timeZone: "UTC" }, isOrganizer: true, isCancelled: false, isOnlineMeeting: true,
         onlineMeetingProvider: "teamsForBusiness", onlineMeeting: { joinUrl },
         attendees: [...emails.map((address) => ({ type: "required", emailAddress: { address } })), { type: "resource", emailAddress: { address: "room-1@a.test" } }],
         ...event,
@@ -1335,9 +1350,11 @@ test(`[${ENGINE}] meetings that record by themselves: an organizer turning it of
   assert.equal(patched(s.recordSkipped), 1);
   // Switched off: audited, and calendars aren't read any more.
   assert.equal((await ann("PUT", "/api/meetings/auto", { autoRecord: false })).status, 200);
-  const reads = calendarReads.length;
+  // (The transcription reminder for scheduled meetings reads the next 2 hours; only 7-day reads are automatic recording's.)
+  const recordReads = () => calendarReads.filter((c) => new Date(c.end) - new Date(c.start) > 86400_000).length;
+  const reads = recordReads();
   await drain({ sweep: true });
-  assert.equal(calendarReads.length, reads);
+  assert.equal(recordReads(), reads);
   assert.equal((await ann("GET", "/api/meetings/auto")).body.autoRecord.enabled, false);
   assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Turned off automatic recording and transcription/);
   // Isolation: Org B sees none of it.
@@ -1370,4 +1387,120 @@ test(`[${ENGINE}] meetings that record by themselves: invitees who never signed 
   assert.ok(!JSON.stringify(st.skipped).includes("Planned"), "no titles");
   assert.deepEqual((await mo("GET", "/api/meetings/auto")).body.autoRecord.skipped, []);
   assert.equal((await ann("PUT", "/api/meetings/auto", { autoRecord: false })).status, 200);
+});
+
+
+/* ---------- "Is this meeting being transcribed?" for scheduled meetings (lib/meeting-nudge.ts) ---------- */
+
+/** Days from now for a meeting that started `n` minutes ago (negative) or starts in `n` minutes. */
+const minutes = (n) => n / 1440;
+/** The meeting_nudges row of an online meeting: "status|posted_to". */
+const remindRow = (id) => scalar(`SELECT status || '|' || COALESCE(posted_to, '') FROM meeting_nudges WHERE online_meeting_id = '${id}'`);
+
+test(`[${ENGINE}] scheduled meetings: one reminder in the meeting's chat where Sidekick is, else in the group's notes chat; nothing when transcribing`, async () => {
+  const st = (await lou("GET", `/api/workspaces/${s.w1}/call-nudge`)).body;
+  assert.equal(st.enabled, true);
+  assert.equal(st.autoNotes, true);
+  // Sidekick was added to two meeting chats (not assigned to a group); the others' chats it can't see.
+  const standupChat = "19:meeting_standup@thread.v2";
+  const retroChat = "19:meeting_retro@thread.v2";
+  for (const chat of [standupChat, retroChat]) {
+    await toBot(activity(chat, { type: "installationUpdate", action: "add" }));
+    await waitFor(chat, /not set up/);
+  }
+  const from = sent.length;
+  const standup = schedule("standup", { organizer: OID.lou, attendees: [OID.mo], emails: ["mo@a.test"], inDays: minutes(-3) });
+  CHAT_MSGS.set(standupChat, [callEvent("callStarted", "standup-call", 3)]);
+  const retro = schedule("retro", { organizer: OID.lou, attendees: [OID.mo], inDays: minutes(-4) });
+  CHAT_MSGS.set(retroChat, [callEvent("callStarted", "retro-call", 4), callEvent("callRecording", "retro-call", 3)]);
+  const review = schedule("review", { organizer: OID.lou, attendees: [OID.mo], inDays: minutes(-4) });
+  const demo = schedule("demo", { organizer: OID.lou, attendees: [OID.mo], inDays: minutes(-5) });
+  TRANSCRIPTS.push({ id: "MSMjdemo-transcript", meetingId: demo, organizer: OID.lou, createdDateTime: "2020-01-01T00:00:00.000Z", vtt: vtt([["Lou Lead", "Demo."]]) });
+  const early = schedule("early", { organizer: OID.lou, attendees: [OID.mo], inDays: minutes(-1) });
+  const later = schedule("soonmeeting", { organizer: OID.lou, attendees: [OID.mo], inDays: minutes(40) });
+  const tie = schedule("tiemeeting", { organizer: OID.quinn, emails: ["mo@a.test", "pat@a.test"], inDays: minutes(-3) });
+  await drain({ sweep: true });
+  // In the meeting's own chat: the steps, and how to stop them from the portal (no chat commands in an unassigned chat).
+  const inChat = await waitFor(standupChat, /Start transcription/, from);
+  assert.match(inChat, /This meeting isn't being transcribed yet/);
+  assert.match(inChat, /Record and transcribe/);
+  assert.match(inChat, /Teams chats tab/);
+  assert.ok(chatReads.some((r) => r.chat === standupChat && /include-unknown-enum-members/.test(r.prefer)), "the meeting chat is read for call events");
+  // Not in the meeting's chat: the group's notes chat, naming the meeting.
+  const inNotes = await waitFor(CHAT_W1, /Start transcription/, from);
+  assert.match(inNotes, /Planned review/);
+  assert.match(inNotes, /can't see whether it's being transcribed/);
+  assert.match(inNotes, /stop transcription reminders/);
+  assert.ok(transcriptLists.some((t) => t.id === review), "Microsoft's transcript list is checked first");
+  assert.match(await remindRow(standup), /^nudged\|meeting$/);
+  assert.match(await remindRow(review), /^nudged\|notes$/);
+  // Nothing for a meeting being recorded, one Teams already lists a transcript for, one that just started, one later,
+  // or a meeting of two groups (left alone, its title not kept).
+  assert.equal(nudgesIn(retroChat, from), 0);
+  assert.doesNotMatch(sentTo(CHAT_W1, from), /Planned demo|Planned early|Planned soonmeeting|Planned tiemeeting/);
+  assert.match(await remindRow(retro), /^transcribing\|/);
+  assert.match(await remindRow(demo), /^transcribing\|/);
+  assert.match(await remindRow(early), /^planned\|/);
+  assert.match(await remindRow(later), /^planned\|/);
+  assert.equal(await scalar(`SELECT status || '|' || COALESCE(title, '') FROM meeting_nudges WHERE online_meeting_id = '${tie}'`), "skipped|", "ties are left alone, titles not kept");
+  // (The meeting that just started would be reminded a minute later; settle it so later tests count only their own.)
+  await dbExec(`UPDATE meeting_nudges SET status = 'late' WHERE online_meeting_id = '${early}'`);
+  // Once per meeting: more checks post nothing new.
+  await drain({ sweep: true });
+  await drain({ sweep: true });
+  assert.equal(nudgesIn(standupChat, from), 1);
+  assert.equal(nudgesIn(CHAT_W1, from), 1);
+  // Audited, traced, and shown on the Teams chats tab.
+  const audit = JSON.stringify((await ann("GET", "/api/audit")).body);
+  assert.match(audit, /Reminded the Teams meeting “Planned standup” to start transcription in its chat/);
+  assert.match(audit, /to start transcription in the Teams meeting “Planned review”/);
+  assert.notEqual(await scalar("SELECT COUNT(*) FROM trace_spans WHERE name = 'Post the transcription reminder for a scheduled meeting'"), "0");
+  assert.notEqual(await scalar("SELECT COUNT(*) FROM trace_spans WHERE name = 'Read the next Teams meetings'"), "0");
+  const after = (await mo("GET", `/api/workspaces/${s.w1}/call-nudge`)).body;
+  assert.match(after.last.chat, /Planned (standup|review)/);
+  assert.equal(after.scheduledProblem, null);
+  // A meeting moved before it starts is forgotten at the next read.
+  EVENTS.splice(EVENTS.findIndex((e) => e.event.subject === "Planned soonmeeting"), 1);
+  await drain({ sweep: true });
+  assert.match(await remindRow(later), /^gone\|/);
+});
+
+test(`[${ENGINE}] scheduled meetings: nothing when the group switched reminders off or the meeting records by itself`, async () => {
+  const url = `/api/workspaces/${s.w1}/call-nudge`;
+  assert.equal((await lou("PUT", url, { enabled: false })).status, 200);
+  const from = sent.length;
+  const off = schedule("offmeeting", { organizer: OID.lou, attendees: [OID.mo], inDays: minutes(-3) });
+  await drain({ sweep: true });
+  assert.equal(nudgesIn(CHAT_W1, from), 0);
+  assert.match(await remindRow(off), /^off\|/);
+  assert.equal((await lou("PUT", url, { enabled: true })).status, 200);
+  // Recording by itself: set in Teams already, or by Sidekick (automatic recording's row for the same join link).
+  const selfRec = schedule("selfrecording", { organizer: OID.lou, attendees: [OID.mo], inDays: minutes(-3), recordAutomatically: true });
+  const sidekickRec = schedule("sidekickrecording", { organizer: OID.lou, attendees: [OID.mo], inDays: minutes(-3) });
+  const org = await scalar("SELECT org_id FROM users WHERE email = 'ann@a.test'");
+  const key = crypto.createHash("sha256").update(joinUrlFor("sidekickrecording")).digest("hex");
+  const t = new Date().toISOString();
+  await dbExec(`INSERT INTO meeting_autorecord (org_id, join_key, organizer_oid, workspace_id, status, title, starts_at, created_at, updated_at) VALUES ('${org}', '${key}', '${OID.lou}', '${s.w1}', 'set', 'Planned sidekickrecording', '${t}', '${t}', '${t}')`);
+  await drain({ sweep: true });
+  assert.equal(nudgesIn(CHAT_W1, from), 0);
+  assert.match(await remindRow(selfRec), /^records\|/);
+  assert.match(await remindRow(sidekickRec), /^records\|/);
+});
+
+test(`[${ENGINE}] scheduled meetings: a refused calendar read is shown on the Teams chats tab; another organization sees none of it`, async () => {
+  recordApproved.delete(TA);
+  await drain({ sweep: true });
+  const st = (await lou("GET", `/api/workspaces/${s.w1}/call-nudge`)).body;
+  assert.match(st.scheduledProblem ?? "", /can't see your groups' scheduled Teams meetings/);
+  recordApproved.add(TA);
+  await drain({ sweep: true });
+  assert.equal((await lou("GET", `/api/workspaces/${s.w1}/call-nudge`)).body.scheduledProblem, null);
+  // Isolation: rows only for Org A; Org B can't see Org A's group or its reminders.
+  assert.equal(await scalar(`SELECT COUNT(*) FROM meeting_nudges WHERE org_id <> (SELECT org_id FROM users WHERE email = 'ann@a.test')`), "0");
+  assert.equal((await bob("GET", `/api/workspaces/${s.w1}/call-nudge`)).status, 404);
+  assert.equal((await pat("GET", `/api/workspaces/${s.w1}/call-nudge`)).status, 404);
+  const b = (await bob("GET", `/api/workspaces/${s.bw}/call-nudge`)).body;
+  assert.equal(b.last, null);
+  assert.equal(b.scheduledProblem, null);
+  assert.ok(calendarReads.every((c) => c.organizer !== OID.bob), "never another organization's calendars");
 });

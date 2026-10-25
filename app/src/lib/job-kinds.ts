@@ -41,6 +41,15 @@
  * - `calls.watch` (1 min): reads the call events of watched Teams group chats (orgs with automatic notes on) and posts
  *   the nudges that are due. Counts: `callsSeen`, `nudged`, `chatsUnreadable`.
  *
+ * "Is this meeting being transcribed?" for scheduled meetings (lib/meeting-nudge.ts):
+ * - `meetings.remind` (10 min): enqueues `meetings.remind.org` for every organization with automatic notes on and a
+ *   group with transcription reminders on (key per org and slot).
+ * - `meetings.remind.org`: reads the org's people's Teams meetings of the next 2 hours, remembers the ones that are
+ *   clearly one group's, then checks the ones that started. Counts: `meetingsLooked`, `meetingsPlanned`,
+ *   `meetingsNudged`.
+ * - `meetings.remind.check` (1 min): checks the group meetings that started 2+ minutes ago and posts one reminder per
+ *   meeting when nothing shows transcription. Counts: `meetingsChecked`, `meetingsNudged`.
+ *
  * Adding one (e.g. item 4's meeting transcripts from Microsoft Graph): `defineJob("meetings.fetch", { label, run })`
  * here, then `enqueue("meetings.fetch", { orgId, payload: { meetingId }, key: \`meeting:${id}\` })` where it starts.
  * Keep payloads to ids, make `run` safe to repeat, and return a few counts.
@@ -59,6 +68,8 @@ import { pruneOldData } from "./retention";
 import { autoNotesOrgs, ensureSubscription, fetchTranscript, markFetchFailed, pollOrg, writeNotes } from "./meetings-graph";
 import { watchCalls } from "./call-nudge";
 import { autoRecordOrgs, scanOrg } from "./auto-record";
+import { checkOrg, checkScheduledMeetings, meetingNudgeOrgs, planOrg } from "./meeting-nudge";
+import { span } from "./trace";
 
 const MIN = 60_000;
 /** How often the watchers run for each organization. */
@@ -94,7 +105,9 @@ defineJob("jobs.prune", {
     const failures = await run("DELETE FROM teams_post_failures WHERE created_at < ?", monthAgo);
     // Calls seen for the transcription reminder are only needed while the call lasts; a month is plenty.
     const calls = await run("DELETE FROM call_nudges WHERE created_at < ?", monthAgo);
-    return { pruned: (await pruneJobs()) + failures.changes + calls.changes };
+    // Scheduled meetings looked at for the same reminder (lib/meeting-nudge.ts): only needed around the meeting.
+    const meetings = await run("DELETE FROM meeting_nudges WHERE starts_at < ?", monthAgo);
+    return { pruned: (await pruneJobs()) + failures.changes + calls.changes + meetings.changes };
   },
 });
 defineJob("data.retention", {
@@ -221,6 +234,39 @@ defineJob("calls.watch", {
   maxAttempts: 1,
   leaseMs: 5 * MIN,
   run: async () => watchCalls(),
+});
+
+// "Is this meeting being transcribed?" for scheduled meetings (lib/meeting-nudge.ts): the calendar every 10 minutes
+// (2 hours ahead), the started meetings every minute, so a meeting is reminded 2–3 minutes after it starts.
+const MEETINGS_REMIND_MS = 10 * MIN;
+defineJob("meetings.remind", {
+  label: "Look for group meetings to remind about transcription",
+  everyMs: MEETINGS_REMIND_MS,
+  maxAttempts: 3,
+  run: async ({ job, payload }) => {
+    const slot = payload.sweep ? `sweep:${job.id}` : String(Math.floor(Date.now() / MEETINGS_REMIND_MS));
+    let queued = 0;
+    for (const org of await meetingNudgeOrgs()) if ((await enqueue("meetings.remind.org", { orgId: org, key: `remind:${org}:${slot}` })).created) queued++;
+    return { remindReadsQueued: queued };
+  },
+});
+defineJob("meetings.remind.org", {
+  label: "Read a company's upcoming group meetings for transcription reminders",
+  maxAttempts: 4,
+  leaseMs: 10 * MIN,
+  run: async ({ job }) => {
+    if (!job.org_id) return;
+    const plan = await span("job", "Read upcoming group meetings for transcription reminders", () => planOrg(job.org_id!));
+    const check = await checkOrg(job.org_id);
+    return { meetingsLooked: plan.looked, meetingsPlanned: plan.planned, meetingsNudged: check.nudged };
+  },
+});
+defineJob("meetings.remind.check", {
+  label: "Remind scheduled Teams meetings to start transcription",
+  everyMs: MIN,
+  maxAttempts: 1,
+  leaseMs: 5 * MIN,
+  run: async () => checkScheduledMeetings(),
 });
 
 /**

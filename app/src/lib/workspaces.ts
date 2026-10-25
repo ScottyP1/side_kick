@@ -86,6 +86,8 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
     // Meetings Sidekick set to record for this group (lib/auto-record.ts): forget the title and the group, keep the
     // row so the meeting isn't set again for another group.
     await run("UPDATE meeting_autorecord SET workspace_id = NULL, title = NULL, reason = 'The group was deleted.' WHERE workspace_id = ? AND org_id = ?", ...ws);
+    // Scheduled meetings waiting for a transcription reminder (lib/meeting-nudge.ts): forget them.
+    await run("DELETE FROM meeting_nudges WHERE workspace_id = ? AND org_id = ?", ...ws);
     // These tables have no org_id; the workspace id was checked against the org above.
     for (const table of ["insights", "gap_status", "reminder_state", "workspace_members"]) {
       await run(`DELETE FROM ${table} WHERE workspace_id = ?`, workspaceId);

@@ -585,6 +585,8 @@ ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_sent_at TEXT;
 -- Notes picker polish: how many people a linked chat has (from the Teams roster, checked at most daily) and when.
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS member_count INTEGER;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS members_checked_at TEXT;
+-- Meet now (ad hoc calls): which kind of Teams call a captured transcript came from ('meeting' scheduled, 'adhoc').
+ALTER TABLE graph_meetings ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'meeting';
 -- Scale readiness: Graph subscriptions are looked up per organization (renewals, notes status).
 CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at);
 -- Upload guard (lib/upload-guard.ts): held documents (status 'Held', text in held_text until kept or moved), what

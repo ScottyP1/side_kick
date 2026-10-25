@@ -215,11 +215,16 @@ Customers don't need this: the transcripts are read by Sidekick's app, billed to
 
 ### 1. Graph permissions on the Entra app (Entra admin center)
 1. Entra admin center → App registrations → the Entra app → **API permissions** → Add a permission → Microsoft Graph
-   → **Application permissions**: add `OnlineMeetingTranscript.Read.All` (read transcripts) and
-   `OnlineMeetings.Read.All` (read the meeting's subject, times, chat and invitees, to pick the group).
-2. **Grant admin consent for Sidekick Labs** (the button on the same page). Both show a green tick.
+   → **Application permissions**: add `OnlineMeetingTranscript.Read.All` (read transcripts of scheduled meetings),
+   `OnlineMeetings.Read.All` (read the meeting's subject, times, chat and invitees, to pick the group) and
+   **`CallTranscripts.Read.All`** (read transcripts of *ad hoc calls*: a **Meet now** started inside a group chat is
+   not an online meeting, and without this permission Graph answers 403 "API requires one of
+   'CallTranscripts.Read.All'" and those calls get no notes).
+2. **Grant admin consent for Sidekick Labs** (the button on the same page). All three show a green tick.
 3. Customers' Microsoft admins approve the new permissions with the same button as before: portal → **Users &
-   access → Approve Sidekick for your organization** (it asks for everything the Entra app lists).
+   access → Approve Sidekick for your organization** (it asks for everything the Entra app lists). Tenants that
+   approved before `CallTranscripts.Read.All` was added approve once more; until then the Meetings page says
+   "approve the new call transcripts permission" and scheduled meetings keep working.
 
 ### 2. Teams single sign-on for the tab (Entra admin center, same app)
 1. **Expose an API** → Application ID URI: `api://<live host>/<Entra app id>` (the live host without https://, e.g.
@@ -275,6 +280,16 @@ in chats, channels and meetings.
 ### When it stops working
 - **Panel says Sidekick can't read transcripts / isn't approved**: steps 1 and 3 (consent, or the access policy
   missing in that tenant). Fix, then **Check now**.
+- **Panel says it can't read calls started with Meet now**: `CallTranscripts.Read.All` isn't approved in that tenant
+  (step 1). Approve, then **Check now**: calls from the last 24 hours are still picked up.
+- **A Meet now call gives no notes** (permission approved, transcript visible in the call's Recap): run the probe
+  **within an hour of the call**, as Sidekick's app, for the people in the call (whoever started transcription is
+  the one Graph files it under):
+  `node --env-file=app/.env.local app/scripts/probe-call-transcripts.mjs --tenant <tenant id> --user <sign-in name> --user …`
+  It lists ad hoc and scheduled transcripts on Graph v1.0 and beta. If only **beta** finds the call, set
+  `SIDEKICK_GRAPH_ADHOC_VERSION=beta` on the Container App (Sidekick then reads ad hoc calls through beta).
+  Not yet confirmed (Oct 25): an empty list 12 hours after a Meet now, on both versions, may mean these calls'
+  transcripts can only be listed for a few hours.
 - **Panel says "checked every 15 minutes" (no instant notifications)**: the subscription couldn't be made; the poll
   still works. Check that `SIDEKICK_PUBLIC_URL` is the live https address and `/api/graph/notifications` is reachable.
   Owner Console → Job queue → `meetings.subscription` shows the last error.

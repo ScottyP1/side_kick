@@ -277,6 +277,8 @@ Customers don't need this: the transcripts are read by Sidekick's app, billed to
    not an online meeting, and without this permission Graph answers 403 "API requires one of
    'CallTranscripts.Read.All'" and those calls get no notes).
 2. **Grant admin consent for Sidekick Labs** (the button on the same page). All three show a green tick.
+   (Optional, only for meetings that record by themselves: `OnlineMeetings.ReadWrite.All` and
+   `Calendars.ReadBasic.All`; see 7b before adding them.)
 3. Customers' Microsoft admins approve the new permissions with the same button as before: portal → **Users &
    access → Approve Sidekick for your organization** (it asks for everything the Entra app lists). Tenants that
    approved before `CallTranscripts.Read.All` was added approve once more; until then the Meetings page says
@@ -348,7 +350,7 @@ Microsoft Learn, Oct 25, 2026):
 | **Transcribe only** (same meeting option) | Organizers choose Off / Record and transcribe / **Transcribe only** when scheduling. Transcribe only makes a transcript and no video. Needs `AllowTranscription` on and `AutoRecording` Enabled. | Standard Teams (no Premium) | Rolled out May–June 2026 (Microsoft message center). The Learn pages don't mention it yet. |
 | `AllowCloudRecording $false` (script `-NoVideoRecording`) | Nobody can record video. With MC1508234 / RM570468 (Targeted Release early Nov, worldwide early–mid Dec 2026), organizers see only the choices their policy allows: recording off + transcription on = **Transcribe only** or Off. | Standard Teams | Confirmed in MC1508234. Changing it is a choice for each customer: it also stops manual recordings. |
 | Teams Premium **meeting template** with the option on and locked | Every meeting made from the template transcribes with nothing to click. | **Teams Premium** for each organizer | Confirmed (Learn). Organizers still have to pick the template. |
-| Graph `onlineMeeting.recordAutomatically` | Turns on automatic recording (video and transcript) for one meeting. Graph has no "transcribe only" property. | Standard. Needs `OnlineMeetings.ReadWrite.All` (a write permission Sidekick doesn't have). | Confirmed in the Graph reference (v1.0 and beta). **Not built**: see the follow-up below. |
+| Graph `onlineMeeting.recordAutomatically` | Turns on automatic recording (video and transcript) for one meeting. Graph has no "transcribe only" property. | Standard. Needs `OnlineMeetings.ReadWrite.All` + `Calendars.ReadBasic.All` (application). | Confirmed in the Graph reference (v1.0 and beta). **Built, opt-in per organization**: see 7b below. |
 | Meet now and calls in a chat | None of the above applies. They have no meeting options. | n/a | Assumed from the docs (the auto-recording page covers meetings, webinars and town halls only). Sidekick's reminder (below) covers these. |
 
 **So, without Premium:** run the script (it sets `AutoRecording Enabled`), then tell organizers to pick
@@ -357,10 +359,52 @@ Customer admins without PowerShell: Teams admin center → Meetings → Meeting 
 transcription*: **Transcription** On. For **Auto recording**, Microsoft documents only PowerShell or a template:
 `Set-CsTeamsMeetingPolicy -Identity Global -AutoRecording Enabled`.
 
-**Follow-up (not built):** when Sidekick sees a scheduled meeting whose chat is linked to a group, it could set
-`recordAutomatically: true` with `PATCH /users/{organizer}/onlineMeetings/{id}`. That needs the application permission
-`OnlineMeetings.ReadWrite.All` (admin consent) and the access policy. It records video as well as the transcript,
-because Graph has no transcribe-only property, so we'd want each customer's agreement first.
+### 7b. Let Sidekick switch it on for group meetings (optional, per organization; records video too)
+`lib/auto-record.ts`. An Org Owner/Admin turns on **Group meetings record and transcribe by themselves** on the
+Meetings page (only shown once automatic notes are on; **off by default**; a dialog says plainly that Teams also saves a
+video; audited). Every 30 minutes (job `meetings.record` → `meetings.record.org`) Sidekick then:
+1. reads the next 7 days of each group member's calendar (people who signed in with Microsoft):
+   `GET /v1.0/users/{oid}/calendarView?startDateTime=…&endDateTime=…&$select=subject,start,isOrganizer,isCancelled,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,attendees`
+   with `Prefer: outlook.timezone="UTC"`, keeping Teams meetings they **organize** (not cancelled);
+2. looks each one up by its join link: `GET /v1.0/users/{oid}/onlineMeetings?$filter=JoinWebUrl eq '{joinUrl}'`;
+3. decides: the meeting chat is linked to a group, or ≥ 2 invitees and ≥ half of everyone invited (organizer included;
+   calendar invitees are matched to Sidekick people by email) are one group's people. **Never** with a guest or anyone
+   from another tenant; ties and nobody's meetings are left alone (titles not kept, looked at again after a day);
+4. `PATCH /v1.0/users/{oid}/onlineMeetings/{id}` with `{ "recordAutomatically": true }` (nothing else), once per
+   meeting (`meeting_autorecord`, keyed by a hash of the join link; a recurring series is one meeting). Already on →
+   recorded as "already". An organizer who turns it off again keeps it off. Audited per meeting ("Turned on automatic
+   recording and transcription for the Teams meeting …"), traced as "Turn on automatic recording for a Teams meeting".
+
+**Checked on Microsoft Learn (Oct 25, 2026):**
+- `onlineMeeting` (v1.0 and beta `onlineMeetingBase`) has `recordAutomatically`, `allowRecording` and
+  `allowTranscription`; **no transcribe-only property**. `recordAutomatically` can be PATCHed ("applies to in-progress
+  meetings: No", so it must be set before the meeting starts; Sidekick looks 7 days ahead).
+- `PATCH /users/{userId}/onlineMeetings/{meetingId}`: application permission **`OnlineMeetings.ReadWrite.All`** (least
+  privileged; nothing narrower), plus an **application access policy** granted to the user (the same
+  `Sidekick-Meetings` policy from step 3 covers reading and changing: no new policy).
+- Calendar-made meetings, app-only: Graph can't list a user's online meetings, but `GET /users/{id}/onlineMeetings?$filter=JoinWebUrl eq '…'`
+  works with an application token and is documented for "a user creates a meeting (for example, in the Microsoft Teams
+  client)". The join link comes from the calendar event's `onlineMeeting.joinUrl`. `calendarView` takes
+  **`Calendars.ReadBasic.All`** (application) as least privileged; it excludes the body and attachments.
+  **Assumed, check live:** that ReadBasic still returns `onlineMeeting.joinUrl` and `attendees`. If it doesn't, the
+  Meetings page says "Microsoft didn't share the join link of N upcoming Teams meetings"; the fix would be
+  `Calendars.Read.All` instead (reads invitation bodies too, so ask first).
+- Also assumed: meeting `participants.attendees` may be empty for meetings made in Outlook, which is why invitees are
+  also taken from the calendar event.
+
+**To switch it on for Sidekick Labs (Cody approves each step; nothing here was done):**
+1. Entra admin center → App registrations → the Entra app → **API permissions** → Add → Microsoft Graph →
+   **Application**: `OnlineMeetings.ReadWrite.All` and `Calendars.ReadBasic.All`. Then **Grant admin consent for
+   Sidekick Labs**. Note: admin consent asks for everything the app lists, so **every** customer's Microsoft admin is
+   then asked for these two as well when they approve Sidekick, even if they never turn this on (decide whether that's
+   acceptable before adding them; the switch stays off either way).
+2. Check the Teams meeting policy allows it: `AutoRecording Enabled` (step 3 + 4 script) and cloud recording **on**.
+   Organizations that ran the script with `-NoVideoRecording` can't use this (Teams refuses; the meeting is listed with
+   "Microsoft Teams didn't accept the change").
+3. Portal → Meetings → *Group meetings record and transcribe by themselves* → **Turn on** (Org Owner/Admin).
+4. Live check: Jojo schedules a meeting with User2 (same group) for tomorrow in Teams; press **Check now**; within a
+   minute it's listed under the switch and Jojo's Meeting options show *Record and transcribe automatically: On*.
+   Schedule one with an outside address too: it must stay off.
 
 ### 8. "Turn on transcription?" reminders in calls (Meet now, calls in a group chat)
 `lib/call-nudge.ts`. When a call starts in a group chat linked to a group, and after about 2 minutes the chat shows

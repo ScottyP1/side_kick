@@ -367,12 +367,16 @@ video; audited). Every 30 minutes (job `meetings.record` → `meetings.record.or
    `GET /v1.0/users/{oid}/calendarView?startDateTime=…&endDateTime=…&$select=subject,start,isOrganizer,isCancelled,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,attendees`
    with `Prefer: outlook.timezone="UTC"`, keeping Teams meetings they **organize** (not cancelled);
 2. looks each one up by its join link: `GET /v1.0/users/{oid}/onlineMeetings?$filter=JoinWebUrl eq '{joinUrl}'`;
-3. decides: the meeting chat is linked to a group, or ≥ 2 invitees and ≥ half of everyone invited (organizer included;
-   calendar invitees are matched to Sidekick people by email) are one group's people. **Never** with a guest or anyone
-   from another tenant; ties and nobody's meetings are left alone (titles not kept, looked at again after a day);
+3. decides: the meeting chat is linked to a group, or ≥ 2 invitees and ≥ half of everyone invited (organizer included)
+   are one group's people. People are matched to Sidekick accounts by Microsoft account id **or by email** (calendar
+   invitees, case-insensitive), so invitees who never signed in to Sidekick with Microsoft still count (the first live
+   check, Oct 25, was skipped because only account ids were matched). **Never** with a guest or anyone from another
+   tenant; ties and nobody's meetings are left alone (titles not kept; looked at again after an hour, or at once on
+   **Check now** / switching on; admins and Team Leads see "Left alone (N upcoming meetings): reason" under the switch);
 4. `PATCH /v1.0/users/{oid}/onlineMeetings/{id}` with `{ "recordAutomatically": true }` (nothing else), once per
    meeting (`meeting_autorecord`, keyed by a hash of the join link; a recurring series is one meeting). Already on →
-   recorded as "already". An organizer who turns it off again keeps it off. Audited per meeting ("Turned on automatic
+   recorded as "already". An organizer who turns it off again keeps it off. Each scan first claims the meeting's row
+   (status `checking`), so a Check now and the 30-minute scan running together never set or audit it twice. Audited per meeting ("Turned on automatic
    recording and transcription for the Teams meeting …"), traced as "Turn on automatic recording for a Teams meeting".
 
 **Checked on Microsoft Learn (Oct 25, 2026):**
@@ -386,11 +390,18 @@ video; audited). Every 30 minutes (job `meetings.record` → `meetings.record.or
   works with an application token and is documented for "a user creates a meeting (for example, in the Microsoft Teams
   client)". The join link comes from the calendar event's `onlineMeeting.joinUrl`. `calendarView` takes
   **`Calendars.ReadBasic.All`** (application) as least privileged; it excludes the body and attachments.
-  **Assumed, check live:** that ReadBasic still returns `onlineMeeting.joinUrl` and `attendees`. If it doesn't, the
-  Meetings page says "Microsoft didn't share the join link of N upcoming Teams meetings"; the fix would be
-  `Calendars.Read.All` instead (reads invitation bodies too, so ask first).
+  **Confirmed live (Oct 25, 2026, Sidekick Labs):** ReadBasic returns `onlineMeeting.joinUrl` and `attendees`, and the
+  JoinWebUrl lookup works app-only. (If a tenant ever doesn't, the Meetings page says "Microsoft didn't share the join
+  link of N upcoming Teams meetings"; the fix would be `Calendars.Read.All`, which reads invitation bodies too.)
 - Also assumed: meeting `participants.attendees` may be empty for meetings made in Outlook, which is why invitees are
   also taken from the calendar event.
+
+**When a meeting isn't set (what to check):** under the switch, admins see *Left alone (N): reason* and *Couldn't
+set …*. In the database: `SELECT status, reason, starts_at, updated_at FROM meeting_autorecord WHERE org_id = '<org>'
+ORDER BY updated_at DESC` and `SELECT auto_record, record_checked_at, record_error FROM auto_meetings WHERE org_id =
+'<org>'`. Activity shows the scan as "Turn on automatic recording for a group's Teams meetings" with its spans (Read
+upcoming Teams meetings, Look up a Teams meeting, Turn on automatic recording for a Teams meeting). People who should
+count but don't: check their Sidekick email matches the address in the invitation (or they signed in with Microsoft).
 
 **To switch it on for Sidekick Labs (Cody approves each step; nothing here was done):**
 1. Entra admin center → App registrations → the Entra app → **API permissions** → Add → Microsoft Graph →

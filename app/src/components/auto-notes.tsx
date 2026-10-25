@@ -34,6 +34,8 @@ type AutoRecord = {
   lastCheckAt: string | null;
   lastError: string | null;
   upcoming: { title: string; startsAt: string | null; status: "set" | "already"; group: string }[];
+  /** Upcoming meetings left alone, by reason (admins and Team Leads only; no titles are kept for these). */
+  skipped?: { reason: string; count: number }[];
   failed: { title: string; reason: string | null }[];
 };
 type Status = { enabled: boolean; connected: boolean; changedBy: string | null; lastCheckAt: string | null; lastError: string | null; instant: boolean; recent: Recent[]; autoRecord?: AutoRecord };
@@ -199,6 +201,7 @@ function AutoRecordSection({ r, admin, manager, busy, onToggle }: { r: AutoRecor
             {r.upcoming.map((m, i) => <li key={i}><b>{m.title}</b> · {fmtTime(m.startsAt)} · {m.group}{m.status === "already" ? <span className="muted"> (the organizer had already turned it on)</span> : null}</li>)}
           </ul>
         )}
+        {manager && r.enabled && (r.skipped ?? []).map((k, i) => <div key={`s${i}`} className="muted" style={{ fontSize: 12.5 }}>Left alone ({k.count} upcoming meeting{k.count === 1 ? "" : "s"}): {k.reason}</div>)}
         {manager && r.enabled && r.failed.map((f, i) => <div key={i} className="muted" style={{ fontSize: 12.5 }}>Couldn&apos;t set <b>{f.title}</b>: {f.reason}</div>)}
       </div>
     </div>

@@ -58,7 +58,7 @@ Things to know before turning it on:
 - Your Teams meeting policy must allow automatic recording (`AutoRecording Enabled`) and cloud recording. If it doesn't, the meeting is listed with *"Microsoft Teams didn't accept the change"*.
 - Turning it off stops Sidekick setting new meetings. Meetings it already set keep recording until their organizer changes them.
 
-Everyone in a group sees that group's upcoming meetings that will record, under the switch. Org Owners, Org Admins and Team Leads also see any problem. Each meeting Sidekick sets is in the audit log ("Turned on automatic recording and transcription for the Teams meeting …"), and so is each change to the switch.
+Everyone in a group sees that group's upcoming meetings that will record, under the switch. Org Owners, Org Admins and Team Leads also see any problem, and how many upcoming meetings Sidekick left alone and why (without their titles). Sidekick looks at those again every hour, or at once when you press **Check now**. People count for their group whether or not they sign in to Sidekick with Microsoft, as long as the email in Sidekick is the one they're invited with. Each meeting Sidekick sets is in the audit log ("Turned on automatic recording and transcription for the Teams meeting …"), and so is each change to the switch.
 
 **Calls in a chat (Meet now, or the call button): Sidekick reminds you.** These calls have no meeting options, so nothing can start transcription by itself. When a call starts in one of a group's Teams chats and nobody has started transcription after about **two minutes**, Sidekick posts one short card in that chat:
 

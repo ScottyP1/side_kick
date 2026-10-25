@@ -30,6 +30,12 @@
  * - `meetings.notes` (payload `{ meetingId }`; key per meeting): writes the notes and posts them to Teams once.
  *   Counts: `notesWritten`, `notesPosted`.
  *
+ * Meetings that record and transcribe by themselves (lib/auto-record.ts), only where an Org Owner/Admin opted in:
+ * - `meetings.record` (30 min): enqueues `meetings.record.org` for every organization with automatic notes and
+ *   automatic recording both on (key per org and slot).
+ * - `meetings.record.org`: reads the next 7 days of the org's people's Teams meetings and turns on automatic
+ *   recording for those that are clearly one group's, once each. Counts: `recordingsOn`, `meetingsChecked`.
+ *
  * "Turn on transcription" reminder (lib/call-nudge.ts):
  * - `calls.watch` (1 min): reads the call events of watched Teams group chats (orgs with automatic notes on) and posts
  *   the nudges that are due. Counts: `callsSeen`, `nudged`, `chatsUnreadable`.
@@ -51,6 +57,7 @@ import { HttpError } from "./auth";
 import { pruneOldData } from "./retention";
 import { autoNotesOrgs, ensureSubscription, fetchTranscript, markFetchFailed, pollOrg, writeNotes } from "./meetings-graph";
 import { watchCalls } from "./call-nudge";
+import { autoRecordOrgs, scanOrg } from "./auto-record";
 
 const MIN = 60_000;
 /** How often the watchers run for each organization. */
@@ -179,6 +186,30 @@ defineJob("meetings.notes", {
     if (!job.org_id) return;
     const r = await writeNotes(job.org_id, String(payload.meetingId ?? ""));
     return { notesWritten: r.written, notesPosted: r.posted };
+  },
+});
+
+// Meetings that record by themselves (lib/auto-record.ts): every 30 minutes is plenty for meetings up to 7 days ahead.
+const MEETINGS_RECORD_MS = 30 * MIN;
+defineJob("meetings.record", {
+  label: "Set group meetings to record and transcribe",
+  everyMs: MEETINGS_RECORD_MS,
+  maxAttempts: 3,
+  run: async ({ job, payload }) => {
+    const slot = payload.sweep ? `sweep:${job.id}` : String(Math.floor(Date.now() / MEETINGS_RECORD_MS));
+    let queued = 0;
+    for (const org of await autoRecordOrgs()) if ((await enqueue("meetings.record.org", { orgId: org, key: `record:${org}:${slot}` })).created) queued++;
+    return { recordScansQueued: queued };
+  },
+});
+defineJob("meetings.record.org", {
+  label: "Turn on automatic recording for a group's Teams meetings",
+  maxAttempts: 4,
+  leaseMs: 15 * MIN,
+  run: async ({ job }) => {
+    if (!job.org_id) return;
+    const r = await scanOrg(job.org_id);
+    return { recordingsOn: r.turnedOn, meetingsChecked: r.checked };
   },
 });
 

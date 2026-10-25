@@ -47,9 +47,25 @@ Each captured meeting's length counts toward your plan's **meeting hours** this 
 - The panel lists recent Teams meetings with their status: **Writing notes**, **Notes written**, **Pick a group**, **Skipped** (with the reason) or **Failed** (with **Try again**). Members see the meetings of their own groups; Org Owners, Org Admins and Team Leads also see skipped ones and the ones waiting for a group, and, after a pick, the meeting's people who aren't in the group yet with **Add to group**.
 
 ## Getting a transcript every time
-Teams only makes a transcript when someone starts transcription, and people forget. Two things help.
+Teams only makes a transcript when someone starts transcription, and people forget. These things help.
 
 **Scheduled meetings: let them transcribe by themselves.** Your Microsoft admin turns on the **automatic recording option** in the Teams meeting policy (PowerShell: `Set-CsTeamsMeetingPolicy -Identity Global -AutoRecording Enabled`; transcription must be on too). Organizers then see **Record and transcribe automatically** in the meeting's **Meeting options**. They choose **Transcribe only** (a transcript, no video) or **Record and transcribe**. This doesn't need Teams Premium. It's **Off for each new meeting** until the organizer picks it: Microsoft has no setting that turns it on for everyone. With **Teams Premium**, your admin can make a meeting template that has it switched on and locked. Organizations that never want video recordings can also turn meeting recording off in the policy. From December 2026 Teams then offers organizers only **Transcribe only** or Off.
+
+**Or let Sidekick switch it on for your groups' meetings (optional, records video too).** Once automatic notes are on, an Org Owner or Org Admin can turn on **Group meetings record and transcribe by themselves** on the Meetings page (it's off until someone does). Sidekick then looks at the scheduled Teams meetings your groups' people organize in the next seven days and turns on **Record and transcribe automatically** for the ones that are clearly one group's:
+
+- the meeting's own chat is linked to a group, or at least half of the people invited (and at least two) are one group's people;
+- never a meeting with anyone from outside your organization (guests or people from another Microsoft 365 organization), and never one that several groups share equally.
+
+Things to know before turning it on:
+
+- **Teams also saves a video recording**, not only the transcript, in the organizer's OneDrive, kept as your Teams policy says. Microsoft doesn't let apps choose *Transcribe only*. If you only want transcripts, leave this off and ask organizers to pick *Transcribe only* themselves.
+- Everyone in the meeting sees that it's being recorded, as with any Teams recording.
+- Each meeting is set **once**. If the organizer turns it off again in **Meeting options**, Sidekick leaves it off. A recurring meeting is set once for the whole series.
+- A Microsoft admin approves two more permissions first: reading calendars (times, subject, invitees and the Teams link, never the invitation text) and changing Teams meetings. Until then the Meetings page says what to approve.
+- Your Teams meeting policy must allow automatic recording (`AutoRecording Enabled`) and cloud recording. If it doesn't, the meeting is listed with *"Microsoft Teams didn't accept the change"*.
+- Turning it off stops Sidekick setting new meetings. Meetings it already set keep recording until their organizer changes them.
+
+Everyone in a group sees that group's upcoming meetings that will record, under the switch. Org Owners, Org Admins and Team Leads also see any problem. Each meeting Sidekick sets is in the audit log ("Turned on automatic recording and transcription for the Teams meeting …"), and so is each change to the switch.
 
 **Calls in a chat (Meet now, or the call button): Sidekick reminds you.** These calls have no meeting options, so nothing can start transcription by itself. When a call starts in one of a group's Teams chats and nobody has started transcription after about **two minutes**, Sidekick posts one short card in that chat:
 

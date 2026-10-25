@@ -641,6 +641,20 @@ CREATE TABLE IF NOT EXISTS call_watch (
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS call_nudge INTEGER;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS call_nudge_by TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS call_nudge_at TEXT;
+-- Meetings that record and transcribe by themselves (lib/auto-record.ts): one row per organization and Teams meeting
+-- (join_key = hash of its join link; a recurring series is one row). status set | already | skipped | failed; a set
+-- meeting is never changed again. title only for set, already and failed rows (the group's own meetings).
+CREATE TABLE IF NOT EXISTS meeting_autorecord (
+  org_id TEXT NOT NULL REFERENCES orgs(id), join_key TEXT NOT NULL, online_meeting_id TEXT, organizer_oid TEXT NOT NULL,
+  workspace_id TEXT, status TEXT NOT NULL, reason TEXT, title TEXT, starts_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, join_key)
+);
+CREATE INDEX IF NOT EXISTS meeting_autorecord_org ON meeting_autorecord(org_id, status, starts_at);
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS auto_record INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS auto_record_by TEXT;
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS auto_record_at TEXT;
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS record_checked_at TEXT;
+ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS record_error TEXT;
 -- ---------------------------------------------------------------------------------------------------------
 -- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
 -- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and

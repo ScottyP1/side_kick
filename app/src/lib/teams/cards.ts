@@ -197,6 +197,7 @@ export function helpCard(workspace: string | null): IAdaptiveCard {
         { title: `@${BRAND.name} remove @name`, value: "Take someone off this group (Team Lead or admin)" },
         { title: `@${BRAND.name} post meeting notes here`, value: "Send this group's meeting notes to this chat (Team Lead or admin)" },
         { title: `@${BRAND.name} stop posting notes here`, value: "Stop sending meeting notes to this chat (Team Lead or admin)" },
+        { title: `@${BRAND.name} stop transcription reminders`, value: "No more “turn on transcription” reminders in this group's calls (Team Lead or admin)" },
         { title: `@${BRAND.name} help`, value: "Show this card" },
       ],
     },

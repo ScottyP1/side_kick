@@ -606,6 +606,18 @@ CREATE TABLE IF NOT EXISTS graph_poll_cursors (
   org_id TEXT NOT NULL REFERENCES orgs(id), organizer_oid TEXT NOT NULL, polled_until TEXT NOT NULL,
   PRIMARY KEY (org_id, organizer_oid)
 );
+-- "Turn on transcription" reminder (lib/call-nudge.ts): calls seen in a group's Teams chats, one row per chat and
+-- call id, status watching | nudged | transcribing | ended | quiet | skipped | failed (one nudge per call).
+CREATE TABLE IF NOT EXISTS call_nudges (
+  conversation_id TEXT NOT NULL, call_id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT,
+  started_at TEXT, status TEXT NOT NULL, nudged_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (conversation_id, call_id)
+);
+CREATE INDEX IF NOT EXISTS call_nudges_ws ON call_nudges(org_id, workspace_id, status);
+-- When each watched chat was last read for call events, and why Graph refused it (null = it was read).
+CREATE TABLE IF NOT EXISTS call_watch (
+  conversation_id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, checked_at TEXT NOT NULL, error TEXT
+);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -738,6 +750,9 @@ function migrate(conn: DatabaseSync) {
   // manager confirmed it; guard_json = what matched. firm_docs.applies_to: 'all' groups or 'some' (firm_doc_groups).
   for (const t of ["documents", "firm_docs"]) for (const col of ["guard_status", "guard_json", "held_text"]) if (!has(t, col)) conn.exec(`ALTER TABLE ${t} ADD COLUMN ${col} TEXT`);
   if (!has("firm_docs", "applies_to")) conn.exec("ALTER TABLE firm_docs ADD COLUMN applies_to TEXT NOT NULL DEFAULT 'all'");
+  // "Turn on transcription" reminder (lib/call-nudge.ts): the group's switch (NULL or 1 = on, 0 = off), who and when.
+  if (!has("workspaces", "call_nudge")) conn.exec("ALTER TABLE workspaces ADD COLUMN call_nudge INTEGER");
+  for (const col of ["call_nudge_by", "call_nudge_at"]) if (!has("workspaces", col)) conn.exec(`ALTER TABLE workspaces ADD COLUMN ${col} TEXT`);
   // Scale readiness (docs/SCALE.md): indexes for per-group lists and counts, per-person lookups and the retention
   // clean-up (lib/retention.ts), found with the load test on 10,000 groups. Same list as db/schema.postgres.sql.
   for (const sql of [

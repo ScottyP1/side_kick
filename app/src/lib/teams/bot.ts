@@ -34,6 +34,9 @@
  *   every message there (needs the app's resource-specific consent permissions, see teams/manifest),
  *   whether meeting notes go there, and whether reminders are posted there. (Chats assigned through the
  *   picker always track: assigned means full access.)
+ * - **Transcription reminders**: lib/call-nudge.ts posts "Turn on transcription?" in a linked group chat when a call
+ *   runs without a transcript (through `postCard`); "@Sidekick stop/start transcription reminders" switches that for
+ *   the chat's group (Team Lead or admin, `callNudgeFromTeams`).
  * - **Adaptive Cards**: the formatted messages with buttons (see cards.ts). Button clicks come back as
  *   `card.action` activities and update the card in place.
  * - **Authentication**: in production every request carries a token signed by Microsoft for Sidekick's
@@ -60,6 +63,7 @@ import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
 import { recordChatMessage, reminderAction } from "../reminders";
 import { notesHereFromTeams, notesTargetsFor, parseNotesCommand, parsePosted, postedToLine, recordNotesPosted, type NotesChat, type PostedChat } from "../notes-chats";
+import { callNudgeFromTeams, parseNudgeCommand } from "../call-nudge";
 import { BRAND } from "../brand";
 import { cleanOutput, getGuardPolicy } from "../guardrails";
 import { SAVABLE_KINDS, setItemSaved } from "../saved-items";
@@ -602,6 +606,13 @@ function registerHandlers(app: App) {
       const group = (await workspaceName(conv)) ?? "this group";
       const text = await span("teams", "Change where meeting notes go from Teams", () => notesHereFromTeams(asker, conv.workspace_id!, group, conv.id, notesCommand));
       return void (await send(cardMessage(noticeCard("Meeting notes", text))));
+    }
+    // "@Sidekick stop/start transcription reminders" (lib/call-nudge.ts): same rule as the portal switch.
+    const nudgeCommand = parseNudgeCommand(question);
+    if (nudgeCommand) {
+      const group = (await workspaceName(conv)) ?? "this group";
+      const text = await span("teams", "Switch transcription reminders from Teams", () => callNudgeFromTeams(asker, conv.workspace_id!, group, nudgeCommand));
+      return void (await send(cardMessage(noticeCard("Transcription reminders", text))));
     }
     traceScope({ actor: asker.name });
     // Follow-ups: in a channel the reply thread is the conversation (its id carries ";messageid=<first post>"); in a

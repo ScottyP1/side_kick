@@ -617,3 +617,19 @@ UPDATE connector_links SET connector_id = connector_id || '-' || workspace_id WH
 DELETE FROM connectors WHERE workspace_id IS NULL;
 DELETE FROM connector_health WHERE workspace_id = '' AND connector IN ('azure-devops', 'jira', 'github', 'confluence', 'microsoft-365-files');
 CREATE UNIQUE INDEX IF NOT EXISTS connectors_group_kind ON connectors(org_id, workspace_id, kind);
+
+-- "Turn on transcription" reminder (lib/call-nudge.ts): calls seen in a group's Teams chats, one row per chat and
+-- call id, status watching | nudged | transcribing | ended | quiet | skipped | failed (one nudge per call).
+CREATE TABLE IF NOT EXISTS call_nudges (
+  conversation_id TEXT NOT NULL, call_id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT,
+  started_at TEXT, status TEXT NOT NULL, nudged_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (conversation_id, call_id)
+);
+CREATE INDEX IF NOT EXISTS call_nudges_ws ON call_nudges(org_id, workspace_id, status);
+-- When each watched chat was last read for call events, and why Graph refused it (null = it was read).
+CREATE TABLE IF NOT EXISTS call_watch (
+  conversation_id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, checked_at TEXT NOT NULL, error TEXT
+);
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS call_nudge INTEGER;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS call_nudge_by TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS call_nudge_at TEXT;

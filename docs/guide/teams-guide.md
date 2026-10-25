@@ -117,6 +117,8 @@ Sidekick needs to know who's asking: sign in to the Sidekick portal with Microso
 ## Choosing where meeting notes go, from the chat
 In one of a group's chats, its **Team Lead** (or an **Org Owner/Admin**) can type `@Sidekick post meeting notes here` (or "notes here", "send meeting notes here") to send the group's meeting notes to this chat, or `@Sidekick stop posting notes here` to stop. Sidekick replies "Done ✓ Meeting notes for *group* will be posted here." Anyone else gets "Only the Team Lead or an admin can change where notes go." In a chat with client guests it works too, but notes of internal-only meetings never go there (Sidekick says so). It's the same choice as **Meeting notes go to** in the portal, and it's in the audit log. Details: [Meetings and automatic notes](meetings.md#the-notes-chat-in-teams).
 
+**Reminders to start transcription.** When someone starts a call in one of a group's chats (**Meet now** or the call button) and nobody has started transcription after about two minutes, Sidekick posts one short card: "Turn on transcription? … **More (…) → Record and transcribe → Start transcription** …". Without a transcript there are no notes. The Team Lead can type `@Sidekick stop transcription reminders` to switch these off for the group (or switch them off on the group's **Teams chats** tab). Details: [Getting a transcript every time](meetings.md#getting-a-transcript-every-time).
+
 ## Commands
 | Type | Does |
 |---|---|
@@ -127,6 +129,7 @@ In one of a group's chats, its **Team Lead** (or an **Org Owner/Admin**) can typ
 | `@Sidekick remove @name` | Take someone off this chat's workspace (Team Lead or Org Admin) |
 | `@Sidekick post meeting notes here` | Send this group's meeting notes to this chat (Team Lead or admin) |
 | `@Sidekick stop posting notes here` | Stop sending meeting notes to this chat (Team Lead or admin) |
+| `@Sidekick stop transcription reminders` | No more "Turn on transcription?" reminders in this group's calls (Team Lead or admin; `start transcription reminders` turns them back on) |
 | `@Sidekick help` | Show what Sidekick can do here |
 
 ## What Sidekick can and can't see

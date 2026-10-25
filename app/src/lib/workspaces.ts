@@ -74,6 +74,8 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
       "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
       // A firm document limited to chosen groups (lib/upload-guard.ts) stops applying to this one.
       "firm_doc_groups",
+      // Calls seen in its chats for the transcription reminder (lib/call-nudge.ts).
+      "call_nudges", "call_watch",
     ]) {
       await run(`DELETE FROM ${table} WHERE workspace_id = ? AND org_id = ?`, ...ws);
     }

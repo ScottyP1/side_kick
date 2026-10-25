@@ -106,6 +106,9 @@ const TRANSCRIPTS = []; // { id, meetingId, organizer, createdDateTime, vtt }
 const pollCalls = [];
 const transcriptsOff = new Set(); // tenants whose Teams "Transcript API access" switch is off (403 GraphAccessToTranscriptsDisabled)
 const throttle = { meeting: [] }; // queue of Retry-After values to answer the next meeting reads with (429)
+const CHAT_MSGS = new Map(); // chat id → its latest messages (call events for the transcription reminder)
+const chatDenied = new Set(); // chats Graph refuses to read (403: the chat permission wasn't granted there)
+const chatReads = []; // every GET /chats/{id}/messages
 const vtt = (lines) => `WEBVTT\n\n${lines.map(([who, text], i) => `00:${String(i).padStart(2, "0")}:01.000 --> 00:${String(i).padStart(2, "0")}:09.000\n<v ${who}>${text}</v>`).join("\n\n")}\n`;
 
 async function validateWith(url) {
@@ -144,6 +147,14 @@ const microsoft = http.createServer((req, res) => {
     if (!consented.has(tid)) return send(403, { error: { code: "Forbidden" } });
     if (transcriptsOff.has(tid) && (p === "/v1.0/subscriptions" || p.includes("/onlineMeetings/"))) {
       return send(403, { error: { code: "Forbidden", message: "Graph API access to transcripts is disabled for this tenant.", innerError: { code: "GraphAccessToTranscriptsDisabled" } } });
+    }
+    // A chat's latest messages (lib/call-nudge.ts reads call events); newest first, at most $top.
+    const chatMsgs = p.match(/^\/v1\.0\/chats\/([^/]+)\/messages$/);
+    if (chatMsgs && req.method === "GET") {
+      chatReads.push({ chat: chatMsgs[1], prefer: req.headers.prefer ?? "", top: url.searchParams.get("$top"), orderby: url.searchParams.get("$orderby") });
+      if (chatDenied.has(chatMsgs[1])) return send(403, { error: { code: "Forbidden", message: "Missing role permissions on the request." } });
+      const list = [...(CHAT_MSGS.get(chatMsgs[1]) ?? [])].sort((a, b) => b.createdDateTime.localeCompare(a.createdDateTime));
+      return send(200, { value: list.slice(0, Number(url.searchParams.get("$top")) || 20) });
     }
     // Subscriptions.
     if (p === "/v1.0/subscriptions" && req.method === "POST") {
@@ -743,3 +754,134 @@ test(`[${ENGINE}] subscription upkeep: renewed before it runs out, recreated whe
   await drain({ sweep: true });
   assert.equal(await scalar(`SELECT COUNT(*) FROM graph_meetings WHERE transcript_id = '${late.transcriptId}'`), "0");
 });
+
+/* ---------- "Turn on transcription" reminders in calls (lib/call-nudge.ts) ---------- */
+
+/** A Teams call event in a chat (`kind`: callStarted, callEnded, callTranscript, callRecording), `minutesAgo` old. */
+const callEvent = (kind, callId, minutesAgo) => ({
+  id: String(Date.now() - minutesAgo * 60_000 + Math.floor(Math.random() * 1000)), messageType: "systemEventMessage",
+  createdDateTime: new Date(Date.now() - minutesAgo * 60_000).toISOString(), body: { contentType: "html", content: "<systemEventMessage/>" },
+  eventDetail: { "@odata.type": `#microsoft.graph.${kind}EventMessageDetail`, callId },
+});
+/** Adds call events to a chat's messages in the fake Graph. */
+const postEvents = (chat, ...events) => CHAT_MSGS.set(chat, [...(CHAT_MSGS.get(chat) ?? []), ...events]);
+/** How many transcription reminders were posted to a chat since `from`. */
+const nudgesIn = (chat, from) => (sentTo(chat, from).match(/Start transcription/g) ?? []).length;
+/** "@Sidekick <text>" in a chat from `from` (default Lou, the Team Lead); returns what Sidekick answered. */
+async function sayTo(chat, text, from) {
+  const i = sent.length;
+  const atSidekick = { type: "mention", mentioned: { id: "bot", name: "Sidekick" }, text: "<at>Sidekick</at>" };
+  await toBot(activity(chat, { type: "message", text: `<at>Sidekick</at> ${text}`, entities: [atSidekick], ...(from ? { from } : {}) }));
+  return waitFor(chat, /./, i);
+}
+const MO_TEAMS = () => ({ id: "29:mo", name: "Mo Member", aadObjectId: OID.mo });
+
+test(`[${ENGINE}] transcription reminder: a call with no transcription after 2 minutes gets one card, once, traced and audited`, async () => {
+  assert.equal((await ann("PUT", "/api/meetings/auto", { enabled: true })).status, 200);
+  await drain({ sweep: true });
+  const st = (await mo("GET", `/api/workspaces/${s.w1}/call-nudge`)).body;
+  assert.equal(st.enabled, true, "on by default");
+  assert.equal(st.autoNotes, true);
+  assert.equal(st.canManage, false);
+  assert.deepEqual(st.unreadable, []);
+  // A call started a minute ago: too early.
+  const from = sent.length;
+  postEvents(CHAT_W1, callEvent("callStarted", "call-1", 1));
+  await drain({ sweep: true });
+  assert.equal(nudgesIn(CHAT_W1, from), 0);
+  const read = chatReads.findLast((r) => r.chat === CHAT_W1);
+  assert.ok(read, "the linked group chat is read");
+  assert.match(read.prefer, /include-unknown-enum-members/);
+  assert.equal(read.orderby, "createdDateTime desc");
+  // Three minutes in and still nothing: one reminder, saying where the button is and how to stop these.
+  CHAT_MSGS.set(CHAT_W1, [callEvent("callStarted", "call-1", 3)]);
+  await drain({ sweep: true });
+  const out = await waitFor(CHAT_W1, /Start transcription/, from);
+  assert.match(out, /Record and transcribe/);
+  assert.match(out, /stop transcription reminders/);
+  await drain({ sweep: true });
+  assert.equal(nudgesIn(CHAT_W1, from), 1, "once per call");
+  assert.equal(await scalar("SELECT status FROM call_nudges WHERE call_id = 'call-1'"), "nudged");
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Reminded%transcription%' ORDER BY id DESC LIMIT 1"), /to start transcription/);
+  let traced = "0";
+  for (let i = 0; i < 40 && traced === "0"; i++) {
+    traced = await scalar("SELECT COUNT(*) FROM traces WHERE name = 'Transcription reminder'");
+    if (traced === "0") await new Promise((r) => setTimeout(r, 150));
+  }
+  assert.equal(traced, "1", "a reminder shows on the Activity page");
+  assert.ok((await lou("GET", `/api/workspaces/${s.w1}/call-nudge`)).body.last?.chat, "the tab shows the latest reminder");
+});
+
+test(`[${ENGINE}] transcription reminder: nothing for a transcribed, ended or old call, nor twice within 30 minutes; quiet days respected`, async () => {
+  const from = sent.length;
+  postEvents(CHAT_W1,
+    callEvent("callStarted", "call-2", 4), callEvent("callTranscript", "call-2", 3),
+    callEvent("callStarted", "call-3", 5), callEvent("callEnded", "call-3", 1),
+    callEvent("callStarted", "call-4", 45),
+    callEvent("callStarted", "call-5", 3));
+  await drain({ sweep: true });
+  assert.equal(nudgesIn(CHAT_W1, from), 0);
+  assert.equal(await scalar("SELECT status FROM call_nudges WHERE call_id = 'call-2'"), "transcribing");
+  assert.equal(await scalar("SELECT status FROM call_nudges WHERE call_id = 'call-3'"), "ended");
+  assert.equal(await scalar("SELECT COUNT(*) FROM call_nudges WHERE call_id = 'call-4'"), "0", "old calls aren't even kept");
+  assert.equal(await scalar("SELECT status FROM call_nudges WHERE call_id = 'call-5'"), "skipped", "the chat had a reminder minutes ago");
+  // A chat with reminders on and every day quiet: no reminder.
+  await dbExec("DELETE FROM call_nudges");
+  const org = await scalar(`SELECT org_id FROM workspaces WHERE id = '${s.w1}'`);
+  const quiet = JSON.stringify({ reminders: true, quietDays: [0, 1, 2, 3, 4, 5, 6], timeZone: "Europe/London" });
+  const saved = await scalar(`SELECT json FROM teams_chat_settings WHERE conversation_id = '${CHAT_W1}'`);
+  await dbExec(`DELETE FROM teams_chat_settings WHERE conversation_id = '${CHAT_W1}'`);
+  await dbExec(`INSERT INTO teams_chat_settings (conversation_id, org_id, workspace_id, json, updated_by, updated_at) VALUES ('${CHAT_W1}', '${org}', '${s.w1}', '${quiet}', 'test', '${new Date().toISOString()}')`);
+  CHAT_MSGS.set(CHAT_W1, [callEvent("callStarted", "call-6", 3)]);
+  await drain({ sweep: true });
+  assert.equal(nudgesIn(CHAT_W1, from), 0);
+  assert.equal(await scalar("SELECT status FROM call_nudges WHERE call_id = 'call-6'"), "quiet");
+  await dbExec(saved ? `UPDATE teams_chat_settings SET json = '${saved.replaceAll("'", "''")}' WHERE conversation_id = '${CHAT_W1}'` : `DELETE FROM teams_chat_settings WHERE conversation_id = '${CHAT_W1}'`);
+});
+
+test(`[${ENGINE}] transcription reminder: the switch (Team Lead or admin, portal or Teams), audited; off means the chat isn't read`, async () => {
+  const url = `/api/workspaces/${s.w1}/call-nudge`;
+  assert.equal((await mo("PUT", url, { enabled: false })).status, 403, "a Member can't switch it");
+  assert.equal((await vic("PUT", url, { enabled: false })).status, 403);
+  assert.equal((await pat("GET", url)).status, 404, "another group's people don't see it");
+  assert.equal((await bob("GET", url)).status, 404, "another organization doesn't see it");
+  assert.equal((await bob("PUT", url, { enabled: false })).status, 404);
+  assert.equal((await ann("PUT", url, { enabled: "no" })).status, 400);
+  const off = await lou("PUT", url, { enabled: false });
+  assert.equal(off.status, 200, JSON.stringify(off.body));
+  assert.equal(off.body.enabled, false);
+  assert.equal(off.body.changedBy, "Lou Lead");
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Turned off%transcription%' ORDER BY id DESC LIMIT 1"), /Turned off/);
+  await dbExec("DELETE FROM call_nudges");
+  const from = sent.length;
+  const reads = chatReads.filter((r) => r.chat === CHAT_W1).length;
+  CHAT_MSGS.set(CHAT_W1, [callEvent("callStarted", "call-7", 3)]);
+  await drain({ sweep: true });
+  assert.equal(nudgesIn(CHAT_W1, from), 0);
+  assert.equal(chatReads.filter((r) => r.chat === CHAT_W1).length, reads, "a switched-off group's chats aren't read");
+  // From Teams: a Member is refused; the Team Lead turns it back on, and the running call gets its reminder.
+  assert.match(await sayTo(CHAT_W1, "start transcription reminders", MO_TEAMS()), /Only the Team Lead or an admin/);
+  assert.equal((await ann("GET", url)).body.enabled, false);
+  assert.match(await sayTo(CHAT_W1, "start transcription reminders"), /Done/);
+  assert.equal((await ann("GET", url)).body.enabled, true);
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Turned on%transcription%' ORDER BY id DESC LIMIT 1"), /from Teams/);
+  const before = sent.length;
+  await drain({ sweep: true });
+  await waitFor(CHAT_W1, /Start transcription/, before);
+  assert.match(await sayTo(CHAT_W1, "stop transcription reminders"), /won't remind/);
+  assert.equal((await ann("GET", url)).body.enabled, false);
+  assert.match(await sayTo(CHAT_W1, "stop transcription reminders"), /already off/);
+  assert.equal((await lou("PUT", url, { enabled: true })).status, 200);
+});
+
+test(`[${ENGINE}] transcription reminder: a chat Microsoft won't let Sidekick read is named on the Teams chats tab`, async () => {
+  chatDenied.add(CHAT_W1);
+  await drain({ sweep: true });
+  const st = (await lou("GET", `/api/workspaces/${s.w1}/call-nudge`)).body;
+  assert.equal(st.unreadable.length, 1, JSON.stringify(st));
+  assert.notEqual(await scalar(`SELECT error FROM call_watch WHERE conversation_id = '${CHAT_W1}'`), "");
+  chatDenied.delete(CHAT_W1);
+  await drain({ sweep: true });
+  assert.deepEqual((await lou("GET", `/api/workspaces/${s.w1}/call-nudge`)).body.unreadable, []);
+});
+

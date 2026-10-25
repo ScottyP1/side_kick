@@ -139,6 +139,9 @@ export async function forgetChat(conversationId: string): Promise<number> {
   await run("DELETE FROM teams_chat_settings WHERE conversation_id = ?", conversationId);
   // No longer a chosen notes chat (lib/notes-chats.ts): if it's assigned again, it isn't picked automatically.
   await run("DELETE FROM notes_chats WHERE conversation_id = ?", conversationId);
+  // Its calls and read state for the transcription reminder (lib/call-nudge.ts).
+  await run("DELETE FROM call_nudges WHERE conversation_id = ?", conversationId);
+  await run("DELETE FROM call_watch WHERE conversation_id = ?", conversationId);
   return rows.length;
 }
 

@@ -12,6 +12,8 @@
  * - **Teams chats**: **Meeting notes go to** (which chats get the group's meeting notes: one, several, or none; the
  *   group's Team Lead and Org Owners/Admins choose, everyone else sees it read-only; GET/PUT
  *   /api/workspaces/:id/notes-chats, lib/notes-chats.ts; "Send test message" per chat: POST …/notes-chats/test), then
+ *   **Transcription reminders** (on/off for "Turn on transcription?" in the group's calls: GET/PUT
+ *   /api/workspaces/:id/call-nudge, lib/call-nudge.ts), then
  *   the chats assigned to the group with their settings (reminders, tracking, client guests;
  *   components/chat-settings.tsx), unassign, and **Assign a chat**: in an organization tied to its Microsoft
  *   tenant, the chats waiting to be assigned (name, who added Sidekick and when, who's in it; GET
@@ -31,7 +33,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { GROUP_DEFAULT_DAYS, MAX_ROLLOFF_DAYS, MIN_GROUP_DAYS } from "@/lib/rolloff-policy";
-import { api, fmtDate, Icon, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
+import { api, fmtDate, Icon, Modal, Pill, Spinner, Switch, useReportError, useToast } from "@/components/ui";
 import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
 import { Avatar, groupHealth, PeoplePicker, type Group, type OrgPerson } from "@/components/groups";
 import { BRAND } from "@/lib/brand";
@@ -454,6 +456,67 @@ function NotesGoTo({ group, plan, canManage, reload }: { group: Group; plan: Not
   );
 }
 
+/** The group's "Turn on transcription" reminder, as GET /api/workspaces/:id/call-nudge returns it (lib/call-nudge.ts). */
+type CallNudge = {
+  enabled: boolean; changedBy: string | null; changedAt: string | null; autoNotes: boolean;
+  unreadable: string[]; last: { chat: string; at: string } | null; canManage: boolean;
+};
+
+/**
+ * "Transcription reminders": when a call starts in one of the group's Teams chats and nobody has started transcription
+ * after about two minutes, Sidekick posts one short reminder there (lib/call-nudge.ts). On by default; the group's
+ * Team Lead and Org Owners/Admins switch it (PUT /api/workspaces/:id/call-nudge, audited), everyone else sees it
+ * read-only. Also says when it can't run (automatic notes off) and which chats Microsoft won't let Sidekick read.
+ */
+function CallReminders({ group }: { group: Group }) {
+  const toast = useToast();
+  const reportError = useReportError();
+  const [st, setSt] = useState<CallNudge | null>(null);
+  const [busy, setBusy] = useState(false);
+  const url = `/api/workspaces/${encodeURIComponent(group.id)}/call-nudge`;
+  useEffect(() => {
+    api<CallNudge>(url).then(setSt).catch(reportError);
+  }, [url, reportError]);
+  if (!st) return null;
+  const flip = async (on: boolean) => {
+    setBusy(true);
+    try {
+      setSt(await api<CallNudge>(url, { method: "PUT", json: { enabled: on } }));
+      toast(on ? "Transcription reminders are on." : "Transcription reminders are off.");
+    } catch (e) {
+      reportError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="panel" style={{ marginBottom: 16 }}>
+      <div className="panel-h">
+        <div>
+          <h2>Transcription reminders</h2>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            Notes need a transcript. When a call starts in one of this group&apos;s Teams chats and nobody has started transcription after about 2 minutes, {BRAND.name} posts one short reminder there.
+            {st.changedBy ? ` ${st.enabled ? "Turned on" : "Turned off"} by ${st.changedBy}${st.changedAt ? ` on ${fmtDate(st.changedAt)}` : ""}.` : ""}
+            {!st.canManage && " The group's Team Lead chooses this."}
+          </span>
+        </div>
+        {st.canManage ? busy ? <Spinner /> : <Switch on={st.enabled} onChange={flip} label="Transcription reminders" /> : <Pill nodot>{st.enabled ? "On" : "Off"}</Pill>}
+      </div>
+      {(!st.autoNotes || st.unreadable.length > 0 || st.last) && (
+        <div className="panel-b">
+          {!st.autoNotes && <p className="muted" style={{ margin: 0 }}>Automatic notes are off for your organization, so there are no reminders either. An Org Owner or Admin turns them on on the Meetings page.</p>}
+          {st.unreadable.length > 0 && (
+            <p className="err" style={{ margin: 0 }}>
+              {BRAND.name} can&apos;t see calls in {st.unreadable.map((n) => `“${n}”`).join(", ")}. Remove {BRAND.name} from that chat in Teams and add it again, so Teams grants the chat-reading permission.
+            </p>
+          )}
+          {st.last && <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>Latest reminder: in {st.last.chat}, {fmtDate(st.last.at)}.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * "Meeting notes go to", then the Teams chats assigned to this group, their settings, and assigning one: from the
  * chats waiting to be assigned when `picker` (the organization is tied to its Microsoft tenant, so Sidekick hands
@@ -523,6 +586,7 @@ function Chats({ group, links, notes, canManage, picker, reload }: { group: Grou
   return (
     <>
       {notes && notes.chats.length > 0 && <NotesGoTo key={`${notes.mode}:${notes.targets.join()}:${notes.chats.map((c) => c.id).join()}`} group={group} plan={notes} canManage={canManage} reload={reload} />}
+      {notes && notes.chats.length > 0 && <CallReminders group={group} />}
       <div className="panel">
         <div className="panel-h">
           <div>

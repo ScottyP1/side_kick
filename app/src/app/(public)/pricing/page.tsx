@@ -22,7 +22,7 @@ export const metadata: Metadata = pageMetadata("/pricing");
 
 /** The limits a buyer compares, from the plan itself. */
 const limits = (p: Plan) => [
-  `${limitText(p.workspaces)} group${p.workspaces === 1 ? "" : "s"} (client engagements)`,
+  p.workspaces === 1 ? "1 group (one client engagement)" : `${limitText(p.workspaces)} groups (client engagements)`,
   `Up to ${limitText(p.seats)} people`,
   `${limitText(p.meetingHours)} meeting hours / month`,
   `${limitText(p.chats)} tracked Teams chats`,

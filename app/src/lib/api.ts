@@ -17,7 +17,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import crypto from "node:crypto";
 import { HttpError } from "./auth";
 import { FeatureOffError } from "./owner";
-import { now, run } from "./db";
+import { asSystem, markRequestSystem, now, openRequestScope, run } from "./db";
 import { failureReason, traceFailed, withTrace } from "./trace";
 import { crossSiteRefusal } from "./security";
 import { readOnlyRefusal } from "./billing";
@@ -68,10 +68,11 @@ async function logAppError(ref: string, status: number, req: unknown, e: unknown
   const message = e instanceof Error ? e.message : String(e);
   console.error(`[error ${ref}] ${r?.method ?? ""} ${route} → ${status}:`, e);
   try {
-    await run(
+    // The error log is the Sidekick team's (no org), written whatever the request's scope was.
+    await asSystem("error log", () => run(
       "INSERT INTO app_errors (ref, status, method, route, message, stack, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       ref, status, r?.method ?? null, route, message.slice(0, 2000), e instanceof Error ? (e.stack ?? "").slice(0, 4000) : null, now(),
-    );
+    ));
   } catch (logErr) {
     console.error(`[error ${ref}] could not be saved to app_errors`, logErr);
   }
@@ -126,10 +127,15 @@ export type ErrorDetail = string | number | boolean | null | ErrorDetail[] | { [
  *   refused with 402 and the reason (`readOnlyRefusal` in lib/billing.ts), so read-only holds for every route.
  * - The route runs inside `runRequest` (lib/request-scope.ts), so `requireWorkspace` can keep groups that
  *   are ending read-only for every route that changes something.
+ * - Everything runs in a database org scope (`openRequestScope`, lib/db.ts): it starts with no org, and
+ *   `requireUser` fills in the person's org, so Postgres row-level security hides every other org's rows.
+ *   Routes that work before anyone is signed in and must look across orgs (sign-in, sign-up, Microsoft sign-in,
+ *   the public help bot, Microsoft Graph notifications) pass `opts.system`, a short reason naming them.
  */
-export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>) {
+export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>, opts: { system?: string } = {}) {
   return async (...args: A) =>
-    withTrace({ name: routeName(args[0]), channel: "portal" }, async () => {
+    openRequestScope(() => withTrace({ name: routeName(args[0]), channel: "portal" }, async () => {
+    if (opts.system) markRequestSystem(opts.system);
     try {
       // Changes from another website first (CSRF), then a read-only (unpaid/ended) plan.
       const crossSite = args[0] instanceof Request ? crossSiteRefusal(args[0]) : null;
@@ -164,7 +170,7 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<unknown>
       if (e instanceof Anthropic.APIError) return fail(502, `Claude couldn't answer right now (${e.status ?? "network"}). Try again in a minute.`);
       return fail(500, `Something went wrong on our side. Try again; if it keeps happening, contact the ${BRAND.name} team.`);
     }
-    });
+    }));
 }
 
 /** Parses the request body as JSON, or throws 400 with a readable message. */

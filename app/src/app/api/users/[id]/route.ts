@@ -42,7 +42,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   const body = await readJson<{ role?: string; workspaces?: string[] }>(req);
   const lead = isLead(admin);
   if (lead && (body.role !== undefined || !LEAD_ASSIGNABLE_ROLES.includes(target.role))) {
-    throw new HttpError(403, "Team Leads can change which of their workspaces a Member or Viewer is in. Ask an Org Admin to change roles.");
+    throw new HttpError(403, "Team Leads can change which of their groups a Member or Viewer is in. Ask an Org Admin to change roles.");
   }
   if (body.role !== undefined) {
     if (target.id === admin.id && body.role !== target.role) throw new HttpError(403, "You can't change your own role. Ask the Org Owner or another Org Admin.");

@@ -19,4 +19,4 @@ export const POST = handle(async (req: Request) => {
   const counts = await handleLifecycle(await req.json().catch(() => null));
   spanAttrs(counts);
   return new Response(null, { status: 202 });
-});
+}, { system: "Microsoft Graph notifications" });

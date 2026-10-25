@@ -32,7 +32,7 @@
 import "server-only";
 import { z } from "zod";
 import { audit, HttpError, isAdmin, isLead, workspaceIdsFor, type User } from "./auth";
-import { all, get, newId, now, run } from "./db";
+import { all, asSystem, get, newId, now, run } from "./db";
 import { span, spanAttrs } from "./trace";
 import { keywords, localMatches } from "./search";
 import { structured } from "./claude";
@@ -172,12 +172,13 @@ const chatsWaiting: Watcher = {
   kind: "chat_waiting",
   label: "Chats waiting to be assigned",
   async check(o) {
-    const rows = await all<{ id: string; name: string | null; kind: string; waiting_since: string | null; created_at: string }>(
+    // Waiting chats have no org yet (row-level security hides them from any org); the org's tenant is the wall here.
+    const rows = await asSystem("Teams chats without an org", () => all<{ id: string; name: string | null; kind: string; waiting_since: string | null; created_at: string }>(
       `SELECT c.id, c.name, c.kind, c.waiting_since, c.created_at FROM teams_conversations c JOIN orgs o ON o.entra_tenant_id = c.tenant_id
         WHERE o.id = ? AND c.workspace_id IS NULL AND c.kind <> 'personal' AND c.leaving IS NULL AND c.removed_at IS NULL
         ORDER BY c.created_at`,
       o.orgId,
-    );
+    ));
     if (!rows.length) return [];
     const leaves = rows.map((r) => Date.parse(r.waiting_since ?? r.created_at) + 7 * 86400_000).sort((a, b) => a - b)[0];
     return [{
@@ -201,11 +202,12 @@ const selfRemovalDenied: Watcher = {
   kind: "self_removal",
   label: "Can't remove itself from Teams chats",
   async check(o) {
-    const rows = await all<{ id: string; name: string | null; kind: string }>(
+    // Chats being left are usually unlinked (no org): system work, walled by the org's tenant (lib/db.ts asSystem).
+    const rows = await asSystem("Teams chats without an org", () => all<{ id: string; name: string | null; kind: string }>(
       `SELECT c.id, c.name, c.kind FROM teams_conversations c JOIN orgs o ON o.entra_tenant_id = c.tenant_id
         WHERE o.id = ? AND c.leaving IS NOT NULL AND c.leave_error = 'consent' ORDER BY c.leave_tried_at`,
       o.orgId,
-    );
+    ));
     if (!rows.length) return [];
     return [{
       kind: "self_removal", workspaceId: null, subject: "", audience: "admins", severity: "warn",

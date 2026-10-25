@@ -72,9 +72,9 @@ const WS_PAGES = ["/knowledge", "/meetings", "/memory"];
  */
 function WorkspacePick({ workspaces, ws, setWs }: { workspaces: Workspace[]; ws: string; setWs: (id: string) => void }) {
   if (!workspaces.length) return null;
-  if (workspaces.length === 1) return <span className="ws-label" title="Workspace">{workspaces[0].name}</span>;
+  if (workspaces.length === 1) return <span className="ws-label" title="Group">{workspaces[0].name}</span>;
   return (
-    <select className="input ws-pick" value={ws} onChange={(e) => setWs(e.target.value)} aria-label="Workspace">
+    <select className="input ws-pick" value={ws} onChange={(e) => setWs(e.target.value)} aria-label="Group">
       {workspaces.map((w) => (
         <option key={w.id} value={w.id}>
           {w.name}
@@ -438,14 +438,14 @@ export function NeedsWorkspace() {
   return (
     <div className="panel">
       <div className="empty">
-        <h2>No workspace yet</h2>
-        <span>Workspaces keep each client engagement&apos;s documents, meetings and memory separate.</span>
+        <h2>No group yet</h2>
+        <span>Groups keep each client engagement&apos;s documents, meetings and memory separate.</span>
         {me.user.admin ? (
           <Link className="btn primary" href="/workspaces">
-            Create a workspace
+            Create a group
           </Link>
         ) : (
-          <span>Ask an Org Admin to add you to one.</span>
+          <span>Ask an Org Admin or a Team Lead to add you to one.</span>
         )}
       </div>
     </div>

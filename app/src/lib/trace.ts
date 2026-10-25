@@ -211,9 +211,10 @@ async function saveTrace(t: TraceState) {
   const orgId = t.orgId;
   if (!orgId) return;
   try {
-    const { DIALECT, get, run, tx } = await import("./db"); // lazy: db.ts imports this file for countDbQuery
+    const { DIALECT, get, run, tx, withOrg } = await import("./db"); // lazy: db.ts imports this file for countDbQuery
     const duration = t.spans[0]?.duration ?? 0;
-    await tx(async () => {
+    // Saved as work for the trace's own org (row-level security, lib/db.ts), whatever scope the request ended in.
+    await withOrg(orgId, () => tx(async () => {
       // Waits while the organization is being deleted; afterwards finds nothing, and the trace is dropped.
       const org = await get(`SELECT id FROM orgs WHERE id = ?${DIALECT === "postgres" ? " FOR KEY SHARE" : ""}`, orgId);
       if (!org) return;
@@ -228,7 +229,7 @@ async function saveTrace(t: TraceState) {
           t.id, s.id, s.parentId, s.kind, s.name, s.start, s.duration, s.status, s.error ?? null, JSON.stringify(s.attrs),
         );
       }
-    });
+    }));
   } catch (e) {
     console.error("Couldn't save trace", e);
   }

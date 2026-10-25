@@ -62,7 +62,7 @@ export default function ClientsPage() {
         <div>
           <div className="eyebrow">Clients</div>
           <h1>{list ? `${list.length} client organization${list.length === 1 ? "" : "s"}` : "Clients"}</h1>
-          <p>Each client has its own users, workspaces, documents and memory. Nothing is shared between clients.</p>
+          <p>Each client has its own users, groups, documents and memory. Nothing is shared between clients.</p>
         </div>
         <div className="actions">
           <button className="btn primary" onClick={() => setAdding(true)}><Icon n="plus" />Add client</button>
@@ -93,7 +93,7 @@ export default function ClientsPage() {
                   <th>Status</th>
                   <th>Plan</th>
                   <th className="r">Users</th>
-                  <th className="r">Workspaces</th>
+                  <th className="r">Groups</th>
                   <th className="r">Meetings</th>
                   <th className="r">Docs</th>
                   <th className="r">Spend (month)</th>

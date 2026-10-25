@@ -51,10 +51,10 @@ export async function workspaceMemberCommand(
 ): Promise<CommandReply> {
   const verb = action === "add" ? "add people to" : "take people off";
   if (actor.id.startsWith("teams:")) {
-    return { title: `I don't know you in ${BRAND.name} yet`, lines: [`Only this workspace's Team Lead or an Org Admin can ${verb} ${workspaceName}. If that's you, sign in to the ${BRAND.name} portal with Microsoft once so I recognise you here.`] };
+    return { title: `I don't know you in ${BRAND.name} yet`, lines: [`Only this group's Team Lead or an Org Admin can ${verb} ${workspaceName}. If that's you, sign in to the ${BRAND.name} portal with Microsoft once so I recognise you here.`] };
   }
   if (!(await mayManage(actor, conv.workspace_id))) {
-    return { title: "Sorry, I can't do that for you", lines: [`Only this workspace's Team Lead or an Org Admin can ${verb} ${workspaceName}. Your ${BRAND.name} role is ${actor.role}.`] };
+    return { title: "Sorry, I can't do that for you", lines: [`Only this group's Team Lead or an Org Admin can ${verb} ${workspaceName}. Your ${BRAND.name} role is ${actor.role}.`] };
   }
   if (!people.length) return { title: "Who should I " + action + "?", lines: [`Mention them, for example “@${BRAND.name} ${action} @Maria”.`] };
 

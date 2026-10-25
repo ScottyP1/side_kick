@@ -11,4 +11,4 @@ export const POST = handle(async () => {
   await endSession();
   if (user) await audit(user, "Signed out", "Sign-in");
   return { ok: true };
-});
+}, { system: "sign-out" });

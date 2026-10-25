@@ -48,7 +48,7 @@ export const GET = handle(async (req: Request) => {
     jar.set(FLASH_COOKIE, message, { path: "/", maxAge: FLASH_SECONDS, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
     return go(`${mode === "link" ? "/settings" : mode === "consent" ? "/users" : "/login"}?error=1`);
   }
-});
+}, { system: "Microsoft sign-in" });
 
 /** Finds the Sidekick person for this Microsoft account, remembering their account id on first sign-in. */
 async function signInAs(who: MicrosoftIdentity): Promise<string> {

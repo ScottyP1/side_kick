@@ -27,7 +27,7 @@
  */
 import "server-only";
 import { audit, HttpError, type User } from "./auth";
-import { get, run } from "./db";
+import { asSystem, get, run } from "./db";
 import { BRAND } from "./brand";
 
 /** Values of TENANT_ID that mean "any organization" rather than one tenant. */
@@ -81,7 +81,8 @@ export const isTenantId = (t: unknown): t is string => typeof t === "string" && 
 export async function tieOrgToTenant(orgId: string, tenantId: string, by: Pick<User, "id" | "org_id" | "name">, ownerOid?: string): Promise<void> {
   if (!isTenantId(tenantId)) throw new HttpError(400, "That isn't a Microsoft organization id.");
   if (by.org_id !== orgId) throw new HttpError(403, "Only the organization's own Org Owner can connect it to Microsoft.");
-  const taken = await get<{ id: string }>("SELECT id FROM orgs WHERE entra_tenant_id = ? AND id <> ?", tenantId, orgId);
+  // A tenant belongs to one org at most, so this check looks at every org (system work, lib/db.ts asSystem).
+  const taken = await asSystem("a tenant belongs to one org", () => get<{ id: string }>("SELECT id FROM orgs WHERE entra_tenant_id = ? AND id <> ?", tenantId, orgId));
   if (taken) throw new HttpError(409, `That Microsoft organization is already connected to another ${BRAND.name} organization. Contact the ${BRAND.name} team.`);
   const current = await tenantOfOrg(orgId);
   if (current && current !== tenantId) throw new HttpError(409, "This organization is already connected to a different Microsoft organization. Disconnect it first.");

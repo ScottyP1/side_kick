@@ -87,7 +87,7 @@ export default function MemoryPage() {
         <div>
           <div className="eyebrow">Memory · {wsName}</div>
           <h1>What {BRAND.name} knows, and what it doesn&apos;t</h1>
-          <p>Built from this workspace&apos;s meetings and documents. Refresh the knowledge map after adding new material.</p>
+          <p>Built from this group&apos;s meetings and documents. Refresh the knowledge map after adding new material.</p>
         </div>
         <div className="actions" style={{ alignItems: "center" }}>
           {data?.refreshedAt && <span className="muted" style={{ fontSize: 12.5 }}>Map updated {fmtTime(data.refreshedAt)}</span>}
@@ -137,7 +137,7 @@ export default function MemoryPage() {
                     <div className="meter" style={{ height: 6, width: "100%" }}>
                       <span style={{ width: `${t.coverage}%`, background: `var(--${covKind(t.coverage)})` }} />
                     </div>
-                    <span className="muted" style={{ fontSize: 12 }}>{t.document_titles.length} docs · {t.meeting_titles.length} meetings</span>
+                    <span className="muted" style={{ fontSize: 12 }}>{t.document_titles.length} {t.document_titles.length === 1 ? "doc" : "docs"} · {t.meeting_titles.length} {t.meeting_titles.length === 1 ? "meeting" : "meetings"}</span>
                   </button>
                 ))}
               </div>

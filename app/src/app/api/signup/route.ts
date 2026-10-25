@@ -21,4 +21,4 @@ export const POST = handle(async (req: Request) => {
   const { orgId, userId, plan } = await signUp({ ...body, microsoft: undefined }, await clientIp());
   await startSession(userId);
   return { ok: true, next: await provider().checkoutUrl(orgId, plan as PlanId) };
-});
+}, { system: "sign-up" });

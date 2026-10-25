@@ -107,7 +107,7 @@ function GuardrailsAdmin() {
         <div>
           <div className="eyebrow">Guardrails</div>
           <h1>Rules {BRAND.name} always follows</h1>
-          <p>These apply to every workspace, in the portal and in Teams. Questions are checked before {BRAND.name} answers, and answers are checked again before anyone sees them. A workspace can be made stricter than the rest, never looser.</p>
+          <p>These apply to every group, in the portal and in Teams. Questions are checked before {BRAND.name} answers, and answers are checked again before anyone sees them. A group can be made stricter than the rest, never looser.</p>
         </div>
       </div>
 
@@ -163,15 +163,15 @@ function GuardrailsAdmin() {
       {r.workspaces.length > 0 && (
         <div className="panel">
           <div className="panel-h">
-            <h2>Workspace rules</h2>
-            <select className="input" style={{ width: "auto" }} value={ws ?? ""} onChange={(e) => setWs(e.target.value)} aria-label="Workspace">
+            <h2>Group rules</h2>
+            <select className="input" style={{ width: "auto" }} value={ws ?? ""} onChange={(e) => setWs(e.target.value)} aria-label="Group">
               {r.workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
             </select>
           </div>
           {r.workspace ? (
             <>
               <div className="panel-b muted" style={{ fontSize: 13, paddingBottom: 0 }}>
-                What&apos;s in force in {r.workspace.name}. A switch that&apos;s on for the whole organization stays on here; {r.canManage ? "you can turn more on for this workspace only." : "Org Owners and Admins can turn more on for this workspace only."}
+                What&apos;s in force in {r.workspace.name}. A switch that&apos;s on for the whole organization stays on here; {r.canManage ? "you can turn more on for this group only." : "Org Owners and Admins can turn more on for this workspace only."}
               </div>
               <div className="list">
                 {r.workspace.switches.map((s) => (
@@ -182,12 +182,12 @@ function GuardrailsAdmin() {
                     ) : r.canManage ? (
                       saving === `ws:${s.key}` ? <Spinner /> : <Switch on={s.extra} onChange={(v) => flipWorkspace(s.key, v)} label={`${s.label} in ${r.workspace!.name}`} />
                     ) : (
-                      <Pill kind={s.on ? "info" : ""}>{s.on ? "On for this workspace" : "Off"}</Pill>
+                      <Pill kind={s.on ? "info" : ""}>{s.on ? "On for this group" : "Off"}</Pill>
                     )}
                   </div>
                 ))}
               </div>
-              {r.workspace.updated && <div className="panel-b muted" style={{ fontSize: 12.5 }}>Workspace switches last changed by {r.workspace.updated.by}, {fmtTime(r.workspace.updated.at)}</div>}
+              {r.workspace.updated && <div className="panel-b muted" style={{ fontSize: 12.5 }}>Group switches last changed by {r.workspace.updated.by}, {fmtTime(r.workspace.updated.at)}</div>}
             </>
           ) : (
             <div className="panel-b muted"><Spinner /> Loading…</div>
@@ -198,7 +198,7 @@ function GuardrailsAdmin() {
       {r.workspace && (
         <RulesPanel
           title={`Custom rules for ${r.workspace.name} only`}
-          hint="Apply in this workspace on top of the organization's rules."
+          hint="Apply in this group on top of the organization's rules."
           rules={r.workspace.rules}
           scope={r.workspace.id}
           canManage={r.canManage}

@@ -15,4 +15,4 @@ export const POST = handle(async (req: Request) => {
   const transcript = body.conversation ? await visitorTranscript(body.conversation) : "";
   const out = await createPublicTicket(body, await clientIp(), { source: transcript ? "helpbot" : "public", transcript: transcript || undefined });
   return { ok: true, ref: out?.ref };
-});
+}, { system: "public support form" });

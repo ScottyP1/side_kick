@@ -766,6 +766,16 @@ test(`[${ENGINE}] who added Sidekick: a Team Lead not linked to Microsoft yet is
   await waitFor(HCHAT, /not set up for this chat yet/, h2);
   const hw = (await ann("GET", "/api/teams-links")).body.waiting.find((w) => w.id === HCHAT);
   assert.equal(hw?.added_by, "Hana Ito");
+
+  // A guest from another company in tenant A whose mail matches a Sidekick person is never linked: unknown.
+  assert.equal((await ann("POST", "/api/users", { name: "Gwen Guest", email: "gwen@outside.test", role: "Team Lead", workspaces: [s.w1] })).status, 200);
+  DIRECTORY[TA].push({ id: guid("oid-gwen"), displayName: "Gwen Guest", mail: "gwen@outside.test", userPrincipalName: "gwen_outside.test#EXT#@a.test", userType: "Guest", accountEnabled: true });
+  const GCHAT = "19:guest-adder@thread.v2";
+  const gg = sent.length;
+  await install(GCHAT, { id: "29:gwen", name: "Gwen Guest", aadObjectId: guid("oid-gwen") });
+  await waitFor(GCHAT, /I don't know you in Sidekick yet/, gg);
+  assert.equal((await ann("GET", "/api/users")).body.users.find((u) => u.email === "gwen@outside.test").microsoft, 0, "a guest's account is never linked");
+  assert.ok(!(await ann("GET", "/api/teams-links")).body.waiting.some((w) => w.id === GCHAT));
   s.grace = { client: grace, from: GRACE };
 });
 

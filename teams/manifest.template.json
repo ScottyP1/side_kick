@@ -48,7 +48,7 @@
       "configurationUrl": "{{PUBLIC_URL}}/teams/config",
       "canUpdateConfiguration": false,
       "scopes": ["groupChat", "team"],
-      "context": ["chatTab", "channelTab", "meetingChatTab", "meetingDetailsTab", "meetingSidePanel"]
+      "context": ["privateChatTab", "channelTab", "meetingChatTab", "meetingDetailsTab", "meetingSidePanel"]
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],

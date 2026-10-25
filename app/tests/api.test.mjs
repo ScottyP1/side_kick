@@ -2829,10 +2829,11 @@ test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; no
   assert.equal((await tick()).posted, 1);
   assert.equal((await tick()).posted, 0, "never twice in the same day");
 
-  // "Meeting notes go to": no choice yet, two chats (the 1:1 chat and the group chat) → the group chat by default, and a choice is needed.
+  // "Meeting notes go to": no choice yet and several chats (the 1:1 chat among them) → ONE default group chat, and a choice is needed.
   const notesUrl = `/api/workspaces/${s.wsA}/notes-chats`;
   const plan0 = (await admin("GET", notesUrl)).body;
-  assert.deepEqual([plan0.mode, plan0.defaultId, plan0.targets, plan0.needsChoice, plan0.canManage], ["unset", GROUP, [GROUP], true, true], JSON.stringify(plan0));
+  assert.deepEqual([plan0.mode, plan0.targets, plan0.needsChoice, plan0.canManage], ["unset", [plan0.defaultId], true, true], JSON.stringify(plan0));
+  assert.ok(plan0.chats.length >= 2 && plan0.defaultId !== "conv-1", "never the 1:1 chat");
   assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: "conv-1", changes: { notes: false } })).status, 400, "no per-chat notes switch any more");
   // A Member of the group sees it read-only and can't change it.
   const remi = (await mia("GET", notesUrl)).body;

@@ -116,7 +116,7 @@ Fix: create the encryption-key secret on the Container App (docs/HOSTING.md → 
     title: "\"Essentials only\": what happens when the monthly AI credit runs out",
     level: "public",
     tags: ["billing", "ai credit", "essentials", "limits"],
-    body: `Every plan includes a monthly AI credit. At 80% Org Owners, Org Admins and Billing Admins see a notice. At 100% ${BRAND.name} switches to **essentials only** until the 1st of next month:
+    body: `Every plan includes a monthly AI credit. At 80% Org Owners and Org Admins see a notice. At 100% ${BRAND.name} switches to **essentials only** until the 1st of next month:
 
 - Answers to questions keep working (in Teams and the portal), and so do the guardrail checks.
 - Notes for short meetings keep working.

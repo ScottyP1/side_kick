@@ -2,7 +2,8 @@
 
 /**
  * AI models & agent (/agent): what each AI feature does and whether it's working, and what's ready vs coming next.
- * Plain wording only: model and provider names are for the Sidekick team (Owner Console), so customers see
+ * Org Owners and Org Admins only: everyone else gets the usual "who can use this" message (the page has no
+ * API of its own; it reads /api/me). Plain wording only: model and provider names are for the Sidekick team (Owner Console), so customers see
  * "Working" / "Essentials only" rather than the plumbing. Models are set by the Sidekick team (lib/claude.ts).
  */
 
@@ -40,6 +41,7 @@ const ESSENTIAL = new Set(["ask", "guard", "extract"]);
 
 export default function AgentPage() {
   const { me } = useApp();
+  if (!me.user.admin) return <div className="callout bad">Only Org Owners and Org Admins can see AI models &amp; agent. Ask one of them if you need it.</div>;
   const essentials = me.credit?.level === "essentials";
   const state = (k: string) => (!me.ai.working ? ["warn", "Not set up"] : essentials && !ESSENTIAL.has(k) ? ["warn", "Paused (AI credit)"] : essentials ? ["info", "Essentials only"] : ["good", "Working"]);
   return (

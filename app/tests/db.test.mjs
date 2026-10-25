@@ -32,6 +32,43 @@ test(`[${engine}] insert, read back, numbers come back as numbers`, async () => 
   assert.equal(typeof count.n, "number");
 });
 
+test(`[${engine}] retiring Billing Admins: they become Members with no groups, audited, the Org Owner told once`, async () => {
+  const org = db.newId();
+  const [ownerId, billId, memberId, ws] = [db.newId(), db.newId(), db.newId(), db.newId()];
+  const t = db.now();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Retire Co", t);
+  for (const [id, name, role] of [[ownerId, "Rita Owner", "Org Owner"], [billId, "Bill Payer", "Billing Admin"], [memberId, "Mo Member", "Member"]]) {
+    await db.run("INSERT INTO users (id, org_id, name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", id, org, name, `${id}@retire.test`, role, "x", t);
+  }
+  await db.run("INSERT INTO workspaces (id, org_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)", ws, org, "Retire group", "#4f46e5", t);
+  for (const u of [billId, memberId]) await db.run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", ws, u);
+
+  await db.runDataMigrations();
+  const role = async (id) => (await db.get("SELECT role FROM users WHERE id = ?", id)).role;
+  assert.equal(await role(billId), "Member", "least privilege");
+  assert.equal(await role(ownerId), "Org Owner");
+  assert.equal(await role(memberId), "Member");
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM workspace_members WHERE user_id = ?", billId)).n, 0, "no groups");
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM workspace_members WHERE user_id = ?", memberId)).n, 1, "other people keep theirs");
+  const audits = await db.all("SELECT actor, action, kind FROM audit_log WHERE org_id = ? ORDER BY id", org);
+  assert.equal(audits.length, 1, "one audit entry per person");
+  assert.equal(audits[0].actor, "Sidekick");
+  assert.equal(audits[0].kind, "Access");
+  assert.match(audits[0].action, /^Changed Bill Payer from Billing Admin to Member: the Billing Admin role was retired/);
+  const notices = await db.all("SELECT id, kind, audience, status, title, next_step, action_href, workspace_id FROM findings WHERE org_id = ?", org);
+  assert.equal(notices.length, 1);
+  assert.deepEqual({ ...notices[0], id: undefined }, {
+    id: undefined, kind: "role_changed", audience: "owners", status: "open", workspace_id: null, action_href: "/users",
+    title: "Bill Payer was a Billing Admin and is now a Member",
+    next_step: "Make them an Org Admin on Users & access if they should keep seeing billing.",
+  });
+  // Running it again (every start-up does) changes nothing.
+  await db.runDataMigrations();
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM audit_log WHERE org_id = ?", org)).n, 1);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM findings WHERE org_id = ?", org)).n, 1);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'Billing Admin'")).n, 0);
+});
+
 test(`[${engine}] a failed transaction saves nothing`, async () => {
   const id = db.newId();
   await assert.rejects(
@@ -495,7 +532,7 @@ test(`[${engine}] roll-off: a pending deletion makes the organization read-only 
   assert.equal(plans.withRolloff(full, null, { selfService: true }, now), full);
   const soon = plans.withRolloff(full, { read_only_from: iso(now + DAY), delete_on: iso(now + 31 * DAY), reason: "the plan was canceled" }, { selfService: true }, now);
   assert.equal(soon.mode, "full", "usable until the paid period ends");
-  assert.match(soon.notice, /deleted on Nov 21, 2026\. To keep it, an Org Owner or Billing Admin can pay again/);
+  assert.match(soon.notice, /deleted on Nov 21, 2026\. To keep it, the Org Owner can pay again/);
   const ro = plans.withRolloff(full, { read_only_from: iso(now - DAY), delete_on: iso(now + 29 * DAY), reason: "the plan was canceled" }, { selfService: false }, now);
   assert.equal(ro.mode, "read_only");
   assert.match(ro.reason, /read-only for your organization because the plan was canceled, and everything in it will be deleted on Nov 19, 2026\. .*Export your data.*contact the Sidekick team/);
@@ -598,7 +635,6 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
   const people = {
     owner: { role: "Org Owner", admin: true },
     orgAdmin: { role: "Org Admin", admin: true },
-    billing: { role: "Billing Admin", admin: false },
     lead: { role: "Team Lead", admin: false, lead: true },
     member: { role: "Member", admin: false },
     viewer: { role: "Viewer", admin: false },
@@ -609,9 +645,11 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
   assert.deepEqual(hrefs(people.orgAdmin), all);
   for (const [who, u] of Object.entries(people)) {
     const mine = hrefs(u);
-    assert.equal(mine.includes("/usage"), ["owner", "orgAdmin", "billing"].includes(who), `${who}: Usage`);
+    assert.equal(mine.includes("/usage"), ["owner", "orgAdmin"].includes(who), `${who}: Usage`);
     assert.equal(mine.includes("/users"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Users`);
-    assert.equal(mine.includes("/activity") || mine.includes("/audit"), u.admin, `${who}: Activity/Audit`);
+    for (const href of ["/usage", "/agent", "/guardrails", "/activity", "/audit"]) assert.equal(mine.includes(href), u.admin, `${who}: ${href} is for Org Owners and Org Admins`);
+    assert.equal(mine.includes("/connectors"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Connectors`);
+    for (const href of ["/home", "/workspaces", "/knowledge", "/firm-library", "/meetings", "/memory", "/settings", "/help"]) assert.ok(mine.includes(href), `${who}: ${href} is for everyone`);
     for (const inGroup of [true, false]) {
       const tabs = pnav.phoneTabs(u, inGroup).map((t) => t.href);
       assert.ok(tabs.length >= 1 && tabs.length <= pnav.MAX_PHONE_TABS, `${who}: ${tabs.length} tabs`);
@@ -621,9 +659,11 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
     assert.deepEqual(pnav.phoneTabs(u, true).map((t) => t.href), ["/home", "/workspaces", "/knowledge", "/meetings"]);
   }
   // Nobody in a group: no empty Knowledge/Meetings tabs; pages the role can use instead.
-  assert.deepEqual(pnav.phoneTabs(people.billing, false).map((t) => t.short ?? t.label), ["Home", "Usage", "Settings", "Help"]);
+  // The retired Billing Admin role (nobody has it after the migration) would get no Usage & billing either.
+  assert.ok(!hrefs({ role: "Billing Admin", admin: false }).includes("/usage"));
   assert.deepEqual(pnav.phoneTabs(people.owner, false).map((t) => t.href), ["/home", "/usage", "/workspaces", "/settings"]);
   assert.deepEqual(pnav.phoneTabs(people.viewer, false).map((t) => t.href), ["/home", "/settings", "/help"]);
+  for (const who of ["member", "lead"]) assert.deepEqual(pnav.phoneTabs(people[who], false).map((t) => t.href), ["/home", "/settings", "/help"], `${who} in no group`);
   // A page counts as active for its own address and the pages under it, not for look-alike prefixes.
   assert.ok(pnav.isActive("/workspaces/abc", "/workspaces"));
   assert.ok(pnav.isActive("/home", "/home"));
@@ -1098,4 +1138,26 @@ test(`[${engine}] connector health: broken keeps its first date until it works a
   assert.equal((await ch.brokenConnectors(org))[0].message, "It stopped working.");
   await ch.removeConnectorHealth(org, "azure-devops", "ws-1");
   assert.deepEqual(await ch.brokenConnectors(org), []);
+});
+
+test(`[${engine}] connectors move from one per organization into groups (CONNECTOR_GROUP_MIGRATION)`, async () => {
+  const org = db.newId(), wsA = db.newId(), wsB = db.newId(), c1 = db.newId(), c2 = db.newId();
+  await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, "Legacy Connector Co", db.now());
+  for (const [id, name] of [[wsA, "A"], [wsB, "B"]]) await db.run("INSERT INTO workspaces (id, org_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)", id, org, name, "#000", db.now());
+  // As before Oct 24, 2026: connectors without a group (Azure DevOps linked in two groups, Jira linked nowhere).
+  for (const [id, kind] of [[c1, "ado"], [c2, "jira"]]) {
+    await db.run("INSERT INTO connectors (id, org_id, kind, status, account, api_base, web_base, access_token, connected_by, connected_at, updated_at) VALUES (?, ?, ?, 'connected', 'acct', 'x', 'y', 'enc1.t', 'Olivia', ?, ?)", id, org, kind, db.now(), db.now());
+  }
+  await db.run("INSERT INTO connector_links (id, org_id, connector_id, workspace_id, project, project_name, created_at) VALUES (?, ?, ?, ?, 'P1', 'P1', '2026-01-01')", db.newId(), org, c1, wsA);
+  const lB = db.newId();
+  await db.run("INSERT INTO connector_links (id, org_id, connector_id, workspace_id, project, project_name, created_at) VALUES (?, ?, ?, ?, 'P2', 'P2', '2026-01-02')", lB, org, c1, wsB);
+  await db.run("INSERT INTO connector_items (id, org_id, workspace_id, link_id, external_id, title, url, synced_at) VALUES (?, ?, ?, ?, '1', 't', 'u', ?)", db.newId(), org, wsB, lB, db.now());
+  for (let i = 0; i < 2; i++) for (const sql of db.CONNECTOR_GROUP_MIGRATION) await db.run(sql); // harmless twice
+  assert.deepEqual((await db.all("SELECT kind FROM connector_kinds WHERE org_id = ? ORDER BY kind", org)).map((r) => r.kind), ["ado", "jira"], "both stay allowed");
+  const conns = await db.all("SELECT id, workspace_id, status, access_token FROM connectors WHERE org_id = ? ORDER BY workspace_id = ?", org, wsB);
+  assert.equal(conns.length, 2, "Jira (no links) is gone, Azure DevOps is in both groups");
+  assert.deepEqual([conns[0].id, conns[0].workspace_id, conns[0].status, conns[0].access_token], [c1, wsA, "connected", "enc1.t"], "the first group keeps the sign-in");
+  assert.deepEqual([conns[1].workspace_id, conns[1].status, conns[1].access_token], [wsB, "expired", null], "the other group signs in again");
+  assert.equal((await db.get("SELECT connector_id FROM connector_links WHERE id = ?", lB)).connector_id, conns[1].id, "its link moved to its own connection");
+  assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM connector_items WHERE link_id = ?", lB)).n), 1, "its items stay");
 });

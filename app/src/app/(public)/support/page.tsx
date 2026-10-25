@@ -24,7 +24,7 @@ export default function SupportPage() {
         <div className="panel"><div className="panel-h"><h2>Common questions</h2></div><div className="panel-b">
           <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
             <li><b>Forgot your password?</b> Ask your Org Owner or Org Admin to reset it from Users &amp; access.</li>
-            <li><b>Change plan or cancel?</b> Org Owners and Billing Admins: Usage &amp; billing → Plan.</li>
+            <li><b>Change plan or cancel?</b> The Org Owner: Usage &amp; billing → Plan.</li>
             <li><b>{BRAND.name} says it&apos;s read-only?</b> Your plan&apos;s trial ended or a payment failed. Pay on Usage &amp; billing to turn everything back on.</li>
             <li><b>Adding {BRAND.name} to Teams?</b> A Team Lead or admin adds the {BRAND.name} app to the chat, then assigns the chat to a group in the portal. See <Link href="/docs/teams-guide">{BRAND.name} in Teams</Link>.</li>
           </ul>

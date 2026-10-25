@@ -270,11 +270,11 @@ function client(label) {
 }
 
 /**
- * Connects a tool like the Connect button: the app sends the browser to the fake tool's sign-in, which approves at
- * once and sends it back to the callback. Fails loudly if it doesn't land on "connected".
+ * Connects a tool for one group like the "Sign in and connect" button: the app sends the browser to the fake tool's
+ * sign-in, which approves at once and sends it back to the callback. Fails loudly if it doesn't land on "connected".
  */
-async function connectDemoTool(call, kind, site) {
-  const start = await call("GET", `/api/connectors/start?kind=${kind}${site ? `&site=${site}` : ""}`, undefined, { raw: true });
+async function connectDemoTool(call, kind, site, ws) {
+  const start = await call("GET", `/api/connectors/start?kind=${kind}&ws=${ws}${site ? `&site=${site}` : ""}`, undefined, { raw: true });
   const approve = await fetch(start.location ?? "", { redirect: "manual" }).catch(() => null);
   const back = approve?.headers.get("location") ? new URL(approve.headers.get("location")) : null;
   const done = back ? await call("GET", back.pathname + back.search, undefined, { raw: true }) : null;
@@ -373,14 +373,15 @@ async function phaseA() {
     const r = await owner("POST", "/api/users", { name: p.name, email: p.email, role });
     world.users[p.email] = { ...p, id: r.id, temp: r.tempPassword };
   }
-  // The login accounts (and every Team Lead, who sign in to do their group's work) choose their own password.
+  // The login accounts (and every Team Lead, and other named people the story signs in as, such as Hannah Brooks who
+  // files the invoice ticket) choose their own password: their login's, or the shared one for everyone else.
   const leadPw = (secrets.leadPassword ??= newPassword());
   saveSecrets();
   for (const p of people) {
     if (p.role === "Org Owner") continue;
     if (!p.key && p.role !== "Team Lead") continue;
     const call = client(p.name);
-    await firstSignIn(call, p.email, world.users[p.email].temp, p.key ? PW[p.key] : leadPw);
+    await firstSignIn(call, p.email, world.users[p.email].temp, PW[p.key] ?? leadPw);
     if (p.key) sessions[p.key] = call;
     world.users[p.email].session = call;
   }
@@ -395,30 +396,38 @@ async function phaseA() {
     world.groups[p.key] = { id: r.id, profile: p, lead: world.users[people.find((x) => x.name === p.lead).email].session };
   }
 
-  log("• Connectors: an Azure DevOps board, a Jira project, a GitHub repository, a Confluence space and a SharePoint folder (fake tools on this Mac), linked to groups");
-  await connectDemoTool(owner, "ado", "northwind");
-  await connectDemoTool(owner, "jira");
-  await connectDemoTool(owner, "github");
-  await connectDemoTool(owner, "confluence");
-  await connectDemoTool(owner, "m365");
+  log("• Connectors: the Org Owner allows Azure DevOps, Jira, Confluence and Microsoft 365; each group's Team Lead connects them with the client's own account (fake tools on this Mac): Contoso's board, Jira project, Confluence space and SharePoint folder, Litware's own Azure DevOps; GitHub not allowed, with one request declined and one waiting");
+  const contoso = world.groups.contoso, litware = world.groups.litware;
+  for (const kind of ["ado", "jira", "confluence"]) await owner("PUT", "/api/connectors/kinds", { kind, allowed: true });
+  // Approve → connect → request (lib/connector-requests.ts): Contoso's Team Lead asked for Microsoft 365 files while it
+  // wasn't allowed, and the Org Owner approved (which allows the type for the organization).
+  const m365Ask = await contoso.lead("POST", "/api/connectors/requests", { kind: "m365", ws: contoso.id, reason: "The client keeps the cutover runbooks and sign-off decks in their SharePoint." });
+  await owner("POST", `/api/connectors/requests/${m365Ask.request.id}`, { action: "approve" });
+  // Each group connects with its own client account: Contoso's four tools, and Litware's separate Azure DevOps connection.
+  for (const [kind, site] of [["ado", "northwind"], ["jira"], ["confluence"], ["m365"]]) await connectDemoTool(contoso.lead, kind, site, contoso.id);
+  await connectDemoTool(litware.lead, "ado", "northwind", litware.id);
+  // GitHub stays not allowed: Fabrikam's lead was declined with a note; Contoso's lead is waiting for the Org Owner.
+  const ghAsk = await world.groups.fabrikam.lead("POST", "/api/connectors/requests", { kind: "github", ws: world.groups.fabrikam.id, reason: "To see the payment API's open pull requests." });
+  await owner("POST", `/api/connectors/requests/${ghAsk.request.id}`, { action: "decline", note: "Fabrikam's code stays in their own GitHub; ask their team for a weekly summary instead." });
+  await contoso.lead("POST", "/api/connectors/requests", { kind: "github", ws: contoso.id, reason: "The tills' code and bug reports live in northwind/store-pos; the team asks about open pull requests every stand-up." });
   const connected = (await owner("GET", "/api/connectors")).connectors;
-  const toolId = (kind) => connected.find((t) => t.kind === kind).id;
+  const toolId = (kind, key) => connected.find((t) => t.kind === kind && t.workspaceId === world.groups[key].id).id;
   const links = [
     ["ado", "Wave 2 Cutover", "contoso"], ["jira", "STORE", "contoso"], ["ado", "Data Platform", "litware"],
-    // The tills' code (issues and pull requests) and the cutover wiki (pages, searched like documents) for Contoso.
-    ["github", "northwind/store-pos", "contoso"], ["confluence", "CUT", "contoso"],
+    // The cutover wiki (pages, searched like documents) for Contoso. (GitHub's store-pos is linked once the request is approved.)
+    ["confluence", "CUT", "contoso"],
     // Contoso's SharePoint cutover folder: Word, PDF, PowerPoint and text files, plus one too large to read.
     ["m365", "b!ops-documents/cut-folder", "contoso"],
   ];
   for (const [kind, project, key] of links) {
-    const r = await world.groups[key].lead("POST", "/api/connectors/links", { connector: toolId(kind), ws: world.groups[key].id, project });
+    const r = await world.groups[key].lead("POST", "/api/connectors/links", { connector: toolId(kind, key), ws: world.groups[key].id, project });
     if (r.link.problem) throw new Error(`Linking ${project} didn't sync: ${r.link.problem}`);
   }
   // One real problem for the broken-connector watcher: the account loses access to Litware's project, and the next
   // sync says so (Connectors shows it, the group's managers get a finding). "Sync now" in the demo fixes it.
   tools.deny("ado", "Data Platform");
-  const litware = (await owner("GET", "/api/connectors")).connectors.find((t) => t.kind === "ado").links.find((l) => l.projectName === "Data Platform");
-  const broken = await world.groups.litware.lead("POST", `/api/connectors/links/${litware.id}/sync`);
+  const litwareLink = (await owner("GET", "/api/connectors")).connectors.find((t) => t.kind === "ado" && t.workspaceId === litware.id).links.find((l) => l.projectName === "Data Platform");
+  const broken = await litware.lead("POST", `/api/connectors/links/${litwareLink.id}/sync`);
   if (!broken.link.problem) throw new Error("The demo's broken connector didn't break.");
   tools.allow("ado", "Data Platform");
 

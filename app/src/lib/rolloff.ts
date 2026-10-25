@@ -330,7 +330,7 @@ export async function deleteGroupWithCertificate(orgId: string, workspaceId: str
 export const ORG_TABLES = [
   "support_attachments", "support_messages", "support_article_uses", "support_tickets", "conversation_turns", "conversations",
   "answer_feedback", "firm_doc_groups", "firm_docs", "graph_meetings", "graph_poll_cursors", "graph_subscriptions", "auto_meetings",
-  "connector_items", "connector_links", "connectors", "connector_states",
+  "connector_items", "connector_links", "connectors", "connector_states", "connector_requests", "connector_kinds",
   "findings", "watch_checks", "connector_health", "teams_post_failures", "jobs",
   "guard_rule_versions", "guard_custom_rules", "guard_workspace_rules", "guard_events", "guard_rules",
   "chat_messages", "teams_chat_settings", "reminder_runs", "action_items", "items", "meetings", "documents",
@@ -393,6 +393,9 @@ export async function deleteOrganization(orgId: string, actor: string, rolloff?:
       for (const table of ORG_TABLES) await run(`DELETE FROM ${table} WHERE org_id = ?`, orgId);
       await run("DELETE FROM orgs WHERE id = ?", orgId);
     });
+    // The job queue's heartbeat may have queued work for this organization (e.g. its watcher run) while the
+    // deletion was in progress: it still saw the organization until the transaction committed. Clear that too.
+    await run("DELETE FROM jobs WHERE org_id = ?", orgId);
     const cert: Certificate = {
       id: certificateId(), scope: "org", organization: org.name, group: null,
       requestedBy: rolloff?.requested_by ?? actor, requestedAt: rolloff?.created_at ?? now(), reason: rolloff?.reason ?? null,

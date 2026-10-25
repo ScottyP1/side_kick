@@ -1,7 +1,8 @@
 /**
  * /api/guardrails: the organization's guardrails (see lib/guardrails.ts).
  *
- * GET  ?ws=<workspace id> (optional). Who: anyone signed in. Returns the locked floor, the org-wide
+ * GET  ?ws=<workspace id> (optional). Who: Org Owners and Org Admins (everyone else reads the plain-words
+ *      summary at /api/rules, shown on Help & support as "Rules Sidekick follows"). Returns the locked floor, the org-wide
  *      switches and whether they're on, who last changed them, `canEdit` (Org Owner only: org switches),
  *      `canManage` (Org Owners/Admins: workspace switches, custom rules, the Test it box), the org-wide
  *      custom rules, the workspaces this person can see (for the page's picker), and for Org
@@ -20,7 +21,7 @@ import { all, get } from "@/lib/db";
 import { FLOOR, getGuardSettings, getWorkspaceExtras, guardSummary, listRules, MAX_RULE_LENGTH, MAX_RULES, saveGuardSettings, SWITCHES, type SwitchKey } from "@/lib/guardrails";
 
 export const GET = handle(async (req: Request) => {
-  const user = await requireUser();
+  const user = await requireUser(["Org Owner", "Org Admin"]);
   const wsParam = new URL(req.url).searchParams.get("ws");
   const settings = await getGuardSettings(user.org_id);
   const updated = await get<{ updated_by: string | null; updated_at: string }>("SELECT updated_by, updated_at FROM guard_rules WHERE org_id = ?", user.org_id);

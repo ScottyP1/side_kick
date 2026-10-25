@@ -31,7 +31,7 @@ export type Me = {
   workspaces: Workspace[];
   /** Plain status of AI answers (no model or provider names in the portal). */
   ai: { working: boolean };
-  /** This month's AI credit (Org Owners, Org Admins, Billing Admins only; null for others). */
+  /** This month's AI credit (Org Owners and Org Admins only; null for others). */
   credit?: { level: "unlimited" | "ok" | "warn" | "essentials"; pct: number } | null;
   /**
    * The plan's name (null = managed by the Sidekick team), connectors included (0, 1, null = all) and its
@@ -230,7 +230,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Icon n="alert" />
                 <span>
                   {me.billing.notice}{" "}
-                  {["Org Owner", "Org Admin", "Billing Admin"].includes(me.user.role) && <Link href="/usage">Open Usage &amp; billing</Link>}
+                  {me.user.admin && <Link href="/usage">Open Usage &amp; billing</Link>}
                 </span>
               </div>
             )}

@@ -3,7 +3,10 @@
 /**
  * A group's page (/workspaces/[id]): one client team (a "workspace" in the API) with tabs for
  * - **Overview**: what the watchers noticed in this group (components/findings.tsx), a setup checklist (Team Lead,
- *   people, Teams chats, documents) and its counts;
+ *   people, Teams chats, documents) and its counts; a **Sources** line for everyone in the group (which connected
+ *   tools feed it, with their last sync: GET /api/workspaces/:id/sources), and for the group's Team Lead and Org
+ *   Owners/Admins a **Last 30 days** card (questions, answers, meetings, documents, share of the organization's AI
+ *   use; no prices: GET /api/workspaces/:id/usage);
  * - **People**: who is in the group; Org Owners/Admins and the group's Team Lead add people already in the
  *   organization and take Members/Viewers off it (/api/workspaces/:id/members);
  * - **Teams chats**: the chats assigned to the group, with their settings (notes, reminders, client guests;
@@ -107,7 +110,9 @@ export default function GroupView() {
         {tb("docs", "Documents", docs.length)}
         {me.user.admin && tb("settings", "Settings")}
       </div>
+      {tab === "overview" && <Sources id={group.id} />}
       {tab === "overview" && <GroupFindings id={group.id} />}
+      {tab === "overview" && canManage && <Activity id={group.id} />}
       {tab === "overview" && <Overview group={group} members={members} links={links} docs={docs} go={setTab} openDocs={openDocs} />}
       {tab === "people" && <People group={group} members={members} canManage={canManage} reload={load} />}
       {tab === "chats" && <Chats group={group} links={links} canManage={canManage} reload={load} />}
@@ -127,6 +132,53 @@ function GroupFindings({ id }: { id: string }) {
     <div className="panel" style={{ marginBottom: 14 }}>
       <div className="panel-h"><h2>Needs attention</h2><Pill kind="warn">{findings.length}</Pill></div>
       <div className="list"><FindingRows findings={findings} reload={reload} here={`/workspaces/${id}`} /></div>
+    </div>
+  );
+}
+
+type Source = { tool: string; name: string; lastSync: string | null; working: boolean };
+
+/** One quiet line: which connected tools feed this group (nothing shown when none do). Read-only, for everyone in it. */
+function Sources({ id }: { id: string }) {
+  const reportError = useReportError();
+  const [sources, setSources] = useState<Source[] | null>(null);
+  useEffect(() => {
+    api<{ sources: Source[] }>(`/api/workspaces/${encodeURIComponent(id)}/sources`).then((r) => setSources(r.sources)).catch(reportError);
+  }, [id, reportError]);
+  if (!sources?.length) return null;
+  return (
+    <p className="muted" style={{ margin: "0 0 14px" }} data-testid="group-sources">
+      <b>Sources:</b>{" "}
+      {sources.map((x, i) => (
+        <span key={`${x.tool}-${x.name}`}>
+          {i > 0 && " · "}
+          {x.tool} ({x.name}){!x.working ? ", not syncing" : x.lastSync ? `, synced ${fmtDate(x.lastSync)}` : ""}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+type GroupActivity = { days: number; questions: number; answered: number; meetings: number; documents: number; aiSharePct: number | null };
+
+/** The group's last 30 days, for its Team Lead and Org Owners/Admins (the server checks the same). No prices. */
+function Activity({ id }: { id: string }) {
+  const reportError = useReportError();
+  const [a, setA] = useState<GroupActivity | null>(null);
+  useEffect(() => {
+    api<{ activity: GroupActivity }>(`/api/workspaces/${encodeURIComponent(id)}/usage`).then((r) => setA(r.activity)).catch(reportError);
+  }, [id, reportError]);
+  if (!a) return null;
+  return (
+    <div className="panel" style={{ marginBottom: 14 }}>
+      <div className="panel-h"><h2>Last {a.days} days</h2><span className="muted" style={{ fontSize: 12.5 }}>This group only</span></div>
+      <div className="panel-b">
+        {[["Questions asked", a.questions], ["Answered with sources", a.answered], ["Meetings captured", a.meetings], ["Documents added", a.documents]].map(([l, v]) => (
+          <div key={l as string} className="stat-line"><span className="muted">{l}</span><b className="num">{v}</b></div>
+        ))}
+        <div className="stat-line"><span className="muted">Share of your organization&apos;s AI use</span><b className="num">{a.aiSharePct === null ? "None yet" : `${a.aiSharePct}%`}</b></div>
+        {a.aiSharePct !== null && <div className="meter" aria-hidden="true"><span style={{ width: `${Math.min(100, a.aiSharePct)}%` }} /></div>}
+      </div>
     </div>
   );
 }

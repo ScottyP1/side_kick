@@ -29,14 +29,17 @@ prints the expected cost, about $3–4, and asks first); `--port <n>` (default 3
 In Claude Code: preview **`sidekick-demo`** (or `sidekick-demo-pg` after a Postgres seed) from `.claude/launch.json`.
 It runs on **http://localhost:3330** with `app/.demo-data`, fake Claude, the reminder timer off and every outside
 service blanked. Sign in at `/login` (portal) or `/owner/login` (Owner Console) with the accounts in
-`app/.demo-logins.md`: one per role (Org Owner, Org Admin, Billing Admin, Team Lead, Member, Viewer, the Owner Console
+`app/.demo-logins.md`: one per role (Org Owner, Org Admin, Team Lead, Member, Viewer, the Owner Console
 operator, and the Org Owner of a second client), each with things to try. Stop the demo copy before seeding again
 (the seed refuses while port 3330 is in use).
 
 **Connectors**: the launch config also starts a fake Azure DevOps, Jira, GitHub, Confluence and Microsoft 365
-(`app/scripts/fake-tools.mjs`, made-up Northwind projects and files) on port 3331, so Connectors shows all five tools
-connected: the "Wave 2 Cutover" board, the Jira project STORE, the GitHub repository `northwind/store-pos` (issues and pull
-requests), the Confluence space CUT (the cutover runbook, batch schedule and decision log, searched like documents) and the
+(`app/scripts/fake-tools.mjs`, made-up Northwind projects and files) on port 3331. The Org Owner allows four tool
+types (Azure DevOps, Jira, Confluence, and Microsoft 365, which Contoso's Team Lead asked for and the Org Owner
+approved); each group connected with its own client account: Contoso its Azure DevOps, Jira, Confluence and SharePoint,
+Litware its own separate Azure DevOps. **GitHub isn't allowed**, with Fabrikam's request declined (with a note) and
+Contoso's request waiting: sign in as the Org Owner to see it on Home and approve it, then as Contoso's Team Lead to
+connect GitHub for Contoso (the fake GitHub sign-in approves at once) and link `northwind/store-pos` (issues and pull requests). Linked: the "Wave 2 Cutover" board, the Jira project STORE, the Confluence space CUT (the cutover runbook, batch schedule and decision log, searched like documents) and the
 SharePoint folder "Store Operations › Documents › Wave 2 Cutover" (a Word cutover plan, a PDF go-live checklist, a
 PowerPoint steering deck and a text file; an 80 MB photo PDF shows as "1 not read") feed the Contoso group ("What's
 blocking the payment gateway cutover?", "How do we roll a store back?", "What budget did the steering committee
@@ -54,7 +57,7 @@ post notes to the simulated Teams chats, which aren't running: a harmless "Teams
 
 | | |
 |---|---|
-| **Northwind Consulting** (Business plan, test mode) | 1 Org Owner, 3 Org Admins, 1 Billing Admin, 10 Team Leads, 80 Members, 20 Viewers |
+| **Northwind Consulting** (Business plan, test mode) | 1 Org Owner, 4 Org Admins (Hannah Brooks looks after billing), 10 Team Leads, 80 Members, 20 Viewers |
 | **10 groups** (+ 1 new) | One per engagement, each with a Team Lead and members (plus a new bid team with no Team Lead yet, for Needs attention). Contoso reuses `samples/contoso/`; the other nine are generated from a profile each in `app/scripts/demo-world.mjs` |
 | **Per group** | 7–8 documents (SOW, runbook, RAID log, architecture, status report, internal staffing note, glossary), 5–8 meeting transcripts imported through the normal import with notes (decisions, action items with owners and dates, open questions, risks; for Contoso, Fabrikam and Litware the latest two are marked as **captured from Teams** by automatic notes, which is on for Northwind, with one meeting waiting for a group and one skipped on the Meetings page, and two Contoso decisions saved to knowledge), a tracked Teams chat, questions with 👍/👎, a knowledge map with gaps, reminder states |
 | **Firm library** | Expense policy v3 (replaces v2), travel, rate card, data handling, information security, RAID-log standard, status-report template; a **data residency standard for the two banking groups only** (Applies to: Fabrikam Bank, Woodgrove Bank) |

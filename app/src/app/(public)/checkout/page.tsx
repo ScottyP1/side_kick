@@ -2,7 +2,7 @@
 
 /**
  * Checkout (/checkout): pay for the organization's plan, after sign-up or from Usage & billing.
- * Signed-in Org Owners and Billing Admins. Shows the plan (`?plan=` picks another one) and extra groups
+ * The signed-in Org Owner. Shows the plan (`?plan=` picks another one) and extra groups
  * (`?extras=`), the plan's price per organization, the extra groups' price and the monthly total (people are a
  * limit, not part of the price), and one **Pay (test mode)** button. Test mode only: no
  * money moves and **no payment details are collected**: there are no card fields here, on purpose. With a
@@ -72,7 +72,7 @@ export default function CheckoutPage() {
           {!b ? (!error && <span className="muted">Loading…</span>) : !b.subscription ? (
             <p className="muted" style={{ margin: 0 }}>Your organization&apos;s plan is managed by the {BRAND.name} team, so there&apos;s nothing to pay here. <Link href="/home">Go to {BRAND.name}</Link>.</p>
           ) : !b.canManage ? (
-            <p className="muted" style={{ margin: 0 }}>Only the Org Owner or a Billing Admin can pay. <Link href="/home">Go to {BRAND.name}</Link>.</p>
+            <p className="muted" style={{ margin: 0 }}>Only the Org Owner can pay. <Link href="/home">Go to {BRAND.name}</Link>.</p>
           ) : (
             <>
               <div className="field">

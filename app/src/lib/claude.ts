@@ -202,7 +202,7 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
     const ws = msg.match(/^create (?:a )?workspace (?:called |named )?(.+)$/i);
     if (ws) return { reply: `Here's what I'll do: create “${ws[1]}”. Press Confirm.`, action: { type: "create_workspace", name: ws[1], code: null, email: null, role: null, workspace_ids: [], guests: null, page: null } };
     // "add <name> <email> [as <role>] [to <workspace id>]"
-    const person = msg.match(/^add (.+?) (\S+@\S+)(?: as (Org Admin|Team Lead|Billing Admin|Member|Viewer))?(?: to (\S+))?$/i);
+    const person = msg.match(/^add (.+?) (\S+@\S+)(?: as (Org Admin|Team Lead|Member|Viewer))?(?: to (\S+))?$/i);
     if (person) return { reply: `Here's what I'll do: add ${person[1]}. Press Confirm.`, action: { type: "add_person", name: person[1], code: null, email: person[2], role: person[3] ?? "Member", workspace_ids: person[4] ? [person[4]] : [], guests: null, page: null } };
     return { reply: "Test assistant reply.", action: null };
   }

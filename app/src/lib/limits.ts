@@ -9,8 +9,8 @@
  *   team sets some. Enterprise starts from the Business numbers.
  * - **Enforced where created**: each route that creates something counted here calls `assertCanAdd` first
  *   (people: POST /api/users; groups: POST /api/workspaces; tracked chats: POST /api/teams-links; meeting
- *   hours: POST /api/meetings; documents: POST /api/docs and POST /api/firm (group documents and the firm library count together); connectors: connecting a new tool in
- *   lib/connectors.ts; live meeting hours: when that exists, e.g. `assertCanAdd(orgId, "liveMeetingHours", hours)` before Sidekick joins a call). The refusal is
+ *   hours: POST /api/meetings; documents: POST /api/docs and POST /api/firm (group documents and the firm library count together); connectors: allowing a new tool type in
+ *   lib/connector-requests.ts (`allowKind`); live meeting hours: when that exists, e.g. `assertCanAdd(orgId, "liveMeetingHours", hours)` before Sidekick joins a call). The refusal is
  *   a 402 whose message names the limit and how to get more, with `kind: "limit"` and `limit` in the body.
  * - **Never deletes**: when a plan shrinks (or the team lowers a limit) nothing is removed; new things are
  *   refused and Usage & billing and the Owner Console show "over limit".
@@ -92,7 +92,7 @@ const count = async (sql: string, ...p: string[]) => Number((await get<{ n: numb
  * How much of each limit the organization uses now. Groups that are ending (scheduled for deletion) don't
  * count. Meeting hours are this month's; the AI credit's use
  * is filled in by lib/credit.ts (here it's 0, so limits stay cheap to count). Connectors are the tools
- * connected (lib/connectors.ts: one per tool, however many projects are linked).
+ * allowed (lib/connectors.ts: one per tool type, however many groups connect it).
  */
 export async function usageCounts(orgId: string): Promise<Record<LimitKey, number>> {
   const [seats, workspaces, chats, minutes, documents, connectors] = await Promise.all([
@@ -102,8 +102,8 @@ export async function usageCounts(orgId: string): Promise<Record<LimitKey, numbe
     count("SELECT COALESCE(SUM(duration_min), 0) AS n FROM meetings WHERE org_id = ? AND created_at >= ?", orgId, monthStart()),
     // Group documents plus the firm library (lib/firm.ts): both count toward the plan's document limit.
     count("SELECT (SELECT COUNT(*) FROM documents WHERE org_id = ?) + (SELECT COUNT(*) FROM firm_docs WHERE org_id = ?) AS n", orgId, orgId),
-    // Connected tools (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365: lib/connectors.ts), one row per tool, expired ones included.
-    count("SELECT COUNT(*) AS n FROM connectors WHERE org_id = ?", orgId),
+    // Allowed tool types (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365: lib/connectors.ts), however many groups connect each.
+    count("SELECT COUNT(*) AS n FROM connector_kinds WHERE org_id = ?", orgId),
   ]);
   // Live meetings (Sidekick joining calls, product step 3) aren't built yet: nothing used so far.
   return { seats, workspaces, chats, meetingHours: minutes / 60, liveMeetingHours: 0, documents, connectors, aiCreditUsd: 0 };
@@ -138,7 +138,7 @@ const optionText = (o: GroupOption) => `${planWithExtras(planById(o.plan)!, o.ex
 
 /**
  * The plain "how to get more groups" sentence for a self-service plan: the cheaper of adding extra groups or
- * upgrading first, both with their monthly price, e.g. "An Org Owner or Billing Admin can add 2 extra groups
+ * upgrading first, both with their monthly price, e.g. "The Org Owner can add 2 extra groups
  * (Starter + 2 extra groups for $457 a month), or move to Team for $699 a month on Usage & billing."
  */
 export function groupOptionsText(o: ReturnType<typeof groupOptions>, extras: number): string {
@@ -147,7 +147,7 @@ export function groupOptionsText(o: ReturnType<typeof groupOptions>, extras: num
   const upLine = o.upgrade ? `move to ${optionText(o.upgrade)}` : null;
   const lines = !upLine ? [extraLine] : o.cheaper === "extra" ? [extraLine, upLine] : [upLine, extraLine];
   const text = lines.join(", or ");
-  return `An Org Owner or Billing Admin can ${text} on Usage & billing.`;
+  return `The Org Owner can ${text} on Usage & billing.`;
 }
 
 const fmt = (key: LimitKey, n: number) => (key === "meetingHours" || key === "liveMeetingHours" ? `${Math.round(n * 10) / 10}` : String(n));
@@ -171,7 +171,7 @@ export async function assertCanAdd(orgId: string, key: Exclude<LimitKey, "aiCred
     ? ` and ${fmt(key, used)} ${used === 1 ? "hour is" : "hours are"} used; this one is about ${fmt(key, amount)} ${amount === 1 ? "hour" : "hours"}`
     : used ? ` and you have ${used}` : "";
   const how = plan?.selfService
-    ? "An Org Owner or Billing Admin can move to a bigger plan on Usage & billing."
+    ? "The Org Owner can move to a bigger plan on Usage & billing."
     : `Contact the ${BRAND.name} team to raise it.`;
   const keep = key === "meetingHours" || key === "liveMeetingHours" ? " Meeting hours start again on the 1st of next month." : "";
   // Groups on a self-service plan: say exactly what would make room, cheapest first, with the prices
@@ -211,7 +211,7 @@ export class FeatureError extends HttpError {
  * Call it only where the feature is *newly* used (turning reminders on for a chat, making someone Team
  * Lead, …), never for what already exists, so a smaller plan switches nothing off. The message names the
  * plan that includes it and who can move to it, e.g. "Your Starter plan doesn't include Team Leads. Team
- * ($699 / month) and up include it: an Org Owner or Billing Admin can move to Team on Usage & billing."
+ * ($699 / month) and up include it: the Org Owner can move to Team on Usage & billing."
  */
 export async function assertFeature(orgId: string, key: FeatureKey) {
   const { plan } = await orgPlan(orgId);
@@ -219,7 +219,7 @@ export async function assertFeature(orgId: string, key: FeatureKey) {
   const needed = planWithFeature(key);
   const label = FEATURE_LABEL[key];
   const how = needed.selfService && plan?.selfService
-    ? `${needed.name} (${priceText(needed)}) and up include it: an Org Owner or Billing Admin can move to ${needed.name} on Usage & billing.`
+    ? `${needed.name} (${priceText(needed)}) and up include it: the Org Owner can move to ${needed.name} on Usage & billing.`
     : `${needed.name} includes it: contact the ${BRAND.name} team.`;
   throw new FeatureError(key, `Your ${plan!.name} plan doesn't include ${label}. ${how} Anything already set up keeps working.`, needed.id);
 }

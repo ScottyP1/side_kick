@@ -1,6 +1,6 @@
 /**
  * POST /api/memory/refresh: rebuild a workspace's knowledge map (topics, coverage, gaps) with Claude.
- * Who: workspace members who can edit content (not Viewers or Billing Admins), because every refresh is a
+ * Who: workspace members who can edit content (not Viewers), because every refresh is a
  * paid Claude call. The portal hides the button for those roles; this check enforces it on the server.
  */
 import { handle, readJson } from "@/lib/api";

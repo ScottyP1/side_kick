@@ -52,7 +52,7 @@ export default function MeetingsPage() {
   // like another client's meeting.
   const [target, setTarget] = useState("");
   const [check, setCheck] = useState<{ question: string; match: GuardMatch } | null>(null);
-  const canEdit = !["Viewer", "Billing Admin"].includes(me.user.role);
+  const canEdit = me.user.role !== "Viewer";
 
   const load = useCallback(async () => {
     if (!ws) return;

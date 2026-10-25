@@ -25,6 +25,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import pg from "pg";
 import { countDbQuery } from "./trace";
+import { BRAND } from "./brand";
 
 /** Which engine this server uses: Postgres when DATABASE_URL is set, otherwise the local SQLite file. */
 export const DIALECT: "postgres" | "sqlite" = process.env.DATABASE_URL ? "postgres" : "sqlite";
@@ -33,6 +34,38 @@ export const DIALECT: "postgres" | "sqlite" = process.env.DATABASE_URL ? "postgr
 // so the real data in app/data is never touched).
 const DATA_DIR = process.env.SIDEKICK_DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "sidekick.db");
+
+/** The per-group `connectors` table (also used by `migrate` to rebuild the old per-organization one). */
+const CONNECTORS_TABLE = `CREATE TABLE IF NOT EXISTS connectors (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, kind TEXT NOT NULL, status TEXT NOT NULL,
+  account TEXT NOT NULL, account_name TEXT, api_base TEXT NOT NULL, web_base TEXT NOT NULL,
+  access_token TEXT, refresh_token TEXT, token_expires_at TEXT,
+  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL
+);`;
+
+/**
+ * Moves connectors from one per organization (before Oct 24, 2026) into groups, on both engines (the same SQL runs
+ * from `migrate` and db/schema.postgres.sql; each statement is harmless to run again):
+ * every tool an organization had connected becomes an **allowed** tool type (connector_kinds); the connector goes to
+ * the group of its first linked project, keeping its sign-in; every other group with linked projects gets its own
+ * connection marked expired (so its Team Lead signs in for that group; its items stay until then), and its links
+ * move to it; a connector with no linked project is removed (the type stays allowed); organization-wide health rows go.
+ */
+export const CONNECTOR_GROUP_MIGRATION = [
+  `INSERT INTO connector_kinds (org_id, kind, allowed_by, allowed_at)
+     SELECT org_id, kind, by_name, at_time FROM (SELECT org_id, kind, MAX(connected_by) AS by_name, MIN(connected_at) AS at_time FROM connectors WHERE workspace_id IS NULL GROUP BY org_id, kind) m
+     WHERE true ON CONFLICT (org_id, kind) DO NOTHING`,
+  `UPDATE connectors SET workspace_id = (SELECT l.workspace_id FROM connector_links l WHERE l.connector_id = connectors.id ORDER BY l.created_at, l.id LIMIT 1) WHERE workspace_id IS NULL`,
+  `INSERT INTO connectors (id, org_id, workspace_id, kind, status, account, account_name, api_base, web_base, connected_by, connected_at, last_error, last_error_at, updated_at)
+     SELECT DISTINCT c.id || '-' || l.workspace_id, c.org_id, l.workspace_id, c.kind, 'expired', c.account, c.account_name, c.api_base, c.web_base, c.connected_by, c.connected_at,
+            'Connections are per group now: sign in again for this group on Connectors.', c.updated_at, c.updated_at
+       FROM connector_links l JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
+      WHERE l.workspace_id <> c.workspace_id ON CONFLICT (id) DO NOTHING`,
+  `UPDATE connector_links SET connector_id = connector_id || '-' || workspace_id WHERE workspace_id <> (SELECT c.workspace_id FROM connectors c WHERE c.id = connector_links.connector_id)`,
+  `DELETE FROM connectors WHERE workspace_id IS NULL`,
+  `DELETE FROM connector_health WHERE workspace_id = '' AND connector IN ('azure-devops', 'jira', 'github', 'confluence', 'microsoft-365-files')`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS connectors_group_kind ON connectors(org_id, workspace_id, kind)`,
+];
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -439,18 +472,20 @@ CREATE TABLE IF NOT EXISTS answer_feedback (
 );
 CREATE INDEX IF NOT EXISTS answer_feedback_org ON answer_feedback(org_id, created_at);
 -- Connectors to outside tools (lib/connectors.ts): Azure DevOps Boards, Jira, GitHub Issues, Confluence and Microsoft 365 files, read-only.
--- connectors: one per organization and tool (kind = ado | jira | github | confluence | m365), connected once by an Org Owner/Admin with the
+-- connector_kinds: the tool types an organization allows (kind = ado | jira | github | confluence | m365), switched on
+-- and off by the Org Owner; no sign-in at this level. The plan's connectors limit counts these rows.
+CREATE TABLE IF NOT EXISTS connector_kinds (
+  org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, allowed_by TEXT, allowed_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, kind)
+);
+-- connectors: one per group and allowed tool (unique org + workspace + kind: connectors_group_kind, made in
+-- migrate), connected by the group's Team Lead (or an admin) with the account the client gave them, through the
 -- tool's own sign-in (OAuth; no passwords). access_token / refresh_token are sealed (lib/secret-box.ts, context
 -- "connectors.<column>:<id>") and refreshed before they run out. status = connected | expired (the sign-in ran
 -- out or was revoked: someone must reconnect). account = the ADO organization, the Atlassian site (cloud id), the GitHub user id or the Microsoft tenant id;
 -- api_base / web_base = where its API and its web pages are. last_error = the last connector-wide problem.
-CREATE TABLE IF NOT EXISTS connectors (
-  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, status TEXT NOT NULL,
-  account TEXT NOT NULL, account_name TEXT, api_base TEXT NOT NULL, web_base TEXT NOT NULL,
-  access_token TEXT, refresh_token TEXT, token_expires_at TEXT,
-  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
-  UNIQUE (org_id, kind)
-);
+-- (Before Oct 24, 2026 connectors were one per organization: migrate moves them into groups, CONNECTOR_GROUP_MIGRATION.)
+${CONNECTORS_TABLE}
 -- One project (ADO), project key (Jira), repository (GitHub, "owner/name"), space key (Confluence) or SharePoint library / folder (Microsoft 365, "<drive id>[/<folder id>]") feeding one group's knowledge, set by an Org Owner/Admin or the
 -- group's Team Lead. audience = internal | shareable (like documents). sync_cursor = the latest "changed" time
 -- seen (Microsoft 365: the Graph delta link), so each sync only fetches what changed since. Health: last_sync_at (last try), last_ok_at (last
@@ -476,8 +511,19 @@ CREATE INDEX IF NOT EXISTS connector_items_ws ON connector_items(org_id, workspa
 -- A connector sign-in in progress (OAuth state + PKCE verifier), used once, kept 10 minutes.
 CREATE TABLE IF NOT EXISTS connector_states (
   state TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, verifier TEXT NOT NULL,
-  site TEXT, expires_at TEXT NOT NULL
+  site TEXT, expires_at TEXT NOT NULL, workspace_id TEXT
 );
+-- A request to turn a tool on for the organization (lib/connector-requests.ts): a Team Lead or Org Admin asks for
+-- one of their groups, the Org Owner approves (turning the tool on) or declines with a note. status = pending |
+-- approved | declined | cancelled; at most one pending request per tool and group (connector_requests_open).
+-- requested_by = the person's id (requester_name kept for the page after they leave); decided_by = a name.
+CREATE TABLE IF NOT EXISTS connector_requests (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, workspace_id TEXT NOT NULL,
+  requested_by TEXT NOT NULL, requester_name TEXT NOT NULL, reason TEXT, status TEXT NOT NULL,
+  decided_by TEXT, decided_at TEXT, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS connector_requests_org ON connector_requests(org_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS connector_requests_open ON connector_requests(org_id, kind, workspace_id) WHERE status = 'pending';
 -- Background jobs (lib/jobs.ts): the database-backed job queue (every background task runs on it). kind = what to run
 -- (registered in lib/job-kinds.ts); payload = small JSON of ids (never document text); org_id/workspace_id = whose
 -- work it is (NULL for system sweeps). status = queued | running | done | dead (gave up after max_attempts, the
@@ -496,7 +542,7 @@ CREATE INDEX IF NOT EXISTS jobs_org ON jobs(org_id, status);
 -- Watcher findings (lib/watchers.ts): something that needs a person, found by a cheap check on the queue.
 -- One row per problem (dedupe_key = kind + group + subject, unique per org), kept up to date on every run and
 -- resolved automatically when the check no longer finds it. workspace_id NULL = organization-wide.
--- audience = members (everyone in the group) | managers (Team Leads of the group and admins) | admins.
+-- audience = members (everyone in the group) | managers (Team Leads of the group and admins) | admins | owners (Org Owners only).
 -- status = open | snoozed (until snoozed_until) | resolved. data_json = counts and ids for the page.
 CREATE TABLE IF NOT EXISTS findings (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, kind TEXT NOT NULL,
@@ -710,7 +756,88 @@ function migrate(conn: DatabaseSync) {
     "CREATE INDEX IF NOT EXISTS teams_conversations_org ON teams_conversations(org_id, workspace_id)",
     "CREATE INDEX IF NOT EXISTS graph_subscriptions_org ON graph_subscriptions(org_id, expires_at)",
   ]) conn.exec(sql);
+  // Connectors per group (Oct 24, 2026): the old table had UNIQUE (org_id, kind), which SQLite can only drop by
+  // rebuilding the table (foreign keys off meanwhile, so the linked projects aren't deleted with it).
+  const connSql = (conn.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'connectors'").get() as { sql?: string } | undefined)?.sql ?? "";
+  if (/UNIQUE \(org_id, kind\)/.test(connSql)) {
+    conn.exec("PRAGMA foreign_keys = OFF");
+    try {
+      conn.exec("BEGIN");
+      conn.exec(CONNECTORS_TABLE.replace("CREATE TABLE IF NOT EXISTS connectors", "CREATE TABLE connectors_v2"));
+      conn.exec(`INSERT INTO connectors_v2 (id, org_id, workspace_id, kind, status, account, account_name, api_base, web_base, access_token, refresh_token, token_expires_at, connected_by, connected_at, last_error, last_error_at, updated_at)
+                 SELECT id, org_id, NULL, kind, status, account, account_name, api_base, web_base, access_token, refresh_token, token_expires_at, connected_by, connected_at, last_error, last_error_at, updated_at FROM connectors`);
+      conn.exec("DROP TABLE connectors");
+      conn.exec("ALTER TABLE connectors_v2 RENAME TO connectors");
+      conn.exec("COMMIT");
+    } catch (e) {
+      conn.exec("ROLLBACK");
+      throw e;
+    } finally {
+      conn.exec("PRAGMA foreign_keys = ON");
+    }
+  }
+  if (!has("connector_states", "workspace_id")) conn.exec("ALTER TABLE connector_states ADD COLUMN workspace_id TEXT");
+  for (const sql of CONNECTOR_GROUP_MIGRATION) conn.exec(sql);
+  // Data migrations (same SQL as Postgres, see `DATA_MIGRATIONS`), all or nothing. A savepoint rather than BEGIN,
+  // because a code reload can re-run this while a transaction is open.
+  conn.exec("SAVEPOINT data_migrations");
+  try {
+    for (const m of DATA_MIGRATIONS) conn.prepare(m.sql).run(...m.params());
+    conn.exec("RELEASE data_migrations");
+  } catch (e) {
+    conn.exec("ROLLBACK TO data_migrations");
+    conn.exec("RELEASE data_migrations");
+    throw e;
+  }
 }
+
+/**
+ * Data migrations: changes to existing rows (not columns), run on both engines with the same SQL after the schema,
+ * every time it is applied. Each must be **idempotent**: written so that a second run finds nothing left to change.
+ * SQLite runs them in `migrate`; Postgres in `postgresDriver`, inside the schema's advisory lock and one transaction.
+ *
+ * - **Retiring the Billing Admin role** (October 2026, the `retireBillingAdmins` steps): only Org Owners and Org Admins see
+ *   usage and billing now. Everyone who still has the role becomes a **Member** (least privilege) with no groups,
+ *   gets one audit entry ("Access", by Sidekick), and the Org Owner gets one notice on Home: a finding of kind
+ *   `role_changed` with audience `owners` (lib/watchers.ts keeps it open for a while unless they change the role).
+ *   The role change runs last, so a second run matches nobody and changes nothing.
+ */
+const DATA_MIGRATIONS: { name: string; sql: string; params: () => Param[] }[] = (() => {
+  const t = () => new Date().toISOString();
+  const retired = "FROM users WHERE role = 'Billing Admin'";
+  return [
+    {
+      name: "retireBillingAdmins: audit entry per person",
+      sql: `INSERT INTO audit_log (org_id, actor, action, kind, workspace_id, created_at)
+            SELECT org_id, ?, 'Changed ' || name || ' from Billing Admin to Member: the Billing Admin role was retired (only Org Owners and Org Admins see billing now)', 'Access', NULL, ?
+            ${retired}`,
+      params: () => [BRAND.name, t()],
+    },
+    {
+      name: "retireBillingAdmins: one notice to the Org Owner per person",
+      sql: `INSERT INTO findings (id, org_id, workspace_id, kind, dedupe_key, audience, severity, status, title, detail, next_step,
+                                 action_href, action_label, data_json, first_seen_at, last_seen_at, updated_at)
+            SELECT 'role_changed:' || id, org_id, NULL, 'role_changed', 'role_changed:org:' || id, 'owners', 'info', 'open',
+                   name || ' was a Billing Admin and is now a Member',
+                   'The Billing Admin role was retired: only Org Owners and Org Admins see usage and billing now.',
+                   'Make them an Org Admin on Users & access if they should keep seeing billing.',
+                   '/users', 'Open Users & access', NULL, ?, ?, ?
+            ${retired}
+            ON CONFLICT DO NOTHING`,
+      params: () => { const now = t(); return [now, now, now]; },
+    },
+    {
+      name: "retireBillingAdmins: no groups",
+      sql: `DELETE FROM workspace_members WHERE user_id IN (SELECT id ${retired})`,
+      params: () => [],
+    },
+    {
+      name: "retireBillingAdmins: Billing Admin becomes Member",
+      sql: "UPDATE users SET role = 'Member' WHERE role = 'Billing Admin'",
+      params: () => [],
+    },
+  ];
+})();
 
 /**
  * SQLite has one connection for the whole server, so a transaction would otherwise see writes from other
@@ -807,6 +934,15 @@ async function postgresDriver(): Promise<Driver> {
     try {
       await client.query("SELECT pg_advisory_lock(727274)");
       await client.query(sql);
+      // Data migrations (`DATA_MIGRATIONS`, same SQL as SQLite) in one transaction, still under the lock.
+      await client.query("BEGIN");
+      try {
+        for (const m of DATA_MIGRATIONS) await client.query(toPgPlaceholders(m.sql), m.params());
+        await client.query("COMMIT");
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw e;
+      }
     } finally {
       await client.query("SELECT pg_advisory_unlock(727274)").catch(() => {});
       client.release();
@@ -863,6 +999,17 @@ function driver(): Promise<Driver> {
     globalThis.__sidekickDriver = d;
   }
   return globalThis.__sidekickDriver;
+}
+
+/**
+ * Runs the data migrations (`DATA_MIGRATIONS`) again, in one transaction, through the active engine. They already
+ * run whenever the schema is applied; this is for tests and scripts that need them on demand. Safe to call any
+ * number of times: a second run changes nothing.
+ */
+export async function runDataMigrations(): Promise<void> {
+  await tx(async () => {
+    for (const m of DATA_MIGRATIONS) await run(m.sql, ...m.params());
+  });
 }
 
 /** New random id for a row (UUID v4). */

@@ -3,7 +3,7 @@
  * group's knowledge, or remove it again (lib/saved-items.ts). The same as the "Save to knowledge" button on the
  * notes card in Teams.
  *
- * Who: anyone who can edit content in the item's group (not Viewers or Billing Admins). The item must belong to the
+ * Who: anyone who can edit content in the item's group (not Viewers). The item must belong to the
  * person's organization and a group they're in (404 otherwise, so other groups' items can't be probed).
  */
 import { handle, readJson } from "@/lib/api";

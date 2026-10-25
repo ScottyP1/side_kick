@@ -435,13 +435,19 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS scope_key TEXT;
 CREATE INDEX IF NOT EXISTS conversations_scope ON conversations(org_id, user_id, kind, workspace_id, scope_key);
 -- Connectors to outside tools (lib/connectors.ts: Azure DevOps Boards, Jira, GitHub Issues, Confluence, Microsoft 365 files): see the SQLite schema in lib/db.ts
 -- for what each column means.
+CREATE TABLE IF NOT EXISTS connector_kinds (
+  org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, allowed_by TEXT, allowed_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, kind)
+);
 CREATE TABLE IF NOT EXISTS connectors (
-  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, status TEXT NOT NULL,
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, kind TEXT NOT NULL, status TEXT NOT NULL,
   account TEXT NOT NULL, account_name TEXT, api_base TEXT NOT NULL, web_base TEXT NOT NULL,
   access_token TEXT, refresh_token TEXT, token_expires_at TEXT,
-  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
-  UNIQUE (org_id, kind)
+  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL
 );
+-- Connectors per group (Oct 24, 2026): databases made before then had one per organization (UNIQUE (org_id, kind)).
+ALTER TABLE connectors ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+ALTER TABLE connectors DROP CONSTRAINT IF EXISTS connectors_org_id_kind_key;
 CREATE TABLE IF NOT EXISTS connector_links (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL, connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
   workspace_id TEXT NOT NULL, project TEXT NOT NULL, project_name TEXT NOT NULL, audience TEXT NOT NULL DEFAULT 'internal',
@@ -460,8 +466,18 @@ CREATE TABLE IF NOT EXISTS connector_items (
 CREATE INDEX IF NOT EXISTS connector_items_ws ON connector_items(org_id, workspace_id);
 CREATE TABLE IF NOT EXISTS connector_states (
   state TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, verifier TEXT NOT NULL,
-  site TEXT, expires_at TEXT NOT NULL
+  site TEXT, expires_at TEXT NOT NULL, workspace_id TEXT
 );
+ALTER TABLE connector_states ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+
+-- Requests to turn a tool on (lib/connector-requests.ts): see the SQLite schema in lib/db.ts for the columns.
+CREATE TABLE IF NOT EXISTS connector_requests (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), kind TEXT NOT NULL, workspace_id TEXT NOT NULL,
+  requested_by TEXT NOT NULL, requester_name TEXT NOT NULL, reason TEXT, status TEXT NOT NULL,
+  decided_by TEXT, decided_at TEXT, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS connector_requests_org ON connector_requests(org_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS connector_requests_open ON connector_requests(org_id, kind, workspace_id) WHERE status = 'pending';
 
 -- Background jobs (lib/jobs.ts), watcher findings (lib/watchers.ts), the stale-document AI checks, connector
 -- health (lib/connector-health.ts) and failed Teams posts: see the SQLite schema in lib/db.ts for the columns.
@@ -570,3 +586,19 @@ CREATE TABLE IF NOT EXISTS firm_doc_groups (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, PRIMARY KEY (firm_doc_id, workspace_id)
 );
 CREATE INDEX IF NOT EXISTS firm_doc_groups_ws ON firm_doc_groups(org_id, workspace_id);
+
+-- Connectors per group: move one-per-organization connectors into groups (same statements as lib/db.ts
+-- CONNECTOR_GROUP_MIGRATION, which explains them; keep both in step). Each is harmless to run again.
+INSERT INTO connector_kinds (org_id, kind, allowed_by, allowed_at)
+     SELECT org_id, kind, by_name, at_time FROM (SELECT org_id, kind, MAX(connected_by) AS by_name, MIN(connected_at) AS at_time FROM connectors WHERE workspace_id IS NULL GROUP BY org_id, kind) m
+     WHERE true ON CONFLICT (org_id, kind) DO NOTHING;
+UPDATE connectors SET workspace_id = (SELECT l.workspace_id FROM connector_links l WHERE l.connector_id = connectors.id ORDER BY l.created_at, l.id LIMIT 1) WHERE workspace_id IS NULL;
+INSERT INTO connectors (id, org_id, workspace_id, kind, status, account, account_name, api_base, web_base, connected_by, connected_at, last_error, last_error_at, updated_at)
+     SELECT DISTINCT c.id || '-' || l.workspace_id, c.org_id, l.workspace_id, c.kind, 'expired', c.account, c.account_name, c.api_base, c.web_base, c.connected_by, c.connected_at,
+            'Connections are per group now: sign in again for this group on Connectors.', c.updated_at, c.updated_at
+       FROM connector_links l JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
+      WHERE l.workspace_id <> c.workspace_id ON CONFLICT (id) DO NOTHING;
+UPDATE connector_links SET connector_id = connector_id || '-' || workspace_id WHERE workspace_id <> (SELECT c.workspace_id FROM connectors c WHERE c.id = connector_links.connector_id);
+DELETE FROM connectors WHERE workspace_id IS NULL;
+DELETE FROM connector_health WHERE workspace_id = '' AND connector IN ('azure-devops', 'jira', 'github', 'confluence', 'microsoft-365-files');
+CREATE UNIQUE INDEX IF NOT EXISTS connectors_group_kind ON connectors(org_id, workspace_id, kind);

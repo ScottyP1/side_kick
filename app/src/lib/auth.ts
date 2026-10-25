@@ -39,7 +39,7 @@
 import "server-only";
 import crypto from "node:crypto";
 import { cookies, headers } from "next/headers";
-import { all, get, newId, now, run, tx } from "./db";
+import { all, asSystem, get, newId, now, run, setScopeOrg, tx } from "./db";
 import { HttpError } from "./http-error";
 import { clientIp } from "./login-limit";
 import { traceScope } from "./trace";
@@ -149,6 +149,15 @@ export async function endOtherSessions(userId: string): Promise<number> {
 export async function currentUser(): Promise<User | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
+  // Finding whose session this is comes before anyone's org is known: system work (lib/db.ts asSystem).
+  const user = await asSystem("session lookup", () => userForToken(token));
+  // From here on this request's queries only reach this org's rows (Postgres row-level security, lib/db.ts).
+  if (user) setScopeOrg(user.org_id);
+  return user;
+}
+
+/** The user behind a session token (see `currentUser`); runs as system work. */
+async function userForToken(token: string): Promise<User | null> {
   const row = await get<User & { expires_at: string; org_status: string; last_seen: string | null; mfa_required: number; via: string | null }>(
     `SELECT u.id, u.org_id, u.name, u.email, u.role, u.must_change_password, s.expires_at, s.last_seen, s.via, o.status AS org_status, o.mfa_required
        FROM sessions s JOIN users u ON u.id = s.user_id JOIN orgs o ON o.id = u.org_id WHERE s.token_hash = ?`,
@@ -242,7 +251,7 @@ export const TWO_STEP_SETUP_REQUIRED = `Your organization requires two-step sign
 export async function sessionUser(): Promise<Pick<User, "org_id" | "name"> | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  return (await get<{ org_id: string; name: string }>("SELECT u.org_id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?", sha256(token))) ?? null;
+  return (await asSystem("session lookup", () => get<{ org_id: string; name: string }>("SELECT u.org_id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?", sha256(token)))) ?? null;
 }
 
 /** Org Owners and Org Admins can manage users, workspaces, Teams links and settings. */

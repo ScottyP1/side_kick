@@ -30,7 +30,7 @@
 import "server-only";
 import crypto from "node:crypto";
 import { cookies, headers } from "next/headers";
-import { get, newId, now, run } from "./db";
+import { get, markRequestSystem, newId, now, run } from "./db";
 import { DUMMY_HASH, hashPassword, HttpError, verifyPassword } from "./auth";
 import { orgAccess } from "./billing";
 import { setupRefusal } from "./security";
@@ -131,6 +131,9 @@ export async function requireOwner(opts: { allowPendingPassword?: boolean } = {}
   if (!row || new Date(row.expires_at) < new Date()) throw new HttpError(401, "Sign in to the Owner Console.");
   const owner = { id: row.id, name: row.name, email: row.email, must_change_password: Number(row.must_change_password) };
   if (owner.must_change_password && !opts.allowPendingPassword) throw new HttpError(403, OWNER_PASSWORD_CHANGE_REQUIRED);
+  // The Owner Console looks across every organization by design: the rest of this request is system work
+  // (lib/db.ts markRequestSystem), named here once instead of in each of its routes.
+  markRequestSystem("Owner Console");
   return owner;
 }
 

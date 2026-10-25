@@ -569,6 +569,7 @@ test(`[${ENGINE}] health check reports the database engine and reveals no data`,
   assert.equal(r.status, 200);
   assert.equal(r.body.ok, true);
   assert.equal(r.body.database.engine, ENGINE);
+  assert.deepEqual(Object.keys(r.body.database).sort(), ["engine", "reachable", "rowLevelSecurity"]);
   assert.deepEqual(Object.keys(r.body).sort(), ["claude", "commit", "database", "ok", "search", "teams"]);
   // Only the short commit the deploy set (SIDEKICK_COMMIT), never more: null when it isn't set.
   assert.ok(r.body.commit === null || /^[0-9a-f]{1,7}$/.test(r.body.commit), String(r.body.commit));
@@ -1506,6 +1507,9 @@ test(`[${ENGINE}] sign-up is closed on a fresh install until the operator opens 
 });
 
 test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, another org, Teams or the assistant`, async () => {
+  // Behind every check below sits a second lock on Postgres: row-level security on every org table (lib/db.ts,
+  // docs/security/2026-10-row-level-security.md; tests/db.test.mjs proves it with queries that have no WHERE).
+  assert.equal((await client()("GET", "/api/health")).body.database.rowLevelSecurity, ENGINE === "postgres", "row-level security is on (Postgres only)");
   const form = new FormData();
   form.append("ws", s.wsB);
   form.append("files", new File(["Workspace B only: the vault code is ZEBRA-7731 for the Fabrikam merger."], "B secrets.md", { type: "text/markdown" }));

@@ -23,4 +23,4 @@ export const POST = handle(async (req: Request) => {
   const counts = await handleNotifications(body);
   spanAttrs(counts);
   return new Response(null, { status: 202 });
-});
+}, { system: "Microsoft Graph notifications" });

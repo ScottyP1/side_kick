@@ -18,4 +18,4 @@ export const GET = handle(async (req: Request) => {
   // Lax so the cookie comes back on Microsoft's redirect (a top-level GET), but not on other sites' requests.
   (await cookies()).set(OIDC_COOKIE, state, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/api/auth/microsoft", maxAge: 600 });
   return NextResponse.redirect(url);
-});
+}, { system: "Microsoft sign-in" });

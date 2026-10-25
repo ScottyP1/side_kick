@@ -30,7 +30,7 @@
  */
 import "server-only";
 import { audit, HttpError, sessionUser, type Role, type User } from "./auth";
-import { get, now, run } from "./db";
+import { get, now, run, withOrg } from "./db";
 import { accessFor, EXTRA_GROUP, limitsWithExtras, MAX_EXTRA_GROUPS, monthlyPrice, PERIOD_DAYS, planById, planWithExtras, TRIAL_DAYS, STATUS_LABEL, usd, withRolloff, type Access, type PlanId, type SubStatus } from "./plans";
 import { cancelOrgRolloff, scheduleOrgRolloff, ORG_GRACE_DAYS } from "./rolloff";
 import { BRAND } from "./brand";
@@ -154,7 +154,7 @@ export async function readOnlyRefusal(req: Request): Promise<string | null> {
   if (!path.startsWith("/api/") || ALWAYS_OPEN.some((p) => path.startsWith(p))) return null;
   const who = await sessionUser();
   if (!who) return null;
-  const access = await orgAccess(who.org_id);
+  const access = await withOrg(who.org_id, () => orgAccess(who.org_id));
   return access.mode === "read_only" ? access.reason : null;
 }
 

@@ -17,7 +17,7 @@ import { BRAND } from "@/lib/brand";
 // First-run setup: creates the organization and its Org Owner. Only works while no users exist.
 // `microsoft` tells the sign-in page whether to show "Sign in with Microsoft"; `needsCode` whether the setup
 // page must ask for the setup code.
-export const GET = handle(async () => ({ needsSetup: !await get("SELECT id FROM users LIMIT 1"), microsoft: entraConfigured(), needsCode: setupNeedsCode() }));
+export const GET = handle(async () => ({ needsSetup: !await get("SELECT id FROM users LIMIT 1"), microsoft: entraConfigured(), needsCode: setupNeedsCode() }), { system: "first-time setup" });
 
 export const POST = handle(async (req: Request) => {
   const body = await readJson<{ org?: string; name?: string; email?: string; password?: string; setupCode?: string }>(req);
@@ -36,4 +36,4 @@ export const POST = handle(async (req: Request) => {
   await startSession(userId);
   await audit({ org_id: orgId, name }, `Created organization “${org}”`, "Access");
   return { ok: true };
-});
+}, { system: "first-time setup" });

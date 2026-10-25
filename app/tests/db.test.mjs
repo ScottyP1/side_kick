@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 
 const db = await import("../src/lib/db.ts");
 const engine = db.DIALECT;
+// These tests set up and inspect several organizations at once, like a script: system work unless a test says otherwise.
+db.useSystemScopeForProcess("database-layer tests");
 
 test(`[${engine}] placeholders: ? becomes $1, $2 but not inside quotes`, () => {
   assert.equal(db.toPgPlaceholders("SELECT * FROM t WHERE a = ? AND b = '?' AND c = ?"), "SELECT * FROM t WHERE a = $1 AND b = '?' AND c = $2");
@@ -1268,4 +1270,86 @@ test(`[${engine}] connectors move from one per organization into groups (CONNECT
   assert.deepEqual([conns[1].workspace_id, conns[1].status, conns[1].access_token], [wsB, "expired", null], "the other group signs in again");
   assert.equal((await db.get("SELECT connector_id FROM connector_links WHERE id = ?", lB)).connector_id, conns[1].id, "its link moved to its own connection");
   assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM connector_items WHERE link_id = ?", lB)).n), 1, "its items stay");
+});
+
+/* ---------- Row-level security (the second lock; Postgres only, docs/security/2026-10-row-level-security.md) ---------- */
+
+/** Two organizations, each with a group, a member and a document, made as system work. */
+async function twoOrgs() {
+  const t = db.now();
+  const mk = async (label) => {
+    const org = db.newId(), ws = db.newId(), user = db.newId(), doc = db.newId();
+    await db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)", org, `RLS ${label} Co`, t);
+    await db.run("INSERT INTO users (id, org_id, name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, 'Member', 'x', ?)", user, org, `${label} Person`, `${user}@rls.test`, t);
+    await db.run("INSERT INTO workspaces (id, org_id, name, color, created_at) VALUES (?, ?, ?, '#000', ?)", ws, org, `${label} group`, t);
+    await db.run("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", ws, user);
+    await db.run("INSERT INTO documents (id, org_id, workspace_id, name, size, status, created_at) VALUES (?, ?, ?, ?, 1, 'ready', ?)", doc, org, ws, `${label}.txt`, t);
+    return { org, ws, user, doc };
+  };
+  return { a: await mk("A"), b: await mk("B") };
+}
+
+test(`[${engine}] row-level security: org A's context can't read, change or add org B's rows, even with no WHERE clause`, { skip: engine !== "postgres" }, async () => {
+  assert.equal((await db.rowLevelSecurity()).mode, "role", "app queries run as the sidekick_app role");
+  const { a, b } = await twoOrgs();
+  await db.withOrg(a.org, async () => {
+    const docs = await db.all("SELECT id, org_id FROM documents"); // no WHERE at all
+    assert.ok(docs.length >= 1 && docs.every((d) => d.org_id === a.org), "only org A's documents");
+    assert.ok(!(await db.get("SELECT id FROM documents WHERE id = ?", b.doc)), "B's document by id: not found");
+    assert.deepEqual((await db.all("SELECT id FROM orgs")).map((r) => r.id), [a.org], "orgs: only its own");
+    assert.ok((await db.all("SELECT u.org_id FROM users u")).every((u) => u.org_id === a.org), "people: only its own");
+    assert.ok(!(await db.get("SELECT user_id FROM workspace_members WHERE workspace_id = ?", b.ws)), "B's memberships are hidden too");
+    // A JOIN that forgets the org on one side still can't reach B.
+    assert.equal((await db.all("SELECT d.id FROM documents d JOIN workspaces w ON w.id = d.workspace_id WHERE w.id = ?", b.ws)).length, 0);
+    // Changes: an UPDATE or DELETE with no WHERE only touches A's rows; writing a B row is refused.
+    await db.run("UPDATE workspaces SET color = '#111'");
+    await assert.rejects(db.run("INSERT INTO documents (id, org_id, workspace_id, name, size, status, created_at) VALUES (?, ?, ?, 'x', 1, 'ready', ?)", db.newId(), b.org, b.ws, db.now()), /row-level security/);
+    await assert.rejects(db.run("UPDATE documents SET org_id = ? WHERE id = ?", b.org, a.doc), /row-level security/, "can't move a row to another org");
+    // Inside a transaction too.
+    await db.tx(async () => assert.equal((await db.all("SELECT id FROM workspaces WHERE id IN (?, ?)", a.ws, b.ws)).length, 1));
+  });
+  assert.equal((await db.get("SELECT color FROM workspaces WHERE id = ?", b.ws)).color, "#000", "B's group was untouched");
+  assert.equal((await db.get("SELECT color FROM workspaces WHERE id = ?", a.ws)).color, "#111");
+  await db.withOrg(a.org, () => db.run("DELETE FROM documents"));
+  assert.ok(await db.get("SELECT id FROM documents WHERE id = ?", b.doc), "a DELETE with no WHERE left B's document alone");
+});
+
+test(`[${engine}] row-level security: system work sees every org, and contexts never leak between connections or transactions`, { skip: engine !== "postgres" }, async () => {
+  const { a, b } = await twoOrgs();
+  await db.withOrg(a.org, async () => {
+    const both = await db.asSystem("test: spans orgs", () => db.all("SELECT id FROM workspaces WHERE id IN (?, ?)", a.ws, b.ws));
+    assert.equal(both.length, 2, "asSystem bypasses the policies");
+    assert.equal((await db.all("SELECT id FROM workspaces WHERE id IN (?, ?)", a.ws, b.ws)).length, 1, "and A's scope is back right after");
+    await db.tx(async () => {
+      assert.equal((await db.asSystem("test", () => db.all("SELECT id FROM workspaces WHERE id IN (?, ?)", a.ws, b.ws))).length, 2, "system inside a transaction");
+      assert.equal((await db.all("SELECT id FROM workspaces WHERE id IN (?, ?)", a.ws, b.ws)).length, 1, "A again inside the same transaction");
+    });
+  });
+  // Many interleaved queries for both orgs share the pool's connections; each only ever sees its own org.
+  const seen = await Promise.all(Array.from({ length: 40 }, (_, i) => {
+    const me = i % 2 ? a : b;
+    return db.withOrg(me.org, async () => ({ me: me.org, rows: await db.all("SELECT org_id FROM workspaces WHERE id IN (?, ?)", a.ws, b.ws) }));
+  }));
+  for (const s of seen) assert.deepEqual(s.rows.map((r) => r.org_id), [s.me]);
+  // A transaction's SET LOCAL ends with it: the connection's next user gets its own context, not the transaction's.
+  await db.withOrg(b.org, () => db.tx(() => db.all("SELECT 1")));
+  assert.equal((await db.withOrg(a.org, () => db.all("SELECT id FROM workspaces WHERE id IN (?, ?)", a.ws, b.ws))).map((r) => r.id).join(), a.ws);
+});
+
+test(`[${engine}] org scope: a query with no org and no system reason fails loudly in strict mode`, { skip: !process.env.SIDEKICK_DB_STRICT || process.env.SIDEKICK_DB_STRICT === "report" }, async () => {
+  const saved = globalThis.__sidekickDbFallback;
+  globalThis.__sidekickDbFallback = undefined;
+  try {
+    await assert.rejects(db.all("SELECT id FROM orgs"), /outside any org scope/);
+    await assert.rejects(db.openRequestScope(() => db.all("SELECT id FROM orgs")), /request before its organization is known/);
+    const org = db.newId();
+    await db.asSystem("test", () => db.run("INSERT INTO orgs (id, name, created_at) VALUES (?, 'Scoped Co', ?)", org, db.now()));
+    await db.openRequestScope(async () => {
+      db.setScopeOrg(org); // what currentUser() does after the session check
+      assert.equal((await db.get("SELECT name FROM orgs WHERE id = ?", org)).name, "Scoped Co");
+      assert.throws(() => db.setScopeOrg(db.newId()), /another organization/, "a request never switches org");
+    });
+  } finally {
+    globalThis.__sidekickDbFallback = saved;
+  }
 });

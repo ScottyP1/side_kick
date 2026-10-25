@@ -592,6 +592,7 @@ async function phaseB() {
   process.env.SIDEKICK_DATA_DIR = DATA_DIR;
   process.env.DATABASE_URL = POSTGRES ?? "";
   const db = await import("../src/lib/db.ts");
+  db.useSystemScopeForProcess("demo world seed"); // a script filling several orgs, not a request
   const { all, get, run, newId } = db;
   const at = (day, time = "15:00:00") => `${day}T${time}.000Z`;
 

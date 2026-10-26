@@ -7,12 +7,14 @@
  * - **Public guide**: one of the guides copied into help-content.ts (concepts, admin, Teams, roles, install as
  *   an app). Only
  *   those exist here, looked up by name in a fixed map, so no address can reach any other file.
- * - **Links between guides**: `admin-guide.md#7-link-…` becomes `/docs/admin-guide#7-link-…`; links to
- *   anything else that isn't a public guide or a web address (developer docs like ../PROGRESS.md) keep their
+ * - **Links between guides**: `admin-guide.md#7-link-…` becomes `/docs/admin-guide#7-link-…`; a public website
+ *   page (`/privacy`, `/terms`, `/privacy/subprocessors`, … from lib/site.ts `PUBLIC_PAGES`) stays as it is; links
+ *   to anything else that isn't a public guide or a web address (developer docs like ../PROGRESS.md) keep their
  *   text but lose the link.
  * - **Search section**: one heading of one guide with its text, so a search hit can jump to `#heading`.
  */
 import { GUIDE_MARKDOWN } from "./help-content";
+import { PUBLIC_PAGES } from "./site";
 import { parseMarkdown, plainText, type Block, type Inline, type ListItem } from "./markdown";
 import type { HelpSection } from "./help-search";
 
@@ -35,6 +37,8 @@ const AUDIENCE: Record<string, string> = {
 export function helpLink(href: string): string | null {
   if (/^https:\/\//.test(href)) return href;
   if (href.startsWith("#")) return href;
+  const page = /^(\/[\w/-]*)(#[\w-]+)?$/.exec(href);
+  if (page && PUBLIC_PAGES.some((p) => p.path === page[1])) return href;
   const m = /^(?:\.\/)?([\w-]+)\.md(#[\w-]+)?$/.exec(href);
   if (m && Object.hasOwn(GUIDE_MARKDOWN, m[1])) return `/docs/${m[1]}${m[2] ?? ""}`;
   return null;

@@ -16,10 +16,11 @@
 // set (e.g. a custom domain), otherwise the app's own address, which serves those pages.
 // Names, tagline, accent color and icons come from app/src/lib/brand.ts (the single brand setting; Node runs
 // the TypeScript file directly), filled into the {{BRAND_*}} placeholders of teams/manifest.template.json.
+// Before zipping, the manifest is checked against Microsoft's schema (teams/schema/) and the Store rules.
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { BRAND, fillBrand } from "./teams-manifest.mjs";
+import { BRAND, fillBrand, validateManifest } from "./teams-manifest.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const src = path.join(root, "teams");
@@ -86,6 +87,9 @@ const { version } = parsed;
 // Teams refuses duplicate valid domains.
 parsed.validDomains = [...new Set(parsed.validDomains)];
 const manifestOut = JSON.stringify(parsed, null, 2);
+// Microsoft's schema and the Teams Store rules (docs/STORE-READINESS.md): a package that fails isn't built.
+const problems = validateManifest(parsed, { store: flavor === "live" });
+if (problems.length) fail(`The manifest doesn't pass the checks:\n  - ${problems.join("\n  - ")}`);
 
 // Each flavor is staged in its own folder (both have a manifest.json) and zipped next to the other.
 const stage = path.join(out, flavor);
@@ -100,7 +104,7 @@ fs.copyFileSync(path.join(root, BRAND.logo.teamsColor), path.join(stage, "color.
 fs.copyFileSync(path.join(root, BRAND.logo.teamsOutline), path.join(stage, "outline.png"));
 execFileSync("zip", ["-q", path.join(out, zip), "manifest.json", "color.png", "outline.png"], { cwd: stage });
 
-console.log(`✓ Built teams/build/${zip} (${flavor}, version ${version})
+console.log(`✓ Built teams/build/${zip} (${flavor}, version ${version}; schema and Store checks passed)
   Teams app / bot ID: ${botId}
   App address:        ${publicUrl.origin}
 ${

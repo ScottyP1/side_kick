@@ -454,6 +454,9 @@ test(`[${engine}] help center: only the four customer guides, links rewritten, s
   for (const bad of ["owner-guide", "README", "../PROGRESS", "PROGRESS", "constructor", "__proto__", "hasOwnProperty", ""]) assert.equal(help.guide(bad), null, bad);
   assert.equal(help.helpLink("admin-guide.md#4-add-people"), "/docs/admin-guide#4-add-people");
   assert.equal(help.helpLink("owner-guide.md"), null);
+  assert.equal(help.helpLink("/privacy#microsoft"), "/privacy#microsoft", "public website pages keep their link");
+  assert.equal(help.helpLink("/privacy/subprocessors"), "/privacy/subprocessors");
+  assert.equal(help.helpLink("/owner"), null, "portal and console paths don't");
   assert.equal(help.helpLink("../ARCHITECTURE.md"), null);
   assert.equal(help.helpLink("javascript:alert(1)"), null);
   assert.equal(help.helpLink("https://learn.microsoft.com/x"), "https://learn.microsoft.com/x");
@@ -701,6 +704,39 @@ test(`[${engine}] brand: one setting names the product in the Teams manifest, pa
   assert.equal(pageTitle("Usage"), `Usage · ${BRAND.name}`);
   const layout = fs.readFileSync(path.join(import.meta.dirname, "../src/app/layout.tsx"), "utf8");
   assert.match(layout, /title: BRAND\.name/, "the root page title comes from the brand");
+});
+
+test(`[${engine}] Teams Store: the manifest passes Microsoft's schema and the Store checks, and the icons have the right sizes`, async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const teams = path.join(import.meta.dirname, "../../teams");
+  const { fillBrand, validateManifest } = await import("../scripts/teams-manifest.mjs");
+  // The package script's placeholders, filled with made-up values the way it fills them.
+  const filled = fillBrand(fs.readFileSync(path.join(teams, "manifest.template.json"), "utf8"))
+    .replaceAll("{{AAD_APP_ID}}", "00000000-0000-0000-0000-0000000000aa")
+    .replaceAll("{{BOT_ID}}", "00000000-0000-0000-0000-0000000000bb")
+    .replaceAll("{{PUBLIC_URL}}", "https://app.sidekick.example")
+    .replaceAll("{{PUBLIC_HOST}}", "app.sidekick.example")
+    .replaceAll("{{WEBSITE_URL}}", "https://sidekick.example")
+    .replaceAll("{{WEBSITE_HOST}}", "sidekick.example");
+  const manifest = JSON.parse(filled);
+  assert.deepEqual(validateManifest(manifest), [], "no schema or Store problems");
+  assert.equal(manifest.developer.privacyUrl, "https://sidekick.example/privacy");
+  assert.equal(manifest.developer.termsOfUseUrl, "https://sidekick.example/terms");
+  assert.ok(manifest.description.full.includes("Microsoft Teams"), "the long description names Microsoft Teams in full first");
+  assert.ok(manifest.description.full.split(/\s+/).length < 500, "the long description stays under 500 words");
+  // The checks really catch problems (a broken manifest isn't waved through).
+  const bad = { ...manifest, version: "1.7", validDomains: ["https://x.devtunnels.ms"], description: { ...manifest.description, short: "x".repeat(81) } };
+  const problems = validateManifest(bad).join("\n");
+  assert.match(problems, /MAJOR\.MINOR\.PATCH/);
+  assert.match(problems, /protocol/);
+  assert.match(problems, /tunnel/);
+  assert.match(problems, /longer than 80/);
+  assert.deepEqual(validateManifest({ ...manifest, validDomains: ["x.devtunnels.ms"] }, { store: false }), [], "the dev-tunnel package may use a tunnel");
+  // PNG width and height are bytes 16–23 of the file: color 192×192, outline 32×32 (Store rule).
+  const size = (f) => { const b = fs.readFileSync(path.join(teams, f)); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
+  assert.deepEqual(size("color.png"), [192, 192]);
+  assert.deepEqual(size("outline.png"), [32, 32]);
 });
 
 const rank = await import("../src/lib/rank.ts");

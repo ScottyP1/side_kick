@@ -654,7 +654,7 @@ test(`[${ENGINE}] website: / shows the website when signed out and sends signed-
 
 test(`[${ENGINE}] website: every public page answers without a session; the portal, Owner Console and checkout don't`, async () => {
   const pages = await sitemapPaths();
-  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/meetings", "/docs/roles-and-permissions", "/docs/connect-devops-jira", "/docs/install-app"]) {
+  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/privacy/subprocessors", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/meetings", "/docs/roles-and-permissions", "/docs/connect-devops-jira", "/docs/install-app"]) {
     assert.ok(pages.includes(p), `${p} is in the sitemap`);
   }
   for (const p of pages) {
@@ -3556,6 +3556,28 @@ test(`[${ENGINE}] plain wording: the portal never shows model names; the Owner C
   assert.ok((await owner("GET", "/api/owner/releases")).body.models.ask, "the operator still sees the models");
   // "Powered by Claude" is said once, on the public trust pages.
   assert.match((await client()("GET", "/privacy")).body, /Powered by Claude/);
+});
+
+test(`[${ENGINE}] Teams Store: privacy, terms and sub-processor pages are public drafts that match what the code does`, async () => {
+  // React separates text it joined from several values with empty comments; drop them to read the text.
+  const page = async (p) => (await client()("GET", p)).body.replaceAll("<!-- -->", "");
+  const privacy = await page("/privacy");
+  const terms = await page("/terms");
+  const subs = await page("/privacy/subprocessors");
+  for (const body of [privacy, terms, subs]) assert.match(body, /<b>Draft\.<\/b>/, "marked as a draft for legal review");
+  // Every Microsoft 365 permission in the app registration is explained on the privacy page.
+  const source = fs.readFileSync(path.join(import.meta.dirname, "../src/lib/graph-permissions.ts"), "utf8");
+  const ids = [...source.matchAll(/id: "([\w.]+)", name:/g)].map((m) => m[1]);
+  assert.ok(ids.length >= 10, "found the permission list");
+  for (const id of ids) assert.ok(privacy.includes(id), `privacy explains ${id}`);
+  for (const words of ["row-level security", "not used to train", "90 days", "35 days", "transcript", "Guardrails"]) assert.ok(privacy.includes(words), `privacy covers ${words}`);
+  for (const name of ["Microsoft Azure", "Anthropic (Claude)", "Microsoft Graph and Microsoft Teams"]) assert.ok(subs.includes(name), `sub-processor ${name}`);
+  assert.match(privacy, /href="\/privacy\/subprocessors"/, "privacy links the sub-processor list");
+  assert.match(terms, /AI answers can be wrong/);
+  // The footer on every public page links all three.
+  for (const href of ["/privacy", "/terms", "/privacy/subprocessors"]) assert.match((await client()("GET", "/")).body, new RegExp(`href="${href}"`));
+  // The help center's Teams guide links them too.
+  assert.match((await client()("GET", "/docs/teams-guide")).body, /href="\/privacy\/subprocessors"/);
 });
 
 test(`[${ENGINE}] Owner Console business view: revenue, margin, trials, payments, limits, partner and health, operators only`, async () => {

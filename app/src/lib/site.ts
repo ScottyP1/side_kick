@@ -33,6 +33,7 @@ export const PUBLIC_PAGES: readonly PublicPage[] = [
   { path: "/changelog", title: `Changelog · ${BRAND.name}`, description: `What's new in ${BRAND.name}, release by release.` },
   { path: "/signup", title: `Sign up · ${BRAND.name}`, description: `Create your organization's ${BRAND.name} account and start a free trial.` },
   { path: "/privacy", title: `Privacy policy (draft) · ${BRAND.name}`, description: `How ${BRAND.name} handles your data. A plain-language draft for legal review.` },
+  { path: "/privacy/subprocessors", title: `Sub-processors (draft) · ${BRAND.name}`, description: `The outside services that process customer data for ${BRAND.name}: Microsoft Azure, Anthropic (Claude) and Microsoft Graph and Teams.` },
   { path: "/terms", title: `Terms of use (draft) · ${BRAND.name}`, description: `The terms for using ${BRAND.name}. A plain-language draft for legal review.` },
 ];
 

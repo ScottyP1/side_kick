@@ -27,7 +27,7 @@ If your organization hasn't connected Microsoft sign-in to Sidekick yet (and in 
 Both work the same for Sidekick; use whatever your team already uses.
 - **Group chat**: one running conversation. Sidekick's answers, notes, action-item cards and reminders appear in the chat in order.
 - **Channel**: posts with replies. Meeting notes are a new post and their action items go in that post's thread; reminders are a new post; answers are replies to the post that mentioned Sidekick.
-- **Meeting chats** (the chat of a scheduled Teams meeting): Teams doesn't offer Sidekick there yet (it needs a meeting tab). This is coming with **automatic meeting notes**; until then, use the team's group chat or channel for notes.
+- **Meeting chats** (the chat of a scheduled Teams meeting): add the **Sidekick tab** to the meeting (**+** at the top of the meeting chat or details). That also brings Sidekick into the meeting chat, which a Team Lead or admin can then assign to a group like any chat.
 - **Names on a group's Teams chats tab**: a group chat shows its name if someone gave it one. A channel shows as "Team › Channel"; a team's first channel shows only the team name until it's renamed, because Teams doesn't tell apps that channel's name (it's "General" unless someone renamed it).
 
 ## Asking questions
@@ -132,9 +132,18 @@ In one of a group's chats, its **Team Lead** (or an **Org Owner/Admin**) can typ
 | `@Sidekick stop transcription reminders` | No more "Turn on transcription?" reminders in this group's calls (Team Lead or admin; `start transcription reminders` turns them back on) |
 | `@Sidekick help` | Show what Sidekick can do here |
 
+## The welcome message and help
+When Sidekick is added somewhere, it posts **one** welcome message, greeting the person who added it: what it does, what has to happen before it works there (a Team Lead or admin assigns the chat, or enters the link code), and that its answers are written by AI. It never repeats the welcome; mention **@Sidekick help** any time for the list of commands. Every card has a **Help center (opens in browser)** button that opens these guides.
+
+## AI answers can be wrong
+Sidekick's answers, meeting notes and reminders are written by AI (Claude, by Anthropic) from your group's own content. They can be incomplete or wrong, so check the sources on the card. Click **👎 Not helpful** on a bad answer (your admins see the counts), and report anything harmful or badly wrong to Support. Your content isn't used to train AI models.
+
 ## What Sidekick can and can't see
 - It only reads messages that mention it (every message in a 1:1 chat with it), unless an admin turned on **Keep track of every message** for that chat (Sidekick announces it there).
 - Meeting notes go only to the chat(s) the group's Team Lead chose under **Meeting notes go to** (one chat until someone chooses); the notes card says where it was posted.
 - It only answers from the linked workspace and your organization's firm library. It never uses other workspaces or other clients' material.
 - In chats and channels marked as having **client guests**, it only uses documents tagged *Shareable* (group and firm library), never posts notes from internal-only meetings there, and only reminds about items whose every source is Shareable.
 - If the chat or channel is unlinked, Sidekick stops answering and posting there until it's linked again.
+
+## Privacy, terms and sub-processors
+How Sidekick handles your data (what it stores, what it reads from Microsoft 365 and why, how long it keeps things and how deletion works) is in the [privacy policy](/privacy). The rules for using it are in the [terms of use](/terms), and the outside services that process data for Sidekick are on the [sub-processor list](/privacy/subprocessors). All three are drafts pending legal review.

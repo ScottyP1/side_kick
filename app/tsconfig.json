@@ -48,7 +48,9 @@
     ".next-m365check/types/**/*.ts",
     ".next-m365check/dev/types/**/*.ts",
     ".next-demo-seed/types/**/*.ts",
-    ".next-demo-seed/dev/types/**/*.ts"
+    ".next-demo-seed/dev/types/**/*.ts",
+    ".next-e2e-c/types/**/*.ts",
+    ".next-e2e-c/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

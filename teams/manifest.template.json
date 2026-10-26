@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
   "manifestVersion": "1.30",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "id": "{{BOT_ID}}",
   "developer": {
     "name": "{{BRAND_NAME}}",
@@ -12,7 +12,7 @@
   "name": { "short": "{{BRAND_SHORT}}", "full": "{{BRAND_NAME}}: {{BRAND_TAGLINE}}" },
   "description": {
     "short": "Answers from your workspace's documents and meetings, with sources.",
-    "full": "Mention @{{BRAND_SHORT}} in a channel or chat to get answers from the linked client workspace's documents and meeting transcripts, with sources. Your organization signs up at {{BRAND_SHORT}} first; when someone adds {{BRAND_SHORT}} to a chat, an admin or the group's leader assigns it to a workspace in the {{BRAND_SHORT}} portal, and leaders can add teammates right from the chat with @{{BRAND_SHORT}} add. After each Teams meeting {{BRAND_SHORT}} writes the notes from the transcript and posts the decisions and action items to the group's notes chat: assign or close action items and save decisions to the group's knowledge right from the card. The {{BRAND_SHORT}} tab (in the app bar, or added to a chat, channel or meeting) shows the group's meetings, notes and open action items. In chats an admin chooses to track, {{BRAND_SHORT}} reads the messages to keep track of decisions and dates, and posts reminders about what's still open."
+    "full": "{{BRAND_SHORT}} is an AI teammate built for Microsoft Teams, for firms that run client work in Teams group chats, channels and meetings. Mention @{{BRAND_SHORT}} with a question and it answers from the client group's own documents, meeting notes and chats, with the sources it used. After each Teams meeting it writes the notes from the transcript and posts the decisions and action items to the group's chat, where people assign or close them and save decisions to the group's knowledge. In chats an admin chooses to track, it keeps track of decisions and dates and posts reminders about what's still open. The {{BRAND_SHORT}} tab, in the app bar or added to a chat, channel or meeting, shows the group's meetings, notes and open action items. Each client group is walled off: people only see the groups they belong to. Before you install: your organization needs a {{BRAND_SHORT}} account (sign up on the {{BRAND_SHORT}} website), and a Microsoft 365 admin approves {{BRAND_SHORT}} once. Meeting notes need transcription turned on in Teams. Only a Team Lead or admin can add {{BRAND_SHORT}} to a chat and assign it to a group; until then it reads and keeps nothing there. Answers and notes are written by AI (Claude, by Anthropic) and can be wrong, so check the sources; your content is not used to train AI models. Report a bad answer with the thumbs-down button. Help, privacy policy and terms are on the {{BRAND_SHORT}} website."
   },
   "icons": { "color": "color.png", "outline": "outline.png" },
   "accentColor": "{{BRAND_ACCENT}}",

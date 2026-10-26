@@ -512,7 +512,7 @@ function CallReminders({ group }: { group: Group }) {
               {BRAND.name} can&apos;t see calls in {st.unreadable.map((n) => `“${n}”`).join(", ")}. Microsoft hasn&apos;t granted it the chat-reading permission there: your Microsoft admin checks Teams&apos; chat consent setting, then remove {BRAND.name} from the chat and add it again. <a href="/settings#microsoft-permissions">See Microsoft permissions</a>
             </p>
           )}
-          {st.scheduledProblem && <p className="err" style={{ margin: 0 }}>{st.scheduledProblem}</p>}
+          {st.scheduledProblem && <p className="err" style={{ margin: 0 }}>{st.scheduledProblem} <a href="/settings#microsoft-permissions">See Microsoft permissions</a></p>}
           {st.last && <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>Latest reminder: in {st.last.chat}, {fmtDate(st.last.at)}.</p>}
         </div>
       )}

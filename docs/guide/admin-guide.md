@@ -49,10 +49,10 @@ You're added to the group automatically. **Create group** opens the group's page
 | Permission (Microsoft's name) | Unlocks |
 |---|---|
 | Read people in your directory (`User.Read.All`) | Import from Microsoft 365, recognising people added by email (in meetings and when they add Sidekick to a chat), `@Sidekick add` in Teams |
-| Read Teams meeting details (`OnlineMeetings.Read.All`) | Meeting notes |
+| Read Teams meeting details (`OnlineMeetings.Read.All`) | Meeting notes, transcription reminders for scheduled meetings |
 | Read Teams meeting transcripts (`OnlineMeetingTranscript.Read.All`) | Meeting notes |
 | Read transcripts of Meet now calls (`CallTranscripts.Read.All`) | Meet now calls (notes for calls started in a group chat) |
-| Read meeting times in calendars (`Calendars.ReadBasic.All`) | Meetings record by themselves |
+| Read meeting times in calendars (`Calendars.ReadBasic.All`) | Meetings record by themselves, transcription reminders for scheduled meetings |
 | Turn on Record and transcribe for meetings (`OnlineMeetings.ReadWrite.All`) | Meetings record by themselves |
 | Remove Sidekick from Teams chats / teams (`TeamsAppInstallation.ReadWriteSelfForChat.All`, `…ReadWriteSelfForTeam.All`) | Leaving chats it shouldn't be in (only Sidekick, never other apps) |
 

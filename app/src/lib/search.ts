@@ -32,13 +32,29 @@
  *   Azure AI Search is configured (see azure-search.ts), a copy also goes to Azure, and questions are
  *   answered with Azure's hybrid keyword + meaning search. If Azure is not configured or a call fails,
  *   search falls back to local keyword search, so answers keep working.
+ * - **Service capacity** (`searchServiceStats`): the Azure service's storage and index use, read hourly by
+ *   lib/search-capacity.ts so the Owner Console warns before the tier is full (nothing to read for the local index).
  */
 import "server-only";
 import { all, DIALECT, get, now, run, type Param } from "./db";
 import { chunk, isTranscript, unchunk } from "./extract";
 import { span, spanAttrs } from "./trace";
-import { azureCount, azureIndex, azureRemove, azureSearch, azureSearchConfigured, azureSetAudience } from "./azure-search";
+import { azureCount, azureIndex, azureRemove, azureSearch, azureSearchConfigured, azureServiceStats, azureSetAudience } from "./azure-search";
 import { rerank, versionKey, type Candidate, type Ranked } from "./rank";
+
+/**
+ * The Azure AI Search service's usage and limits (storage, indexes, documents, vector size), for the hourly capacity
+ * check (lib/search-capacity.ts) and so the Owner Console. Null when Azure AI Search isn't configured: the local
+ * keyword index has no service limits to watch. Traced as a "search" step (counts only). Throws if Azure refuses.
+ */
+export async function searchServiceStats() {
+  if (!azureSearchConfigured()) return null;
+  return span("search", "Read search service usage", async () => {
+    const stats = await azureServiceStats();
+    spanAttrs({ storageBytes: stats.storage.usage, indexes: stats.indexes.usage });
+    return stats;
+  });
+}
 
 /** The workspace id the firm library's passages are indexed under (one copy per org, shared by its groups). */
 export const FIRM_SCOPE = "firm";

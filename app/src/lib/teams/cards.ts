@@ -228,6 +228,11 @@ export type NotesInput = {
   source?: string;
   /** Footer: where these notes were posted ("Notes posted to …", lib/notes-chats.ts `postedToLine`). */
   postedTo?: string | null;
+  /**
+   * "3 older items still open: Open in Sidekick": items from earlier meetings still open in this chat's group
+   * (lib/reminders.ts `olderOpenFor`), instead of a second reminders card. `url` is the portal's Reminders page.
+   */
+  olderOpen?: { count: number; url: string } | null;
 };
 
 /** Cap on rows with a Save button, so a long meeting's card stays within Teams' card size; the rest is in the portal. */
@@ -239,7 +244,8 @@ const KEEP_LABEL: Record<string, string> = { decision: "Decision", requirement: 
  * each decision (then requirements, risks, facts, terms) is a row with **Save to knowledge** (verb
  * `VERBS.saveKnowledge`, data `{ itemId, meetingId }`); a saved one shows who saved it and **Undo**
  * (`VERBS.unsaveKnowledge`). The bot answers a click with this card rebuilt, so everyone sees the new state.
- * The footer says which chats got the notes (`postedTo`).
+ * Then one short line about older items still open (`olderOpen`), and the footer says which chats got the notes
+ * (`postedTo`).
  */
 export function meetingNotesCard(m: NotesInput): IAdaptiveCard {
   const sub = [m.heldAt, m.source].filter(Boolean).join(" · ");
@@ -281,7 +287,12 @@ export function meetingNotesCard(m: NotesInput): IAdaptiveCard {
   }
   list("Still open", m.openQuestions);
   if (m.actionCount) body.push(text(`${m.actionCount} action item${m.actionCount === 1 ? "" : "s"} below. Assign them or mark them done right here.`, { size: "Small", isSubtle: true, spacing: "Large" }));
-  if (m.postedTo) body.push(text(m.postedTo, { size: "Small", isSubtle: true, spacing: m.actionCount ? "Small" : "Large" }));
+  if (m.olderOpen?.count) {
+    // Built by code from a number and the portal's own address, so the link is kept (text() would neutralise it).
+    const n = Math.floor(m.olderOpen.count);
+    body.push({ type: "TextBlock", wrap: true, size: "Small", spacing: m.actionCount ? "Small" : "Large", text: `${n} older item${n === 1 ? "" : "s"} still open: [Open in ${BRAND.name}](${m.olderOpen.url})` });
+  }
+  if (m.postedTo) body.push(text(m.postedTo, { size: "Small", isSubtle: true, spacing: m.actionCount || m.olderOpen?.count ? "Small" : "Large" }));
   return card(body, [{ type: "Action.OpenUrl", title: `Open in ${BRAND.name}`, url: m.portalUrl }]);
 }
 

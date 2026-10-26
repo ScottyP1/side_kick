@@ -200,3 +200,31 @@ export async function azureSearch(orgId: string, scopes: string[], question: str
   }
   return out;
 }
+
+/**
+ * One usage counter of the search service: `usage` now and its `quota` (null = no fixed limit on this tier).
+ * Storage counters are in bytes.
+ */
+export type ServiceCounter = { usage: number; quota: number | null };
+
+/**
+ * The search service's own usage and limits (`GET {endpoint}/servicestats`, api-version 2024-07-01): storage used of
+ * the tier's storage, indexes used of the tier's index limit, documents and vector index size. Counts and sizes only,
+ * never content. For lib/search-capacity.ts (through lib/search.ts `searchServiceStats`); only call it when
+ * `azureSearchConfigured()`. Throws with Azure's status when the call fails (wrong key, service gone, timeout).
+ */
+export async function azureServiceStats(): Promise<{ storage: ServiceCounter; indexes: ServiceCounter; documents: ServiceCounter | null; vectorStorage: ServiceCounter | null }> {
+  const url = `${process.env.AZURE_SEARCH_ENDPOINT!.replace(/\/+$/, "")}/servicestats?api-version=2024-07-01`;
+  const res = await fetch(url, { headers: { "api-key": process.env.AZURE_SEARCH_API_KEY! }, signal: AbortSignal.timeout(15_000) });
+  const json = (await res.json().catch(() => ({}))) as { counters?: Record<string, { usage?: unknown; quota?: unknown } | undefined>; error?: { message?: string } };
+  if (!res.ok || !json.counters) throw new Error(`Azure AI Search service stats failed: ${json.error?.message ?? `HTTP ${res.status}`}`);
+  const counter = (name: string): ServiceCounter | null => {
+    const c = json.counters?.[name];
+    if (!c || typeof c.usage !== "number") return null;
+    return { usage: c.usage, quota: typeof c.quota === "number" ? c.quota : null };
+  };
+  const storage = counter("storageSize");
+  const indexes = counter("indexesCount");
+  if (!storage || !indexes) throw new Error("Azure AI Search service stats came back without storage or index counts.");
+  return { storage, indexes, documents: counter("documentCount"), vectorStorage: counter("vectorIndexSize") };
+}

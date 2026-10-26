@@ -98,10 +98,10 @@ Each tool and each linked project shows its status on Connectors:
 ## Who sees what: one shared account, or each person signs in
 Every group's connection has a **Who sees what** setting on Connectors (the group's Team Lead or an admin changes it):
 - **One shared account** (the default): everyone in the group sees what the connection's account can read. Fine when the whole team may open the whole board anyway.
-- **Each person signs in** (Jira, Azure DevOps and Microsoft 365 files): the group's account still keeps Sidekick up to date, but an answer only uses a ticket, work item or file **the person asking can open with their own account**. Use it when some issues have a security level, some Azure DevOps areas are restricted, some SharePoint folders or OneDrive files are shared with only part of the team, or not everyone on the team has the same access.
+- **Each person signs in** (every tool: Jira, Azure DevOps, GitHub, Confluence and Microsoft 365 files): the group's account still keeps Sidekick up to date, but an answer only uses a ticket, work item, issue, page or file **the person asking can open with their own account**. Use it when some issues have a security level, some Azure DevOps areas are restricted, some GitHub repositories are private to part of the team, some Confluence pages are restricted, some SharePoint folders or OneDrive files are shared with only part of the team, or not everyone on the team has the same access.
 
 When a group uses **Each person signs in**:
-1. Everyone in the group (Viewers too) opens **Knowledge** and, under **Your sign-ins to tools**, presses **Connect your Jira** (or Azure DevOps) and signs in with **their own** account for the client's site. It must be the same Jira site or Azure DevOps organization the group is connected to. Sidekick only reads and stores no password; the sign-in is kept encrypted and renewed by itself.
+1. Everyone in the group (Viewers too) opens **Knowledge** and, under **Your sign-ins to tools**, presses **Connect your Jira** (or Azure DevOps, GitHub, Confluence, Microsoft 365 files) and signs in with **their own** account for the client's site. It must be the same Jira or Confluence site, Azure DevOps organization or Microsoft organization the group is connected to (GitHub has no site: any GitHub account, and what it can open decides). Sidekick only reads and stores no password; the sign-in is kept encrypted and renewed by itself.
 2. Until someone connects, their answers leave that tool out and say so: "Connect your Jira to include its tickets" with a button. In Teams the answer card has the same button.
 3. Sidekick checks with the tool, at the moment of the answer, which of the tickets it found the person can open (it remembers each check for 5 minutes). If the tool doesn't answer quickly, the tickets are left out of that answer rather than guessed. A ticket someone can't open is simply not used: the answer doesn't mention that it exists.
 4. If a person's own sign-in expires or is revoked, their answers say **"Your Jira sign-in expired"** with **Reconnect**, and the group's Team Lead sees under Needs attention whose sign-ins expired. On Connectors the group's managers see how many people have connected.
@@ -116,7 +116,17 @@ Switching back to **One shared account** removes everyone's own sign-ins. **Disc
 - At the moment of the answer, Sidekick asks Microsoft which of the files it found the person can open (SharePoint's own permissions: folder sharing, broken inheritance, sharing links). A file someone can't open isn't used and isn't mentioned. Until someone connects, their answers say **"Connect your Microsoft 365 files to include them"**, without naming any file.
 - In Teams group chats, only files **everyone in the chat** can open are used, with the same rules as tickets above (client guests, people Sidekick doesn't know, or more than 20 people mean no files from Microsoft 365 in that answer, and the card says so).
 
-GitHub and Confluence use one shared account for now. GitHub's own permissions are per repository (anyone who may open the repository may open all its issues), so the shared account already matches GitHub. Checking each person's access is planned for Confluence (page restrictions).
+**Confluence pages with "each person signs in":**
+- Each person presses **Connect your Confluence** on Knowledge and signs in with **their own** Atlassian account for the client's site (the same site the group is connected to; the same kind of sign-in as Jira).
+- At the moment of the answer, Sidekick asks Confluence which of the pages it found the person can view. Confluence applies its own rules: space permissions and **page restrictions** (a restriction on a parent page covers the pages under it). A page someone can't view isn't used and isn't mentioned. A page created a moment ago may not be in Confluence's search yet, so it's left out until Confluence has it. Until someone connects, their answers say **"Connect your Confluence to include its pages"**.
+
+**GitHub issues with "each person signs in":**
+- Each person presses **Connect your GitHub** on Knowledge and signs in with **their own** GitHub account. GitHub asks them once to **Authorize** Sidekick's app (read-only). Nobody has to install anything; the client's GitHub organization owner installs the app once, as before.
+- GitHub's permissions are per repository: a person who can open a repository can open all its issues and pull requests. So Sidekick asks GitHub, per repository, whether the person can open it. Issues from a **private repository** they can't open aren't used and aren't mentioned.
+- Issues from a **public repository** are open to everyone, so they're used for everyone in the group, also for people who haven't connected GitHub and in Teams chats with client guests. They still stay inside the group the repository is linked to.
+- Until someone connects, their answers say **"Connect your GitHub to include its issues"** whenever a private repository had something relevant.
+
+In Teams group chats, Confluence pages and private GitHub issues follow the same rules as tickets above: only what **everyone in the chat** can open is used.
 
 ## Unlink or switch off
 - **Unlink** (on a linked project) removes that project's items from the group's knowledge. The connection stays.

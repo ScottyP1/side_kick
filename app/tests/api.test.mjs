@@ -1836,15 +1836,16 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
     assert.equal((await member("POST", "/api/connectors/links", { connector: id, ws: s.wsA, project })).status, 403, `${kind}: Members can't link`);
     assert.equal((await member("DELETE", `/api/connectors/${id}`)).status, 403);
     assert.equal((await member("GET", `/api/connectors/start?kind=${kind}&ws=${s.wsA}`)).status, 403);
-    if (kind === "m365") {
-      // "Each person signs in" on B's files: nobody outside B can sign in to it, see it as theirs or switch it back.
-      assert.equal((await admin("PUT", `/api/connectors/${id}`, { accessMode: "personal" })).status, 200);
-      assert.match(flashOf(await isoAsker("GET", `/api/connectors/mine/start?connector=${id}`)), /Connector not found/, "m365: A's Member can't sign in to B's files");
-      assert.match(flashOf(await other("GET", `/api/connectors/mine/start?connector=${id}`)), /Connector not found/, "m365: nor another organization");
+    {
+      // "Each person signs in" on B's connection (every tool has it): nobody outside B can sign in to it, see it as
+      // theirs or switch it back, and its items still never reach A.
+      assert.equal((await admin("PUT", `/api/connectors/${id}`, { accessMode: "personal" })).status, 200, kind);
+      assert.match(flashOf(await isoAsker("GET", `/api/connectors/mine/start?connector=${id}`)), /Connector not found/, `${kind}: A's Member can't sign in to B's connection`);
+      assert.match(flashOf(await other("GET", `/api/connectors/mine/start?connector=${id}`)), /Connector not found/, `${kind}: nor another organization`);
       assert.ok(!(await isoAsker("GET", "/api/connectors/mine")).body.signIns.some((x) => x.connectorId === id));
       assert.equal((await lead("PUT", `/api/connectors/${id}`, { accessMode: "shared" })).status, 404);
       assert.equal((await other("DELETE", `/api/connectors/mine/${id}`)).status, 404);
-      assert.ok(!leaks(await askA(isoAsker, "ZEBRA vault key Fabrikam merger handover")), "m365 personal: never reaches A");
+      assert.ok(!leaks(await askA(isoAsker, "ZEBRA vault key Fabrikam merger handover")), `${kind} personal: never reaches A`);
     }
     // Disconnecting removes the sign-in, the link and its search entries.
     assert.deepEqual((await admin("DELETE", `/api/connectors/${id}`)).body, { links: 1, items: 1 });
@@ -5784,6 +5785,175 @@ test(`[${ENGINE}] connectors: Microsoft 365 files, each person signs in: answers
   assert.equal((await admin("DELETE", `/api/connectors/${conn.id}`)).status, 200);
   const drive = tools.world.m365.sites[0].drives[0];
   drive.items.splice(0, drive.items.length, ...drive.items.filter((x) => !x.id.startsWith("sp-")));
+  rosters.delete(CHAT);
+  await dbExec(`UPDATE orgs SET entra_tenant_id = ${tenantBefore ? `'${tenantBefore}'` : "NULL"} WHERE name = 'Test Org'`);
+});
+
+test(`[${ENGINE}] connectors: Confluence and GitHub, each person signs in: restricted pages and private repositories only reach people who can open them (CQL and per-repository checks with their own token), public repositories reach everyone, expiry, throttling, Teams chats and walls`, async () => {
+  const now = () => new Date().toISOString();
+  for (const kind of ["github", "confluence"]) assert.equal((await allowTool(admin, kind)).status, 200);
+  // Made-up content: a restricted Confluence page only Ana may view and an open one; a private repository only Ana
+  // is in, a private one everybody here is in, and a public one.
+  tools.world.people = { ...tools.world.people, ana: "Ana Pages", ben: "Ben Pages" };
+  const space = tools.world.confluence.sites[0].spaces.find((sp) => sp.key === "OPS");
+  const page = (id, title, body, extra = {}) => ({ id, title, updated: now(), by: "Ana Pages", ancestors: ["Store Operations"], labels: [], body: `<p>${body}</p>`, ...extra });
+  space.pages.push(
+    page("88101", "Peridot salary bands", "Peridot salary bands for the store managers, confidential.", { viewers: ["ana"] }),
+    page("88102", "Beryl weekend rota", "Beryl weekend rota: two staff per till on cutover Saturday."),
+  );
+  const repos = tools.world.github.installations[0].repos;
+  const ghIssue = (number, title, body) => ({ number, title, state: "open", pr: false, assignees: [], labels: [], milestone: null, updated: now(), body, comments: [] });
+  repos.push(
+    { full_name: "northwind/payroll", members: ["ana"], issues: [ghIssue(5, "Amber bonus run for the store managers", "Amber bonus run: confidential.")] },
+    { full_name: "northwind/store-ops", issues: [ghIssue(3, "Coral shift swap form", "Coral shift swap form for the tills.")] },
+    { full_name: "northwind/open-kiosk", visibility: "public", issues: [ghIssue(9, "Jasper kiosk font too small", "Jasper kiosk font is too small on the new screens.")] },
+  );
+  const cfIn = await connectTool(admin, "confluence");
+  assert.equal(cfIn.to?.search, "?connected=confluence", flashOf(cfIn.done ?? cfIn.start));
+  const ghIn = await connectTool(admin, "github");
+  assert.equal(ghIn.to?.search, "?connected=github", flashOf(ghIn.done ?? ghIn.start));
+  const conns = (await admin("GET", "/api/connectors")).body.connectors;
+  const cf = conns.find((x) => x.kind === "confluence" && x.workspaceId === s.wsA), gh = conns.find((x) => x.kind === "github" && x.workspaceId === s.wsA);
+  for (const c of [cf, gh]) assert.deepEqual([c.personal.supported, c.personal.reason], [true, null], `${c.kind}: no more "shared only" reason on the tile`);
+  const links = [];
+  for (const [conn, project] of [[cf.id, "OPS"], [gh.id, "northwind/payroll"], [gh.id, "northwind/store-ops"], [gh.id, "northwind/open-kiosk"]]) {
+    const l = await admin("POST", "/api/connectors/links", { connector: conn, ws: s.wsA, project });
+    assert.deepEqual([l.status, l.body.link?.problem], [200, null], JSON.stringify(l.body));
+    links.push(l.body.link);
+  }
+  const found = (r) => r.body.sources.map((x) => x.title.match(/(Peridot|Beryl|Opal|Amber|Coral|Jasper|Basalt)/)?.[1]).filter(Boolean);
+  const PERIDOT = "Peridot salary bands store managers", BERYL = "Beryl weekend rota staff per till", AMBER = "Amber bonus run store managers", CORAL = "Coral shift swap form tills", JASPER = "Jasper kiosk font too small";
+  const pages = { types: ["documents"] }, work = { types: ["work"] };
+  // Other made-up items may be cited next to the one asked about: check the ones that matter.
+  const has = (r, w) => found(r).includes(w);
+  const PRIVATE = ["Peridot", "Beryl", "Opal", "Amber", "Coral", "Basalt"];
+  const onlyPublic = (r) => !found(r).some((w) => PRIVATE.includes(w));
+  const ana = client(), ben = client(), lead = client();
+  for (const [call, name, email, role] of [[ana, "Ana Pages", "ana.cg@test.local", "Member"], [ben, "Ben Pages", "ben.cg@test.local", "Member"], [lead, "Lea Pages", "lea.cg@test.local", "Team Lead"]]) {
+    const u = await admin("POST", "/api/users", { name, email, role, workspaces: [s.wsA] });
+    assert.equal((await firstSignIn(call, email, u.body.tempPassword)).status, 200);
+  }
+  // Shared account: everyone sees what the group's account reads, the restricted page and private issue too.
+  assert.ok(has(await askA(ben, PERIDOT, pages), "Peridot"), "the gap this closes (Confluence)");
+  assert.ok(has(await askA(ben, AMBER, work), "Amber"), "the gap this closes (GitHub)");
+  for (const c of [cf, gh]) assert.deepEqual((await lead("PUT", `/api/connectors/${c.id}`, { accessMode: "personal" })).body, { accessMode: "personal", removedSignIns: 0 });
+  // Not connected: nothing from either tool except public repositories, with a note that names nothing.
+  const noneCf = await askA(ben, BERYL, pages);
+  assert.ok(onlyPublic(noneCf), JSON.stringify(found(noneCf)));
+  assert.deepEqual(noneCf.body.access.map((n) => [n.kind, n.reason, n.text]), [["confluence", "connect", "Connect your Confluence to include its pages in your answers."]]);
+  const noneGh = await askA(ben, CORAL, work);
+  assert.ok(onlyPublic(noneGh), JSON.stringify(found(noneGh)));
+  assert.deepEqual(noneGh.body.access.map((n) => [n.kind, n.reason, n.text]), [["github", "connect", "Connect your GitHub to include its issues in your answers."]]);
+  assert.doesNotMatch(JSON.stringify([noneCf.body.access, noneGh.body.access]), /Beryl|Coral|store-ops|88102/);
+  const pub = await askA(ben, JASPER, work);
+  assert.ok(has(pub, "Jasper") && onlyPublic(pub), "a public repository's issues need nobody's sign-in");
+  assert.deepEqual((await ben("GET", `/api/connectors/mine?ws=${s.wsA}`)).body.signIns.map((x) => [x.kind, x.label, x.status]).sort(), [["confluence", "Confluence", "none"], ["github", "GitHub", "none"]]);
+  // Each connects their own Atlassian and GitHub accounts and lands back on Knowledge.
+  for (const [call, as] of [[ana, "ana"], [ben, "ben"]]) {
+    for (const c of [cf, gh]) {
+      const r = await connectMine(call, c.id, as);
+      assert.equal(r.to?.pathname + r.to?.search, `/knowledge?ws=${s.wsA}&signedin=${c.kind}`, flashOf(r.done ?? r.start));
+    }
+  }
+  assert.deepEqual((await ana("GET", `/api/connectors/mine?ws=${s.wsA}`)).body.signIns.map((x) => [x.kind, x.status, x.accountName]).sort(), [["confluence", "connected", "Ana Pages"], ["github", "connected", "ana-gh"]]);
+  for (const c of [cf, gh]) assert.match(await dbValue(`SELECT access_token FROM connector_user_tokens WHERE connector_id = '${c.id}' AND user_id = (SELECT id FROM users WHERE email = 'ana.cg@test.local')`), /^enc1\./, `${c.kind}: sealed at rest`);
+  // Ana sees her restricted page and private issue; Ben never does and isn't told they exist; both see the rest.
+  const cfCalls = tools.counts.personal.confluence, ghCalls = tools.counts.personal.github;
+  assert.ok(has(await askA(ana, PERIDOT, pages), "Peridot"));
+  assert.ok(has(await askA(ana, AMBER, work), "Amber"));
+  assert.ok(tools.counts.personal.confluence > cfCalls && tools.counts.personal.github > ghCalls, "checked with Ana's own tokens");
+  for (const [q, opt] of [[PERIDOT, pages], [AMBER, work]]) {
+    const r = await askA(ben, q, opt);
+    assert.ok(!has(r, "Peridot") && !has(r, "Amber"), `${q}: closed to Ben`);
+    assert.deepEqual(r.body.access, [], `${q}: left out silently`);
+  }
+  assert.ok(has(await askA(ben, BERYL, pages), "Beryl"));
+  assert.ok(has(await askA(ben, CORAL, work), "Coral"));
+  const cached = [tools.counts.personal.confluence, tools.counts.personal.github];
+  assert.ok(has(await askA(ana, PERIDOT, pages), "Peridot"));
+  assert.ok(has(await askA(ana, AMBER, work), "Amber"));
+  assert.deepEqual([tools.counts.personal.confluence, tools.counts.personal.github], cached, "cached for a few minutes");
+  assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%88101%' OR attrs LIKE '%Peridot%' OR attrs LIKE '%payroll%' OR attrs LIKE '%Amber%' OR attrs LIKE '%githubat_%' OR attrs LIKE '%confluenceat_%'")), 0, "no ids, titles or tokens in traces");
+
+  // A revoked sign-in turns "expired" (reconnect); Ana's own keeps working.
+  space.pages.push(page("88103", "Opal till vendor contacts", "Opal till vendor contacts for the cutover weekend."));
+  repos.find((r) => r.full_name === "northwind/store-ops").issues.push(ghIssue(4, "Basalt freight schedule", "Basalt freight schedule for the stores."));
+  for (const l of [links[0], links[2]]) assert.equal((await admin("POST", `/api/connectors/links/${l.id}/sync`)).body.link.problem, null);
+  tools.revokeUser("confluence", "ben");
+  tools.revokeUser("github", "ben");
+  tools.expireAccessTokens();
+  for (const [q, opt, tool] of [["Opal till vendor contacts", pages, "Confluence"], ["Basalt freight schedule", work, "GitHub"]]) {
+    const r = await askA(ben, q, opt);
+    assert.ok(onlyPublic(r), q);
+    assert.deepEqual(r.body.access.map((n) => n.reason), ["reconnect"], q);
+    assert.match(r.body.access[0].text, new RegExp(`^Your ${tool} sign-in expired`));
+  }
+  assert.deepEqual((await ben("GET", `/api/connectors/mine?ws=${s.wsA}`)).body.signIns.map((x) => x.status), ["expired", "expired"]);
+  assert.ok(has(await askA(ana, "Basalt freight schedule", work), "Basalt"), "Ana's own GitHub sign-in refreshes and works");
+  // Confluence throttles the check: nothing is shown (fail closed) and nothing is remembered as closed.
+  tools.rateLimit("confluence", { times: 1, retryAfter: 900 });
+  const busy = await askA(ana, "Opal till vendor contacts", pages);
+  assert.ok(!has(busy, "Opal") && !has(busy, "Peridot") && !has(busy, "Beryl"));
+  assert.deepEqual(busy.body.access.map((n) => n.reason), ["unavailable"]);
+  assert.ok(has(await askA(ana, "Opal till vendor contacts", pages), "Opal"), "checked again once Confluence answers");
+  await jobTick({ sweep: true, kinds: ["watch.all", "watch.org"] });
+  const titles = (await lead("GET", "/api/findings")).body.findings.filter((f) => f.kind === "connector_signins").map((f) => `${f.title} ${f.detail}`).join("\n");
+  assert.ok(/GitHub/.test(titles) && /Confluence/.test(titles) && /Ben Pages/.test(titles), titles);
+  for (const c of [cf, gh]) assert.equal((await connectMine(ben, c.id, "ben")).to?.pathname, "/knowledge", `${c.kind}: reconnecting`);
+  assert.ok(has(await askA(ben, "Basalt freight schedule", work), "Basalt"));
+
+  // Walls: someone outside the group or in another organization can't connect, switch or see them.
+  const otto = client();
+  const ou = await admin("POST", "/api/users", { name: "Otto Pages", email: "otto.cg@test.local", role: "Member", workspaces: [s.wsB] });
+  assert.equal((await firstSignIn(otto, "otto.cg@test.local", ou.body.tempPassword)).status, 200);
+  const elsewhere = client();
+  assert.equal((await signUpAs(elsewhere, { org: "Pages Elsewhere", name: "Pat Else", email: "pat@cgelsewhere.test", password: "correct horse battery", plan: "business" })).status, 200);
+  for (const c of [cf, gh]) {
+    assert.match(flashOf((await connectMine(otto, c.id, "ana")).start), /Connector not found/, `${c.kind}: not their group`);
+    assert.match(flashOf((await connectMine(elsewhere, c.id, "ana")).start), /Connector not found/, `${c.kind}: another organization`);
+    assert.equal((await otto("DELETE", `/api/connectors/mine/${c.id}`)).status, 404);
+    assert.equal((await elsewhere("PUT", `/api/connectors/${c.id}`, { accessMode: "shared" })).status, 404);
+    assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM connector_user_tokens WHERE connector_id = '${c.id}'`)), 2, `${c.kind}: only Ana's and Ben's`);
+  }
+  assert.notEqual((await askA(otto, JASPER, work)).status, 200, "public issues still stay inside the group that linked them");
+
+  // Teams: only what everyone in the chat can open; a guest means none of it, except public repositories.
+  const CHAT = "19:pages-people@thread.v2";
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: CHAT, conversationType: "groupChat", tenantId: "tenant-1", name: "Pages crew" } }));
+  const code = cardText(cardsOf(await waitForSent((m) => decodeURIComponent(m.url).includes(CHAT)))[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+  assert.equal((await admin("POST", "/api/teams-links", { code, ws: s.wsA })).status, 200);
+  const tenantBefore = await dbValue("SELECT entra_tenant_id FROM orgs WHERE name = 'Test Org'");
+  await dbExec("UPDATE orgs SET entra_tenant_id = 'tenant-1' WHERE name = 'Test Org'");
+  await dbExec("UPDATE users SET entra_oid = 'oid-ana-cg' WHERE email = 'ana.cg@test.local'");
+  await dbExec("UPDATE users SET entra_oid = 'oid-ben-cg' WHERE email = 'ben.cg@test.local'");
+  const person = (oid, name) => ({ id: `29:${oid}`, name, aadObjectId: oid, tenantId: "tenant-1", userRole: "user" });
+  const askChat = async (text) => {
+    const before = sent.length;
+    await toBot(activity({ type: "message", text: `<at>Sidekick</at> ${text}`, from: { id: "29:oid-ana-cg", name: "Ana in Teams", aadObjectId: "oid-ana-cg" }, conversation: { id: CHAT, conversationType: "groupChat", tenantId: "tenant-1" }, entities: [{ type: "mention", mentioned: { id: "bot", name: "Sidekick" }, text: "<at>Sidekick</at>" }] }));
+    return cardText(cardsOf(await waitForSent((m) => sent.indexOf(m) >= before && cardsOf(m).some((x) => cardText(x).includes(text))))[0]);
+  };
+  rosters.set(CHAT, [person("oid-ana-cg", "Ana"), person("oid-ben-cg", "Ben")]);
+  const chatP = await askChat(PERIDOT);
+  assert.doesNotMatch(chatP, /Peridot salary bands for/, "Ben is in the chat and can't open the page");
+  assert.match(chatP, /Confluence pages were left out: not everyone in this chat/);
+  const chatA = await askChat(AMBER);
+  assert.doesNotMatch(chatA, /Amber bonus run for/, "nor the private repository");
+  assert.match(chatA, /GitHub issues were left out: not everyone in this chat/);
+  assert.match(await askChat(BERYL), /Beryl weekend rota/, "both can open it");
+  rosters.set(CHAT, [person("oid-ana-cg", "Ana"), { id: "29:guest", name: "Client guest", userRole: "guest", tenantId: "client-tenant" }]);
+  const guest = await askChat(BERYL);
+  assert.doesNotMatch(guest, /Beryl weekend rota:/, "a guest can't be checked: no pages");
+  assert.match(guest, /not everyone in this chat/);
+  assert.match(await askChat(JASPER), /Jasper kiosk font/, "a public repository is fine with a guest in the chat");
+  rosters.set(CHAT, Array.from({ length: 21 }, (_, i) => (i === 0 ? person("oid-ana-cg", "Ana") : i === 1 ? person("oid-ben-cg", "Ben") : person(`oid-crowd-cg-${i}`, `Crowd ${i}`))));
+  assert.doesNotMatch(await askChat(CORAL), /Coral shift swap form for/, "more than 20 people: not checked person by person");
+
+  // Back to one shared account: everyone's own sign-ins go. Tidy up for the tests below.
+  for (const c of [cf, gh]) assert.equal((await admin("PUT", `/api/connectors/${c.id}`, { accessMode: "shared" })).body.removedSignIns, 2);
+  assert.ok(has(await askA(ben, PERIDOT, pages), "Peridot"));
+  for (const c of [cf, gh]) assert.equal((await admin("DELETE", `/api/connectors/${c.id}`)).status, 200);
+  space.pages.splice(0, space.pages.length, ...space.pages.filter((p) => !p.id.startsWith("881")));
+  repos.splice(0, repos.length, ...repos.filter((r) => !["northwind/payroll", "northwind/store-ops", "northwind/open-kiosk"].includes(r.full_name)));
   rosters.delete(CHAT);
   await dbExec(`UPDATE orgs SET entra_tenant_id = ${tenantBefore ? `'${tenantBefore}'` : "NULL"} WHERE name = 'Test Org'`);
 });

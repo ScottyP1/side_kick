@@ -21,8 +21,8 @@
  *   When a refresh is refused (revoked, expired after long disuse) the connector turns **expired** and the group's
  *   Team Lead or an admin must reconnect; nothing is deleted.
  * - **Access mode** (`connectors.access_mode`, docs/ARCHITECTURE.md → Connectors): **shared** (the default: everyone
- *   in the group sees what the connection's account can read) or **personal** ("each person signs in", Jira, Azure
- *   DevOps and Microsoft 365 files: `Provider.personal`). In personal mode the connection's account still syncs, but answers only use
+ *   in the group sees what the connection's account can read) or **personal** ("each person signs in", every tool:
+ *   `Provider.personal`). In personal mode the connection's account still syncs, but answers only use
  *   items the reader's **own** sign-in can open (lib/connector-access.ts checks them at question time). Each
  *   person's tokens are in `connector_user_tokens`, sealed and refreshed like the group's (`personalApi`); a refused
  *   refresh turns that person's row expired. Personal sign-ins use the same callback as group connections
@@ -163,17 +163,22 @@ export type Provider = {
   /** The items changed since `cursor` (null = everything), oldest first, one page at a time (see `ChangePage`). */
   changes(api: ToolApi, conn: ConnectorRow, project: string, cursor: string | null): AsyncGenerator<WorkItem[] | ChangePage>;
   /**
-   * "Each person signs in" (only tools that have it; the others are shared only, `PERSONAL_UNSUPPORTED`). `api` calls
+   * "Each person signs in" (every tool has it today; one without it would be shared only, `PERSONAL_UNSUPPORTED`). `api` calls
    * the tool with **one person's** token. `account` checks that person's sign-in opens the connection's own site
    * (`ConnectorError` "access" otherwise) and says who they are there; `canOpen` returns which of the given external
    * ids (item keys, as stored in `connector_items.external_id`) that person can open. `where` gives each id's linked
    * project key (`connector_links.project`), for tools whose item ids only mean something inside it (Microsoft 365:
    * a file id within its drive). Must fail closed: anything not clearly open is left out of the set; a tool that
    * couldn't say (throttled, down) throws, so nothing is cached as closed.
+   * `openToAll` (optional) says which items **anyone** may open, asked with the **connection's** own token (GitHub:
+   * issues of public repositories). Those skip the per-person check, so a reader who hasn't connected, or a client
+   * guest in a Teams chat, still gets them. It must only return items the tool itself shows to the whole internet;
+   * when it throws, nothing counts as open to all and the per-person check decides.
    */
   personal?: {
     account(api: ToolApi, conn: ConnectorRow): Promise<{ accountName: string }>;
     canOpen(api: ToolApi, conn: ConnectorRow, externalIds: string[], where: Map<string, string>): Promise<Set<string>>;
+    openToAll?(api: ToolApi, conn: ConnectorRow, externalIds: string[], where: Map<string, string>): Promise<Set<string>>;
   };
 };
 
@@ -183,14 +188,12 @@ const PROVIDERS: Record<ConnectorKind, Provider> = { ado, jira, github, confluen
 export const providerFor = (kind: ConnectorKind): Provider => PROVIDERS[kind];
 
 /**
- * Why a tool can't use "each person signs in" yet (shown on its tile; docs/ARCHITECTURE.md → Connectors). Tools not
- * listed here have `Provider.personal`.
+ * Why a tool can't use "each person signs in" (shown on its tile; docs/ARCHITECTURE.md → Connectors). Empty today:
+ * every tool (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365 files) has `Provider.personal`. A new tool
+ * without per-person checks goes here with a plain reason.
  */
-export const PERSONAL_UNSUPPORTED: Partial<Record<ConnectorKind, string>> = {
-  github: "GitHub permissions are per repository, never per issue: anyone who may open the linked repository may open all its issues, so the shared account already matches GitHub's own rule.",
-  confluence: "Shared only for now: checking Confluence page restrictions for each person is planned.",
-};
-/** True when the tool can check each person's own access (Jira, Azure DevOps, Microsoft 365 files). */
+export const PERSONAL_UNSUPPORTED: Partial<Record<ConnectorKind, string>> = {};
+/** True when the tool can check each person's own access (every tool today; see `PERSONAL_UNSUPPORTED`). */
 export const supportsPersonal = (kind: ConnectorKind) => Boolean(PROVIDERS[kind].personal);
 
 /** Checks a tool name from a request ("ado", "jira", "github", "confluence" or "m365"), or 400. */
@@ -394,6 +397,11 @@ async function connectorToken(c: Pick<ConnectorRow, "id" | "org_id" | "kind" | "
 
 /** The tool API for a stored connector (see `ToolApi`). */
 const toolApi = (c: ConnectorRow): ToolApi => makeApi(c.kind, (force) => connectorToken(c, force));
+/**
+ * The tool API with the **connection's** own token, for lib/connector-access.ts's `Provider.personal.openToAll`
+ * check (which items anyone may open). Server code only; the caller has already scoped `c` to the reader's group.
+ */
+export const connectionApi = (c: ConnectorRow): ToolApi => toolApi(c);
 
 /* ---------------------------------------------------------------- */
 /* One person's own sign-in ("each person signs in")                 */

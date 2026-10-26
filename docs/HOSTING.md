@@ -13,7 +13,7 @@ signed in as CodyScott@SidekickLabs334.onmicrosoft.com. Set up October 16, 2026.
 | Web app + Teams bot endpoint | Container App `sidekick-app` (0.5 vCPU, 1 GiB, always 1 copy) in environment `sidekick-env` | East US | ~$10–15/month |
 | Database | Postgres Flexible Server `sidekick-labs-db` (Burstable B1ms, 32 GB, v17), database `sidekick` | Central US | ~$16/month |
 | Container images | Container Registry `sidekicklabsacr` (Basic) | East US | ~$5/month |
-| Search | AI Search `sidekick-labs-search` (Free), index `sidekick-cloud` (local copies use `sidekick-passages`) | Central US | $0 |
+| Search | AI Search `sidekick-labs-search` (Free: 50 MB, 3 indexes; how full it is is checked hourly, Owner Console → Business → Search capacity), index `sidekick-cloud` (local copies use `sidekick-passages`) | Central US | $0 |
 | Embeddings / Claude via Foundry | `codyscott-9578-resource` | East US 2 | pay per use |
 | Budget freeze | Logic App `sidekick-freeze` + action group `sidekick-freeze-ag` | East US | ~$0 (runs only on alert) |
 | Teams bot registration | Azure Bot `sidekick-bot-dev` (F0, single tenant), endpoint = the live address + `/api/messages` | global | $0 |
@@ -285,7 +285,7 @@ or the portal's estimate before buying.
 
 | Step | When | Change | Extra cost / month |
 |---|---|---|---|
-| 1. Search: Free → **Basic** | Before the first real customer. Free holds only 50 MB / 10,000 passages; one busy group fills it | AI Search `Basic` (15 GB per partition) | ~$75 |
+| 1. Search: Free → **Basic** | Before the first real customer, or when the Owner Console says "Search is almost full" (hourly check: 70% of storage or one index left, again at 90%). Free holds only 50 MB / 10,000 passages and 3 indexes; one busy group fills it | AI Search `Basic` (15 GB per partition) | ~$75 |
 | 2. Database: B1ms → **B2s** | ~10 companies or 1,000 groups, or CPU over 70% for an hour | Burstable B2s (2 vCores, 4 GiB, ~430 connections) | ~+$35 (≈$50 total) |
 | 3. App: **2–4 copies** with auto-scaling | When one copy's CPU is over 60% at busy hours, or before a launch | Container App min 2 / max 4 copies, scale rule "50 requests at once per copy"; 1 vCPU / 2 GiB each | ~+$30–100 (≈$35 per busy copy) |
 | 4. Database: **General Purpose D2ds_v5** | ~50 companies / 5,000 groups, or B2s CPU credits running out | 2 vCores, 8 GiB, ~860 connections, no CPU credits; zone-redundant HA optional (doubles it) | ≈$130 total (≈$78 with a 1-year reservation) |

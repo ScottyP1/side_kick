@@ -62,7 +62,7 @@ import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, notic
 import { adderName, holdForUnknownAdder, leaveChat, mayAddSidekick, recognizeAdder, reopenChat, UNKNOWN_ADDER, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
-import { recordChatMessage, reminderAction } from "../reminders";
+import { olderOpenFor, recordChatMessage, reminderAction } from "../reminders";
 import { notesHereFromTeams, notesTargetsFor, parseNotesCommand, parsePosted, postedToLine, recordNotesPosted, type NotesChat, type PostedChat } from "../notes-chats";
 import { callNudgeFromTeams, parseNudgeCommand } from "../call-nudge";
 import { BRAND } from "../brand";
@@ -874,8 +874,10 @@ export async function sendNotesTestMessage(chat: NotesChat, groupName: string, s
  * is on, swearing masked, slurs replaced). Null when the meeting isn't in this org or isn't Ready.
  * With `viewer` (the chat the card is shown in), the footer says where the notes were posted: `postedTo` while posting,
  * else what the meeting remembers; a chat with client guests only sees other guest chats' names (`postedToLine`).
+ * A full viewer chat also gets the "N older items still open: Open in Sidekick" line when that chat wants reminders
+ * after meetings (lib/reminders.ts `olderOpenFor`; worked out again when the card is rebuilt after a click).
  */
-export async function notesCardFor(orgId: string, meetingId: string, viewer?: { guests: number }, postedTo?: PostedChat[]): Promise<IAdaptiveCard | null> {
+export async function notesCardFor(orgId: string, meetingId: string, viewer?: { guests: number } | TeamsConversation, postedTo?: PostedChat[]): Promise<IAdaptiveCard | null> {
   const m = await get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; source: string | null; notes_posted_to: string | null; ws: string }>(
     "SELECT m.id, m.workspace_id, m.title, m.held_at, m.summary, m.status, m.source, m.notes_posted_to, w.name AS ws FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.id = ? AND m.org_id = ?",
     meetingId, orgId,
@@ -887,6 +889,7 @@ export async function notesCardFor(orgId: string, meetingId: string, viewer?: { 
   const actions = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM action_items WHERE meeting_id = ? AND org_id = ?", m.id, orgId))?.n ?? 0);
   const settings = (await getGuardPolicy(orgId, m.workspace_id)).switches;
   const clean = (t: string) => cleanOutput(t, settings).text;
+  const older = viewer && "id" in viewer ? await olderOpenFor(viewer, m.id) : 0;
   return meetingNotesCard({
     workspace: m.ws,
     title: m.title,
@@ -900,6 +903,7 @@ export async function notesCardFor(orgId: string, meetingId: string, viewer?: { 
     keep: items.filter((i) => (SAVABLE_KINDS as readonly string[]).includes(i.kind)).map((i) => ({ id: i.id, kind: i.kind, text: clean(i.text), savedBy: i.pinned ? (i.saved_by ?? "someone") : null })),
     source: m.source === "teams" ? "Captured from Microsoft Teams" : undefined,
     postedTo: viewer ? postedToLine(postedTo ?? parsePosted(m.notes_posted_to), viewer.guests === 1) : null,
+    olderOpen: older ? { count: older, url: portalUrl("/memory") } : null,
   });
 }
 
@@ -932,6 +936,19 @@ export async function meetingHasLinkedChat(orgId: string, meetingId: string): Pr
   ));
 }
 
+/**
+ * The Teams chats a meeting's notes go to: the group's "Meeting notes go to" choice (lib/notes-chats.ts), never a
+ * conversation with client guests in it when the meeting was internal-only. Used to post the notes, and by
+ * lib/reminders.ts `remindAfterMeeting` so those chats don't get a reminder card right after their notes.
+ */
+export async function notesTargets(orgId: string, m: { workspace_id: string; external_guests: number }): Promise<TeamsConversation[]> {
+  const chosen = new Set((await notesTargetsFor(orgId, m.workspace_id, m.external_guests === 1)).map((c) => c.id));
+  if (!chosen.size) return [];
+  return (await all<TeamsConversation>(
+    "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND removed_at IS NULL", orgId, m.workspace_id,
+  )).filter((c) => chosen.has(c.id) && (m.external_guests === 1 || !c.guests));
+}
+
 async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<number> {
   const m = await get<{ id: string; workspace_id: string; title: string; held_at: string; summary: string | null; status: string; external_guests: number; ws: string }>(
     "SELECT m.id, m.workspace_id, m.title, m.held_at, m.summary, m.status, m.external_guests, w.name AS ws FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.id = ? AND m.org_id = ?",
@@ -939,13 +956,7 @@ async function postMeetingNotesInner(orgId: string, meetingId: string): Promise<
   );
   if (!m || m.status !== "Ready") return 0;
   traceScope({ workspaceId: m.workspace_id });
-  // The group's "Meeting notes go to" choice (lib/notes-chats.ts); notes from an internal-only meeting never go to a
-  // conversation that has client guests in it.
-  const chosen = new Set((await notesTargetsFor(orgId, m.workspace_id, m.external_guests === 1)).map((c) => c.id));
-  if (!chosen.size) return 0;
-  const targets = (await all<TeamsConversation>(
-    "SELECT * FROM teams_conversations WHERE org_id = ? AND workspace_id = ? AND removed_at IS NULL", orgId, m.workspace_id,
-  )).filter((c) => chosen.has(c.id) && (m.external_guests === 1 || !c.guests));
+  const targets = await notesTargets(orgId, m);
   if (!targets.length) return 0;
   const actions = await all<ActionItemInput>("SELECT id, text, owner, due, status FROM action_items WHERE meeting_id = ? AND org_id = ? ORDER BY rowid", m.id, orgId);
   const planned: PostedChat[] = targets.map((c) => ({ name: c.name ?? "Teams chat", guests: c.guests === 1 }));

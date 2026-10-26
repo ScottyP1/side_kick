@@ -2887,7 +2887,11 @@ test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; no
   assert.equal((await fetch(`${BASE}/api/reminders/tick`, { method: "POST" })).status, 404);
   assert.equal((await fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": "wrong-secret-wrong-secret-wrong" } })).status, 404);
   const tick = () => fetch(`${BASE}/api/reminders/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET, "content-type": "application/json" }, body: JSON.stringify({ sweep: true }) }).then((x) => x.json());
+  const d0 = sent.length;
   assert.equal((await tick()).posted, 1);
+  // The daily digest is unchanged: a full "Still open for the team" card in the group chat.
+  const digest = await waitForSent((x) => sent.indexOf(x) >= d0 && x.url.includes(GROUP) && /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {})));
+  assert.match(cardText(cardsOf(digest)[0]), /REMINDERS · /);
   assert.equal((await tick()).posted, 0, "never twice in the same day");
 
   // "Meeting notes go to": no choice yet and several chats (the 1:1 chat among them) → ONE default group chat, and a choice is needed.
@@ -2933,10 +2937,9 @@ test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; no
   form.append("ws", s.wsA);
   form.append("title", "Notes routing check");
   form.append("text", "We agreed on the plan.");
-  assert.equal((await admin("POST", "/api/meetings", undefined, { form })).status, 200);
+  const routed = await admin("POST", "/api/meetings", undefined, { form });
+  assert.equal(routed.status, 200);
   await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && /Notes routing check/.test(cardText(cardsOf(x)[0] ?? {})));
-  // The reminder after the meeting follows the notes in the group chat.
-  await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes(GROUP) && /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {})));
   assert.ok(!sent.slice(n).some((x) => x.url.includes("conv-1") && /Notes routing check/.test(JSON.stringify(x.body))), "no notes in the chat that wasn't chosen");
   const notesPost = sent.slice(n).find((x) => x.url.includes(GROUP) && /Notes routing check/.test(cardText(cardsOf(x)[0] ?? {})));
   assert.match(cardText(cardsOf(notesPost)[0]), /Notes posted to Wave 2 team only/, "the card's footer says where the notes went");
@@ -2947,9 +2950,54 @@ test(`[${ENGINE}] reminders: the timer posts each chat's daily reminder once; no
     await new Promise((res) => setTimeout(res, 100));
   }
   assert.deepEqual([after.last?.title, after.last?.chats], ["Notes routing check", ["Wave 2 team"]], "the Teams chats tab says where the latest notes went");
+  // Quieter after meetings: the older items still open are one line on the notes card (more are open than today's
+  // digest listed), and no reminders card follows the notes in that chat.
+  assert.match(cardText(cardsOf(notesPost)[0]), /\d+ older items? still open: \[Open in Sidekick\]\([^)]*\/memory\)/);
+  await new Promise((res) => setTimeout(res, 1500)); // the after-meeting step runs right after the notes post
+  assert.ok(!sent.slice(n).some((x) => x.url.includes(GROUP) && /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {}))), "no second card after the notes");
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM reminder_runs WHERE slot = 'meeting:${routed.body.id}'`)), 0, "no after-meeting reminder run at all");
   // "Don't post notes in Teams" is a choice too; then back to the group chat for the tests below.
   assert.equal((await admin("PUT", notesUrl, { none: true })).body.targets.length, 0);
   assert.equal((await admin("PUT", notesUrl, { chatIds: [GROUP] })).status, 200);
+});
+
+test(`[${ENGINE}] reminders after meetings: a card only where the notes didn't go; "after meetings" off means no line`, async () => {
+  const importMeeting = async (title) => {
+    const form = new FormData();
+    form.append("ws", s.wsA);
+    form.append("title", title);
+    form.append("text", "We agreed on the plan.");
+    const r = await admin("POST", "/api/meetings", undefined, { form });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    return r.body.id;
+  };
+  const notesIn = (from, title) => waitForSent((x) => sent.indexOf(x) >= from && x.url.includes(GROUP) && new RegExp(title).test(cardText(cardsOf(x)[0] ?? {})));
+  // The 1:1 chat (linked to the same group, not a notes chat) wants reminders after meetings: it gets the card.
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: "conv-1", changes: { reminders: true, afterMeeting: true } })).status, 200);
+  let n = sent.length;
+  await importMeeting("Elsewhere check");
+  const notes = await notesIn(n, "Elsewhere check");
+  assert.match(cardText(cardsOf(notes)[0]), /older items? still open/);
+  await waitForSent((x) => sent.indexOf(x) >= n && x.url.includes("conv-1") && /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {})));
+  await new Promise((res) => setTimeout(res, 1000));
+  assert.ok(!sent.slice(n).some((x) => x.url.includes(GROUP) && /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {}))), "still no card in the notes chat");
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: "conv-1", changes: { reminders: false } })).status, 200);
+
+  // The group chat switches "after meetings" off: notes without the line, and no card.
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { afterMeeting: false } })).status, 200);
+  n = sent.length;
+  const quiet = await importMeeting("Quiet check");
+  const plain = await notesIn(n, "Quiet check");
+  assert.doesNotMatch(cardText(cardsOf(plain)[0]), /older items? still open/);
+  await new Promise((res) => setTimeout(res, 1000));
+  assert.ok(!sent.slice(n).some((x) => /Still open for the team/.test(cardText(cardsOf(x)[0] ?? {}))), "no reminder card anywhere");
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM reminder_runs WHERE slot = 'meeting:${quiet}'`)), 0);
+  // Reminders off altogether in the chat: no line either.
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { afterMeeting: true, reminders: false } })).status, 200);
+  n = sent.length;
+  await importMeeting("Reminders off check");
+  assert.doesNotMatch(cardText(cardsOf(await notesIn(n, "Reminders off check"))[0]), /older items? still open/);
+  assert.equal((await admin("PATCH", "/api/teams-links/settings", { id: GROUP, changes: { reminders: true } })).status, 200);
 });
 
 test(`[${ENGINE}] reminders: unlinking a chat forgets its saved messages; the owner's switch pauses reminders`, async () => {
@@ -3595,6 +3643,9 @@ test(`[${ENGINE}] Owner Console business view: revenue, margin, trials, payments
   assert.equal((await s.lee("PATCH", `/api/owner/tenants/${await limitOrg()}/terms`, { partner: "Me" })).status, 401);
   const b = await owner("GET", "/api/owner/business");
   assert.equal(b.status, 200, JSON.stringify(b.body));
+  // Search capacity (lib/search-capacity.ts) is for Azure AI Search only: on the local keyword index nothing shows.
+  assert.equal(b.body.infra.searchCapacity, null);
+  assert.deepEqual((await owner("GET", "/api/owner/overview")).body.alerts, []);
   const limitCo = b.body.clients.find((c) => c.name === "Limit Co");
   assert.equal(limitCo.partner, "Contoso Partners");
   assert.equal(limitCo.plan, "Starter");

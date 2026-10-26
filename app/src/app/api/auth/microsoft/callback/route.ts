@@ -42,7 +42,7 @@ export const GET = handle(async (req: Request) => {
       return go(`${replyPath}?microsoft=approved`);
     }
     const { who, saved } = await finishMicrosoftSignIn(req, cookieState);
-    mode = saved.mode;
+    mode = saved.mode === "link" ? "link" : "signin";
     if (saved.mode === "link") {
       await connectTenant(saved.user_id, who);
       // Back to where connecting started: the setup wizard or Settings.

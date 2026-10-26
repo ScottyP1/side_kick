@@ -158,7 +158,8 @@ export function mfaRoutes(kind: AccountKind) {
       return { ok: true };
     }
     await startOwnerSession(who.id);
-    await platformLog(who.name, `Signed in to the Owner Console (password + ${method})`);
+    // The first step was a password or Microsoft sign-in (that callback logged which), so only the second is named.
+    await platformLog(who.name, `Signed in to the Owner Console (second step: ${method})`);
     return { ok: true, mustChange: Number((who as { must_change_password: number }).must_change_password) === 1 };
   }
 

@@ -226,13 +226,9 @@ Connectors; audited):
 - **Each person signs in** (`personal`): the connection's account still does the **syncing** (it should be a
   read-only account that can read every linked project), but it no longer decides what anyone sees. Each member
   connects their own account ("Connect your Jira") and answers use only the items *their* account can open.
-  Only for tools that implement the per-person check (`Provider.personal`): **Jira, Azure DevOps and Microsoft 365
-  files** (SharePoint, OneDrive; added Oct 26, 2026). The others are
-  **shared only for now** (`PERSONAL_UNSUPPORTED` says why on the tile):
-  - GitHub: permissions are per repository, never per issue, so anyone who may open the linked repository may open
-    every issue in it. The shared account already matches GitHub's own rule.
-  - Confluence: pages can carry view restrictions. It needs a per-person CQL check (the same interface as Jira's);
-    planned.
+  Every tool implements the per-person check (`Provider.personal`): **Jira, Azure DevOps, Microsoft 365 files**
+  (SharePoint, OneDrive; Oct 26, 2026), **Confluence and GitHub Issues** (Oct 26, 2026). A future tool without it
+  would be shared only, with the reason in `PERSONAL_UNSUPPORTED` (shown on its tile; empty today).
 
 **Per-person tokens** (`connector_user_tokens`): one row per connection and person, the tool's account name, access
 and refresh tokens **sealed** with `SIDEKICK_ENCRYPTION_KEY` (context `connector_user_tokens.<column>:<row id>`, so
@@ -241,11 +237,12 @@ rotated refresh tokens saved). A refused refresh turns the row **expired** ("Rec
 changes. Any member of the group (Viewers too, since they may ask) signs in from **Knowledge** (and from Connectors
 for Team Leads/admins), through the same `/api/connectors/callback` as group connections (the saved state carries
 `connector_id`, which marks a personal sign-in), so **no extra redirect address** is needed on the tools' apps.
-The account must open the **same site** as the connection (Jira: the same cloud id; Azure DevOps: the same
-organization), otherwise it's refused. Leaving the group, being removed from the organization, switching the
+The account must open the **same site** as the connection (Jira and Confluence: the same Atlassian cloud id; Azure
+DevOps: the same organization; Microsoft 365: the same tenant), otherwise it's refused. GitHub has no site: any
+GitHub account may connect, and what it can open is decided per repository. Leaving the group, being removed from the organization, switching the
 connection back to shared, disconnecting it, or deleting the group deletes the person's tokens.
 
-**How answers respect permissions: option (a), a query-time check, for Jira, Azure DevOps and Microsoft 365 files.** The shared index
+**How answers respect permissions: option (a), a query-time check, for every tool.** The shared index
 stays as it is (one copy per group, synced by the connection's account). When an answer is about to be written,
 the candidates from personal connections (at most ~30 passages) are checked **with the reader's own token**:
 - Jira: `POST /rest/api/3/issue/bulkfetch` with the candidate keys; issues it doesn't return (404/no permission) are
@@ -267,6 +264,23 @@ the candidates from personal connections (at most ~30 passages) are checked **wi
   syncs (a share removed 10 minutes ago would still look open), and can't resolve nested groups or sharing links
   without more calls, so it could only ever **narrow** the candidates; the question-time check stays the guarantee.
   Worth adding only if the check's latency shows up on the Activity page.
+- Confluence: CQL `id in (…) AND type = page` through `GET /wiki/rest/api/content/search` with the reader's token,
+  up to 50 ids a call (`CHECK_BATCH`). Confluence search only returns pages the person may view: space permissions
+  **and page restrictions** (view restrictions inherit from parent pages), so a page that doesn't come back is closed
+  (restricted, deleted, or not in Confluence's search index yet: all fail closed). We chose CQL over
+  `GET /wiki/api/v2/pages/{id}` per page because one call covers the whole batch; a reply without a results list
+  throws. Same Atlassian app and sign-in as the group connection; the one scope added for it is
+  `read:confluence-user` (the name shown for whoever connected, `wiki/rest/api/user/current`).
+- GitHub Issues: permissions are **per repository**, never per issue, so `canOpen` makes one
+  `GET /repos/{owner}/{repo}` per repository among the candidates with the reader's user-to-server token (from the
+  same GitHub App). 200 (and the same `full_name`) = every issue and pull request of that repository is open to them;
+  404 (GitHub's answer for a private repository you can't see) or 403 = closed; rate limits and anything else throw.
+  The token can only reach repositories the app is installed on **and** the person may open, which is exactly the
+  rule we want. **Public repositories are open to everyone** (`Provider.personal.openToAll`): the same call with the
+  **connection's own** token, and a repository GitHub reports as `visibility: "public"` (not private, not an
+  enterprise's `internal`) skips the per-person check, so people who haven't connected GitHub, and guests in a Teams
+  chat, still get those issues. That answer is cached like the others (per connection); when it fails, nothing
+  counts as public and the per-person check decides. Public issues still stay inside the group that linked them.
 Results are cached **in memory for 5 minutes** per token row and item (`ACCESS_CACHE_SECONDS`), so follow-ups don't
 call the tool again; a reconnect or disconnect starts a fresh cache. Why (a): it costs one small call per answer,
 needs no second copy of anything, and asks the tool itself, which is the only place that knows about security
@@ -275,8 +289,9 @@ the group size for the same answer; (c) copying ACLs into the index fits SharePo
 Jira's permission schemes and ADO's area security can't be resolved from item data alone.
 **Fail closed:** an item is only used when the check said yes. Not connected, sign-in expired, the tool down or slow
 (4-second limit), or an unexpected answer → that connection's items are left out of this answer, never shown.
-There are **no "public" items** in this version: Sidekick can't tell from its side which items everyone may open,
-so a person who hasn't connected gets the answer without that tool and a note: "Connect your Jira to include its
+The only **"public" items** are GitHub issues in public repositories (above): for every other tool Sidekick can't
+tell from its side which items everyone may open, so a person who hasn't connected gets the answer without that
+tool and a note: "Connect your Jira to include its
 tickets" (with a button). The note appears only when that tool had something relevant.
 
 **Teams chats: the intersection.** An answer in a group chat or channel is read by everyone there, so items are

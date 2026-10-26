@@ -689,14 +689,18 @@ site / any GitHub organization that installs the app). **Only Cody creates these
 secrets go straight into Key Vault; they are never pasted into chat, a ticket or the repo. Until an app exists, its
 tile says "Not set up yet" and nothing else changes. Use the live address for `<site>` (SIDEKICK_PUBLIC_URL).
 
-**Each person signs in** (Oct 25, 2026; docs/ARCHITECTURE.md → Connectors): members connect their own Jira or Azure
-DevOps account through **the same apps and the same redirect address** (`/api/connectors/callback`), so there is
-**nothing extra to register**. Two things to check once per app: the Atlassian app's **Distribution** must be
+**Each person signs in** (Oct 25–26, 2026; docs/ARCHITECTURE.md → Connectors): members connect their own Jira, Azure
+DevOps, Confluence, GitHub or Microsoft 365 account through **the same apps and the same redirect address**
+(`/api/connectors/callback`), so there is **no new app or redirect to register**. The one addition is a Confluence
+scope, **read:confluence-user** (step 1 of Confluence below), for the name shown for whoever connected. Two things to check once per app: the Atlassian app's **Distribution** must be
 **Sharing** (step 4 below; otherwise only you can sign in), and the Entra app must stay **multitenant**. A client
 whose Microsoft admin blocks user consent must approve the Azure DevOps app once for their organization, after
 which every member can connect. Jira's per-person check calls `POST /rest/api/3/issue/bulkfetch` and `/myself`,
 Azure DevOps' calls `_apis/connectionData` and `_apis/wit/workitemsbatch`: all covered by the scopes below
-(`read:jira-work`, `read:jira-user`, `vso.work`).
+(`read:jira-work`, `read:jira-user`, `vso.work`). Confluence's check runs CQL `id in (…)` through
+`/wiki/rest/api/content/search` (`search:confluence`) and reads `/wiki/rest/api/user/current`
+(`read:confluence-user`). GitHub's calls `GET /user` and `GET /repos/{owner}/{repo}` (**Metadata: Read-only**, already
+required) with each member's own user token from the same GitHub App (GitHub → step 1 below).
 
 **Azure DevOps (Microsoft Entra ID; Azure DevOps' own OAuth apps are deprecated)**
 1. entra.microsoft.com (the Sidekick Labs tenant) → **App registrations → New registration**.
@@ -749,8 +753,8 @@ Azure DevOps' calls `_apis/connectionData` and `_apis/wit/workitemsbatch`: all c
 
 **Confluence Cloud (the same Atlassian app as Jira)**
 1. developer.atlassian.com → **My apps → Sidekick → Permissions → Confluence API → Add → Configure → Edit scopes
-   (Classic)**: tick **read:confluence-content.all**, **read:confluence-space.summary** and **search:confluence**.
-   Nothing that writes. Existing Jira connections are unaffected (each tool's sign-in asks only for its own scopes).
+   (Classic)**: tick **read:confluence-content.all**, **read:confluence-space.summary**, **search:confluence** and
+   **read:confluence-user** (the name of whoever connected; used by "each person signs in"). Nothing that writes. Existing Jira connections are unaffected (each tool's sign-in asks only for its own scopes).
    Do the same on the "Sidekick dev" app for the laptop.
 2. **Distribution**: add to the personal-data answer that page authors' names are stored (as part of pages).
 3. Nothing to set on the Container App: Confluence uses `JIRA_CLIENT_ID` / `JIRA_CLIENT_SECRET`. (Only if it ever
@@ -767,7 +771,12 @@ permissions; Sidekick only uses the signed-in person's user token, never the app
    - Name: `Sidekick connector` (must be unique on GitHub; add a suffix if taken). Homepage: `https://<site>`.
    - **Callback URL**: `https://<site>/api/connectors/callback`; **Add callback URL**: `http://localhost:3000/api/connectors/callback`.
    - Keep **Expire user authorization tokens** ticked (8-hour tokens with refresh). Leave "Request user
-     authorization during installation" and "Device flow" off.
+     authorization (OAuth) during installation" and "Device flow" off: people authorize the app from Sidekick's
+     Connect buttons instead.
+   - "Each person signs in" needs nothing more here: each member presses **Connect your GitHub** on Knowledge, GitHub
+     asks them once to **Authorize** the app (their own user-to-server token, through the same Callback URL), and
+     the token can only open repositories the app is installed on **and** that person may open. Members don't install
+     anything; only the client's GitHub organization owner installs the app (step 3).
    - **Webhook**: untick **Active** (Sidekick polls every 15 minutes; no webhook needed).
    - **Repository permissions**: **Issues: Read-only**, **Pull requests: Read-only**, **Metadata: Read-only**
      (required). Nothing else, no account or organization permissions.

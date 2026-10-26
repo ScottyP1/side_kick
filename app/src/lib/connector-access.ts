@@ -10,7 +10,8 @@
  * - **Screening** (`screenConnectorSources`): before ranking, every candidate passage from a connection in
  *   **personal** mode (lib/connectors.ts `access_mode`) is checked with each reader's own token
  *   (`Provider.personal.canOpen`, one call per tool and reader). An item stays only if **every** reader can open
- *   it. Anything uncertain is left out (fail closed): a reader who hasn't connected, an expired sign-in, an
+ *   it. Items the tool shows to anyone at all (`Provider.personal.openToAll`: GitHub issues in public repositories,
+ *   asked with the connection's own token) skip that check. Anything uncertain is left out (fail closed): a reader who hasn't connected, an expired sign-in, an
  *   unmatched person in the chat, a tool that's down or slower than `CHECK_TIMEOUT_MS`. Shared-mode connections
  *   and all other sources pass untouched.
  * - **Notes** (`AccessNote`): when a personal connection had relevant items that were left out, the answer says
@@ -29,7 +30,7 @@ import "server-only";
 import { all, get, now, run } from "./db";
 import { audit, HttpError, requireWorkspace, workspaceIdsFor, type User } from "./auth";
 import { span, spanAttrs } from "./trace";
-import { personalApi, providerFor, type ConnectorRow, type PersonalTokenRow } from "./connectors";
+import { connectionApi, personalApi, providerFor, type ConnectorRow, type PersonalTokenRow } from "./connectors";
 import { ConnectorError, isPageKind, KIND_LABEL, type ConnectorKind } from "./connector-text";
 
 /** How long one "can this person open this item" answer is reused. */
@@ -51,8 +52,8 @@ export type Readers =
  */
 export type AccessNote = { connectorId: string; kind: ConnectorKind; reason: "connect" | "reconnect" | "chat" | "unavailable"; text: string };
 
-/** What a tool's items are called in the notes ("tickets" for Jira, "work items" for Azure DevOps, "files" for Microsoft 365). */
-const itemsWord = (kind: ConnectorKind) => (kind === "jira" ? "tickets" : kind === "m365" ? "files" : isPageKind(kind) ? "pages" : "work items");
+/** What a tool's items are called in the notes ("tickets" for Jira, "issues" for GitHub, "pages" for Confluence, "files" for Microsoft 365, "work items" for Azure DevOps). */
+const itemsWord = (kind: ConnectorKind) => (kind === "jira" ? "tickets" : kind === "github" ? "issues" : kind === "m365" ? "files" : isPageKind(kind) ? "pages" : "work items");
 
 /** The note's wording for each reason (plain, no item names). */
 export function noteText(kind: ConnectorKind, reason: AccessNote["reason"]): string {
@@ -89,6 +90,30 @@ const timeout = <T>(p: Promise<T>, ms: number) =>
   Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new ConnectorError("busy", "timed out")), ms))]);
 
 /** A candidate passage's item: `project` is its link's key (Microsoft 365: the drive a file id belongs to). */
+type OpenToAll = NonNullable<NonNullable<ReturnType<typeof providerFor>["personal"]>["openToAll"]>;
+
+/**
+ * Which of a personal connection's candidate items anyone may open (`Provider.personal.openToAll`, asked with the
+ * connection's own token; cached like the per-person answers, per connection). Anything uncertain (the tool didn't
+ * answer in time, the connection's own sign-in expired) counts as not open to all, so the per-person check decides.
+ */
+async function openToAll(conn: ConnectorRow, check: OpenToAll, list: CandidateItem[], at: number): Promise<Set<string>> {
+  const key = { id: `all:${conn.id}`, connected_at: conn.connected_at };
+  const out = new Set(list.map((it) => it.external_id).filter((x) => cached(key, x, at) === true));
+  const ask = list.map((it) => it.external_id).filter((x) => cached(key, x, at) === undefined);
+  if (!ask.length) return out;
+  try {
+    const yes = await timeout(check(connectionApi(conn), conn, ask, new Map(list.map((it) => [it.external_id, it.project]))), CHECK_TIMEOUT_MS);
+    for (const x of ask) {
+      remember(key, x, yes.has(x), at);
+      if (yes.has(x)) out.add(x);
+    }
+  } catch (e) {
+    if (!(e instanceof ConnectorError)) console.error("Connector open-to-all check failed", e);
+  }
+  return out;
+}
+
 type CandidateItem = { id: string; external_id: string; connector_id: string; kind: ConnectorKind; project: string };
 
 /**
@@ -119,14 +144,21 @@ export async function screenConnectorSources(
   if (!items.length) return { drop, notes };
   return span("connector", "Check who can open the cited items", async () => {
     const at = Date.now();
-    let checked = 0, fromCache = 0;
+    let checked = 0, fromCache = 0, openToAllCount = 0;
     const byConn = new Map<string, CandidateItem[]>();
     for (const it of items) byConn.set(it.connector_id, [...(byConn.get(it.connector_id) ?? []), it]);
     const people = readers.kind === "person" ? (readers.userId ? [readers.userId] : []) : readers.userIds;
     // A reader Sidekick doesn't know, an unreadable roster or a crowded chat: nobody can vouch for them.
     const unvouched = readers.kind === "person" ? !readers.userId : Boolean(readers.unknown) || readers.unmatched > 0 || readers.userIds.length > MAX_CHAT_PEOPLE || !readers.userIds.length;
-    for (const [connectorId, list] of byConn) {
-      const kind = list[0].kind;
+    for (const [connectorId, all0] of byConn) {
+      const kind = all0[0].kind;
+      const conn = await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ? AND workspace_id = ?", connectorId, orgId, workspaceId);
+      const p = providerFor(kind).personal;
+      // Items anyone may open (GitHub: public repositories) need nobody's sign-in; the rest are checked per person.
+      const pub = conn && p?.openToAll ? await openToAll(conn, p.openToAll, all0, at) : new Set<string>();
+      openToAllCount += pub.size;
+      const list = all0.filter((it) => !pub.has(it.external_id));
+      if (!list.length) continue;
       const leaveOut = (reason: AccessNote["reason"]) => {
         for (const it of list) drop.add(it.id);
         notes.push({ connectorId, kind, reason, text: noteText(kind, reason) });
@@ -146,8 +178,6 @@ export async function screenConnectorSources(
         leaveOut(readers.kind === "chat" ? "chat" : expired ? "reconnect" : "connect");
         continue;
       }
-      const conn = await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ?", connectorId, orgId);
-      const p = providerFor(kind).personal;
       if (!conn || !p) {
         leaveOut("unavailable");
         continue;
@@ -188,7 +218,7 @@ export async function screenConnectorSources(
       // Some items closed for one of several chat readers: the chat hears that not everything could be used.
       if (closed.length && readers.kind === "chat") notes.push({ connectorId, kind, reason: "chat", text: noteText(kind, "chat") });
     }
-    spanAttrs({ candidates: items.length, connections: byConn.size, readers: readers.kind === "person" ? 1 : readers.userIds.length + readers.unmatched, checked, fromCache, dropped: drop.size, notes: notes.length });
+    spanAttrs({ candidates: items.length, connections: byConn.size, readers: readers.kind === "person" ? 1 : readers.userIds.length + readers.unmatched, checked, fromCache, openToAll: openToAllCount, dropped: drop.size, notes: notes.length });
     return { drop, notes };
   });
 }

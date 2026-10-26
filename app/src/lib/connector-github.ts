@@ -21,6 +21,14 @@
  *   100 through the `Link` header (only links back to the GitHub API are followed), at most `MAX_PER_SYNC` per
  *   run. `since` includes the cursor itself, so the last item is seen again and skipped (unchanged text).
  *   Comments cost one call per item, so at most `COMMENT_CALLS` items per sync get theirs read.
+ * - **Each person signs in** (`personal`, docs/ARCHITECTURE.md → Connectors): each member authorizes the same GitHub
+ *   App with their own GitHub account (a user-to-server token; it can only reach repositories the app is installed on
+ *   **and** that person may open). GitHub permissions are per repository, so `canOpen` asks
+ *   `GET /repos/{owner}/{repo}` once per repository among the candidates: 200 = all its issues are open to that
+ *   person, 404/403 = closed (GitHub answers 404 for a private repository you can't see), anything else throws (fail
+ *   closed). **Public repositories** are open to everyone: `openToAll` asks the same with the connection's own token
+ *   and counts a repository GitHub reports as `visibility: "public"` (not private, not an enterprise's "internal"),
+ *   so people who haven't connected GitHub, and guests in a Teams chat, still get those issues.
  * - **Rate limits**: GitHub answers 403 or 429 with `Retry-After` or `x-ratelimit-remaining: 0`; the framework's
  *   API helper (lib/connectors.ts `makeApi`) waits briefly or stops the sync with a plain "busy" message and the
  *   cursor saved, so the next run carries on.
@@ -30,7 +38,7 @@
  */
 import "server-only";
 import { ConnectorError, dayOf, isoOf, type WorkItem } from "./connector-text";
-import type { Provider, ToolApi } from "./connectors";
+import type { ConnectorRow, Provider, ToolApi } from "./connectors";
 
 /** At most this many changed issues and pull requests per sync (pages of 100); the rest come on the next run. */
 export const MAX_PER_SYNC = 2000;
@@ -105,6 +113,34 @@ async function* pages<T>(api: ToolApi, first: string, key: string | null, what?:
 /** GitHub's markdown body as plain-ish text: HTML comments (issue templates) dropped, whitespace tidied. */
 const bodyText = (s: string | null | undefined) => (s ?? "").replace(/<!--[\s\S]*?-->/g, " ").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
 
+/** The candidate ids grouped by their repository ("owner/name", from `where`); ids whose repository doesn't match are left out. */
+function byRepo(ids: string[], where: Map<string, string>): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const id of ids) {
+    const repo = repoName(where.get(id) ?? "");
+    // The id is "<repo name>#<number>": it must belong to that repository.
+    if (!repo || !id.toLowerCase().startsWith(`${repo.split("/")[1].toLowerCase()}#`)) continue;
+    const key = repo.toLowerCase();
+    out.set(key, [...(out.get(key) ?? []), id]);
+  }
+  return out;
+}
+
+/**
+ * One repository as the token sees it: its visibility, or null when GitHub says it can't be opened (404, or 403
+ * without a rate limit). Anything else (busy, down, a sign-in problem) throws, so nothing is decided.
+ */
+async function repoFor(api: ToolApi, conn: ConnectorRow, repo: string): Promise<{ private: boolean; visibility: string | null } | null> {
+  try {
+    const j = (await api(`${conn.api_base}/repos/${repo}`, {}, { what: `the repository “${repo}”` })).json as { full_name?: string; private?: boolean; visibility?: string } | null;
+    if (!j?.full_name || j.full_name.toLowerCase() !== repo.toLowerCase()) return null; // renamed or an answer about something else: closed
+    return { private: j.private !== false, visibility: j.visibility ?? null };
+  } catch (e) {
+    if (e instanceof ConnectorError && (e.reason === "notfound" || e.reason === "access")) return null;
+    throw e;
+  }
+}
+
 export const github: Provider = {
   kind: "github",
   needsSite: false,
@@ -148,6 +184,30 @@ export const github: Provider = {
       }
     }
     return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
+  },
+
+  personal: {
+    /** Any GitHub account may sign in: what it can open is decided per repository by `canOpen`. */
+    async account(api) {
+      const me = (await api(`${apiBase()}/user`)).json as { id?: number; login?: string; name?: string | null } | null;
+      if (!me?.id || !me.login) throw new ConnectorError("tool", "GitHub didn't say which account signed in. Try again.");
+      return { accountName: me.login };
+    },
+    /** The issues of repositories the person can open (one `GET /repos/{repo}` per repository, see the file comment). */
+    async canOpen(api, conn, ids, where) {
+      const open = new Set<string>();
+      for (const [repo, list] of byRepo(ids, where)) if (await repoFor(api, conn, repo)) for (const id of list) open.add(id);
+      return open;
+    },
+    /** The issues of public repositories, asked with the connection's own token. */
+    async openToAll(api, conn, ids, where) {
+      const open = new Set<string>();
+      for (const [repo, list] of byRepo(ids, where)) {
+        const r = await repoFor(api, conn, repo);
+        if (r && !r.private && (r.visibility ?? "public") === "public") for (const id of list) open.add(id);
+      }
+      return open;
+    },
   },
 
   async *changes(api, conn, project, cursor) {

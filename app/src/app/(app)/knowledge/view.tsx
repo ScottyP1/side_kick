@@ -17,7 +17,7 @@
  * "Needs attention" finding) scrolls to and highlights that document.
  *
  * Your sign-ins to tools (components/my-sign-ins.tsx, `#signins`): for connections where each person signs in, Connect
- * / Reconnect / Disconnect your own Jira, Azure DevOps or Microsoft 365 files; answers only use what your own sign-in can open there.
+ * / Reconnect / Disconnect your own Jira, Azure DevOps, GitHub, Confluence or Microsoft 365 files; answers only use what your own sign-in can open there.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";

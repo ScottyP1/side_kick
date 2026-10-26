@@ -1097,6 +1097,63 @@ test("connectors: Microsoft 365 files, each person signs in: the access check ba
   }
 });
 
+test("connectors: Confluence, each person signs in: CQL id in (…) with the reader's token, 50 ids a call; pages that don't come back are closed; odd answers throw (fail closed)", async () => {
+  const { confluence, CHECK_BATCH } = await import("../src/lib/connector-confluence.ts");
+  const { ConnectorError } = await import("../src/lib/connector-text.ts");
+  const conn = { api_base: "https://api.atlassian.example/ex/confluence/site-1", account: "site-1", account_name: "northwind" };
+  const ids = [...Array.from({ length: 52 }, (_, i) => String(1000 + i)), "not-a-page-id"];
+  const calls = [];
+  // 1001 is restricted (never comes back); the reply also carries a page nobody asked about.
+  const api = async (url) => {
+    const cql = new URL(url).searchParams.get("cql");
+    calls.push(cql);
+    const asked = cql.match(/^id in \(([\d,]+)\) AND type = page$/)[1].split(",");
+    return { json: { results: [...asked.filter((x) => x !== "1001").map((id) => ({ id, status: "current" })), { id: "9999" }], _links: {} } };
+  };
+  const open = await confluence.personal.canOpen(api, conn, ids, new Map());
+  assert.equal(CHECK_BATCH, 50);
+  assert.deepEqual(calls.map((c) => c.split(",").length), [50, 2], "batched; the id that isn't a number is never put in CQL");
+  assert.ok(open.has("1000") && open.has("1051"));
+  for (const closed of ["1001", "9999", "not-a-page-id"]) assert.ok(!open.has(closed), closed);
+  await assert.rejects(confluence.personal.canOpen(async () => ({ json: null }), conn, ["1000"], new Map()), ConnectorError, "no answer: throws, nothing cached");
+  // The person's account must open the connection's own site.
+  const elsewhere = async () => ({ json: [{ id: "site-2" }] });
+  await assert.rejects(confluence.personal.account(elsewhere, conn), (e) => e instanceof ConnectorError && e.reason === "access");
+  const here = async (url) => ({ json: url.endsWith("/accessible-resources") ? [{ id: "site-1" }] : { displayName: "Ana Ruiz" } });
+  assert.deepEqual(await confluence.personal.account(here, conn), { accountName: "Ana Ruiz" });
+});
+
+test("connectors: GitHub, each person signs in: one GET /repos per repository with the reader's token (404/403 closed, else throws); public repositories are open to all", async () => {
+  const { github } = await import("../src/lib/connector-github.ts");
+  const { ConnectorError } = await import("../src/lib/connector-text.ts");
+  const conn = { api_base: "https://api.github.example" };
+  const where = new Map([["store-pos#1", "northwind/store-pos"], ["store-pos#2", "northwind/store-pos"], ["vault#3", "northwind/vault"], ["docs#4", "northwind/docs"], ["sneaky#5", "northwind/store-pos"]]);
+  const ids = [...where.keys()];
+  const calls = [];
+  const repos = { "northwind/store-pos": { private: true, visibility: "private" }, "northwind/docs": { private: false, visibility: "public" } };
+  const api = async (url) => {
+    calls.push(url);
+    const name = url.replace(`${conn.api_base}/repos/`, "");
+    if (!repos[name]) throw new ConnectorError("notfound", "Not Found", 404);
+    return { json: { full_name: name, ...repos[name] } };
+  };
+  const open = await github.personal.canOpen(api, conn, ids, where);
+  assert.deepEqual([...open].sort(), ["docs#4", "store-pos#1", "store-pos#2"], "a private repository they can't see (404) is closed; an id outside its repository never counts");
+  assert.equal(calls.length, 3, "one call per repository");
+  calls.length = 0;
+  assert.deepEqual([...await github.personal.openToAll(api, conn, ids, where)], ["docs#4"], "only public repositories are open to all");
+  // An enterprise's "internal" repository isn't public.
+  repos["northwind/store-pos"] = { private: false, visibility: "internal" };
+  assert.ok(!(await github.personal.openToAll(api, conn, ids, where)).has("store-pos#1"));
+  // A renamed repository (the answer is about another one) stays closed; busy or a sign-in problem throws.
+  const renamed = async () => ({ json: { full_name: "northwind/other", private: true } });
+  assert.equal((await github.personal.canOpen(renamed, conn, ["store-pos#1"], where)).size, 0);
+  const busy = async () => { throw new ConnectorError("busy", "rate limit"); };
+  await assert.rejects(github.personal.canOpen(busy, conn, ["store-pos#1"], where), (e) => e.reason === "busy");
+  const expired = async () => { throw new ConnectorError("auth", "expired", 401); };
+  await assert.rejects(github.personal.canOpen(expired, conn, ["store-pos#1"], where), (e) => e.reason === "auth");
+});
+
 /* ---------- Job queue (src/lib/jobs.ts) ---------- */
 
 const jobs = await import("../src/lib/jobs.ts");

@@ -43,7 +43,7 @@ export const MATRIX = [
   { what: "See a group's last 30 days (Team Leads: their own groups)", method: "GET", url: (s) => `/api/workspaces/${s.wsA}/usage`, allow: MANAGERS },
   { what: "See Needs attention for their groups", method: "GET", url: () => "/api/findings", allow: EVERYONE },
   { what: "See their own sign-ins to tools where each person signs in (Knowledge)", method: "GET", url: (s) => `/api/connectors/mine?ws=${s.wsA}`, allow: EVERYONE },
-  { what: "Connect their own Jira, Azure DevOps or Microsoft 365 files account where each person signs in", method: "GET", url: () => `/api/connectors/mine/start?connector=${NOPE}`, allow: EVERYONE },
+  { what: "Connect their own account to a tool where each person signs in (Jira, Azure DevOps, GitHub, Confluence, Microsoft 365 files)", method: "GET", url: () => `/api/connectors/mine/start?connector=${NOPE}`, allow: EVERYONE },
   { what: "Disconnect their own sign-in to a tool", method: "DELETE", url: () => `/api/connectors/mine/${NOPE}`, allow: EVERYONE },
   // Change workspace content
   { what: "Upload documents", method: "POST", url: () => "/api/docs", form: (s) => ({ ws: s.wsA }), allow: EDITORS },

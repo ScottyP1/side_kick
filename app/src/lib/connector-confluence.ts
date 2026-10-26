@@ -5,8 +5,8 @@
  *
  * Concepts
  * - **Sign-in**: the same Atlassian authorization code flow as Jira (lib/connector-jira.ts), with Confluence's
- *   read-only scopes (`read:confluence-content.all`, `read:confluence-space.summary`, `search:confluence`) plus
- *   `offline_access`; refresh tokens rotate. It uses **the same Atlassian app as Jira** where possible:
+ *   read-only scopes (`read:confluence-content.all`, `read:confluence-space.summary`, `search:confluence`,
+ *   `read:confluence-user` for the name of whoever signed in) plus `offline_access`; refresh tokens rotate. It uses **the same Atlassian app as Jira** where possible:
  *   `CONFLUENCE_CLIENT_ID` / `CONFLUENCE_CLIENT_SECRET` when set, otherwise `JIRA_CLIENT_ID` / `JIRA_CLIENT_SECRET`
  *   (the app then needs the Confluence API and scopes added: docs/RUNBOOKS.md → Connector apps). It is still its
  *   own connector (its own sign-in, health and plan slot), because people connect the two separately.
@@ -21,6 +21,11 @@
  * - **Incremental sync** by last-modified: CQL `space = "KEY" AND type = page AND lastmodified >= "<cursor>"`
  *   oldest first, pages of 25 through `_links.next`. CQL times are in the signing-in person's own time zone and
  *   only to the minute, so (like Jira) the cursor goes back a day; unchanged pages are skipped by text hash.
+ * - **Each person signs in** (`personal`, docs/ARCHITECTURE.md → Connectors): a member's own Atlassian sign-in must
+ *   open the connection's site (same cloud id); before an answer uses pages, `canOpen` runs CQL
+ *   `id in (…) AND type = page` with that person's token, up to `CHECK_BATCH` ids a call. Confluence search only
+ *   returns pages the person may view (space permissions **and** page restrictions, inherited from parent pages),
+ *   so a page that doesn't come back (restricted, deleted, not indexed yet) is closed.
  *
  * Tests and the demo world point `CONFLUENCE_AUTH_BASE` and `CONFLUENCE_API_BASE` at a fake Confluence
  * (scripts/fake-tools.mjs); both overrides are ignored in production.
@@ -30,7 +35,9 @@ import { ConnectorError, htmlToText, isoOf, type WorkItem } from "./connector-te
 import { jqlSince } from "./connector-jira";
 import type { Provider } from "./connectors";
 
-const SCOPE = "read:confluence-content.all read:confluence-space.summary search:confluence offline_access";
+const SCOPE = "read:confluence-content.all read:confluence-space.summary search:confluence read:confluence-user offline_access";
+/** How many page ids one "who can open these" CQL search asks about. */
+export const CHECK_BATCH = 50;
 /** At most this many changed pages per sync (pages of 25); the rest come on the next run. */
 export const MAX_PER_SYNC = 1000;
 const PAGE = 25;
@@ -122,6 +129,39 @@ export const confluence: Provider = {
       url = confluenceNext(j?._links?.next, conn.api_base);
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
+  },
+
+  personal: {
+    /** The person's Atlassian account must open the connection's own site; their name comes from Confluence. */
+    async account(api, conn) {
+      const r = await api(`${apiBase()}/oauth/token/accessible-resources`);
+      const sites = ((r.json as { id: string }[]) ?? []).filter((s) => s?.id);
+      if (!sites.some((s) => s.id === conn.account)) {
+        throw new ConnectorError("access", `This Atlassian account can't open Confluence on the site ${conn.account_name ?? conn.account}. Sign in with the account the client gave you for that site.`, 403);
+      }
+      const me = (await api(`${conn.api_base}/wiki/rest/api/user/current`)).json as { displayName?: string; publicName?: string; email?: string } | null;
+      return { accountName: me?.displayName || me?.publicName || me?.email || "Confluence user" };
+    },
+    /** Which pages the person can view: CQL `id in (…)` with their own token (see the file comment). */
+    async canOpen(api, conn, ids) {
+      const open = new Set<string>();
+      const nums = ids.filter((x) => /^\d{1,20}$/.test(x));
+      for (let i = 0; i < nums.length; i += CHECK_BATCH) {
+        const part = nums.slice(i, i + CHECK_BATCH);
+        const wanted = new Set(part);
+        const cql = `id in (${part.join(",")}) AND type = page`;
+        let url: string | null = `${conn.api_base}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=${CHECK_BATCH}`;
+        // One page of results is normal; follow `next` a few times in case the site caps the page size lower.
+        for (let n = 0; url && n < 5; n++) {
+          const j = (await api(url, {}, { what: "who can open the pages" })).json as { results?: { id?: string | number; status?: string }[]; _links?: { next?: string } } | null;
+          if (!j || !Array.isArray(j.results)) throw new ConnectorError("tool", "Confluence didn't say who can open the pages just now.");
+          // Only ids asked for count; anything else in the reply is ignored.
+          for (const p of j.results) if (p?.id !== undefined && wanted.has(String(p.id)) && (!p.status || p.status === "current")) open.add(String(p.id));
+          url = j.results.length ? confluenceNext(j._links?.next, conn.api_base) : null;
+        }
+      }
+      return open;
+    },
   },
 
   async *changes(api, conn, project, cursor) {

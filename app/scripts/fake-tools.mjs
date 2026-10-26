@@ -50,6 +50,11 @@
  * e.g. 429). Microsoft sign-ins remember the tenant in the sign-in address: `/organization` answers that tenant for
  * a person signed in at a tenant id (`state.m365Tenants` lists the ones that sign-ins went to), and a refresh at a
  * different tenant than the sign-in's is refused.
+ * GitHub: a repository is private unless it has `visibility: "public"`; a private one with `members: [names]` is
+ * open only to them (no list = everyone). A person's `GET /repos/{owner}/{repo}` (and its issues) answers 404
+ * otherwise, like the real one; `/user` answers that person. Confluence: a page with `viewers` is open only to those
+ * people (a page restriction), a site with `members` only to its members; a person's CQL search leaves out what
+ * they can't view, including `id in (…)` searches, and `wiki/rest/api/user/current` answers that person.
  * `revokeUser(kind, name)` revokes one person's sign-in (their calls 401, their refreshes fail); `counts.personal`
  * counts their API calls.
  *
@@ -265,7 +270,7 @@ export function createFakeTools({
   lenient = false,
 } = {}) {
   const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false, graphSitePage: 100, graphDeltaPage: 200, graphDeltaGone: false, graphBatchStatus: null, m365Tenants: [] };
-  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, personal: { ado: 0, jira: 0, m365: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0 };
+  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, personal: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0 };
   let nextUser = null; // signInAs: the next sign-in's person (null = the shared account)
   const revokedUsers = new Set(); // `${kind}:${name}`
   const limits = new Map(); // kind → { times, retryAfter, status }
@@ -531,7 +536,16 @@ export function createFakeTools({
           const next = n * size < list.length ? `${base}/gh-api/${rest}?${q}${extra}` : null;
           return { part, next };
         };
-        if (rest === "user") return send(200, { id: gh.user.id, login: gh.user.login, type: "User" });
+        if (rest === "user") return send(200, who ? { id: 70000 + [...who].reduce((n, ch) => n + ch.charCodeAt(0), 0), login: `${who}-gh`, type: "User" } : { id: gh.user.id, login: gh.user.login, type: "User" });
+        const ghRepo = (name) => gh.installations.flatMap((i) => i.repos).find((r) => r.full_name.toLowerCase() === name.toLowerCase());
+        /** Whether the caller may open a repository: public ones are open to all, private ones to `members` (if listed). */
+        const ghSees = (r) => r.visibility === "public" || member(r);
+        if ((m = rest.match(/^repos\/([^/]+\/[^/]+)$/))) {
+          const repo = ghRepo(m[1]);
+          if (!repo || !ghSees(repo)) return send(404, { message: "Not Found" });
+          const visibility = repo.visibility ?? "private";
+          return send(200, { id: 4000 + gh.installations.flatMap((i) => i.repos).indexOf(repo), full_name: repo.full_name, private: visibility !== "public", visibility });
+        }
         if (rest === "user/installations") {
           const { part, next } = pageOf(gh.installations);
           return send(200, { total_count: gh.installations.length, installations: part.map((i) => ({ id: i.id, account: { login: "northwind" } })) }, link(next));
@@ -540,11 +554,11 @@ export function createFakeTools({
           const inst = gh.installations.find((i) => i.id === Number(m[1]));
           if (!inst) return send(404, { message: "Not Found" });
           const { part, next } = pageOf(inst.repos);
-          return send(200, { total_count: inst.repos.length, repositories: part.map((r) => ({ full_name: r.full_name, name: r.full_name.split("/")[1], private: true, archived: false })) }, link(next));
+          return send(200, { total_count: inst.repos.length, repositories: part.map((r) => ({ full_name: r.full_name, name: r.full_name.split("/")[1], private: r.visibility !== "public", archived: false })) }, link(next));
         }
         if ((m = rest.match(/^repos\/([^/]+\/[^/]+)\/issues(?:\/(\d+)\/comments)?$/))) {
           const repo = gh.installations.flatMap((i) => i.repos).find((r) => r.full_name === m[1]);
-          if (!repo) return send(404, { message: "Not Found" });
+          if (!repo || !ghSees(repo)) return send(404, { message: "Not Found" });
           if (denied.has(`github:${repo.full_name}`)) return send(403, { message: "Resource not accessible by integration" });
           if (m[2]) {
             const it = repo.issues.find((i) => i.number === Number(m[2]));
@@ -574,12 +588,29 @@ export function createFakeTools({
       // ---- Confluence REST ----
       if (path === "/confluence-api/oauth/token/accessible-resources") {
         if (!authed("confluence")) return;
-        return send(200, world.confluence.sites.map((s) => ({ id: s.id, name: s.name, url: `${base}/confluence-web/${s.name}`, scopes: ["read:confluence-content.all", "read:confluence-space.summary", "search:confluence"] })));
+        return send(200, world.confluence.sites.filter(member).map((s) => ({ id: s.id, name: s.name, url: `${base}/confluence-web/${s.name}`, scopes: ["read:confluence-content.all", "read:confluence-space.summary", "search:confluence", "read:confluence-user"] })));
       }
       if ((m = path.match(/^\/confluence-api\/ex\/confluence\/([^/]+)\/wiki\/(.+)$/))) {
         if (!authed("confluence")) return;
         const site = world.confluence.sites.find((s) => s.id === m[1]);
         if (!site) return send(404, { message: "Site not found" });
+        if (!member(site)) return send(401, { message: "Not a member of this site" });
+        if (m[2] === "rest/api/user/current") return send(200, { type: "known", accountId: `acc-${who ?? "shared"}`, displayName: who ? (world.people?.[who] ?? who) : "Northwind reader" });
+        const pageJson = (space, p) => ({
+          id: p.id, type: "page", status: "current", title: p.title,
+          body: { storage: { value: p.body, representation: "storage" } },
+          version: { when: p.updated, by: { displayName: p.by } },
+          ancestors: p.ancestors.map((title) => ({ title })),
+          metadata: { labels: { results: p.labels.map((name) => ({ name })) } },
+          _links: { webui: `/spaces/${space.key}/pages/${p.id}/${encodeURIComponent(p.title.replace(/ /g, "+"))}` },
+        });
+        // "Who can open these": `id in (…)` across the site, only pages the caller may view.
+        const ids = m[2] === "rest/api/content/search" ? (url.searchParams.get("cql") ?? "").match(/^id in \(([\d,\s]*)\) AND type = page$/) : null;
+        if (ids) {
+          const want = new Set(ids[1].split(",").map((x) => x.trim()).filter(Boolean));
+          const results = site.spaces.flatMap((sp) => sp.pages.filter((p) => want.has(p.id) && sees(p)).map((p) => ({ ...pageJson(sp, p), body: undefined })));
+          return send(200, { results, start: 0, limit: Number(url.searchParams.get("limit") ?? 25), size: results.length, _links: {} });
+        }
         if (m[2] === "api/v2/spaces") {
           const start = Number(url.searchParams.get("cursor") ?? 0);
           const size = Math.min(Number(url.searchParams.get("limit") ?? 25), state.confluenceSpacePage);
@@ -595,7 +626,7 @@ export function createFakeTools({
           if (denied.has(`confluence:${space.key}`)) return send(403, { message: "Not permitted to use Confluence" });
           const since = cql.match(/lastmodified >= "(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})"/);
           const sinceIso = since ? `${since[1]}-${since[2]}-${since[3]}T${since[4]}:${since[5]}:00.000Z` : null;
-          const list = space.pages.filter((p) => !sinceIso || p.updated >= sinceIso).sort((a, b) => a.updated.localeCompare(b.updated));
+          const list = space.pages.filter((p) => (!sinceIso || p.updated >= sinceIso) && sees(p)).sort((a, b) => a.updated.localeCompare(b.updated));
           const start = Number(url.searchParams.get("start") ?? 0);
           const size = Math.min(Number(url.searchParams.get("limit") ?? 25), state.confluencePage);
           const part = list.slice(start, start + size);
@@ -603,14 +634,7 @@ export function createFakeTools({
           const q = new URLSearchParams(url.searchParams);
           q.set("start", String(start + part.length));
           return send(200, {
-            results: part.map((p) => ({
-              id: p.id, type: "page", status: "current", title: p.title,
-              body: { storage: { value: p.body, representation: "storage" } },
-              version: { when: p.updated, by: { displayName: p.by } },
-              ancestors: p.ancestors.map((title) => ({ title })),
-              metadata: { labels: { results: p.labels.map((name) => ({ name })) } },
-              _links: { webui: `/spaces/${space.key}/pages/${p.id}/${encodeURIComponent(p.title.replace(/ /g, "+"))}` },
-            })),
+            results: part.map((p) => pageJson(space, p)),
             start, limit: size, size: part.length,
             // Like the real one: relative to the site's /wiki context.
             _links: { base: `${base}/confluence-web/${site.name}/wiki`, context: "/wiki", ...(more ? { next: `/rest/api/content/search?${q}` } : {}) },

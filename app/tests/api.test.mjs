@@ -5419,15 +5419,13 @@ test(`[${ENGINE}] connector requests: plans without connectors can't ask (upgrad
 const rc = client();
 const rq = client();
 test(`[${ENGINE}] accuracy fixes: old transcripts are re-cut once per org, speakers get known sides, tags are tidied, follow-ups get dates`, async () => {
-  const made = await owner("POST", "/api/owner/tenants", { org: "Recall Co", name: "Rita Recall", email: "rita@recall.test" });
-  assert.equal(made.status, 200, JSON.stringify(made.body));
-  await firstSignIn(rc, "rita@recall.test", made.body.tempPassword);
+  // Self-service sign-up, not the Owner Console: an earlier test resets the operator's password.
+  assert.equal((await signUpAs(rc, { org: "Recall Co", name: "Rita Recall", email: "rita@recall.test", password: "correct horse battery", plan: "team" })).status, 200);
   const org = await dbValue("SELECT id FROM orgs WHERE name = 'Recall Co'");
   const ws = (await rc("POST", "/api/workspaces", { name: "Claims rebuild", client: "Tailspin Mutual" })).body.id;
   assert.equal((await rc("POST", "/api/users", { name: "Priya Raman", email: "priya@recall.test", role: "Member", workspaces: [ws] })).status, 200);
   // A second organization with an old-style transcript: nothing of it may change.
-  const quiet = await owner("POST", "/api/owner/tenants", { org: "Quiet Recall Co", name: "Quinn Quiet", email: "quinn@quietrecall.test" });
-  await firstSignIn(rq, "quinn@quietrecall.test", quiet.body.tempPassword);
+  assert.equal((await signUpAs(rq, { org: "Quiet Recall Co", name: "Quinn Quiet", email: "quinn@quietrecall.test", password: "correct horse battery", plan: "team" })).status, 200);
   const qorg = await dbValue("SELECT id FROM orgs WHERE name = 'Quiet Recall Co'");
   const qws = (await rq("POST", "/api/workspaces", { name: "Quiet group" })).body.id;
 

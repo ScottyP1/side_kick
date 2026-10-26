@@ -1,0 +1,4 @@
+ID,Type,Description,Owner,Status,Opened,Due
+R-01,Risk,Legacy claim code mapping incomplete; data migration about 2 weeks behind plan,Ana Souza,Open,2026-10-16,2026-10-30
+R-02,Risk,Claims API endpoints fail performance tests at 2x load,Ben Wu,Open,2026-10-09,2026-10-23
+A-01,Assumption,Closed claims older than 7 years may not need migrating (legal to confirm),Grace Kim,Open,2026-10-19,

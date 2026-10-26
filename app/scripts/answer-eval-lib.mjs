@@ -3,7 +3,7 @@
 // meetings and firm library through the API, asks every question, and scores each answer.
 //
 // Scoring, one point each (see the "about" line in the set file):
-// - found: answered when an answer is expected, "I don't know" when `found` is false;
+// - found: answered when an answer is expected, "I don't know" when `found` is false (null: either is fine);
 // - facts: each fact group needs one of its alternatives in the answer (case-insensitive, plain text);
 // - sources: each pattern must match the title of a cited source;
 // - absent: each pattern must not match the answer or any cited title (walls: guests, internal-only);
@@ -35,7 +35,7 @@ export function scoreAnswer(spec, answer, followUp) {
   const text = answer.answer ?? "";
   const titles = titlesOf(answer);
   if (spec.found === false) check(!answer.found, "should say it doesn't know");
-  else check(answer.found === true, "no answer found");
+  else if (spec.found !== null) check(answer.found === true, "no answer found"); // null: either is fine
   for (const alts of spec.facts ?? []) check(alts.some((a) => has(text, a)), `missing fact: ${alts[0]}`);
   for (const p of spec.sources ?? []) check(titles.some((t) => new RegExp(p, "i").test(t)), `no cited source matching /${p}/`);
   for (const p of spec.absent ?? []) check(!new RegExp(p, "i").test(`${text}\n${titles.join("\n")}`), `must not mention /${p}/`);

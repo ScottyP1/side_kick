@@ -5340,3 +5340,92 @@ test(`[${ENGINE}] connector requests: plans without connectors can't ask (upgrad
   assert.equal((await team.o("GET", "/api/connectors")).body.requests[0].status, "pending", "still waiting");
 });
 
+
+/* ---------- Accuracy fixes (docs/quality/2026-10-accuracy-run.md): passages, speakers, citations, follow-ups ---------- */
+
+const rc = client();
+const rq = client();
+test(`[${ENGINE}] accuracy fixes: old transcripts are re-cut once per org, speakers get known sides, tags are tidied, follow-ups get dates`, async () => {
+  const made = await owner("POST", "/api/owner/tenants", { org: "Recall Co", name: "Rita Recall", email: "rita@recall.test" });
+  assert.equal(made.status, 200, JSON.stringify(made.body));
+  await firstSignIn(rc, "rita@recall.test", made.body.tempPassword);
+  const org = await dbValue("SELECT id FROM orgs WHERE name = 'Recall Co'");
+  const ws = (await rc("POST", "/api/workspaces", { name: "Claims rebuild", client: "Tailspin Mutual" })).body.id;
+  assert.equal((await rc("POST", "/api/users", { name: "Priya Raman", email: "priya@recall.test", role: "Member", workspaces: [ws] })).status, 200);
+  // A second organization with an old-style transcript: nothing of it may change.
+  const quiet = await owner("POST", "/api/owner/tenants", { org: "Quiet Recall Co", name: "Quinn Quiet", email: "quinn@quietrecall.test" });
+  await firstSignIn(rq, "quinn@quietrecall.test", quiet.body.tempPassword);
+  const qorg = await dbValue("SELECT id FROM orgs WHERE name = 'Quiet Recall Co'");
+  const qws = (await rq("POST", "/api/workspaces", { name: "Quiet group" })).body.id;
+
+  // A meeting with client guests; Tom is not one of Recall Co's people, Priya is.
+  const turns = Array.from({ length: 16 }, (_, i) => {
+    const t = `[00:0${Math.floor(i / 6)}:${String((i * 9) % 60).padStart(2, "0")}]`;
+    if (i === 7) return `${t} Tom Becker: From security: the new card readers in the claims kiosks are a PCI question. That is on our side, but we need your timeline.`;
+    if (i === 8) return `${t} Priya Raman: Understood. PCI stays with the security team as in the SOW, and we share the kiosk list by October 10.`;
+    return `${t} ${i % 2 ? "Priya Raman" : "Sam Ortiz"}: Update ${i} on the kiosk rollout and the card readers, nothing blocking from the claims side for item ${i}.`;
+  });
+  const form = new FormData();
+  form.append("ws", ws);
+  form.append("title", "Kiosk security check-in");
+  form.append("external", "true");
+  form.append("text", turns.join("\n"));
+  const meeting = (await rc("POST", "/api/meetings", undefined, { form })).body.id;
+  assert.ok(meeting);
+  // Make it look like it was indexed before passages overlapped: two halves, no shared turn. Same for a transcript
+  // uploaded as a document (no file kept), in both organizations.
+  const esc = (t) => t.replace(/'/g, "''");
+  const insert = (o, w, type, id, title, loc, text) =>
+    `INSERT INTO passages (text, title, loc, source_type, source_id, workspace_id, org_id, audience) VALUES ('${esc(text)}', '${esc(title)}', '${loc}', '${type}', '${id}', '${w}', '${o}', 'internal');`;
+  await dbExec(`DELETE FROM passages WHERE source_id = '${meeting}'`);
+  await dbExec(insert(org, ws, "meeting", meeting, "Meeting: Kiosk security check-in", "00:00:00", turns.slice(0, 8).join("\n")) + insert(org, ws, "meeting", meeting, "Meeting: Kiosk security check-in", turns[8].slice(1, 9), turns.slice(8).join("\n")));
+  const docTurns = ["[00:00:01] Dana Doc: Kiosk card readers arrive Monday.", "[00:00:05] Lee Lin: Thanks, noted.", "[00:00:09] Dana Doc: The vendor confirmed PCI testing.", "[00:00:12] Lee Lin: Good.", "[00:00:15] Dana Doc: That is all.", "[00:00:18] Lee Lin: Bye."];
+  for (const [o, w, id] of [[org, ws, "old-upload-recall"], [qorg, qws, "old-upload-quiet"]]) {
+    for (let i = 0; i < 3; i++) await dbExec(insert(o, w, "document", id, "Old kiosk call.vtt", docTurns[i * 2].slice(1, 9), docTurns.slice(i * 2, i * 2 + 2).join("\n")));
+  }
+  assert.equal(await dbValue(`SELECT COUNT(*) FROM index_versions WHERE org_id = '${org}'`), "0");
+
+  // The first question re-cuts them, then answers. Fake Claude echoes the speaker notes and the group's client.
+  const asked = await rc("POST", "/api/ask", { ws, question: "__SPEAKERS__ What did the client say about the card readers and PCI?" });
+  assert.equal(asked.status, 200, JSON.stringify(asked.body));
+  assert.match(asked.body.answer, /^Tailspin Mutual \|/, "the prompt names the group's client");
+  assert.match(asked.body.answer, /Priya Raman: Recall Co \(our team\)/);
+  assert.match(asked.body.answer, /Tom Becker: not one of Recall Co's people in .+; this meeting had client guests/);
+  assert.doesNotMatch(asked.body.answer, /Dana Doc|Lee Lin/, "no side guessed for a transcript without a guest flag or the firm's people");
+  assert.doesNotMatch(asked.body.answer, /@/, "no guest details beyond the name");
+  const parts = async (id) => JSON.parse((await dbValue(ENGINE === "postgres"
+    ? `SELECT json_agg(text ORDER BY rowid) FROM passages WHERE source_id = '${id}'`
+    : `SELECT json_group_array(text) FROM (SELECT text FROM passages WHERE source_id = '${id}' ORDER BY rowid)`)) || "[]");
+  const cut = await parts(meeting);
+  assert.ok(cut.length >= 2, "the meeting is cut into passages again");
+  assert.ok(cut.some((p) => p.includes("Tom Becker: From security") && p.includes("Priya Raman: Understood. PCI stays")), "statement and reply share a passage");
+  assert.ok(cut.slice(1).every((p, i) => cut[i].split("\n").includes(p.split("\n")[0])), "each passage starts with the previous one's last turn");
+  assert.deepEqual(await parts("old-upload-recall"), [docTurns.join("\n")], "the uploaded transcript was rebuilt from its passages and cut again");
+  assert.equal((await parts("old-upload-quiet")).length, 3, "another organization's passages are untouched");
+  assert.equal(await dbValue(`SELECT version FROM index_versions WHERE org_id = '${org}' AND name = 'transcript_chunks'`), "2");
+  assert.equal(await dbValue(`SELECT COUNT(*) FROM index_versions WHERE org_id = '${qorg}'`), "0");
+
+  // Citations: two passages of the meeting under two tags become one source; a tag to nothing is dropped.
+  const dup = (await rc("POST", "/api/ask", { ws, question: "__DUPCITE__ card readers kiosk rollout update" })).body;
+  assert.equal(new Set(dup.sources.map((x) => x.sourceId)).size, dup.sources.length, "one entry per source");
+  assert.equal(dup.sources.length, 1);
+  assert.match(dup.sources[0].loc, /, /, "the merged entry lists both places");
+  assert.equal(dup.answer, `It was raised twice [${dup.sources[0].id}], see.`);
+  const none = (await rc("POST", "/api/ask", { ws, question: "__NOTHING__ card readers" })).body;
+  assert.equal(none.found, false);
+  assert.deepEqual(none.sources, []);
+  assert.doesNotMatch(none.answer, /\[S\d+/, "no tags pointing at nothing");
+
+  // Meeting notes: "review again in two weeks" is a dated action item, not a decision; "in three days" gets a date.
+  const fu = new FormData();
+  fu.append("ws", ws);
+  fu.append("title", "Cutover prep check-in");
+  fu.append("held_at", "2026-10-22");
+  fu.append("text", "[00:00:01] Grace Lee: __FOLLOWUP__ Let us look at all of this again in two weeks.");
+  const notes = (await rc("GET", `/api/meetings/${(await rc("POST", "/api/meetings", undefined, { form: fu })).body.id}`)).body;
+  assert.deepEqual(notes.items.filter((i) => i.kind === "decision").map((i) => i.text), ["Use the new claims ID alongside the legacy one"]);
+  assert.deepEqual(notes.actions.map((a) => [a.text, a.owner, a.due_on]), [
+    ["Send the reconciliation report", "Ana Silva", "2026-10-25"],
+    ["Review cutover prep progress again in two weeks", "Grace Lee", "2026-11-05"],
+  ]);
+});

@@ -54,7 +54,7 @@ import { broadRuleCheck, hasSlur, localQuestionCheck, localRuleCheck, maskContac
 import { BRAND } from "./brand";
 
 // The quick text checks live in guard-text.ts (no I/O, so they can be unit-tested); re-exported for callers.
-export { broadRuleCheck, hasSlur, localQuestionCheck, localRuleCheck, maskContacts, maskPersonalData, maskSwearing } from "./guard-text";
+export { broadRuleCheck, hasSlur, localQuestionCheck, localRuleCheck, maskContacts, maskPersonalData, maskSwearing, tidyCitations } from "./guard-text";
 
 /* ------------------------------------------------------------------ */
 /* Rules: the locked floor and the org-wide switches                   */

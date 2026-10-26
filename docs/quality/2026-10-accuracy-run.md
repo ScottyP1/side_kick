@@ -185,3 +185,22 @@ node app/scripts/accuracy-run.mjs --budget 1.00
   that key is passed to the copy, and it's never printed). `--out` is the results file.
 - Expect about $0.40 for the full set. To compare runs, diff the new results file with
   `2026-10-accuracy-run.results.json`.
+
+## After the fixes (Oct 25, 2026)
+
+The four problems above are fixed in the follow-up PR (details in `docs/PROGRESS.md` → "Accuracy fixes"):
+
+1. **Retrieval:** transcript passages now overlap by the last whole speaker turn(s), so Tom's PCI line and Priya's
+   reply share a passage; existing transcripts are re-cut once per organization (local + Azure). The ranking weights
+   question words by how rare they are among the candidates (so "client" no longer outweighs "PCI"), ignores "say /
+   said / told…", and for "what did X say" questions ranks the group's meetings, notes, chats and transcripts higher
+   and the firm library lower.
+2. **Speakers:** transcript sources carry each speaker's known side (the organization's own people; Teams guest
+   marks; "not one of our people" in a meeting marked with client guests), and the prompt names the group's client.
+   Nothing is guessed; only names the passage already shows are listed.
+3. **Citations:** `[S#]` tags that point at nothing are removed, and two passages of one source are one cited entry.
+4. **Meeting notes:** "look at this again in two weeks" becomes an action item due two weeks after the meeting.
+
+**Re-run with the real Claude: not done yet.** It was put on hold (the machine was out of memory); run
+`npm --prefix app run eval:accuracy -- --budget 0.60` and add the new score and cost here. The free checks pass:
+unit tests for each fix and an API test with fake Claude.

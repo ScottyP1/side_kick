@@ -10,6 +10,7 @@
  *   every ordinary work question ("Don't answer any questions"). Claude checks the rest at save time.
  * - **Answer masking** (`maskSwearing`, `maskContacts`): swear words become f***; emails and phone numbers
  *   become "[email hidden]" / "[phone hidden]". Dates and times ("[2026-10-07 15:40]") are not phone numbers.
+ * - **Source tags** (`tidyCitations`): an answer's [S#] tags only point at sources it really cites, once each.
  * - **Personal data masking** (`maskPersonalData`): what a website visitor types to the help bot is masked
  *   before it's stored (contact details, plus long digit runs such as card or account numbers).
  */
@@ -175,4 +176,33 @@ export function maskPersonalData(text: string): { text: string; count: number } 
     // Stricter than answers: any other 9+ digit number is hidden too, even before a ":" (only real dates stay).
     .replace(/(?<![\w.])\+?\d[\d ().-]{7,}\d(?![\w])/g, (m) => (m.replace(/\D/g, "").length >= 9 && !/\b\d{4}[-./]\d{1,2}[-./]\d{1,2}\b/.test(m) ? (count++, "[number hidden]") : m));
   return { text: out, count };
+}
+
+/**
+ * Tidies an answer's source tags against the sources it really cites (Ask, portal and Teams, after the grounding
+ * check): tags for sources that aren't in the list ("I don't know [S1]" when nothing is cited) are removed, two
+ * passages of the same source are merged into one entry (the first; its location lists both, "00:01:33, 00:04:10")
+ * with their tags rewritten to it, and repeated tags ("[S1] [S1]", "[S1, S1]") are collapsed. Grouped tags
+ * ("[S1, S3]") are kept as a group. Pure; called by `ask` in lib/sidekick.ts.
+ */
+export function tidyCitations<T extends { id: string; sourceId: string; loc: string }>(answer: string, sources: T[]): { answer: string; sources: T[] } {
+  const keep: T[] = [];
+  const alias = new Map<string, string>();
+  for (const s of sources) {
+    const first = keep.find((k) => k.sourceId === s.sourceId);
+    if (!first) {
+      keep.push({ ...s });
+      alias.set(s.id, s.id);
+      continue;
+    }
+    alias.set(s.id, first.id);
+    if (s.loc && !first.loc.split(", ").includes(s.loc)) first.loc = first.loc ? `${first.loc}, ${s.loc}` : s.loc;
+  }
+  let text = answer.replace(/\s*\[(S\d+(?:\s*,\s*S\d+)*)\]/g, (m, ids: string) => {
+    const mapped = [...new Set(ids.split(/\s*,\s*/).map((id) => alias.get(id)).filter(Boolean))];
+    return mapped.length ? `${m.match(/^\s*/)![0]}[${mapped.join(", ")}]` : "";
+  });
+  // The same tag twice in a row (after merging) becomes one.
+  text = text.replace(/(\[S\d+(?:, S\d+)*\])(\s*\1)+/g, "$1");
+  return { answer: text.trim(), sources: keep };
 }

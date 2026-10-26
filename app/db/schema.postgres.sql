@@ -676,6 +676,12 @@ CREATE TABLE IF NOT EXISTS meeting_nudges (
 CREATE INDEX IF NOT EXISTS meeting_nudges_due ON meeting_nudges(org_id, status, starts_at);
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS remind_checked_at TEXT;
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS remind_error TEXT;
+-- Search index upkeep (lib/search.ts rechunkTranscripts): which one-time re-index steps each organization has had,
+-- e.g. name 'transcript_chunks' version 2 = its transcripts were re-cut into overlapping passages.
+CREATE TABLE IF NOT EXISTS index_versions (
+  org_id TEXT NOT NULL REFERENCES orgs(id), name TEXT NOT NULL, version INTEGER NOT NULL, done_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, name)
+);
 -- ---------------------------------------------------------------------------------------------------------
 -- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
 -- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and

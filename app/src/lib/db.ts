@@ -644,6 +644,12 @@ CREATE TABLE IF NOT EXISTS meeting_nudges (
   PRIMARY KEY (org_id, join_key, starts_at)
 );
 CREATE INDEX IF NOT EXISTS meeting_nudges_due ON meeting_nudges(org_id, status, starts_at);
+-- Search index upkeep (lib/search.ts rechunkTranscripts): which one-time re-index steps each organization has had,
+-- e.g. name 'transcript_chunks' version 2 = its transcripts were re-cut into overlapping passages.
+CREATE TABLE IF NOT EXISTS index_versions (
+  org_id TEXT NOT NULL REFERENCES orgs(id), name TEXT NOT NULL, version INTEGER NOT NULL, done_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, name)
+);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(

@@ -325,6 +325,10 @@ CREATE TABLE IF NOT EXISTS search_capacity (
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS duration_min INTEGER;
 -- Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.
 ALTER TABLE platform_admins ADD COLUMN IF NOT EXISTS must_change_password INTEGER NOT NULL DEFAULT 0;
+-- Owner Console sign-in with Microsoft (lib/owner.ts): the tenant id + object id linked to an owner.
+ALTER TABLE platform_admins ADD COLUMN IF NOT EXISTS entra_tid TEXT;
+ALTER TABLE platform_admins ADD COLUMN IF NOT EXISTS entra_oid TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS platform_admins_entra ON platform_admins(entra_tid, entra_oid);
 -- Two-step sign-in (lib/mfa.ts), for portal users (account_kind 'user') and Owner Console owners ('owner').
 -- A factor is an authenticator app (kind 'totp': secret, last_step stops a code being used twice) or a
 -- passkey (kind 'passkey': credential_id, public_key, counter). enabled = 0 while still being set up.

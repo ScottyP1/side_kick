@@ -131,6 +131,11 @@ const pwned = http.createServer((req, res) => {
 
 const TENANT = "11111111-2222-4333-8444-555555555555";
 const OTHER_TENANT = "99999999-8888-4777-8666-555555555555";
+// The Owner Console's allowed Microsoft accounts (SIDEKICK_OWNER_MS_ACCOUNTS): the operator's own tenant and two
+// accounts in it (one new, one whose email matches the password owner created by the kill-switch test).
+const OWNER_TENANT = "30f4623e-0000-4000-8000-0000000000aa";
+const OWNER_OID = "0b0e0000-0000-4000-8000-000000000001";
+const OWNER_OID_LINK = "0b0e0000-0000-4000-8000-000000000002";
 
 /**
  * Signs in with the fake Microsoft: starts the flow like the button does, "signs in" as `claims`
@@ -138,14 +143,16 @@ const OTHER_TENANT = "99999999-8888-4777-8666-555555555555";
  * `opts.cheat` lets tests break one piece (nonce, state cookie, key) to check it's refused.
  */
 async function microsoftSignIn(call, claims, { mode, cheat = {}, replay } = {}) {
-  const start = await call("GET", `/api/auth/microsoft/start${mode === "link" ? "?mode=link" : ""}`);
+  // mode "owner": the Owner Console's own round trip (/api/owner/auth/microsoft/*).
+  const base = mode === "owner" ? "/api/owner/auth/microsoft" : "/api/auth/microsoft";
+  const start = await call("GET", `${base}/start${mode === "link" ? "?mode=link" : ""}`);
   if (start.status !== 307) return { start };
   const u = new URL(start.location);
   assert.equal(u.searchParams.get("code_challenge_method"), "S256");
   const code = crypto.randomUUID();
   msCodes.set(code, { challenge: u.searchParams.get("code_challenge"), nonce: cheat.nonce ?? u.searchParams.get("nonce"), claims, key: cheat.key });
-  const back = await (cheat.otherBrowser ?? call)("GET", `/api/auth/microsoft/callback?code=${code}&state=${u.searchParams.get("state")}`);
-  if (replay) await call("GET", `/api/auth/microsoft/callback?code=${code}&state=${u.searchParams.get("state")}`);
+  const back = await (cheat.otherBrowser ?? call)("GET", `${base}/callback?code=${code}&state=${u.searchParams.get("state")}`);
+  if (replay) await call("GET", `${base}/callback?code=${code}&state=${u.searchParams.get("state")}`);
   return { start, back, to: back.location ? new URL(back.location) : null };
 }
 
@@ -266,6 +273,8 @@ before(async () => {
     ENTRA_TENANT: "organizations",
     ENTRA_LOGIN_BASE: "",
     PWNED_PASSWORDS_URL: "",
+    // Owner Console sign-in with Microsoft: these two accounts (tenant id:object id) are the allowed operators.
+    SIDEKICK_OWNER_MS_ACCOUNTS: `${OWNER_TENANT}:${OWNER_OID}, ${OWNER_TENANT.toUpperCase()}:${OWNER_OID_LINK}`,
     // Authenticator secrets are encrypted at rest (lib/secret-box.ts) with a key made up for this run.
     SIDEKICK_ENCRYPTION_KEY: crypto.randomBytes(32).toString("base64"),
   };
@@ -654,7 +663,7 @@ test(`[${ENGINE}] website: / shows the website when signed out and sends signed-
 
 test(`[${ENGINE}] website: every public page answers without a session; the portal, Owner Console and checkout don't`, async () => {
   const pages = await sitemapPaths();
-  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/meetings", "/docs/roles-and-permissions", "/docs/connect-devops-jira", "/docs/install-app"]) {
+  for (const p of ["/", "/features", "/how-it-works", "/security", "/pricing", "/faq", "/docs", "/support", "/changelog", "/signup", "/privacy", "/privacy/subprocessors", "/terms", "/docs/concepts", "/docs/admin-guide", "/docs/teams-guide", "/docs/meetings", "/docs/roles-and-permissions", "/docs/connect-devops-jira", "/docs/install-app"]) {
     assert.ok(pages.includes(p), `${p} is in the sitemap`);
   }
   for (const p of pages) {
@@ -2619,6 +2628,116 @@ test(`[${ENGINE}] Microsoft: forged, replayed or cross-browser replies are refus
   assert.match(flashOf(cancelled), /cancelled/);
 });
 
+/* ---------- Owner Console: sign in with Microsoft (lib/owner.ts) ---------- */
+const ownerMs = (call, claims, opts = {}) => microsoftSignIn(call, claims, { ...opts, mode: "owner" });
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: the allowed account gets an owner session (created on first sign-in), never a portal one`, async () => {
+  assert.equal((await client()("GET", "/api/owner/auth/setup")).body.microsoft, true, "the sign-in page shows the button");
+  const cody = client();
+  const r = await ownerMs(cody, { tid: OWNER_TENANT, oid: OWNER_OID, email: "Cody@Labs.test", name: "Cody Operator" });
+  assert.equal(r.to.pathname, "/owner", errorOf(r));
+  const me = (await cody("GET", "/api/owner/me")).body;
+  assert.equal(me.owner.email, "cody@labs.test", JSON.stringify(me));
+  assert.equal(me.owner.name, "Cody Operator", "name and email come from the token");
+  assert.equal((await cody("GET", "/api/owner/overview")).status, 200);
+  // An Owner Console session is not a portal session.
+  assert.equal((await cody("GET", "/api/me")).status, 401);
+  assert.equal(r.back.cookies.sk_session, undefined);
+  // Again (now with Microsoft saying MFA was used): the same owner row, no second one.
+  const again = client();
+  assert.equal((await ownerMs(again, { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody.renamed@labs.test", name: "Cody", amr: ["pwd", "mfa"] })).to.pathname, "/owner");
+  assert.deepEqual((await again("GET", "/api/owner/me")).body, (await cody("GET", "/api/owner/me")).body, "matched by tenant + object id, not email");
+  const log = JSON.stringify((await cody("GET", "/api/owner/releases")).body.log);
+  assert.match(log, /Created the owner account cody@labs\.test from Microsoft sign-in/);
+  assert.match(log, /Signed in to the Owner Console \(Microsoft; the token doesn't list the method/);
+  assert.match(log, /Signed in to the Owner Console \(Microsoft, MFA confirmed\)/);
+  // The password way in stays closed for an owner made by Microsoft sign-in (nobody knows its password).
+  assert.equal((await client()("POST", "/api/owner/auth/login", { email: "cody@labs.test", password: "correct horse battery" })).status, 401);
+  s.msOwner = cody;
+});
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: other accounts, the same id in another tenant and no-MFA sign-ins are refused and logged`, async () => {
+  const tries = [
+    { tid: OWNER_TENANT, oid: "0b0e0000-0000-4000-8000-0000000000ff", email: "colleague@labs.test" }, // same tenant, another person
+    { tid: OTHER_TENANT, oid: OWNER_OID, email: "cody@labs.test" }, // the owner's object id, but another tenant
+    { tid: TENANT, oid: "oid-admin", email: "admin@test.local" }, // a portal Org Owner
+  ];
+  for (const claims of tries) {
+    const c = client();
+    const r = await ownerMs(c, claims);
+    assert.equal(r.to.pathname, "/owner/login", JSON.stringify(claims));
+    assert.equal(errorOf(r), "This Microsoft account can't sign in to the Owner Console.", "one plain refusal, no hint about who is allowed");
+    assert.equal((await c("GET", "/api/owner/me")).status, 401);
+    assert.equal((await c("GET", "/api/me")).status, 401);
+  }
+  const noMfa = await ownerMs(client(), { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody@labs.test", amr: ["pwd"] });
+  assert.match(errorOf(noMfa), /didn't use multi-factor authentication/);
+  const log = JSON.stringify((await s.msOwner("GET", "/api/owner/releases")).body.log);
+  assert.match(log, /Refused Owner Console sign-in with Microsoft: colleague@labs\.test \(tenant 30f4623e/);
+  assert.match(log, new RegExp(`Refused Owner Console sign-in with Microsoft: cody@labs\\.test \\(tenant ${OTHER_TENANT}`));
+  assert.match(log, /Microsoft says no MFA was used/);
+});
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: the two round trips never cross, and portal sessions never open the console`, async () => {
+  // A portal sign-in by a person whose Microsoft ids match an allowed operator still only signs in to the portal flow.
+  const p = client();
+  const portal = await microsoftSignIn(p, { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody@labs.test" });
+  assert.equal(portal.to.pathname, "/login", "the operator's tenant isn't a client org");
+  assert.equal((await p("GET", "/api/owner/me")).status, 401);
+  // A portal session (any role) can't reach the console.
+  assert.equal((await admin("GET", "/api/owner/me")).status, 401);
+  // An Owner Console round trip handed to the portal callback (even with a matching state cookie) is refused.
+  const c = client();
+  const start = await c("GET", "/api/owner/auth/microsoft/start");
+  const u = new URL(start.location);
+  const code = crypto.randomUUID();
+  msCodes.set(code, { challenge: u.searchParams.get("code_challenge"), nonce: u.searchParams.get("nonce"), claims: { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody@labs.test" } });
+  const state = u.searchParams.get("state");
+  const crossed = await c("GET", `/api/auth/microsoft/callback?code=${code}&state=${state}`, undefined, { headers: { cookie: `sk_oidc=${state}` } });
+  assert.match(flashOf(crossed), /doesn't belong here/);
+  assert.equal((await c("GET", "/api/me")).status, 401);
+  assert.equal((await c("GET", "/api/owner/me")).status, 401);
+  // And the other way round: a portal round trip can't finish at the owner callback.
+  const ps = new URL((await c("GET", "/api/auth/microsoft/start")).location).searchParams.get("state");
+  const crossed2 = await c("GET", `/api/owner/auth/microsoft/callback?code=x&state=${ps}`, undefined, { headers: { cookie: `sk_owner_oidc=${ps}` } });
+  assert.match(flashOf(crossed2), /doesn't belong here/);
+  assert.equal((await c("GET", "/api/owner/me")).status, 401);
+  // Forged and cross-browser replies are refused here too (the same checks as the portal's).
+  const forger = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+  assert.match(errorOf(await ownerMs(client(), { tid: OWNER_TENANT, oid: OWNER_OID }, { cheat: { key: forger } })), /couldn't be verified/);
+  assert.match(errorOf(await ownerMs(client(), { tid: OWNER_TENANT, oid: OWNER_OID }, { cheat: { otherBrowser: client() } })), /different browser/);
+});
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: links the existing password owner with the same email`, async () => {
+  const before = (await owner("GET", "/api/owner/me")).body;
+  const c = client();
+  const r = await ownerMs(c, { tid: OWNER_TENANT, oid: OWNER_OID_LINK, email: "owner@test.local", name: "Someone Else" });
+  assert.equal(r.to.pathname, "/owner", errorOf(r));
+  assert.deepEqual((await c("GET", "/api/owner/me")).body, before, "the same owner account, name unchanged");
+  assert.match(JSON.stringify((await owner("GET", "/api/owner/releases")).body.log), /Linked the owner account owner@test\.local to their Microsoft account/);
+  // The password still works as the fallback.
+  assert.equal((await client()("POST", "/api/owner/auth/login", { email: "owner@test.local", password: "correct horse battery" })).status, 200);
+});
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: with a passkey registered, it's asked for after Microsoft`, async () => {
+  const call = s.msOwner;
+  const key = fakePasskey();
+  const options = (await call("POST", "/api/owner/auth/mfa/passkey-options", {})).body;
+  assert.equal((await call("POST", "/api/owner/auth/mfa/passkey-add", { response: key.register(options), label: "Laptop" })).status, 200);
+  const b = client();
+  const r = await ownerMs(b, { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody@labs.test" });
+  assert.equal(r.to.pathname + r.to.search, "/owner/login?step=passkey");
+  assert.equal((await b("GET", "/api/owner/me")).status, 401, "no session before the passkey");
+  const signIn = (await b("POST", "/api/owner/auth/mfa/signin-options", {})).body.options;
+  assert.equal((await b("POST", "/api/owner/auth/mfa/verify", { passkey: fakePasskey().sign(signIn) })).status, 400, "an unknown passkey is refused");
+  assert.equal((await b("POST", "/api/owner/auth/mfa/verify", { passkey: key.sign(signIn) })).status, 200);
+  assert.equal((await b("GET", "/api/owner/me")).status, 200);
+  assert.equal((await b("GET", "/api/me")).status, 401);
+  const log = JSON.stringify((await b("GET", "/api/owner/releases")).body.log);
+  assert.match(log, /waiting for their passkey/);
+  assert.match(log, /Signed in to the Owner Console \(second step: passkey\)/);
+});
+
 test(`[${ENGINE}] Microsoft: Teams messages from a linked account use that person's name and role`, async () => {
   const fromViewer = { from: { id: "teams-vic", name: "Vic in Teams", aadObjectId: "oid-viewer" }, conversation: { id: "conv-1", conversationType: "personal", tenantId: TENANT } };
   const refused = await (await toBot(activity({ ...fromViewer, type: "invoke", name: "adaptiveCard/action", value: { action: { type: "Action.Execute", verb: "sidekick.action.done", data: { itemId: s.actionA } } } }))).json();
@@ -3671,6 +3790,28 @@ test(`[${ENGINE}] no cost internals for firms: an Org Owner's API responses have
   assert.ok(["input", "output", "latency", "errors", "calls"].every((k) => k in detail.ai.totals), "tokens, response time and failures per client");
   assert.ok(detail.ai.byWorkspace.some((w) => w.name === "Limit Group" && Number(w.cost) > 0), "cost per group");
   assert.ok(detail.ai.daily.length >= 1 && detail.ai.byModel.length >= 1, "cost per day and per model");
+});
+
+test(`[${ENGINE}] Teams Store: privacy, terms and sub-processor pages are public drafts that match what the code does`, async () => {
+  // React separates text it joined from several values with empty comments; drop them to read the text.
+  const page = async (p) => (await client()("GET", p)).body.replaceAll("<!-- -->", "");
+  const privacy = await page("/privacy");
+  const terms = await page("/terms");
+  const subs = await page("/privacy/subprocessors");
+  for (const body of [privacy, terms, subs]) assert.match(body, /<b>Draft\.<\/b>/, "marked as a draft for legal review");
+  // Every Microsoft 365 permission in the app registration is explained on the privacy page.
+  const source = fs.readFileSync(path.join(import.meta.dirname, "../src/lib/graph-permissions.ts"), "utf8");
+  const ids = [...source.matchAll(/id: "([\w.]+)", name:/g)].map((m) => m[1]);
+  assert.ok(ids.length >= 10, "found the permission list");
+  for (const id of ids) assert.ok(privacy.includes(id), `privacy explains ${id}`);
+  for (const words of ["row-level security", "not used to train", "90 days", "35 days", "transcript", "Guardrails"]) assert.ok(privacy.includes(words), `privacy covers ${words}`);
+  for (const name of ["Microsoft Azure", "Anthropic (Claude)", "Microsoft Graph and Microsoft Teams"]) assert.ok(subs.includes(name), `sub-processor ${name}`);
+  assert.match(privacy, /href="\/privacy\/subprocessors"/, "privacy links the sub-processor list");
+  assert.match(terms, /AI answers can be wrong/);
+  // The footer on every public page links all three.
+  for (const href of ["/privacy", "/terms", "/privacy/subprocessors"]) assert.match((await client()("GET", "/")).body, new RegExp(`href="${href}"`));
+  // The help center's Teams guide links them too.
+  assert.match((await client()("GET", "/docs/teams-guide")).body, /href="\/privacy\/subprocessors"/);
 });
 
 test(`[${ENGINE}] Owner Console business view: revenue, margin, trials, payments, limits, partner and health, operators only`, async () => {

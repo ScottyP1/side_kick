@@ -70,6 +70,12 @@ the same Atlassian app unless `CONFLUENCE_CLIENT_ID` + `CONFLUENCE_CLIENT_SECRET
 apps. Customers' tool sign-ins are stored in the database, sealed with `SIDEKICK_ENCRYPTION_KEY` (one more reason
 never to regenerate it: they'd all have to reconnect).
 
+**Owner Console sign-in with Microsoft**: `SIDEKICK_OWNER_MS_ACCOUNTS` (plain setting) lists the Microsoft
+accounts allowed into `/owner` as `tenantId:objectId`, comma-separated. It uses the portal's Entra app
+(`CLIENT_ID`/`CLIENT_SECRET`), which needs `https://<live host>/api/owner/auth/microsoft/callback` as a second Web
+redirect URI. Not set = the console's sign-in page shows only email + password. How to set it, MFA and adding a
+second operator: RUNBOOKS → Owner Console sign-in with Microsoft.
+
 The image is pulled with the app's managed identity (AcrPull role); the registry's admin user is off.
 
 ## Deploy, freeze, unfreeze
@@ -216,6 +222,8 @@ first if it would trip again). Not test-fired yet, because firing it takes the l
 
 - App: HTTPS only (insecure off); Teams calls without Microsoft's signature are refused (401).
 - First-run Setup is open until the first account exists; it was claimed by Cody right after deploy.
+- Owner Console sign-in (Oct 25, 2026): Sign in with Microsoft for the allowed accounts in
+  `SIDEKICK_OWNER_MS_ACCOUNTS` (tenant id + object id) is the normal way in; the password path below is the fallback.
 - Owner Console setup (and first-run setup) in production needs the one-time `SIDEKICK_SETUP_CODE` secret
   (at least 16 characters; without it production refuses setup). To create the owner account: add the
   secret to the Container App, open `/owner/setup`, enter it, then remove the secret. (Oct 2026: the

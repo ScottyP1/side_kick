@@ -131,6 +131,11 @@ const pwned = http.createServer((req, res) => {
 
 const TENANT = "11111111-2222-4333-8444-555555555555";
 const OTHER_TENANT = "99999999-8888-4777-8666-555555555555";
+// The Owner Console's allowed Microsoft accounts (SIDEKICK_OWNER_MS_ACCOUNTS): the operator's own tenant and two
+// accounts in it (one new, one whose email matches the password owner created by the kill-switch test).
+const OWNER_TENANT = "30f4623e-0000-4000-8000-0000000000aa";
+const OWNER_OID = "0b0e0000-0000-4000-8000-000000000001";
+const OWNER_OID_LINK = "0b0e0000-0000-4000-8000-000000000002";
 
 /**
  * Signs in with the fake Microsoft: starts the flow like the button does, "signs in" as `claims`
@@ -138,14 +143,16 @@ const OTHER_TENANT = "99999999-8888-4777-8666-555555555555";
  * `opts.cheat` lets tests break one piece (nonce, state cookie, key) to check it's refused.
  */
 async function microsoftSignIn(call, claims, { mode, cheat = {}, replay } = {}) {
-  const start = await call("GET", `/api/auth/microsoft/start${mode === "link" ? "?mode=link" : ""}`);
+  // mode "owner": the Owner Console's own round trip (/api/owner/auth/microsoft/*).
+  const base = mode === "owner" ? "/api/owner/auth/microsoft" : "/api/auth/microsoft";
+  const start = await call("GET", `${base}/start${mode === "link" ? "?mode=link" : ""}`);
   if (start.status !== 307) return { start };
   const u = new URL(start.location);
   assert.equal(u.searchParams.get("code_challenge_method"), "S256");
   const code = crypto.randomUUID();
   msCodes.set(code, { challenge: u.searchParams.get("code_challenge"), nonce: cheat.nonce ?? u.searchParams.get("nonce"), claims, key: cheat.key });
-  const back = await (cheat.otherBrowser ?? call)("GET", `/api/auth/microsoft/callback?code=${code}&state=${u.searchParams.get("state")}`);
-  if (replay) await call("GET", `/api/auth/microsoft/callback?code=${code}&state=${u.searchParams.get("state")}`);
+  const back = await (cheat.otherBrowser ?? call)("GET", `${base}/callback?code=${code}&state=${u.searchParams.get("state")}`);
+  if (replay) await call("GET", `${base}/callback?code=${code}&state=${u.searchParams.get("state")}`);
   return { start, back, to: back.location ? new URL(back.location) : null };
 }
 
@@ -266,6 +273,8 @@ before(async () => {
     ENTRA_TENANT: "organizations",
     ENTRA_LOGIN_BASE: "",
     PWNED_PASSWORDS_URL: "",
+    // Owner Console sign-in with Microsoft: these two accounts (tenant id:object id) are the allowed operators.
+    SIDEKICK_OWNER_MS_ACCOUNTS: `${OWNER_TENANT}:${OWNER_OID}, ${OWNER_TENANT.toUpperCase()}:${OWNER_OID_LINK}`,
     // Authenticator secrets are encrypted at rest (lib/secret-box.ts) with a key made up for this run.
     SIDEKICK_ENCRYPTION_KEY: crypto.randomBytes(32).toString("base64"),
   };
@@ -1971,7 +1980,7 @@ test(`[${ENGINE}] Help chat: checks the person's own setup, cites articles (neve
   // The checks it ran.
   const checks = await admin("POST", "/api/support/assistant", { message: "which checks did you run?" });
   assert.equal(checks.status, 200, JSON.stringify(checks.body));
-  assert.deepEqual(checks.body.checks.map((c) => c.name), ["Teams chats", "Message tracking", "Microsoft 365", "Features", "Plan limits", "AI credit", "Recent errors"]);
+  assert.deepEqual(checks.body.checks.map((c) => c.name), ["Teams chats", "Message tracking", "Microsoft 365", "Features", "Plan limits", "AI allowance", "Recent errors"]);
   assert.match(checks.body.checks.find((c) => c.name === "Message tracking").summary, /Support test chat/);
   // A fix behind Confirm: nothing changes until the browser sends the card's request.
   const fix = await admin("POST", "/api/support/assistant", { message: "Please turn on tracking in our chat", conversation: checks.body.conversation });
@@ -2557,7 +2566,7 @@ test(`[${ENGINE}] permission matrix: every role gets exactly the access the role
   for (const role of EVERYONE) {
     const st = (await as[role]("GET", "/api/overview")).body.stats;
     const wholeOrg = ["owner", "admin"].includes(role);
-    assert.equal(st.spendScope, wholeOrg ? "org" : "you", `${role} spend scope`);
+    assert.equal(st.aiScope, wholeOrg ? "org" : "you", `${role} AI use scope`);
     if (wholeOrg) assert.equal(st.aiCallsMonth, org.aiCallsMonth, `${role} sees the company total`);
   }
   const before = (await member("GET", "/api/overview")).body.stats.aiCallsMonth;
@@ -2617,6 +2626,116 @@ test(`[${ENGINE}] Microsoft: forged, replayed or cross-browser replies are refus
   assert.match(flashOf(back), /expired|took too long|different browser/);
   const cancelled = await c("GET", "/api/auth/microsoft/callback?error=access_denied&error_description=AADSTS65004%3A+User+declined");
   assert.match(flashOf(cancelled), /cancelled/);
+});
+
+/* ---------- Owner Console: sign in with Microsoft (lib/owner.ts) ---------- */
+const ownerMs = (call, claims, opts = {}) => microsoftSignIn(call, claims, { ...opts, mode: "owner" });
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: the allowed account gets an owner session (created on first sign-in), never a portal one`, async () => {
+  assert.equal((await client()("GET", "/api/owner/auth/setup")).body.microsoft, true, "the sign-in page shows the button");
+  const cody = client();
+  const r = await ownerMs(cody, { tid: OWNER_TENANT, oid: OWNER_OID, email: "Cody@Labs.test", name: "Cody Operator" });
+  assert.equal(r.to.pathname, "/owner", errorOf(r));
+  const me = (await cody("GET", "/api/owner/me")).body;
+  assert.equal(me.owner.email, "cody@labs.test", JSON.stringify(me));
+  assert.equal(me.owner.name, "Cody Operator", "name and email come from the token");
+  assert.equal((await cody("GET", "/api/owner/overview")).status, 200);
+  // An Owner Console session is not a portal session.
+  assert.equal((await cody("GET", "/api/me")).status, 401);
+  assert.equal(r.back.cookies.sk_session, undefined);
+  // Again (now with Microsoft saying MFA was used): the same owner row, no second one.
+  const again = client();
+  assert.equal((await ownerMs(again, { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody.renamed@labs.test", name: "Cody", amr: ["pwd", "mfa"] })).to.pathname, "/owner");
+  assert.deepEqual((await again("GET", "/api/owner/me")).body, (await cody("GET", "/api/owner/me")).body, "matched by tenant + object id, not email");
+  const log = JSON.stringify((await cody("GET", "/api/owner/releases")).body.log);
+  assert.match(log, /Created the owner account cody@labs\.test from Microsoft sign-in/);
+  assert.match(log, /Signed in to the Owner Console \(Microsoft; the token doesn't list the method/);
+  assert.match(log, /Signed in to the Owner Console \(Microsoft, MFA confirmed\)/);
+  // The password way in stays closed for an owner made by Microsoft sign-in (nobody knows its password).
+  assert.equal((await client()("POST", "/api/owner/auth/login", { email: "cody@labs.test", password: "correct horse battery" })).status, 401);
+  s.msOwner = cody;
+});
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: other accounts, the same id in another tenant and no-MFA sign-ins are refused and logged`, async () => {
+  const tries = [
+    { tid: OWNER_TENANT, oid: "0b0e0000-0000-4000-8000-0000000000ff", email: "colleague@labs.test" }, // same tenant, another person
+    { tid: OTHER_TENANT, oid: OWNER_OID, email: "cody@labs.test" }, // the owner's object id, but another tenant
+    { tid: TENANT, oid: "oid-admin", email: "admin@test.local" }, // a portal Org Owner
+  ];
+  for (const claims of tries) {
+    const c = client();
+    const r = await ownerMs(c, claims);
+    assert.equal(r.to.pathname, "/owner/login", JSON.stringify(claims));
+    assert.equal(errorOf(r), "This Microsoft account can't sign in to the Owner Console.", "one plain refusal, no hint about who is allowed");
+    assert.equal((await c("GET", "/api/owner/me")).status, 401);
+    assert.equal((await c("GET", "/api/me")).status, 401);
+  }
+  const noMfa = await ownerMs(client(), { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody@labs.test", amr: ["pwd"] });
+  assert.match(errorOf(noMfa), /didn't use multi-factor authentication/);
+  const log = JSON.stringify((await s.msOwner("GET", "/api/owner/releases")).body.log);
+  assert.match(log, /Refused Owner Console sign-in with Microsoft: colleague@labs\.test \(tenant 30f4623e/);
+  assert.match(log, new RegExp(`Refused Owner Console sign-in with Microsoft: cody@labs\\.test \\(tenant ${OTHER_TENANT}`));
+  assert.match(log, /Microsoft says no MFA was used/);
+});
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: the two round trips never cross, and portal sessions never open the console`, async () => {
+  // A portal sign-in by a person whose Microsoft ids match an allowed operator still only signs in to the portal flow.
+  const p = client();
+  const portal = await microsoftSignIn(p, { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody@labs.test" });
+  assert.equal(portal.to.pathname, "/login", "the operator's tenant isn't a client org");
+  assert.equal((await p("GET", "/api/owner/me")).status, 401);
+  // A portal session (any role) can't reach the console.
+  assert.equal((await admin("GET", "/api/owner/me")).status, 401);
+  // An Owner Console round trip handed to the portal callback (even with a matching state cookie) is refused.
+  const c = client();
+  const start = await c("GET", "/api/owner/auth/microsoft/start");
+  const u = new URL(start.location);
+  const code = crypto.randomUUID();
+  msCodes.set(code, { challenge: u.searchParams.get("code_challenge"), nonce: u.searchParams.get("nonce"), claims: { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody@labs.test" } });
+  const state = u.searchParams.get("state");
+  const crossed = await c("GET", `/api/auth/microsoft/callback?code=${code}&state=${state}`, undefined, { headers: { cookie: `sk_oidc=${state}` } });
+  assert.match(flashOf(crossed), /doesn't belong here/);
+  assert.equal((await c("GET", "/api/me")).status, 401);
+  assert.equal((await c("GET", "/api/owner/me")).status, 401);
+  // And the other way round: a portal round trip can't finish at the owner callback.
+  const ps = new URL((await c("GET", "/api/auth/microsoft/start")).location).searchParams.get("state");
+  const crossed2 = await c("GET", `/api/owner/auth/microsoft/callback?code=x&state=${ps}`, undefined, { headers: { cookie: `sk_owner_oidc=${ps}` } });
+  assert.match(flashOf(crossed2), /doesn't belong here/);
+  assert.equal((await c("GET", "/api/owner/me")).status, 401);
+  // Forged and cross-browser replies are refused here too (the same checks as the portal's).
+  const forger = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+  assert.match(errorOf(await ownerMs(client(), { tid: OWNER_TENANT, oid: OWNER_OID }, { cheat: { key: forger } })), /couldn't be verified/);
+  assert.match(errorOf(await ownerMs(client(), { tid: OWNER_TENANT, oid: OWNER_OID }, { cheat: { otherBrowser: client() } })), /different browser/);
+});
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: links the existing password owner with the same email`, async () => {
+  const before = (await owner("GET", "/api/owner/me")).body;
+  const c = client();
+  const r = await ownerMs(c, { tid: OWNER_TENANT, oid: OWNER_OID_LINK, email: "owner@test.local", name: "Someone Else" });
+  assert.equal(r.to.pathname, "/owner", errorOf(r));
+  assert.deepEqual((await c("GET", "/api/owner/me")).body, before, "the same owner account, name unchanged");
+  assert.match(JSON.stringify((await owner("GET", "/api/owner/releases")).body.log), /Linked the owner account owner@test\.local to their Microsoft account/);
+  // The password still works as the fallback.
+  assert.equal((await client()("POST", "/api/owner/auth/login", { email: "owner@test.local", password: "correct horse battery" })).status, 200);
+});
+
+test(`[${ENGINE}] Owner Console Microsoft sign-in: with a passkey registered, it's asked for after Microsoft`, async () => {
+  const call = s.msOwner;
+  const key = fakePasskey();
+  const options = (await call("POST", "/api/owner/auth/mfa/passkey-options", {})).body;
+  assert.equal((await call("POST", "/api/owner/auth/mfa/passkey-add", { response: key.register(options), label: "Laptop" })).status, 200);
+  const b = client();
+  const r = await ownerMs(b, { tid: OWNER_TENANT, oid: OWNER_OID, email: "cody@labs.test" });
+  assert.equal(r.to.pathname + r.to.search, "/owner/login?step=passkey");
+  assert.equal((await b("GET", "/api/owner/me")).status, 401, "no session before the passkey");
+  const signIn = (await b("POST", "/api/owner/auth/mfa/signin-options", {})).body.options;
+  assert.equal((await b("POST", "/api/owner/auth/mfa/verify", { passkey: fakePasskey().sign(signIn) })).status, 400, "an unknown passkey is refused");
+  assert.equal((await b("POST", "/api/owner/auth/mfa/verify", { passkey: key.sign(signIn) })).status, 200);
+  assert.equal((await b("GET", "/api/owner/me")).status, 200);
+  assert.equal((await b("GET", "/api/me")).status, 401);
+  const log = JSON.stringify((await b("GET", "/api/owner/releases")).body.log);
+  assert.match(log, /waiting for their passkey/);
+  assert.match(log, /Signed in to the Owner Console \(second step: passkey\)/);
 });
 
 test(`[${ENGINE}] Microsoft: Teams messages from a linked account use that person's name and role`, async () => {
@@ -3353,7 +3472,10 @@ test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meet
   s.lee = c;
   const lines = (await c("GET", "/api/billing")).body.limits;
   const line = (k) => lines.find((l) => l.key === k);
-  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors", "aiCreditUsd"].map((k) => line(k).limit), [15, 1, 5, 30, 0, 500, 0, 40], "Starter's numbers");
+  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors"].map((k) => line(k).limit), [15, 1, 5, 30, 0, 500, 0], "Starter's numbers");
+  assert.equal(line("aiCreditUsd"), undefined, "the AI credit (dollars) isn't sent to the firm");
+  const ownerLines = (await owner("GET", `/api/owner/tenants/${await limitOrg()}`)).body.limits;
+  assert.equal(ownerLines.find((l) => l.key === "aiCreditUsd").limit, 40, "the operator still sees Starter's AI credit");
   // The operator tightens the limits for this client (custom terms), so each can be hit quickly. Groups
   // keep Starter's own limit (1), so the message offers extra groups or an upgrade.
   await terms({ limits: { seats: 2, chats: 0, meetingHours: 1, documents: 1 } });
@@ -3501,8 +3623,9 @@ test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answer
   assert.equal((await s.lou("GET", "/api/me")).body.credit, null, "Members don't get the credit banner");
   assert.equal((await ask(c, "zebra quokka again?")).body.aiMode, "full");
   const audit = JSON.stringify((await c("GET", "/api/audit")).body);
-  assert.match(audit, /80% of this month's AI credit \(\$10\.00\) is used/);
-  assert.equal(audit.match(/80% of this month's AI credit/g).length, 1, "the notice is written once a month");
+  assert.match(audit, /80% of this month's included AI is used/);
+  assert.equal(audit.match(/80% of this month's included AI/g).length, 1, "the notice is written once a month");
+  assert.doesNotMatch(audit, /\$10/, "the client's log has no dollar amounts");
 
   assert.equal((await ask(c, "__SPEND_2__ zebra quokka once more?")).status, 200);
   me = (await c("GET", "/api/me")).body;
@@ -3510,7 +3633,7 @@ test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answer
   const answered = await ask(s.lou, "zebra quokka still?");
   assert.equal(answered.status, 200, "answers keep working");
   assert.equal(answered.body.aiMode, "essentials");
-  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /AI credit \(\$10\.00\) is used up: essentials only/);
+  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /included AI is used up: essentials only/);
   assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Limit Co used up its AI credit/.test(l.action)), "the operator is told too");
   const orgId = await limitOrg();
   const models = (await owner("GET", `/api/owner/tenants/${orgId}?reload=1`)).body.ai.byModel.map((m) => m.model);
@@ -3520,7 +3643,7 @@ test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answer
   const assistant = await c("POST", "/api/assistant", { message: "hello", history: [] });
   assert.equal(assistant.status, 503);
   assert.equal(assistant.body.kind, "credit");
-  assert.match(assistant.body.error, /in-app assistant is paused because your organization has used this month's AI credit\. Answers to questions keep working/);
+  assert.match(assistant.body.error, /in-app assistant is paused because your organization has used this month's included AI\. Answers to questions keep working/);
   assert.equal(assistant.body.ref, undefined, "a pause isn't an app error");
   const map = await c("POST", "/api/memory/refresh", { ws: s.limitWs });
   assert.equal(map.status, 503);
@@ -3543,11 +3666,17 @@ test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answer
   assert.equal(top.body.credit.creditUsd, 15);
   assert.equal(top.body.credit.level, "ok");
   assert.equal((await c("POST", "/api/assistant", { message: "hello", history: [] })).status, 200);
-  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /Added \$5\.00 of AI credit for \d{4}-\d{2} \(Go-live week\)/);
+  const topAudit = JSON.stringify((await c("GET", "/api/audit")).body);
+  assert.match(topAudit, /Added extra AI for \d{4}-\d{2} \(Go-live week\)/);
+  assert.doesNotMatch(topAudit, /\$5/, "the dollar amount is only in the operator log");
   assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Added \$5\.00 of AI credit for Limit Co/.test(l.action)));
   // Raising the credit itself works the same way.
   await terms({ aiCreditUsd: 100 });
-  assert.equal((await c("GET", "/api/usage")).body.credit.creditUsd, 105);
+  assert.equal((await owner("GET", `/api/owner/tenants/${orgId}?reload=1`)).body.credit.creditUsd, 105);
+  const allowance = (await c("GET", "/api/usage")).body.allowance;
+  assert.equal(allowance.level, "ok");
+  assert.equal(allowance.toppedUp, true);
+  assert.ok(allowance.pct > 9 && allowance.pct < 12, `about 10.5 of 105 used: ${allowance.pct}`);
 });
 
 test(`[${ENGINE}] rate limit: questions per person per hour, portal and Teams together, with a friendly message`, async () => {
@@ -3569,14 +3698,23 @@ test(`[${ENGINE}] usage export: a CSV per group and month with the engagement co
   const r = await s.lee("GET", "/api/usage/export?months=3");
   assert.equal(r.status, 200);
   const [head, ...lines] = r.body.trim().split("\r\n");
-  assert.equal(head, "Month,Group,Engagement code,Client,AI requests,AI cost (USD),Questions asked,Meetings imported,Meeting hours,Documents added");
+  assert.equal(head, "Month,Group,Engagement code,Client,Questions asked,Questions answered,Meetings imported,Meeting hours,Documents added,Reminders sent,Assistant replies");
+  assert.doesNotMatch(r.body, /cost|token|model|claude/i, "counts only: no AI cost, tokens or models for the firm");
   const month = new Date().toISOString().slice(0, 7);
   const row = lines.find((l) => l.includes("Limit Group")).split(",");
   assert.deepEqual(row.slice(0, 4), [month, "Limit Group", "WBS-1001", "Northwind Bank"]);
-  assert.ok(Number(row[5]) >= 10.5, "the AI cost charged to the group");
-  assert.ok(Number(row[6]) >= 5, "questions");
-  assert.equal(row[7], "2", "two meetings imported");
-  assert.equal(row[9], "1", "one document");
+  assert.ok(Number(row[4]) >= 5, "questions");
+  assert.equal(row[6], "2", "two meetings imported");
+  assert.equal(row[8], "1", "one document");
+  // The Owner Console's copy adds the AI requests and cost, for margin checks; clients can't fetch it.
+  const orgId = await limitOrg();
+  const withCost = await owner("GET", `/api/owner/tenants/${orgId}/usage-export?months=3`);
+  assert.equal(withCost.status, 200);
+  const [ownerHead, ...ownerLines] = withCost.body.trim().split("\r\n");
+  assert.equal(ownerHead, `${head},AI requests,AI cost (USD)`);
+  assert.ok(Number(ownerLines.find((l) => l.includes("Limit Group")).split(",")[12]) >= 10.5, "the AI cost charged to the group");
+  assert.equal((await s.lee("GET", `/api/owner/tenants/${orgId}/usage-export`)).status, 401, "clients can't fetch the copy with cost");
+  assert.equal((await owner("GET", `/api/owner/tenants/${orgId}/usage-export?months=0`)).status, 400);
   assert.ok(!/Workspace A|Fabrikam|Test Org/.test(r.body), "only this organization's groups");
   assert.match((await s.lee("GET", "/api/usage/export?month=2026-13")).body.error, /Month must look like/);
   assert.equal((await s.lee("GET", "/api/usage/export?months=99")).status, 400);
@@ -3604,6 +3742,54 @@ test(`[${ENGINE}] plain wording: the portal never shows model names; the Owner C
   assert.ok((await owner("GET", "/api/owner/releases")).body.models.ask, "the operator still sees the models");
   // "Powered by Claude" is said once, on the public trust pages.
   assert.match((await client()("GET", "/privacy")).body, /Powered by Claude/);
+});
+
+test(`[${ENGINE}] no cost internals for firms: an Org Owner's API responses have no AI cost, token or model keys`, async () => {
+  // The rule (lib/firm-usage.ts): firms see activity counts and their AI allowance as a percent; cost, tokens and
+  // models are only in the Owner Console. This org has real AI spend (the AI credit test above), so a leak shows.
+  const OPERATOR_ONLY = /^models?$|token|cost|usd|spend/i;
+  const leaks = (v, path = "") => {
+    if (Array.isArray(v)) return v.flatMap((x, i) => leaks(x, `${path}[${i}]`));
+    if (v && typeof v === "object") return Object.entries(v).flatMap(([k, x]) => [...(OPERATOR_ONLY.test(k) && !/^priceUsd$/.test(k) ? [`${path}.${k}`] : []), ...leaks(x, `${path}.${k}`)]);
+    return typeof v === "string" && /claude-|fake-claude|\$\d+\.\d\d of \$/i.test(v) ? [`${path} = ${v.slice(0, 80)}`] : [];
+  };
+  const c = s.lee;
+  assert.equal((await c("GET", "/api/me")).body.user.role, "Org Owner");
+  const traces = (await c("GET", "/api/activity?view=traces&limit=200")).body.traces;
+  const withAi = [];
+  for (const t of traces.slice(0, 40)) {
+    const one = await c("GET", `/api/activity?view=trace&id=${t.id}`);
+    if (one.body.spans.some((sp) => sp.kind === "ai")) withAi.push(one);
+  }
+  assert.ok(withAi.length, "there is a trace with an AI step to check");
+  const urls = ["/api/usage", "/api/billing", "/api/activity?view=traces&limit=200", "/api/me", "/api/overview", "/api/activity?view=overview&days=30", "/api/activity?view=live", "/api/activity?view=messages", `/api/workspaces/${s.limitWs}/usage`, "/api/audit"];
+  const found = [];
+  for (const url of urls) {
+    const r = await c("GET", url);
+    assert.equal(r.status, 200, `${url}: ${JSON.stringify(r.body).slice(0, 200)}`);
+    found.push(...leaks(r.body, url));
+  }
+  for (const t of withAi) found.push(...leaks(t.body, "trace"));
+  assert.deepEqual(found, [], "operator-only fields reached the firm");
+  // Even the billing plan list leaves out the plans' AI credit in dollars; the price (what they pay) stays.
+  const billing = (await c("GET", "/api/billing")).body;
+  assert.ok(billing.plans.every((p) => !("aiCreditUsd" in p) && typeof p.priceUsd === "number"));
+  assert.ok(billing.limits.every((l) => l.key !== "aiCreditUsd"), "the AI credit limit line (dollars) isn't sent");
+  // What the Usage page shows instead: counts and a percent.
+  const usage = (await c("GET", "/api/usage")).body;
+  assert.ok(usage.totals.questions >= 5 && usage.totals.meetings >= 1 && usage.totals.documents >= 1, JSON.stringify(usage.totals));
+  assert.ok(usage.byWorkspace.some((w) => w.name === "Limit Group" && w.questions >= 5));
+  assert.equal(typeof usage.allowance.pct, "number");
+  // The help chat's checks say the allowance as a percent, not dollars.
+  const help = (await c("POST", "/api/support/assistant", { message: "which checks did you run?" })).body;
+  assert.doesNotMatch(help.checks.find((x) => x.name === "AI allowance").summary, /\$/);
+  // The Owner Console keeps all of it, per client.
+  const detail = (await owner("GET", `/api/owner/tenants/${await limitOrg()}?reload=1`)).body;
+  // Fake Claude records the cost but 0 tokens, so the token fields are checked for presence, not size.
+  assert.ok(Number(detail.ai.totals.cost) > 0, `cost per client: ${JSON.stringify(detail.ai.totals)}`);
+  assert.ok(["input", "output", "latency", "errors", "calls"].every((k) => k in detail.ai.totals), "tokens, response time and failures per client");
+  assert.ok(detail.ai.byWorkspace.some((w) => w.name === "Limit Group" && Number(w.cost) > 0), "cost per group");
+  assert.ok(detail.ai.daily.length >= 1 && detail.ai.byModel.length >= 1, "cost per day and per model");
 });
 
 test(`[${ENGINE}] Teams Store: privacy, terms and sub-processor pages are public drafts that match what the code does`, async () => {
@@ -3727,7 +3913,11 @@ test(`[${ENGINE}] group pricing: extra groups or an upgrade make room, with pric
   const b = (await c("GET", "/api/billing")).body;
   assert.equal(b.priceUsd, 457, "Starter $199 + 2 × $129");
   const limit = (k) => b.limits.find((l) => l.key === k).limit;
-  assert.deepEqual([limit("workspaces"), limit("seats"), limit("meetingHours"), limit("aiCreditUsd")], [3, 45, 90, 120]);
+  assert.deepEqual([limit("workspaces"), limit("seats"), limit("meetingHours")], [3, 45, 90]);
+  // The extras' AI credit ($40 each) is only in dollars for the operator; the firm's add-on says "more included AI".
+  assert.equal(b.extraGroup.adds.aiCreditUsd, undefined);
+  const groupCo = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Group Co").id;
+  assert.equal((await owner("GET", `/api/owner/tenants/${groupCo}`)).body.limits.find((l) => l.key === "aiCreditUsd").limit, 120);
   for (const n of ["GC Two", "GC Three"]) assert.equal((await c("POST", "/api/workspaces", { name: n })).status, 200);
   const fourth = await c("POST", "/api/workspaces", { name: "GC Four" });
   assert.equal(fourth.status, 402);

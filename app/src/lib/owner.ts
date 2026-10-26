@@ -5,8 +5,17 @@
  * - **Owner (platform operator)**: the person running Sidekick as a service, not a client user. Owners see
  *   every client organization's usage and health, but sign in separately with their own `sk_owner` cookie,
  *   so a client account can never reach the console (and an owner session can't act inside a client org).
- * - **First owner from localhost**: the very first owner account can only be created on the machine
- *   running Sidekick, so nobody on the internet can claim the console on a fresh install.
+ * - **Sign in with Microsoft** (the normal way in): the operator signs in with their Microsoft account. Only the
+ *   accounts listed in `SIDEKICK_OWNER_MS_ACCOUNTS` get in, each named by tenant id + object id (`tid:oid`,
+ *   comma-separated), read from the verified ID token, never by email (an email can be renamed or reused; the
+ *   pair can't). Any other account gets the same plain refusal and an operator-log entry. The first sign-in links
+ *   the account to the owner row with the same email, or creates one (no setup code needed). Microsoft's own
+ *   rules (security defaults: MFA for admins) do the strong check; when the ID token lists how they signed in
+ *   (`amr`) it must include MFA (`ownerMfaEvidence`). If the owner registered a passkey, it's asked for too.
+ * - **Other ways to sign in** (fallback for recovery and localhost): email + password, and the one-time setup
+ *   below for the very first account.
+ * - **First owner from localhost**: the very first password account can only be created on the machine
+ *   running Sidekick (or with the one-time setup code), so nobody on the internet can claim the console.
  * - **Kill switches (flags)**: owners can pause a feature (answering, meeting notes, knowledge map,
  *   uploads) for every client at once, e.g. during an incident or a cost spike. Code checks them with
  *   `assertEnabled` before doing that work.
@@ -33,6 +42,7 @@ import { cookies, headers } from "next/headers";
 import { get, markRequestSystem, newId, now, run } from "./db";
 import { DUMMY_HASH, hashPassword, HttpError, verifyPassword } from "./auth";
 import { orgAccess } from "./billing";
+import { entraConfigured, type MicrosoftIdentity } from "./entra";
 import { setupRefusal } from "./security";
 import { BRAND } from "./brand";
 
@@ -97,6 +107,98 @@ export async function checkOwnerPassword(email: string, password: string): Promi
     owner: row && ok ? { id: row.id, name: row.name, email: row.email, must_change_password: Number(row.must_change_password) } : null,
     exists: Boolean(row),
   };
+}
+
+/* ---------- Sign in with Microsoft ---------- */
+/** The cookie carrying an Owner Console Microsoft round trip's state (separate from the portal's `sk_oidc`). */
+export const OWNER_OIDC_COOKIE = "sk_owner_oidc";
+
+/** The one refusal for any Microsoft account that isn't an allowed operator (says nothing about who is). */
+export const OWNER_MS_REFUSED = "This Microsoft account can't sign in to the Owner Console.";
+
+/** One Microsoft account allowed into the Owner Console: tenant id + object id, lower case. */
+export type OwnerMicrosoftAccount = { tid: string; oid: string };
+
+/**
+ * The Microsoft accounts allowed into the Owner Console, from `SIDEKICK_OWNER_MS_ACCOUNTS` ("tid:oid,tid:oid").
+ * Entries that aren't two ids separated by ":" are skipped (and said so in the server log), never guessed at.
+ */
+export function ownerMicrosoftAccounts(): OwnerMicrosoftAccount[] {
+  const out: OwnerMicrosoftAccount[] = [];
+  for (const entry of (process.env.SIDEKICK_OWNER_MS_ACCOUNTS ?? "").split(",").map((e) => e.trim()).filter(Boolean)) {
+    const [tid, oid, extra] = entry.toLowerCase().split(":").map((x) => x.trim());
+    if (!tid || !oid || extra !== undefined || !/^[0-9a-f-]{36}$/.test(tid)) {
+      console.error("SIDEKICK_OWNER_MS_ACCOUNTS: skipped an entry that isn't tenantId:objectId");
+      continue;
+    }
+    out.push({ tid, oid });
+  }
+  return out;
+}
+
+/** True when the Owner Console offers "Sign in with Microsoft": the Entra app is set up and at least one account is listed. */
+export const ownerMicrosoftEnabled = () => entraConfigured() && ownerMicrosoftAccounts().length > 0;
+
+/** Whether this verified Microsoft identity is one of the allowed operator accounts (exact tenant and object id). */
+export function ownerMicrosoftAllowed(who: Pick<MicrosoftIdentity, "tenantId" | "objectId">): boolean {
+  const tid = who.tenantId.toLowerCase();
+  const oid = who.objectId.toLowerCase();
+  return ownerMicrosoftAccounts().some((a) => a.tid === tid && a.oid === oid);
+}
+
+/** The `amr` values that mean Microsoft checked more than a password (MFA, Windows Hello, passkey/FIDO key). */
+const MFA_METHODS = ["mfa", "ngcmfa", "mngcmfa", "fido"];
+
+/**
+ * What the ID token says about MFA: "mfa" (it lists a strong method), "none" (it lists methods, but only weak
+ * ones such as a password: refused) or "unknown" (no `amr` at all; Microsoft's v2.0 ID tokens usually leave it
+ * out, and then the tenant's own rules are relied on: security defaults require MFA for every admin sign-in).
+ */
+export function ownerMfaEvidence(amr: string[] | null | undefined): "mfa" | "none" | "unknown" {
+  if (!amr || !amr.length) return "unknown";
+  return amr.some((m) => MFA_METHODS.includes(m.toLowerCase())) ? "mfa" : "none";
+}
+
+/**
+ * The owner row for an allowed Microsoft account (call `ownerMicrosoftAllowed` first): the row already linked to
+ * this tid + oid; else the unlinked row with the same email, which is linked now; else a new row with the name
+ * and email from the token (so no setup code is needed). A new row gets a random password nobody knows: the
+ * password way in stays closed until `npm run reset-password -- --owner <email>`. A pending temporary password
+ * is retired the same way, since Microsoft now proves who this is.
+ */
+export async function ownerForMicrosoft(who: MicrosoftIdentity): Promise<{ owner: Owner; created: boolean; linked: boolean }> {
+  const cols = "id, name, email, must_change_password";
+  const tid = who.tenantId.toLowerCase();
+  const oid = who.objectId.toLowerCase();
+  let row = await get<Owner>(`SELECT ${cols} FROM platform_admins WHERE entra_tid = ? AND entra_oid = ?`, tid, oid);
+  let created = false;
+  let linked = false;
+  const email = (who.email || `${oid}@${tid}`).toLowerCase().slice(0, 200);
+  if (!row) {
+    row = await get<Owner>(`SELECT ${cols} FROM platform_admins WHERE email = ? AND entra_oid IS NULL`, email);
+    if (row) {
+      await run("UPDATE platform_admins SET entra_tid = ?, entra_oid = ? WHERE id = ?", tid, oid, row.id);
+      linked = true;
+    }
+  }
+  if (!row) {
+    if (await get("SELECT id FROM platform_admins WHERE email = ?", email)) {
+      // The email belongs to an owner already linked to a different Microsoft account: never merge the two.
+      throw new HttpError(409, "This Microsoft account can't be linked to an owner account automatically. See RUNBOOKS: Owner Console sign-in.");
+    }
+    const id = newId();
+    const name = (who.name || email).slice(0, 120);
+    await run(
+      "INSERT INTO platform_admins (id, name, email, password_hash, created_at, entra_tid, entra_oid) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      id, name, email, hashPassword(crypto.randomBytes(32).toString("base64url")), now(), tid, oid,
+    );
+    row = { id, name, email, must_change_password: 0 };
+    created = true;
+  }
+  if (Number(row.must_change_password)) {
+    await run("UPDATE platform_admins SET password_hash = ?, must_change_password = 0 WHERE id = ?", hashPassword(crypto.randomBytes(32).toString("base64url")), row.id);
+  }
+  return { owner: { ...row, must_change_password: 0 }, created, linked };
 }
 
 /** Signs an owner in: session row + `sk_owner` cookie (httpOnly, sameSite strict, 12 hours). */

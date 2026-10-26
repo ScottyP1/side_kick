@@ -915,7 +915,7 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
     const mine = hrefs(u);
     assert.equal(mine.includes("/usage"), ["owner", "orgAdmin"].includes(who), `${who}: Usage`);
     assert.equal(mine.includes("/users"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Users`);
-    for (const href of ["/usage", "/agent", "/guardrails", "/activity", "/audit"]) assert.equal(mine.includes(href), u.admin, `${who}: ${href} is for Org Owners and Org Admins`);
+    for (const href of ["/usage", "/guardrails", "/activity", "/audit"]) assert.equal(mine.includes(href), u.admin, `${who}: ${href} is for Org Owners and Org Admins`);
     assert.equal(mine.includes("/connectors"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Connectors`);
     for (const href of ["/home", "/workspaces", "/knowledge", "/firm-library", "/meetings", "/memory", "/settings", "/help"]) assert.ok(mine.includes(href), `${who}: ${href} is for everyone`);
     for (const inGroup of [true, false]) {

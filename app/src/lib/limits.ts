@@ -301,6 +301,11 @@ export async function saveTerms(orgId: string, body: Record<string, unknown>, ow
     orgId, Object.keys(next.limits).length ? JSON.stringify(next.limits) : null, next.aiCreditUsd, next.monthlyPriceUsd, next.partner, next.askPerHour, ownerName, now(),
   );
   const summary = changes.join("; ");
-  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Set plan terms: ${summary}`, "Billing");
+  // The client's log never shows the AI credit in dollars (firms see a percent; lib/firm-usage.ts), so those parts
+  // are reworded there. The returned summary (operator log) keeps the amounts.
+  const forClient = changes
+    .map((c) => (c.startsWith("AI credit $") ? "a new monthly AI allowance" : c === "the plan's AI credit" ? "the plan's AI allowance" : c.replace(/(,)? ?AI credit this month [\d.]+(, )?/, (_m, before, after) => (before && after ? ", " : after ? " " : ""))))
+    .join("; ");
+  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Set plan terms: ${forClient}`, "Billing");
   return summary;
 }

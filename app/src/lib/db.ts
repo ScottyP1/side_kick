@@ -907,6 +907,9 @@ function migrate(conn: DatabaseSync) {
   // Group pricing: extra groups bought on top of the plan.
   if (!has("subscriptions", "extra_groups")) conn.exec("ALTER TABLE subscriptions ADD COLUMN extra_groups INTEGER NOT NULL DEFAULT 0");
   if (!has("platform_admins", "must_change_password")) conn.exec("ALTER TABLE platform_admins ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
+  // Owner Console sign-in with Microsoft (lib/owner.ts): the tenant id + object id linked to an owner.
+  for (const col of ["entra_tid", "entra_oid"]) if (!has("platform_admins", col)) conn.exec(`ALTER TABLE platform_admins ADD COLUMN ${col} TEXT`);
+  conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS platform_admins_entra ON platform_admins(entra_tid, entra_oid)");
   // Required two-step sign-in (lib/auth.ts): the Org Owner's switch, and how each session was started
   // (password | microsoft; Microsoft sign-in is exempt). Older sessions have none and count as password.
   if (!has("orgs", "mfa_required")) conn.exec("ALTER TABLE orgs ADD COLUMN mfa_required INTEGER NOT NULL DEFAULT 0");

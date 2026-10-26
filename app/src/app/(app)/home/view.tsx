@@ -8,12 +8,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/shell";
 import { LiveOrb } from "@/components/live-orb";
-import { api, fmtDate, Pill, usd, useReportError } from "@/components/ui";
+import { api, fmtDate, Pill, useReportError } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 import { FindingRows, useFindings } from "@/components/findings";
 
 type Overview = {
-  stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; spendMonth: number; aiCallsMonth: number; spendScope: "org" | "you" };
+  stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; aiCallsMonth: number; aiScope: "org" | "you" };
   recentMeetings: { id: string; title: string; held_at: string; status: string; workspace: string; color: string; workspace_id: string }[];
   attention: {
     failedDocs: { id: string; name: string; error: string; workspace_id: string }[];
@@ -92,7 +92,8 @@ export default function OverviewPage() {
         <Link className="kpi" href={me.user.admin ? "/usage" : "/knowledge"} style={{ textDecoration: "none" }}>
           <span className="eyebrow">Documents</span>
           <span className="v">{s?.documents ?? "—"}</span>
-          <span className="d muted">{s ? `${s.spendScope === "org" ? "AI spend this month" : "Your AI use this month"}: ${usd(s.spendMonth)}` : "AI spend this month: —"}</span>
+          {/* No AI cost here: admins see the share of the plan's included AI used, everyone else how often Sidekick helped them. */}
+          <span className="d muted">{me.credit ? (me.credit.level === "unlimited" ? "No limit on AI use" : `${me.credit.pct}% of this month's AI allowance used`) : s ? `${BRAND.name} helped you ${s.aiCallsMonth.toLocaleString()} time${s.aiCallsMonth === 1 ? "" : "s"} this month` : "—"}</span>
         </Link>
       </div>
 

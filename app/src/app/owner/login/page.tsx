@@ -1,16 +1,23 @@
 "use client";
 
 /**
- * Owner Console sign-in (/owner/login), separate from client sign-in. After a password reset from the
- * command line (scripts/reset-password.mjs) the sign-in answers `mustChange`, and this page asks for a new
- * password (POST /api/owner/auth/password) before opening the console. With two-step sign-in on, a correct
- * password leads to the second step first (components/two-step.tsx).
+ * Owner Console sign-in (/owner/login), separate from client sign-in.
+ * - **Sign in with Microsoft** is the normal way in when it's set up (`microsoft` from GET /api/owner/auth/setup):
+ *   the button goes to /api/owner/auth/microsoft/start, and only the allowed operator accounts get through
+ *   (lib/owner.ts). A refusal comes back as `?error=1` with the reason in a flash cookie (lib/flash.ts). With a
+ *   passkey registered, Microsoft's callback sends the browser back here with `?step=passkey` for it.
+ * - **Other ways to sign in** (behind a small link when Microsoft is on; shown straight away when it isn't, e.g.
+ *   on localhost): email + password. After a password reset from the command line (scripts/reset-password.mjs)
+ *   the sign-in answers `mustChange`, and this page asks for a new password (POST /api/owner/auth/password)
+ *   before opening the console. With two-step sign-in on, a correct password leads to the second step first
+ *   (components/two-step.tsx). The first-owner setup page is only offered when Microsoft sign-in is off.
  */
 
 import { useEffect, useState } from "react";
 import { SecondStepForm } from "@/components/two-step";
 import { api } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { takeFlash } from "@/lib/flash";
 
 export default function OwnerLoginPage() {
   const [email, setEmail] = useState("");
@@ -22,11 +29,22 @@ export default function OwnerLoginPage() {
   const [secondStep, setSecondStep] = useState<("totp" | "passkey")[] | null>(null);
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
+  // Whether "Sign in with Microsoft" is on, and whether the password form is open ("Other ways to sign in").
+  const [microsoft, setMicrosoft] = useState(false);
+  const [otherWays, setOtherWays] = useState(false);
 
   useEffect(() => {
-    api<{ needsSetup: boolean }>("/api/owner/auth/setup")
-      .then((r) => r.needsSetup && window.location.assign("/owner/setup"))
-      .catch(() => {});
+    // Read after mount: the page is static, and Microsoft's callback says what happened in the address.
+    const q = new URLSearchParams(location.search);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (q.has("error")) setError(takeFlash("Microsoft sign-in didn't finish. Try again."));
+    if (q.get("step") === "passkey") setSecondStep(["passkey"]);
+    api<{ needsSetup: boolean; microsoft: boolean }>("/api/owner/auth/setup")
+      .then((r) => {
+        setMicrosoft(r.microsoft);
+        if (r.needsSetup && !r.microsoft) window.location.assign("/owner/setup");
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : `Couldn't reach ${BRAND.name}.`));
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -73,7 +91,7 @@ export default function OwnerLoginPage() {
           base="/api/owner/auth/mfa"
           methods={secondStep}
           onDone={(r) => (r.mustChange ? setMustChange(true) : window.location.assign("/owner"))}
-          onCancel={() => { setSecondStep(null); setPassword(""); }}
+          onCancel={() => { setSecondStep(null); setPassword(""); history.replaceState(null, "", "/owner/login"); }}
         />
       </div>
     );
@@ -113,16 +131,30 @@ export default function OwnerLoginPage() {
           <h1>Owner Console</h1>
           <p className="muted" style={{ margin: "4px 0 0" }}>For the {BRAND.name} team only. Client users sign in at the main portal.</p>
         </div>
-        <div className="field">
-          <label htmlFor="email">Email</label>
-          <input id="email" className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </div>
-        <div className="field">
-          <label htmlFor="password">Password</label>
-          <input id="password" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        </div>
+        {microsoft && (
+          <a className="btn ms-btn" href="/api/owner/auth/microsoft/start">
+            <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022" /><rect x="11" y="1" width="9" height="9" fill="#7fba00" /><rect x="1" y="11" width="9" height="9" fill="#00a4ef" /><rect x="11" y="11" width="9" height="9" fill="#ffb900" /></svg>
+            Sign in with Microsoft
+          </a>
+        )}
+        {(!microsoft || otherWays) && (
+          <>
+            {microsoft && <div className="or-line"><span>or use your email</span></div>}
+            <div className="field">
+              <label htmlFor="email">Email</label>
+              <input id="email" className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            </div>
+            <div className="field">
+              <label htmlFor="password">Password</label>
+              <input id="password" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            </div>
+          </>
+        )}
         {error && <p className="err" role="alert">{error}</p>}
-        <button className="btn primary" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+        {(!microsoft || otherWays) && <button className={microsoft ? "btn" : "btn primary"} type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>}
+        {microsoft && !otherWays && (
+          <button type="button" className="linklike muted" style={{ fontSize: 13, alignSelf: "center", textDecoration: "underline" }} onClick={() => setOtherWays(true)}>Other ways to sign in</button>
+        )}
       </form>
     </div>
   );

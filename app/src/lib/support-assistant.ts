@@ -117,7 +117,7 @@ export async function setupChecks(user: User, message = ""): Promise<Check[]> {
         ...off.map((f) => `${f.label} is ${!f.platformEnabled ? `paused by the ${BRAND.name} team for everyone (temporary)` : `turned off for your organization by the ${BRAND.name} team`}.`),
       ].filter(Boolean).join(" ") || "Nothing is paused or turned off for your organization.",
     });
-    // Plan limits near or at the maximum (counts only; the AI credit is its own check).
+    // Plan limits near or at the maximum (counts only; the AI allowance is its own check).
     const credit = await creditStatus(user.org_id);
     const { lines } = await limitReport(user.org_id, credit.usedUsd);
     const tight = lines.filter((l) => l.key !== "aiCreditUsd" && l.limit !== null && (l.near || l.full));
@@ -128,9 +128,10 @@ export async function setupChecks(user: User, message = ""): Promise<Check[]> {
     });
     const level = { unlimited: "no monthly limit", ok: "fine", warn: "over 80% used", essentials: "used up: essentials only until the 1st (answers keep working; reminders, the knowledge map, the in-app assistant and long-meeting notes pause)" }[credit.level];
     checks.push({
-      name: "AI credit",
+      name: "AI allowance",
       status: credit.level === "essentials" ? "problem" : credit.level === "warn" ? "warn" : "ok",
-      summary: `This month's AI credit: ${level}${ROLE_SEES_CREDIT.includes(user.role) && credit.creditUsd !== null ? ` ($${credit.usedUsd.toFixed(2)} of $${credit.creditUsd.toFixed(2)})` : ""}.`,
+      // A percent, never dollars: what the AI costs is the Sidekick team's business (lib/firm-usage.ts).
+      summary: `This month's AI allowance: ${level}${ROLE_SEES_CREDIT.includes(user.role) && credit.creditUsd !== null ? ` (${Math.round(credit.pct)}% used)` : ""}.`,
     });
     // Recent errors by reference code: the organization's for admins, the person's own otherwise.
     const since = new Date(Date.now() - 7 * 86400_000).toISOString();

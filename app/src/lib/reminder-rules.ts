@@ -10,7 +10,10 @@
  *   (Which chats get meeting notes is one choice per group since Oct 2026: lib/notes-chats.ts. An old `notes` field in
  *   the JSON is ignored here; lib/db.ts `DATA_MIGRATIONS` carried it over.)
  *   - `reminders`: a reminder card is posted once a day at `time` (24-hour "HH:MM") in `timeZone`,
- *     except on `quietDays` (0 = Sunday … 6 = Saturday), and also right after a meeting if `afterMeeting`;
+ *     except on `quietDays` (0 = Sunday … 6 = Saturday);
+ *   - `afterMeeting` (with `reminders` on): after a meeting, the group's notes card in this chat ends with a short
+ *     "3 older items still open" line (items today's daily reminder already listed don't count); a chat that doesn't
+ *     get the notes gets a reminder card instead (lib/reminders.ts `remindAfterMeeting`);
  *   - `kinds`: which reminders to include (overdue/unowned action items, open questions and decisions,
  *     out-of-date documents, conflicting sources).
  * - **Slot**: the name of one reminder run, used to never post twice: the chat's local date
@@ -167,4 +170,14 @@ export function dailySlotDue(s: ChatSettings, at: Date): string | null {
 /** Adds `days` to a "YYYY-MM-DD" day and returns the new day. */
 export function addDays(day: string, days: number): string {
   return new Date(Date.parse(`${day}T00:00:00Z`) + days * 86400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * How many older open items the "N older items still open" line on a meeting-notes card counts: the items that would
+ * be reminded about now (`openKeys`, the meeting's own items already left out) minus those today's daily reminder in
+ * the same chat already listed (`listedToday`). 0 means no line at all, so a chat isn't told twice in one day.
+ */
+export function olderOpenCount(openKeys: readonly string[], listedToday: readonly string[]): number {
+  const listed = new Set(listedToday);
+  return new Set(openKeys.filter((k) => !listed.has(k))).size;
 }

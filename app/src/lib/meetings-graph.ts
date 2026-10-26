@@ -974,7 +974,8 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
 
 /**
  * Writes the notes for a captured meeting (Claude, lib/sidekick.ts `processMeeting`) unless they're already
- * written, then posts them once to the group's notes chats in Teams and sends the after-meeting reminders.
+ * written, then posts them once to the group's notes chats in Teams (with the "older items still open" line) and
+ * sends the after-meeting reminder cards to the other chats that want one.
  * The post is claimed with `notes_posted_at`, so a retried job never posts twice. A Claude failure throws (the
  * job retries; the meeting shows Failed with Try again meanwhile).
  */

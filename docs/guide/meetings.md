@@ -121,8 +121,10 @@ Chats with **client guests** are marked: only notes from meetings the client att
 **Before anyone chooses**, notes go to **one** chat only: a chat with "notes" in its name if there is one, otherwise the group's first chat without client guests. A group with two or more chats and no choice yet shows **Pick which chat gets meeting notes** under *Needs attention* for its Team Lead, with a button to the Teams chats tab. (Groups that had switched notes off in some chats before this choice existed keep that: the chats that still had notes on are the chosen ones.)
 
 After each meeting Sidekick posts to the chosen chat(s):
-1. a **notes card**: summary, the decisions and things to keep, and questions still open, with **Open in Sidekick**. Its last line says where the notes were posted ("Notes posted to Core team only."); in a chat with client guests it only names other client chats;
+1. a **notes card**: summary, the decisions and things to keep, and questions still open, with **Open in Sidekick**. If the chat has reminders on (with *After meetings*), one short line says what's still open from earlier meetings: "3 older items still open: Open in Sidekick". Items today's daily reminder already listed in that chat aren't counted again, and with nothing left the line isn't there. Its last line says where the notes were posted ("Notes posted to Core team only."); in a chat with client guests it only names other client chats;
 2. one **card per action item**, with **Assign** and **Mark done**.
+
+No separate reminders card follows the notes any more (since Oct 25, 2026): the older items are that one line, and the full list comes with the chat's daily reminder. A chat of the group that wants reminders after meetings but doesn't get the notes still gets a reminders card after each meeting.
 
 The Teams chats tab also shows where the latest meeting's notes went. A group without any Teams chat shows up under *Needs attention* so its Team Lead can add one.
 

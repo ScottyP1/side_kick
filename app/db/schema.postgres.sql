@@ -311,6 +311,12 @@ CREATE INDEX IF NOT EXISTS ai_batch_items_status ON ai_batch_items(status, batch
 CREATE TABLE IF NOT EXISTS app_releases (
   release_key TEXT PRIMARY KEY, commit_sha TEXT, released_at TEXT, first_seen_at TEXT NOT NULL
 );
+-- Azure AI Search capacity (lib/search-capacity.ts): one row ('azure'), the latest service usage read hourly (json:
+-- storage and index use with their limits, counts only), its level (ok / warn / full; a rise alerts the operator),
+-- and the last check's error. Nothing per organization.
+CREATE TABLE IF NOT EXISTS search_capacity (
+  id TEXT PRIMARY KEY, json TEXT, level TEXT NOT NULL, checked_at TEXT NOT NULL, error TEXT
+);
 -- Plan limits: each meeting's length in minutes (meeting hours per month).
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS duration_min INTEGER;
 -- Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.

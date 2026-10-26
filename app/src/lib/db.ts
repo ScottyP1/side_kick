@@ -167,6 +167,12 @@ CREATE INDEX IF NOT EXISTS ai_batch_items_status ON ai_batch_items(status, batch
 CREATE TABLE IF NOT EXISTS app_releases (
   release_key TEXT PRIMARY KEY, commit_sha TEXT, released_at TEXT, first_seen_at TEXT NOT NULL
 );
+-- Azure AI Search capacity (lib/search-capacity.ts): one row ('azure'), the latest service usage read hourly (json:
+-- storage and index use with their limits, counts only), its level (ok / warn / full; a rise alerts the operator),
+-- and the last check's error. Nothing per organization.
+CREATE TABLE IF NOT EXISTS search_capacity (
+  id TEXT PRIMARY KEY, json TEXT, level TEXT NOT NULL, checked_at TEXT NOT NULL, error TEXT
+);
 -- Microsoft sign-in in progress: one row per "Sign in with Microsoft" click, kept 10 minutes. state is
 -- the random value sent to Microsoft and back; verifier (PKCE) and nonce prove the reply belongs to it.
 -- mode = signin | link (an Org Owner connecting their organization's Microsoft tenant).

@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Owner Console home (/owner): spend, speed, errors and activity across every client organization.
+ * Owner Console home (/owner): spend, speed, errors and activity across every client organization, with alerts the
+ * operator must act on at the top (e.g. "Search is almost full", lib/search-capacity.ts).
  */
 
 import Link from "next/link";
@@ -10,6 +11,7 @@ import { api, fmtTime, Pill, usd } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 
 type O = {
+  alerts: { kind: "warn" | "bad"; text: string; href: string }[];
   kpis: {
     tenants: number; activeTenants: number; users: number; activeUsers: number; meetings: number; questions: number; documents: number;
     monthCost: number; monthCalls: number; errorRate: number; avgLatency: number; todayCost: number; todayCalls: number; projected: number;
@@ -48,6 +50,12 @@ export default function OwnerOverview() {
           <Link className="btn primary" href="/owner/clients">Add client</Link>
         </div>
       </div>
+
+      {o.alerts.map((a) => (
+        <div key={a.text} className={`callout ${a.kind}`} role="status">
+          <div><b>{a.text}.</b> <Link href={a.href}>See the numbers</Link></div>
+        </div>
+      ))}
 
       <div className="grid g4">
         <div className="kpi" style={{ cursor: "default" }}>

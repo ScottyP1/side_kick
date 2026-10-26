@@ -23,6 +23,7 @@ operations review is in `docs/security/`.
 | Setting up automatic meeting notes and the Teams tab, or they stopped working | [Automatic meeting notes](#automatic-meeting-notes-microsoft-setup) |
 | "Sidekick isn't allowed to remove itself from Teams chats" under Needs attention, or a Teams chat never shows as waiting | [Teams self-removal](#teams-sidekick-cant-remove-itself-from-chats) |
 | Pages show nothing or "not found" for data that exists, after the row-level security deploy | [Row-level security](#row-level-security) |
+| Owner Console says "Search is almost full" (Azure AI Search 70%+ full, or one index left) | [Upgrade the search tier](#search-almost-full-upgrade-the-search-tier) |
 
 ## Roll back a bad deploy
 
@@ -813,6 +814,42 @@ and watchers while no copy is up.
 
 **Undo.** Each step can be reversed in the same place (the database can go down a size; search back to
 Free only if the passages fit, which they won't after real use).
+
+## Search almost full: upgrade the search tier
+**What you see.** The Owner Console home shows "Search is almost full: upgrade to Basic (about $75/month) before
+uploads fail", and Owner Console → Business → **Search capacity** shows storage and indexes against the tier's
+limits. The hourly `search.capacity` job (`app/src/lib/search-capacity.ts`) reads Azure's own counters
+(`GET {endpoint}/servicestats`); it warns at **70% of storage or when all indexes but one are used**, and again at
+**90% (or no index left)**. Each step is also written once to the operator log (Owner Console → Releases → log,
+actor "Search capacity check"). Customers see nothing.
+
+**Why it matters.** The live service `sidekick-labs-search` is on **Free**: 50 MB of storage (the portal shows
+52 MB), 3 indexes, no uptime guarantee. On Oct 25, 2026 it used about 2 MB and 2 of its 3 indexes, so
+the "one index left" warning shows from the start: that is expected and is the reminder to upgrade before the
+first paying customer. When storage is full, Azure refuses new passages: uploads and meeting notes still save
+(the local index is the source of truth and search falls back to it), but Azure search stops seeing new content.
+
+**Upgrade (Cody's go-ahead first: it costs about $75/month).** A Free service can't be changed to Basic in place, so
+make a new one and switch to it. Same steps as [Scaling up](#scaling-up-the-plan-in-docshostingmd--scaling-up)
+step 1:
+1. Azure portal → AI Search → **Create**: name `sidekick-search-basic`, resource group `sidekick-rg`, same region as
+   the database (Central US), pricing tier **Basic**.
+2. Open it → Settings → Keys → copy the **primary admin key** straight into Key Vault `sidekick-kv` as a new version
+   of `azure-search-api-key` (never into chat or the repo).
+3. Container App → Containers → Environment variables: set `AZURE_SEARCH_ENDPOINT` to
+   `https://sidekick-search-basic.search.windows.net`. Keep `AZURE_SEARCH_INDEX=sidekick-cloud`. Save (a new
+   revision starts and reads the new key).
+4. The new index is empty: the first question after the restart starts copying every passage into it
+   (`reindexAzure` in `app/src/lib/search.ts`). Answers keep working meanwhile (local fallback).
+5. Check: Owner Console → Business → Search capacity shows **Basic tier**, about 0% storage and 1 of 15 indexes,
+   with no warning (the next hourly check; the alert clears by itself). Ask one question in the portal.
+6. A week later, delete the Free service `sidekick-labs-search`.
+
+**Check failed.** "The last check failed: …" under Search capacity means Azure refused the stats call (usually a
+wrong or rotated key: see [Rotate secrets](#rotate-secrets)). The last good numbers stay on the page.
+
+**Later.** Basic → Standard S1 when passages pass about a million or Basic's vector quota: docs/HOSTING.md →
+Scaling up, step 5. The same alert says "move to a bigger tier or add a partition" once you're past Free.
 
 ## Slow pages or "AI is very busy"
 1. Owner Console → **Performance**: which requests are slow, and is it database time or AI time?

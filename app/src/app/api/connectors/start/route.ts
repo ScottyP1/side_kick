@@ -12,7 +12,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { errorMessageFor, handle } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
-import { CONNECTOR_COOKIE, startConnect } from "@/lib/connectors";
+import { CONNECTOR_BACK_COOKIE, CONNECTOR_COOKIE, startConnect } from "@/lib/connectors";
 import { FLASH_COOKIE, FLASH_SECONDS } from "@/lib/flash";
 
 export const GET = handle(async (req: Request) => {
@@ -23,6 +23,7 @@ export const GET = handle(async (req: Request) => {
     const { url, state } = await startConnect(req, user, q.get("kind"), q.get("site"), q.get("ws"));
     // Lax so the cookie comes back on the tool's redirect (a top-level GET), but not on other sites' requests.
     jar.set(CONNECTOR_COOKIE, state, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/api/connectors", maxAge: 600 });
+    jar.delete({ name: CONNECTOR_BACK_COOKIE, path: "/api/connectors" }); // a group connection lands back on Connectors
     return NextResponse.redirect(url);
   } catch (e) {
     jar.set(FLASH_COOKIE, await errorMessageFor(req, e), { path: "/", maxAge: FLASH_SECONDS, sameSite: "lax", secure: process.env.NODE_ENV === "production" });

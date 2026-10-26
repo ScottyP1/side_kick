@@ -32,6 +32,7 @@ import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, 
 import { tagSafe } from "./security";
 import { BRAND } from "./brand";
 import { openWorkItemLines, workItemLinks } from "./connectors";
+import { screenConnectorSources, type AccessNote, type Readers } from "./connector-access";
 
 /* ------------------------------------------------------------------ */
 /* Ask Sidekick: answer from this group's sources and the firm library */
@@ -91,6 +92,12 @@ export type AskOptions = {
   /** Only sources dated from / until these days (YYYY-MM-DD). */
   since?: string | null;
   until?: string | null;
+  /**
+   * Who will read the answer, for connections in "each person signs in" mode (lib/connector-access.ts): default the
+   * asker alone (a Teams guest Sidekick doesn't know counts as nobody it can vouch for). Teams group chats and
+   * channels pass everyone in the chat, so only items **all** of them can open are used.
+   */
+  readers?: Readers;
 };
 
 /** The label a source's origin is shown with: "Firm policy" for the firm library, nothing for the group's own. */
@@ -111,7 +118,9 @@ declare global {
  * @returns `found` (false = not in the sources), the `answer` text with [S#] citations, the `sources` actually
  *          cited (title, location, excerpt, origin, date, outdated flag), `conflict` (sources disagree),
  *          `questionId` (for 👍/👎 feedback; null when refused), `conversation` (pass it back for a follow-up) and
- *          `followUp` (the earlier question this one built on, for the "Following up on…" hint)
+ *          `followUp` (the earlier question this one built on, for the "Following up on…" hint), and `access`
+ *          (notes when a connection in "each person signs in" mode had relevant items the readers couldn't be shown:
+ *          "Connect your Jira…", lib/connector-access.ts)
  *
  * Pipeline: the message is rewritten into a standalone question when it follows up on earlier turns of the same
  * person's conversation in this group (lib/conversations.ts); that question is checked by the guardrails
@@ -148,16 +157,24 @@ export async function ask(user: User, workspaceId: string, question: string, gue
   const policy = await getGuardPolicy(user.org_id, workspaceId);
   const settings = policy.switches;
   const types = opts.types?.length ? [...new Set(opts.types.flatMap((t) => FILTER_TYPES[t] ?? []))] : undefined;
+  // "Each person signs in" connections: only items the readers can open in the tool (checked with their own sign-in).
+  const readers: Readers = opts.readers ?? { kind: "person", userId: user.id.startsWith("teams:") ? null : user.id };
+  let access: AccessNote[] = [];
+  const screen = async (candidates: { source_id: string; source_type: string }[]) => {
+    const r = await screenConnectorSources(user.org_id, workspaceId, readers, candidates);
+    access = r.notes;
+    return r.drop;
+  };
   const [blocked, found] = await Promise.all([
     screenTurn(ctx, policy, question, standalone.question) as Promise<RuleId | null>,
-    findSources(user.org_id, workspaceId, standalone.question, { guests, limit: 10, types, since: opts.since, until: opts.until }),
+    findSources(user.org_id, workspaceId, standalone.question, { guests, limit: 10, types, since: opts.since, until: opts.until, screen }),
   ]);
-  const base = { conversation: conv.id, followUp: standalone.on, aiMode: await aiMode(user.org_id) };
+  const base = { conversation: conv.id, followUp: standalone.on, aiMode: await aiMode(user.org_id), access };
   if (blocked) {
     await recordGuard(place, "question", blocked, "blocked");
     const reply = refusalFor(blocked);
     await addExchange(conv, { text: question, question: standalone.question, refused: true }, { text: reply, meta: { followUp: standalone.on } });
-    return { ...base, found: false, answer: reply, sources: [] as CitedSource[], blocked: blocked as RuleId | null, conflict: false, questionId: null as string | null };
+    return { ...base, access: [] as AccessNote[], found: false, answer: reply, sources: [] as CitedSource[], blocked: blocked as RuleId | null, conflict: false, questionId: null as string | null };
   }
   const sources = found.map((p, i) => ({ id: `S${i + 1}`, ...p }));
   let result: z.infer<typeof AnswerSchema>;
@@ -219,7 +236,7 @@ export async function ask(user: User, workspaceId: string, question: string, gue
   await addExchange(
     conv,
     { text: question, question: standalone.question, refused: false },
-    { text: result.answer, meta: { followUp: standalone.on, found: result.found, conflict: result.conflict, questionId, sources: cited.map((c) => ({ id: c.id, title: c.title, loc: c.loc, origin: c.origin, ...(c.url ? { url: c.url } : {}), ...(c.appliesTo ? { appliesTo: c.appliesTo } : {}) })) } },
+    { text: result.answer, meta: { followUp: standalone.on, found: result.found, conflict: result.conflict, questionId, ...(access.length ? { access } : {}), sources: cited.map((c) => ({ id: c.id, title: c.title, loc: c.loc, origin: c.origin, ...(c.url ? { url: c.url } : {}), ...(c.appliesTo ? { appliesTo: c.appliesTo } : {}) })) } },
   );
   return { ...base, found: result.found, answer: result.answer, sources: cited, blocked: null as RuleId | null, conflict: result.conflict, questionId };
 }

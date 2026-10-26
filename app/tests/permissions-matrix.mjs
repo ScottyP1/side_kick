@@ -42,6 +42,9 @@ export const MATRIX = [
   { what: "Open Connectors: which tool types are allowed, their groups' connections and linked projects", method: "GET", url: () => "/api/connectors", allow: MANAGERS },
   { what: "See a group's last 30 days (Team Leads: their own groups)", method: "GET", url: (s) => `/api/workspaces/${s.wsA}/usage`, allow: MANAGERS },
   { what: "See Needs attention for their groups", method: "GET", url: () => "/api/findings", allow: EVERYONE },
+  { what: "See their own sign-ins to tools where each person signs in (Knowledge)", method: "GET", url: (s) => `/api/connectors/mine?ws=${s.wsA}`, allow: EVERYONE },
+  { what: "Connect their own Jira or Azure DevOps account where each person signs in", method: "GET", url: () => `/api/connectors/mine/start?connector=${NOPE}`, allow: EVERYONE },
+  { what: "Disconnect their own sign-in to a tool", method: "DELETE", url: () => `/api/connectors/mine/${NOPE}`, allow: EVERYONE },
   // Change workspace content
   { what: "Upload documents", method: "POST", url: () => "/api/docs", form: (s) => ({ ws: s.wsA }), allow: EDITORS },
   { what: "Change or delete a document", method: "DELETE", url: () => `/api/docs/${NOPE}`, allow: EDITORS },
@@ -78,6 +81,7 @@ export const MATRIX = [
   { what: "Link a tool's project to their groups, sync or unlink it", method: "POST", url: () => "/api/connectors/links", body: {}, allow: MANAGERS },
   { what: "Ask the Org Owner to allow a tool type for their group (Team Leads: their groups)", method: "POST", url: () => "/api/connectors/requests", body: {}, allow: MANAGERS },
   { what: "List a connected tool's projects (to link one)", method: "GET", url: () => `/api/connectors/${NOPE}/projects`, allow: MANAGERS },
+  { what: "Choose who sees what from a group's tool: one shared account or each person signs in (Team Leads: their groups)", method: "PUT", url: () => `/api/connectors/${NOPE}`, body: { accessMode: "personal" }, allow: MANAGERS },
   { what: "Change or delete a firm library document", method: "DELETE", url: () => `/api/firm/${NOPE}`, allow: ADMINS },
   { what: "Keep, limit or move a held firm library document", method: "POST", url: () => `/api/firm/${NOPE}`, body: { action: "keep" }, allow: ADMINS },
   { what: "See answer quality (👍/👎 counts)", method: "GET", url: () => "/api/feedback", allow: ADMINS },

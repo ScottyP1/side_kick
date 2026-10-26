@@ -39,6 +39,7 @@ import { structured } from "./claude";
 import { FeatureOffError } from "./owner";
 import { hasFeature } from "./limits";
 import { brokenConnectors } from "./connector-health";
+import { expiredSignIns, pruneLeftSignIns } from "./connector-access";
 import { notesPlan } from "./notes-chats";
 import { versionKey } from "./rank";
 import { tagSafe } from "./security";
@@ -46,7 +47,7 @@ import { BRAND } from "./brand";
 import { KIND_LABEL as TOOL_LABEL, PROJECT_WORD, type ConnectorKind } from "./connector-text";
 
 /** The kinds of finding, one per watcher (chats have two: waiting to be assigned, and removed in Teams). */
-export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "self_removal", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "role_changed", "misfiled_doc"] as const;
+export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "self_removal", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "connector_signins", "role_changed", "misfiled_doc"] as const;
 export type FindingKind = (typeof FINDING_KINDS)[number];
 
 /** Short plain names for each kind (pills on the page, Owner Console counts). */
@@ -63,6 +64,7 @@ export const KIND_LABEL: Record<FindingKind, string> = {
   no_notes_chat: "No notes chat",
   broken_connector: "Connector not working",
   connector_request: "Connector requests",
+  connector_signins: "Expired personal sign-ins",
   role_changed: "Role changed",
   misfiled_doc: "May be another client's",
 };
@@ -478,6 +480,31 @@ const brokenConnector: Watcher = {
   },
 };
 
+/**
+ * "Each person signs in" connections (lib/connector-access.ts) where some of the group's people's own sign-ins expired:
+ * one finding per connection for the group's managers, with the names (they can remind them). The people themselves
+ * see "Reconnect your …" on Knowledge. Also tidies away the sign-ins of people who left the group.
+ */
+const connectorSignIns: Watcher = {
+  kind: "connector_signins",
+  label: "Expired personal sign-ins",
+  async check(o) {
+    await pruneLeftSignIns(o.orgId);
+    const groups = new Map(o.groups.map((g) => [g.id, g.name]));
+    return (await expiredSignIns(o.orgId)).filter((r) => groups.has(r.workspaceId)).map((r) => {
+      const tool = TOOL_LABEL[r.kind] ?? r.kind;
+      const names = r.names.length > 4 ? `${r.names.slice(0, 4).join(", ")} and ${r.names.length - 4} more` : r.names.join(", ");
+      return {
+        kind: "connector_signins", workspaceId: r.workspaceId, subject: r.connectorId, audience: "managers", severity: "warn",
+        title: `${r.names.length} ${r.names.length === 1 ? "person's" : "people's"} own ${tool} sign-in expired in ${quote(groups.get(r.workspaceId)!, 60)}`,
+        detail: `${names}. Until they reconnect, their answers leave out ${tool} (since ${fmtDay(r.since)}).`,
+        nextStep: `Ask them to open Knowledge in ${BRAND.name} and press "Reconnect your ${tool}".`,
+        actionHref: `/connectors#tool-${r.kind}`, actionLabel: "Open Connectors", data: { count: r.names.length },
+      } satisfies Fresh;
+    });
+  },
+};
+
 /** How long a "role changed" notice stays on the Org Owner's Home unless they act on it first. */
 export const ROLE_NOTICE_DAYS = 14;
 
@@ -598,7 +625,7 @@ const misfiledDocs: Watcher = {
 };
 
 /** Every watcher, in the order they run. */
-export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, selfRemovalDenied, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests, roleChanged, misfiledDocs];
+export const WATCHERS: readonly Watcher[] = [unanswered, failedReplies, chatsWaiting, chatsRemoved, selfRemovalDenied, overdueItems, unownedItems, staleDocs, noLead, noNotesChat, brokenConnector, connectorRequests, connectorSignIns, roleChanged, misfiledDocs];
 
 /* ------------------------------------------------------------------ */
 /* Running the watchers and keeping findings up to date                */

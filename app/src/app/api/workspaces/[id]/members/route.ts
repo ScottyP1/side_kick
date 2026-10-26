@@ -92,6 +92,8 @@ export const DELETE = handle(async (req: Request, { params }: Ctx) => {
   if (isLead(user) && target.id === user.id) throw new HttpError(403, "You can't take yourself off a group you lead. Ask an Org Admin.");
   if (isLead(user) && !LEAD_ASSIGNABLE_ROLES.includes(target.role)) throw new HttpError(403, "Team Leads can take Members and Viewers off their group. Ask an Org Admin for anyone else.");
   await run("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?", ws, target.id);
+  // Their own sign-ins to this group's tools go too (lib/connector-access.ts; the watcher also tidies other removals).
+  await run("DELETE FROM connector_user_tokens WHERE workspace_id = ? AND user_id = ? AND org_id = ?", ws, target.id, user.org_id);
   await audit(user, `Took ${target.name} off “${await groupName(user, ws)}”`, "Access", ws);
   return { ok: true };
 });

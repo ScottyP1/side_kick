@@ -15,11 +15,15 @@
  * (in its colour); people in two or more groups confirm the group for each upload. A file that looks like another
  * client's is **Held** (not used in answers) and its row asks "Keep it here, or move it?". `?doc=<id>` (from a
  * "Needs attention" finding) scrolls to and highlights that document.
+ *
+ * Your sign-ins to tools (components/my-sign-ins.tsx, `#signins`): for connections where each person signs in, Connect
+ * / Reconnect / Disconnect your own Jira or Azure DevOps; answers only use what your own sign-in can open there.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AskPanel } from "./ask";
+import { MySignIns } from "@/components/my-sign-ins";
 import { NeedsWorkspace, useApp } from "@/components/shell";
 import { api, fmtBytes, fmtDate, Icon, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
@@ -138,6 +142,8 @@ export default function KnowledgePage() {
       </div>
 
       <AskPanel ws={ws} admin={me.user.admin} onAsked={() => load().catch(reportError)} />
+
+      <MySignIns ws={ws} />
 
       {canEdit && (
         <div

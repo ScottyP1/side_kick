@@ -4,7 +4,9 @@
  * POST { ws, question (max 1,000 chars), guests?, conversation?, newQuestion?, types?, since?, until? } → the answer,
  *   whether it was found, the cited sources (group and firm library, with origin, date and outdated flag),
  *   `conflict`, `questionId` (for 👍/👎), `conversation` (send it back with the next question so a follow-up builds
- *   on this one) and `followUp` (the earlier question it built on). `types` filters the sources ("documents",
+ *   on this one), `followUp` (the earlier question it built on) and `access` (notes such as "Connect your Jira to
+ *   include its tickets" when a connection in "each person signs in" mode had relevant items this person can't be
+ *   shown: lib/connector-access.ts). `types` filters the sources ("documents",
  *   "meetings", "chats", "decisions", "firm"); `since`/`until` are YYYY-MM-DD days. See ask() in lib/sidekick.ts.
  * GET ?ws=&guests=1&conversation=id → { conversation, turns } to show the conversation again after a page change.
  * DELETE ?ws=&guests=1&conversation=id → { ended } ("New question": forgets the conversation).

@@ -14,13 +14,17 @@
  *   time precision), oldest first, at most `MAX_PER_SYNC` per run; then the items in batches of 200 (with their
  *   links, to find what blocks them), and the latest 3 comments of items that have any. Project lists come in
  *   pages (`x-ms-continuationtoken`).
+ * - **Each person signs in** (`personal`, docs/ARCHITECTURE.md → Connectors): a member's own Microsoft sign-in must
+ *   open the connection's ADO organization (`_apis/connectionData` answers with who they are); before an answer
+ *   uses work items, `canOpen` asks ADO which of the candidate ids that person can read (`workitemsbatch` with
+ *   `errorPolicy: "Omit"`: items they can't read, such as an area path they aren't allowed in, come back as null).
  *
  * Tests and the demo world point `ADO_LOGIN_BASE`, `ADO_API_BASE` and `ADO_WEB_BASE` at a fake ADO
  * (scripts/fake-tools.mjs); these overrides are ignored in production.
  */
 import "server-only";
 import { LOGIN_BASE } from "./entra";
-import { dayOf, htmlToText, isoOf, type WorkItem } from "./connector-text";
+import { ConnectorError, dayOf, htmlToText, isoOf, type WorkItem } from "./connector-text";
 import type { Provider } from "./connectors";
 
 /** Azure DevOps' resource id in Entra ID, and the read-only work items scope on it. */
@@ -114,6 +118,29 @@ export const ado: Provider = {
       if (!token) break;
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
+  },
+
+  personal: {
+    async account(api, conn) {
+      const r = await api(`${conn.api_base}/_apis/connectionData`, {}, { what: `the Azure DevOps organization “${conn.account}”` }).catch((e) => {
+        // A token that works but can't open this organization looks like a sign-in problem to ADO (401/203).
+        if (e instanceof ConnectorError && (e.reason === "auth" || e.reason === "access" || e.reason === "notfound")) {
+          throw new ConnectorError("access", `This Microsoft account can't open the Azure DevOps organization “${conn.account}”. Sign in with the account the client gave you for it.`, 403);
+        }
+        throw e;
+      });
+      const u = (r.json as { authenticatedUser?: { providerDisplayName?: string; customDisplayName?: string } } | null)?.authenticatedUser;
+      return { accountName: u?.customDisplayName || u?.providerDisplayName || "Azure DevOps user" };
+    },
+    async canOpen(api, conn, ids) {
+      const open = new Set<string>();
+      const nums = ids.filter((x) => /^\d{1,10}$/.test(x)).map(Number);
+      for (let i = 0; i < nums.length; i += BATCH) {
+        const r = await api(`${conn.api_base}/_apis/wit/workitemsbatch?${API}`, { method: "POST", body: { ids: nums.slice(i, i + BATCH), fields: ["System.Id"], errorPolicy: "Omit" } });
+        for (const it of ((r.json as { value?: ({ id?: number } | null)[] } | null)?.value ?? [])) if (it && typeof it.id === "number") open.add(String(it.id));
+      }
+      return open;
+    },
   },
 
   async *changes(api, conn, project, cursor) {

@@ -20,6 +20,13 @@
  *   the `SIDEKICK_ENCRYPTION_KEY` envelope setup, lib/secret-box.ts, bound to the connector's id) and refreshed shortly before they run out.
  *   When a refresh is refused (revoked, expired after long disuse) the connector turns **expired** and the group's
  *   Team Lead or an admin must reconnect; nothing is deleted.
+ * - **Access mode** (`connectors.access_mode`, docs/ARCHITECTURE.md → Connectors): **shared** (the default: everyone
+ *   in the group sees what the connection's account can read) or **personal** ("each person signs in", Jira and Azure
+ *   DevOps only: `Provider.personal`). In personal mode the connection's account still syncs, but answers only use
+ *   items the reader's **own** sign-in can open (lib/connector-access.ts checks them at question time). Each
+ *   person's tokens are in `connector_user_tokens`, sealed and refreshed like the group's (`personalApi`); a refused
+ *   refresh turns that person's row expired. Personal sign-ins use the same callback as group connections
+ *   (`startPersonalConnect`, the state carries `connector_id`).
  * - **Link** (`connector_links`): one project (ADO), project key (Jira), repository (GitHub, "owner/name"),
  *   space key (Confluence) or SharePoint library / folder (Microsoft 365, "<drive id>[/<folder id>]") read through a
  *   group's connector into that same group. Org Owners/Admins and that group's Team Lead link and unlink (`requireManage`). Each link has an audience like documents
@@ -58,7 +65,7 @@
 import "server-only";
 import crypto from "node:crypto";
 import { all, asSystem, get, newId, now, run, setScopeOrg, tx } from "./db";
-import { audit, auditAsSidekick, HttpError, isAdmin, requireManage, workspaceIdsFor, type User } from "./auth";
+import { audit, auditAsSidekick, HttpError, isAdmin, requireManage, requireWorkspace, workspaceIdsFor, type User } from "./auth";
 import { openSecret, sealSecret } from "./secret-box";
 import { indexText, removeIndexedMany } from "./search";
 import { span, spanAttrs } from "./trace";
@@ -85,12 +92,24 @@ const STATE_MINUTES = 10;
 export const RATE_WAIT_MAX_SECONDS = 5;
 /** Browser cookie tying a connector sign-in to the browser that started it (like Microsoft sign-in's). */
 export const CONNECTOR_COOKIE = "sk_connector";
+/** Set with a personal sign-in ("Connect your Jira"): the callback lands back on Knowledge instead of Connectors. */
+export const CONNECTOR_BACK_COOKIE = "sk_connector_to";
 
 /** A `connectors` row. Tokens are sealed; use `toolApi` to call the tool. */
 export type ConnectorRow = {
   id: string; org_id: string; workspace_id: string; kind: ConnectorKind; status: "connected" | "expired"; account: string; account_name: string | null;
   api_base: string; web_base: string; access_token: string | null; refresh_token: string | null; token_expires_at: string | null;
   connected_by: string | null; connected_at: string; last_error: string | null; last_error_at: string | null; updated_at: string;
+  /** shared = everyone sees what the connection's account reads; personal = each person signs in (see the file comment). */
+  access_mode: AccessMode; access_mode_by: string | null; access_mode_at: string | null;
+};
+/** A connection's access mode (see the file comment). */
+export type AccessMode = "shared" | "personal";
+/** A `connector_user_tokens` row: one person's own sign-in to a personal-mode connection. Tokens are sealed. */
+export type PersonalTokenRow = {
+  id: string; org_id: string; connector_id: string; workspace_id: string; user_id: string; status: "connected" | "expired"; account_name: string | null;
+  access_token: string | null; refresh_token: string | null; token_expires_at: string | null; connected_at: string; last_used_at: string | null;
+  last_error: string | null; last_error_at: string | null; updated_at: string;
 };
 /** A `connector_links` row. */
 export type LinkRow = {
@@ -136,9 +155,35 @@ export type Provider = {
   projects(api: ToolApi, conn: ConnectorRow): Promise<{ key: string; name: string }[]>;
   /** The items changed since `cursor` (null = everything), oldest first, one page at a time (see `ChangePage`). */
   changes(api: ToolApi, conn: ConnectorRow, project: string, cursor: string | null): AsyncGenerator<WorkItem[] | ChangePage>;
+  /**
+   * "Each person signs in" (only tools that have it; the others are shared only, `PERSONAL_UNSUPPORTED`). `api` calls
+   * the tool with **one person's** token. `account` checks that person's sign-in opens the connection's own site
+   * (`ConnectorError` "access" otherwise) and says who they are there; `canOpen` returns which of the given external
+   * ids (item keys, as stored in `connector_items.external_id`) that person can open. Must fail closed: anything not
+   * clearly open is left out of the set.
+   */
+  personal?: {
+    account(api: ToolApi, conn: ConnectorRow): Promise<{ accountName: string }>;
+    canOpen(api: ToolApi, conn: ConnectorRow, externalIds: string[]): Promise<Set<string>>;
+  };
 };
 
 const PROVIDERS: Record<ConnectorKind, Provider> = { ado, jira, github, confluence, m365 };
+
+/** The tool's provider (lib/connector-access.ts uses its `personal` checks). */
+export const providerFor = (kind: ConnectorKind): Provider => PROVIDERS[kind];
+
+/**
+ * Why a tool can't use "each person signs in" yet (shown on its tile; docs/ARCHITECTURE.md → Connectors). Tools not
+ * listed here have `Provider.personal`.
+ */
+export const PERSONAL_UNSUPPORTED: Partial<Record<ConnectorKind, string>> = {
+  github: "GitHub permissions are per repository, never per issue: anyone who may open the linked repository may open all its issues, so the shared account already matches GitHub's own rule.",
+  confluence: "Shared only for now: checking Confluence page restrictions for each person is planned.",
+  m365: "Shared only for now: using SharePoint's own file permissions for each person is planned.",
+};
+/** True when the tool can check each person's own access (Jira, Azure DevOps). */
+export const supportsPersonal = (kind: ConnectorKind) => Boolean(PROVIDERS[kind].personal);
 
 /** Checks a tool name from a request ("ado", "jira", "github", "confluence" or "m365"), or 400. */
 export function kindOf(value: unknown): ConnectorKind {
@@ -342,6 +387,69 @@ async function connectorToken(c: Pick<ConnectorRow, "id" | "org_id" | "kind" | "
 /** The tool API for a stored connector (see `ToolApi`). */
 const toolApi = (c: ConnectorRow): ToolApi => makeApi(c.kind, (force) => connectorToken(c, force));
 
+/* ---------------------------------------------------------------- */
+/* One person's own sign-in ("each person signs in")                 */
+/* ---------------------------------------------------------------- */
+
+/** Seal-context per column and row of `connector_user_tokens`. */
+const userCtx = (id: string, col: "access_token" | "refresh_token") => `connector_user_tokens.${col}:${id}`;
+const personalExpiredMessage = (kind: ConnectorKind) => `Your ${KIND_LABEL[kind]} sign-in has expired or was revoked. Reconnect it on Knowledge to include ${KIND_LABEL[kind]} in your answers again.`;
+
+/** Marks one person's sign-in expired (once) and tells the group's audit log. */
+async function markPersonalExpired(t: Pick<PersonalTokenRow, "id" | "org_id" | "workspace_id" | "user_id">, kind: ConnectorKind) {
+  const r = await run("UPDATE connector_user_tokens SET status = 'expired', last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ? AND org_id = ? AND status <> 'expired'", personalExpiredMessage(kind), now(), now(), t.id, t.org_id);
+  if (r.changes) {
+    const who = (await get<{ name: string }>("SELECT name FROM users WHERE id = ? AND org_id = ?", t.user_id, t.org_id))?.name ?? "Someone";
+    await auditAsSidekick(t.org_id, `${who}'s own ${KIND_LABEL[kind]} sign-in expired or was revoked; ${KIND_LABEL[kind]} items are left out of their answers until they reconnect`, "Connectors", t.workspace_id);
+  }
+}
+
+/**
+ * A valid access token for one person's sign-in, refreshed like the group's (`connectorToken`): one refresh at a
+ * time per row in this process, rotated refresh tokens saved sealed; a refused refresh marks the row expired.
+ */
+async function personalToken(t: Pick<PersonalTokenRow, "id" | "org_id">, kind: ConnectorKind, force: boolean): Promise<string> {
+  const cur = await get<PersonalTokenRow>("SELECT * FROM connector_user_tokens WHERE id = ? AND org_id = ?", t.id, t.org_id);
+  if (!cur || cur.status === "expired") throw new ConnectorError("auth", personalExpiredMessage(kind));
+  const soon = new Date(Date.now() + 60_000).toISOString();
+  if (!force && cur.access_token && cur.token_expires_at && cur.token_expires_at > soon) return openSecret(cur.access_token, userCtx(cur.id, "access_token"));
+  const key = `u:${cur.id}`;
+  const pending = refreshing.get(key);
+  if (pending) return pending;
+  const p = (async () => {
+    if (!cur.refresh_token) {
+      await markPersonalExpired(cur, kind);
+      throw new ConnectorError("auth", personalExpiredMessage(kind));
+    }
+    const r = await span("connector", `Refresh a person's ${KIND_LABEL[kind]} sign-in`, () => PROVIDERS[kind].refresh(openSecret(cur.refresh_token!, userCtx(cur.id, "refresh_token"))))
+      .catch((e) => {
+        if (e instanceof ConnectorError) throw e;
+        throw new ConnectorError("network", `${BRAND.name} couldn't reach ${KIND_LABEL[kind]} to renew your sign-in.`);
+      });
+    if ("error" in r) {
+      if (r.revoked) {
+        await markPersonalExpired(cur, kind);
+        throw new ConnectorError("auth", personalExpiredMessage(kind));
+      }
+      throw new ConnectorError("busy", `${KIND_LABEL[kind]} didn't renew your sign-in right now.`);
+    }
+    await run(
+      "UPDATE connector_user_tokens SET access_token = ?, refresh_token = ?, token_expires_at = ?, updated_at = ? WHERE id = ? AND org_id = ?",
+      sealSecret(r.access, userCtx(cur.id, "access_token")), r.refresh ? sealSecret(r.refresh, userCtx(cur.id, "refresh_token")) : cur.refresh_token,
+      new Date(Date.now() + r.expiresIn * 1000).toISOString(), now(), cur.id, cur.org_id,
+    );
+    return r.access;
+  })().finally(() => refreshing.delete(key));
+  refreshing.set(key, p);
+  return p;
+}
+
+/**
+ * The tool API with **one person's** token (lib/connector-access.ts uses it for `Provider.personal.canOpen`). A
+ * refused refresh marks their sign-in expired and throws `ConnectorError` "auth".
+ */
+export const personalApi = (t: Pick<PersonalTokenRow, "id" | "org_id">, kind: ConnectorKind): ToolApi => makeApi(kind, (force) => personalToken(t, kind, force));
+
 /** A `ConnectorError` for a person's request: 409 (reconnect / access / gone), 502 for the tool being down. */
 function asHttp(e: unknown): never {
   if (e instanceof ConnectorError) {
@@ -388,6 +496,77 @@ export async function startConnect(req: Request, user: User, kindRaw: unknown, s
 }
 
 /**
+ * Starts **one person's own** sign-in to a group's connection in "each person signs in" mode (Connect your Jira):
+ * anyone who may see the connection's group (`requireWorkspace`; Viewers too, since they ask questions). Refuses a
+ * shared-mode connection (409), a tool without per-person checks (409), a tool type no longer allowed (403) and a
+ * tool whose app isn't set up here (503). The state carries the connection's id, which tells `finishConnect` it's a
+ * personal sign-in; the redirect address is the same as for group connections.
+ */
+export async function startPersonalConnect(req: Request, user: User, connectorRaw: unknown): Promise<{ url: string; state: string }> {
+  const c = typeof connectorRaw === "string" ? await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ?", connectorRaw, user.org_id) : undefined;
+  if (!c) throw new HttpError(404, "Connector not found.");
+  await requireWorkspace(user, c.workspace_id).catch(() => { throw new HttpError(404, "Connector not found."); });
+  const p = PROVIDERS[c.kind];
+  if (!p.personal) throw new HttpError(409, `${KIND_LABEL[c.kind]} uses the group's shared account. ${PERSONAL_UNSUPPORTED[c.kind] ?? ""}`.trim());
+  if (c.access_mode !== "personal") throw new HttpError(409, `This group's ${KIND_LABEL[c.kind]} uses one shared account, so there's nothing to connect for yourself.`);
+  if (!(await isAllowed(user.org_id, c.kind))) throw new HttpError(403, notAllowedMessage(c.kind));
+  if (!p.configured()) throw new HttpError(503, `Connecting ${KIND_LABEL[c.kind]} isn't set up on this ${BRAND.name} yet.`);
+  const state = b64url(crypto.randomBytes(24));
+  const verifier = b64url(crypto.randomBytes(32));
+  await run("DELETE FROM connector_states WHERE expires_at < ?", now());
+  await run(
+    "INSERT INTO connector_states (state, org_id, user_id, kind, verifier, site, expires_at, workspace_id, connector_id) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+    state, user.org_id, user.id, c.kind, verifier, new Date(Date.now() + STATE_MINUTES * 60_000).toISOString(), c.workspace_id, c.id,
+  );
+  const challenge = b64url(crypto.createHash("sha256").update(verifier).digest());
+  return { url: p.authorizeUrl({ state, challenge, redirectUri: connectorRedirectUri(req) }), state };
+}
+
+/**
+ * Finishes a personal sign-in (from `finishConnect`): the person must still see the group, the connection must still
+ * be in personal mode; the account must open the connection's own site (`Provider.personal.account`). Saves (or
+ * replaces) their row with the tokens sealed, connected again. Audited in the group (no tokens, no item names).
+ */
+async function finishPersonal(req: Request, saved: { org_id: string; user_id: string; kind: ConnectorKind; verifier: string; connector_id: string }, code: string): Promise<{ kind: ConnectorKind; ws: string; personal: true }> {
+  const user = await get<User>("SELECT * FROM users WHERE id = ? AND org_id = ?", saved.user_id, saved.org_id);
+  if (!user) throw new HttpError(403, "Sign in to the portal again, then connect.");
+  const c = await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ?", saved.connector_id, saved.org_id);
+  if (!c || c.kind !== saved.kind) throw new HttpError(404, "Connector not found.");
+  await requireWorkspace(user, c.workspace_id).catch(() => { throw new HttpError(404, "Connector not found."); });
+  const p = PROVIDERS[c.kind];
+  if (!p.personal || c.access_mode !== "personal") throw new HttpError(409, `This group's ${KIND_LABEL[c.kind]} uses one shared account now, so there's nothing to connect for yourself.`);
+  return span("connector", `Connect your own ${KIND_LABEL[c.kind]}`, async () => {
+    const tokens = await p.exchange(code, saved.verifier, connectorRedirectUri(req)).catch(() => ({ error: "unreachable" }));
+    if ("error" in tokens) {
+      console.error(`Connector sign-in: personal ${c.kind} token exchange failed`, tokens.error);
+      throw new HttpError(502, `${KIND_LABEL[c.kind]} didn't confirm the sign-in. Try again.`);
+    }
+    const acct = await p.personal!.account(makeApi(c.kind, async () => tokens.access), c).catch(asHttp);
+    const existing = await get<{ id: string }>("SELECT id FROM connector_user_tokens WHERE connector_id = ? AND user_id = ? AND org_id = ?", c.id, user.id, c.org_id);
+    const id = existing?.id ?? newId();
+    const sealedAccess = sealSecret(tokens.access, userCtx(id, "access_token"));
+    const sealedRefresh = tokens.refresh ? sealSecret(tokens.refresh, userCtx(id, "refresh_token")) : null;
+    const expires = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
+    const name = acct.accountName.slice(0, 200);
+    if (existing) {
+      await run(
+        "UPDATE connector_user_tokens SET status = 'connected', account_name = ?, access_token = ?, refresh_token = ?, token_expires_at = ?, connected_at = ?, last_error = NULL, last_error_at = NULL, updated_at = ? WHERE id = ? AND org_id = ?",
+        name, sealedAccess, sealedRefresh, expires, now(), now(), id, c.org_id,
+      );
+    } else {
+      await run(
+        `INSERT INTO connector_user_tokens (id, org_id, connector_id, workspace_id, user_id, status, account_name, access_token, refresh_token, token_expires_at, connected_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'connected', ?, ?, ?, ?, ?, ?)`,
+        id, c.org_id, c.id, c.workspace_id, user.id, name, sealedAccess, sealedRefresh, expires, now(), now(),
+      );
+    }
+    spanAttrs({ kind: c.kind, reconnect: Boolean(existing), personal: true });
+    await audit(user, `${existing ? "Reconnected" : "Connected"} their own ${KIND_LABEL[c.kind]} sign-in (${name}) for this group, read-only`, "Connectors", c.workspace_id);
+    return { kind: c.kind, ws: c.workspace_id, personal: true as const };
+  });
+}
+
+/**
  * Finishes connecting: checks the state against the browser cookie (used once, 10 minutes), swaps the code for
  * tokens, checks which account/site they open, and saves the **group's** connector with the tokens sealed.
  * Reconnecting the same account replaces the tokens and resumes syncing; a different account is refused (disconnect
@@ -395,12 +574,12 @@ export async function startConnect(req: Request, user: User, kindRaw: unknown, s
  * they may still manage that group and the tool type is still allowed. Audited in the group.
  * @returns the tool that was connected and the group
  */
-export async function finishConnect(req: Request, cookieState: string | undefined): Promise<{ kind: ConnectorKind; ws: string }> {
+export async function finishConnect(req: Request, cookieState: string | undefined): Promise<{ kind: ConnectorKind; ws: string; personal?: boolean }> {
   const q = new URL(req.url).searchParams;
   const state = q.get("state") ?? "";
   // The tool sends the person back with only the random state: finding it is a lookup across orgs (system work).
   // Everything after runs as the org that started connecting (row-level security, lib/db.ts).
-  const saved = state ? await asSystem("connector sign-in", () => get<{ state: string; org_id: string; user_id: string; kind: ConnectorKind; verifier: string; site: string | null; expires_at: string; workspace_id: string | null }>("SELECT * FROM connector_states WHERE state = ?", state)) : undefined;
+  const saved = state ? await asSystem("connector sign-in", () => get<{ state: string; org_id: string; user_id: string; kind: ConnectorKind; verifier: string; site: string | null; expires_at: string; workspace_id: string | null; connector_id: string | null }>("SELECT * FROM connector_states WHERE state = ?", state)) : undefined;
   if (saved) {
     await asSystem("connector sign-in", () => run("DELETE FROM connector_states WHERE state = ?", state));
     setScopeOrg(saved.org_id);
@@ -413,6 +592,8 @@ export async function finishConnect(req: Request, cookieState: string | undefine
   const code = q.get("code") ?? "";
   if (!saved || !code || !cookieState || cookieState !== state) throw new HttpError(400, "That link expired or was opened in a different browser. Start connecting again from Connectors.");
   if (saved.expires_at < now()) throw new HttpError(400, "Connecting took too long. Try again.");
+  // A person connecting their own account to a personal-mode connection ("Connect your Jira").
+  if (saved.connector_id) return finishPersonal(req, { ...saved, connector_id: saved.connector_id }, code);
   const user = await get<User>("SELECT * FROM users WHERE id = ? AND org_id = ?", saved.user_id, saved.org_id);
   if (!user) throw new HttpError(403, "Only the group's Team Lead or an admin can connect tools.");
   const ws = await requireManage(user, saved.workspace_id);
@@ -476,6 +657,34 @@ export async function disconnect(user: User, id: unknown): Promise<{ links: numb
   return removeConnector(user, await ownConnector(user, id));
 }
 
+/**
+ * Switches one group's connection between **shared** (everyone sees what the connection's account reads) and
+ * **personal** ("each person signs in": answers use only what the reader's own sign-in can open). The group's Team
+ * Lead or an Org Owner/Admin (`ownConnector`). Personal is refused (409) for tools without per-person checks
+ * (`PERSONAL_UNSUPPORTED`). Back to shared deletes everyone's own sign-ins to it. Nothing synced is deleted either
+ * way. Audited in the group, traced.
+ * @returns the new mode and how many personal sign-ins were removed
+ */
+export async function setAccessMode(user: User, id: unknown, modeRaw: unknown): Promise<{ accessMode: AccessMode; removedSignIns: number }> {
+  const c = await ownConnector(user, id);
+  if (modeRaw !== "shared" && modeRaw !== "personal") throw new HttpError(400, "Pick shared (one account for the group) or personal (each person signs in).");
+  const mode: AccessMode = modeRaw;
+  if (mode === "personal" && !PROVIDERS[c.kind].personal) throw new HttpError(409, PERSONAL_UNSUPPORTED[c.kind] ?? `${KIND_LABEL[c.kind]} can only use one shared account.`);
+  if (mode === c.access_mode) return { accessMode: mode, removedSignIns: 0 };
+  return span("connector", `Switch ${KIND_LABEL[c.kind]} to ${mode === "personal" ? "each person signs in" : "a shared account"}`, async () => {
+    let removed = 0;
+    await tx(async () => {
+      await run("UPDATE connectors SET access_mode = ?, access_mode_by = ?, access_mode_at = ?, updated_at = ? WHERE id = ? AND org_id = ?", mode, user.name, now(), now(), c.id, user.org_id);
+      if (mode === "shared") removed = (await run("DELETE FROM connector_user_tokens WHERE connector_id = ? AND org_id = ?", c.id, user.org_id)).changes;
+    });
+    spanAttrs({ kind: c.kind, mode, removedSignIns: removed });
+    await audit(user, mode === "personal"
+      ? `Switched ${KIND_LABEL[c.kind]} to "each person signs in": answers now only use ${KIND_LABEL[c.kind]} items the reader's own sign-in can open`
+      : `Switched ${KIND_LABEL[c.kind]} back to one shared account for the group${removed ? ` (removed ${removed} personal sign-in${removed === 1 ? "" : "s"})` : ""}`, "Connectors", c.workspace_id);
+    return { accessMode: mode, removedSignIns: removed };
+  });
+}
+
 /** Removes a connector with its links, items, search entries and health (see `disconnect`). Audited. */
 async function removeConnector(user: User, c: ConnectorRow): Promise<{ links: number; items: number }> {
   return span("connector", `Disconnect ${KIND_LABEL[c.kind]}`, async () => {
@@ -485,6 +694,8 @@ async function removeConnector(user: User, c: ConnectorRow): Promise<{ links: nu
     await tx(async () => {
       await run("DELETE FROM connector_items WHERE org_id = ? AND link_id IN (SELECT id FROM connector_links WHERE connector_id = ? AND org_id = ?)", user.org_id, c.id, user.org_id);
       await run("DELETE FROM connector_links WHERE connector_id = ? AND org_id = ?", c.id, user.org_id);
+      // Everyone's own sign-ins to it go too ("each person signs in").
+      await run("DELETE FROM connector_user_tokens WHERE connector_id = ? AND org_id = ?", c.id, user.org_id);
       await run("DELETE FROM connectors WHERE id = ? AND org_id = ?", c.id, user.org_id);
       // Disconnected on purpose: nothing for the broken-connector watcher to report any more.
       await run("DELETE FROM connector_health WHERE org_id = ? AND workspace_id = ? AND connector = ?", user.org_id, c.workspace_id, HEALTH[c.kind].id);
@@ -767,10 +978,16 @@ export type LinkHealth = {
   id: string; connectorId: string; kind: ConnectorKind; workspaceId: string; workspaceName: string; project: string; projectName: string;
   audience: "internal" | "shareable"; items: number; skipped: number; lastSyncAt: string | null; lastOkAt: string | null; syncing: boolean; problem: string | null;
 };
-/** One group's connected tool's health. `status`: ok, expired (reconnect), error (a project fails or is stale), waiting (no sync yet). */
+/**
+ * One group's connected tool's health. `status`: ok, expired (reconnect), error (a project fails or is stale), waiting
+ * (no sync yet). `accessMode` and `personal`: who sees what ("each person signs in": how many of the group's people
+ * have connected, and the names of those whose own sign-in expired, for the group's managers).
+ */
 export type ConnectorHealth = {
   id: string; kind: ConnectorKind; label: string; workspaceId: string; workspaceName: string; account: string; accountName: string | null; status: "ok" | "expired" | "error" | "waiting";
   problem: string | null; connectedBy: string | null; connectedAt: string; lastSyncAt: string | null; lastOkAt: string | null; links: LinkHealth[];
+  accessMode: AccessMode;
+  personal: { supported: boolean; reason: string | null; people: number; connected: number; expired: string[] };
 };
 
 const staleSince = (at: Date) => new Date(at.getTime() - STALE_HOURS * 3600_000).toISOString();
@@ -813,7 +1030,17 @@ export async function connectorHealth(orgId: string, workspaceIds: string[] | nu
   )).filter((c) => !workspaceIds || workspaceIds.includes(c.workspace_id));
   const links = (await all<LinkJoin>(`${LINK_SELECT} WHERE l.org_id = ? ORDER BY w.name, l.project_name`, orgId))
     .filter((l) => !workspaceIds || workspaceIds.includes(l.workspace_id));
+  // Personal sign-ins of the group's current members only (someone who left no longer counts).
+  const signIns = conns.some((c) => c.access_mode === "personal")
+    ? await all<{ connector_id: string; status: string; name: string }>(
+      `SELECT t.connector_id, t.status, u.name FROM connector_user_tokens t JOIN users u ON u.id = t.user_id AND u.org_id = t.org_id
+        WHERE t.org_id = ? AND EXISTS (SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = t.workspace_id AND wm.user_id = t.user_id) ORDER BY u.name`, orgId)
+    : [];
+  const people = new Map((await all<{ workspace_id: string; n: number | string }>(
+    "SELECT wm.workspace_id, COUNT(*) AS n FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id WHERE w.org_id = ? GROUP BY wm.workspace_id", orgId,
+  )).map((r) => [r.workspace_id, Number(r.n)]));
   return conns.map((c) => {
+    const mineSignIns = signIns.filter((t) => t.connector_id === c.id);
     const mine = links.filter((l) => l.connector_id === c.id).map((l) => toLinkHealth(l, at));
     const okTimes = mine.map((l) => l.lastOkAt).filter((x): x is string => !!x).sort();
     const tries = mine.map((l) => l.lastSyncAt).filter((x): x is string => !!x).sort();
@@ -824,6 +1051,11 @@ export async function connectorHealth(orgId: string, workspaceIds: string[] | nu
     return {
       id: c.id, kind: c.kind, label: KIND_LABEL[c.kind], workspaceId: c.workspace_id, workspaceName: c.workspace_name, account: c.account, accountName: c.account_name, status, problem,
       connectedBy: c.connected_by, connectedAt: c.connected_at, lastSyncAt: tries.at(-1) ?? null, lastOkAt: okTimes.at(-1) ?? null, links: mine,
+      accessMode: c.access_mode === "personal" ? "personal" : "shared",
+      personal: {
+        supported: supportsPersonal(c.kind), reason: PERSONAL_UNSUPPORTED[c.kind] ?? null, people: people.get(c.workspace_id) ?? 0,
+        connected: mineSignIns.filter((t) => t.status === "connected").length, expired: mineSignIns.filter((t) => t.status === "expired").map((t) => t.name),
+      },
     };
   });
 }
@@ -898,12 +1130,14 @@ export async function workItemLinks(orgId: string, ids: string[]): Promise<Map<s
  * The group's open work items (not done/closed/merged), most recently changed first, as inventory lines for the
  * knowledge map and meeting notes: `- "<title as indexed>": State · assignee · due · blocked by …`. At most `limit`.
  * Confluence pages aren't work, so they're left out (they reach the knowledge map as documents through search).
+ * Items of "each person signs in" connections are left out too: these outputs are read by the whole group, and not
+ * everyone may open every item (docs/ARCHITECTURE.md → Connectors).
  */
 export async function openWorkItemLines(orgId: string, workspaceId: string, limit = 60): Promise<string[]> {
   const rows = await all<{ kind: ConnectorKind; external_id: string; item_type: string | null; title: string; state: string | null; assignee: string | null; due_on: string | null; blocked_by: string | null; changed_at: string | null }>(
     `SELECT c.kind, i.external_id, i.item_type, i.title, i.state, i.assignee, i.due_on, i.blocked_by, i.changed_at FROM connector_items i
        JOIN connector_links l ON l.id = i.link_id AND l.org_id = i.org_id JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
-      WHERE i.org_id = ? AND i.workspace_id = ? ORDER BY i.changed_at DESC LIMIT 400`,
+      WHERE i.org_id = ? AND i.workspace_id = ? AND c.access_mode <> 'personal' ORDER BY i.changed_at DESC LIMIT 400`,
     orgId, workspaceId,
   );
   return rows.filter((r) => !isPageKind(r.kind) && !isDoneState(r.state)).slice(0, limit).map((r) => {

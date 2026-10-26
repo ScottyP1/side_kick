@@ -629,6 +629,15 @@ site / any GitHub organization that installs the app). **Only Cody creates these
 secrets go straight into Key Vault; they are never pasted into chat, a ticket or the repo. Until an app exists, its
 tile says "Not set up yet" and nothing else changes. Use the live address for `<site>` (SIDEKICK_PUBLIC_URL).
 
+**Each person signs in** (Oct 25, 2026; docs/ARCHITECTURE.md → Connectors): members connect their own Jira or Azure
+DevOps account through **the same apps and the same redirect address** (`/api/connectors/callback`), so there is
+**nothing extra to register**. Two things to check once per app: the Atlassian app's **Distribution** must be
+**Sharing** (step 4 below; otherwise only you can sign in), and the Entra app must stay **multitenant**. A client
+whose Microsoft admin blocks user consent must approve the Azure DevOps app once for their organization, after
+which every member can connect. Jira's per-person check calls `POST /rest/api/3/issue/bulkfetch` and `/myself`,
+Azure DevOps' calls `_apis/connectionData` and `_apis/wit/workitemsbatch`: all covered by the scopes below
+(`read:jira-work`, `read:jira-user`, `vso.work`).
+
 **Azure DevOps (Microsoft Entra ID; Azure DevOps' own OAuth apps are deprecated)**
 1. entra.microsoft.com (the Sidekick Labs tenant) → **App registrations → New registration**.
    - Name: `Sidekick Connectors (Azure DevOps)`.
@@ -760,6 +769,15 @@ does the fixing; you only help). Connections are per group: one group's problem 
   Lead presses **Reconnect** and signs in again with the client's account. Nothing was deleted. After the Oct 24,
   2026 move to per-group connections, a group that shared an organization-wide connection with another group shows
   "Connections are per group now: sign in again for this group" once: same fix.
+- **"Connect your Jira to include its tickets" / a member says tickets are missing** (the connection uses "each
+  person signs in"): they haven't connected their own account, or it expired (Knowledge → Your sign-ins to tools →
+  Connect / Reconnect). Their account must open the **same** Jira site / Azure DevOps organization as the group's
+  connection, otherwise the sign-in is refused with that reason. Tickets they can't open in the tool are left out on
+  purpose. "didn't confirm who can open its tickets just now" = the tool didn't answer within 4 seconds; try again.
+  In Teams group chats, tickets are only used when everyone in the chat is a group member who connected and can open
+  them (guests or unknown people in the chat: left out, by design). Expired personal sign-ins show under Needs
+  attention for the group's Team Lead (watcher `connector_signins`). A revoked access can take up to 5 minutes to
+  apply (`ACCESS_CACHE_SECONDS` in `app/src/lib/connector-access.ts`).
 - **"refused access to the project …"**: the connected account lost access to that project. Reconnect with an
   account that can open it, or unlink the project.
 - **"couldn't find …"**: the project or organization was renamed or deleted. Unlink it and link the new one.

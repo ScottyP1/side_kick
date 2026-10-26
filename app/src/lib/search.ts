@@ -266,6 +266,11 @@ export type SearchOpts = {
   since?: string | null;
   /** only sources dated on or before this day (YYYY-MM-DD) */
   until?: string | null;
+  /**
+   * `findSources` only: the source ids among the candidates the readers may not see (lib/connector-access.ts
+   * "each person signs in"), left out before ranking so the best remaining sources fill the answer.
+   */
+  screen?: (candidates: Passage[]) => Promise<Set<string>>;
 };
 
 /** The workspace ids one search covers: the group, plus the firm library unless left out or filtered away. */
@@ -473,12 +478,15 @@ export type FoundSource = Ranked;
 
 /**
  * The answer pipeline for Ask (portal and Teams): searches the group and its firm library (~30 candidates,
- * with the person's type and date filters), adds each source's facts (`sourceInfo`), then re-ranks,
- * de-duplicates and keeps the best `limit` (lib/rank.ts). Traced as its own step with counts only.
+ * with the person's type and date filters), leaves out what `opts.screen` says the readers may not see, adds each
+ * source's facts (`sourceInfo`), then re-ranks, de-duplicates and keeps the best `limit` (lib/rank.ts). Traced as
+ * its own step with counts only.
  */
 export async function findSources(orgId: string, workspaceId: string, question: string, opts: SearchOpts = {}): Promise<FoundSource[]> {
   const limit = opts.limit ?? 10;
-  const candidates = await searchPassages(orgId, workspaceId, question, { ...opts, limit: Math.max(30, limit * 3) });
+  const found = await searchPassages(orgId, workspaceId, question, { ...opts, limit: Math.max(30, limit * 3) });
+  const hidden = opts.screen ? await opts.screen(found) : new Set<string>();
+  const candidates = hidden.size ? found.filter((p) => !hidden.has(p.source_id)) : found;
   return span("rank", "Re-rank the sources", async () => {
     const info = await sourceInfo(orgId, candidates);
     const list: Candidate[] = candidates.map((p) => {

@@ -16,6 +16,10 @@
  *   (`/rest/api/3/search/jql`, pages of 50 with `nextPageToken`). JQL times are in the signing-in person's own
  *   time zone and only to the minute, so the cursor goes back a day to be safe; unchanged issues are skipped
  *   (text hash) so the overlap costs no re-indexing.
+ * - **Each person signs in** (`personal`, docs/ARCHITECTURE.md → Connectors): a member's own Atlassian sign-in must
+ *   open the connection's site (same cloud id); before an answer uses issues, `canOpen` asks Jira which of the
+ *   candidate keys that person can open (`POST /rest/api/3/issue/bulkfetch`, up to 100 keys a call). Jira only
+ *   returns issues the person may browse (project permissions, issue security levels), so anything missing is closed.
  *
  * Tests and the demo world point `JIRA_AUTH_BASE` and `JIRA_API_BASE` at a fake Jira (scripts/fake-tools.mjs);
  * both overrides are ignored in production.
@@ -122,6 +126,29 @@ export const jira: Provider = {
       startAt += values.length;
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
+  },
+
+  personal: {
+    async account(api, conn) {
+      const r = await api(`${apiBase()}/oauth/token/accessible-resources`);
+      const sites = ((r.json as { id: string }[]) ?? []).filter((s) => s?.id);
+      if (!sites.some((s) => s.id === conn.account)) {
+        throw new ConnectorError("access", `This Atlassian account can't open the Jira site ${conn.account_name ?? conn.account}. Sign in with the account the client gave you for that site.`, 403);
+      }
+      const me = (await api(`${conn.api_base}/rest/api/3/myself`)).json as { displayName?: string; emailAddress?: string } | null;
+      return { accountName: me?.displayName || me?.emailAddress || "Jira user" };
+    },
+    async canOpen(api, conn, keys) {
+      const open = new Set<string>();
+      for (let i = 0; i < keys.length; i += 100) {
+        const part = keys.slice(i, i + 100);
+        const r = await api(`${conn.api_base}/rest/api/3/issue/bulkfetch`, { method: "POST", body: { issueIdsOrKeys: part, fields: ["summary"] } });
+        const wanted = new Set(part);
+        // Only keys asked for count: an issue moved meanwhile comes back under a new key and stays closed.
+        for (const it of ((r.json as { issues?: { key?: string }[] } | null)?.issues ?? [])) if (it?.key && wanted.has(it.key)) open.add(it.key);
+      }
+      return open;
+    },
   },
 
   async *changes(api, conn, project, cursor) {

@@ -54,6 +54,7 @@ import { all, asSystem, get, now, run, withOrg } from "../db";
 import { audit, canEdit, HttpError, type User } from "../auth";
 import { FeatureOffError } from "../owner";
 import { ask, endAskConversation } from "../sidekick";
+import { MAX_CHAT_PEOPLE, type Readers } from "../connector-access";
 import { CHAT_FOLLOWUP_MINUTES } from "../conversations";
 import { recordFeedback } from "../feedback";
 import { failureReason, span, traceFailed, traceScope, withTrace } from "../trace";
@@ -457,6 +458,49 @@ export async function stillInChat(conv: Pick<TeamsConversation, "id" | "service_
 }
 
 /**
+ * Who will read an answer in this chat, for connections in "each person signs in" mode (lib/connector-access.ts):
+ * undefined (the asker alone) in a 1:1 chat or when the group has no such connection (no Teams call then). In a group
+ * chat or channel: everyone in its roster (a channel's is the team's), matched by Microsoft account to the group's
+ * Sidekick people (members, or Org Owners/Admins, who see every group) in the organization's own Microsoft tenant.
+ * People who can't be matched (client guests, people who never signed in with Microsoft) are counted in `unmatched`;
+ * a roster Teams won't give within 4 seconds, or one larger than `MAX_CHAT_PEOPLE`, is `unknown`. Either way the
+ * personal connections' items are left out of the answer: the safe choice for a reply everyone in the chat reads.
+ */
+async function chatReaders(conv: TeamsConversation, a: InboundActivity): Promise<Readers | undefined> {
+  if (conv.kind === "personal" || !conv.workspace_id || !conv.org_id) return undefined;
+  if (!(await get("SELECT id FROM connectors WHERE org_id = ? AND workspace_id = ? AND access_mode = 'personal'", conv.org_id, conv.workspace_id))) return undefined;
+  const unknown: Readers = { kind: "chat", userIds: [], unmatched: 0, unknown: true };
+  try {
+    const api = await connectorFor(conv);
+    if (!api) return unknown;
+    const rosterId = a.channelData?.team?.id ?? conv.id;
+    const members = await span("teams", "List the people in a Teams chat", () =>
+      Promise.race([api.conversations.getMembers(rosterId), new Promise<null>((r) => setTimeout(() => r(null), 4000))]));
+    if (!Array.isArray(members) || members.length > MAX_CHAT_PEOPLE) return unknown;
+    const tenant = (await get<{ entra_tenant_id: string | null }>("SELECT entra_tenant_id FROM orgs WHERE id = ?", conv.org_id))?.entra_tenant_id ?? null;
+    const userIds: string[] = [];
+    let unmatched = 0;
+    for (const m of members as { aadObjectId?: string; tenantId?: string; userRole?: string }[]) {
+      const oid = m.aadObjectId;
+      const guest = m.userRole === "guest" || m.userRole === "anonymous" || (m.tenantId && tenant && m.tenantId !== tenant);
+      const person = oid && tenant && !guest
+        ? await get<{ id: string }>(
+          `SELECT u.id FROM users u WHERE u.org_id = ? AND u.entra_oid = ?
+              AND (u.role IN ('Org Owner', 'Org Admin') OR EXISTS (SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = ? AND wm.user_id = u.id))`,
+          conv.org_id, oid, conv.workspace_id,
+        )
+        : undefined;
+      if (person) userIds.push(person.id);
+      else unmatched++;
+    }
+    return { kind: "chat", userIds: [...new Set(userIds)], unmatched };
+  } catch (e) {
+    console.error("Couldn't list the people in a Teams chat for an answer", e instanceof Error ? e.message : e);
+    return unknown;
+  }
+}
+
+/**
  * The display names of the people in a chat (Teams' roster, at most 12), for the portal's "Assign a chat" list;
  * null when Teams can't be asked or takes over 4 seconds. Only names: nothing is stored. Never throws.
  */
@@ -640,8 +684,9 @@ function registerHandlers(app: App) {
           const result = await ask(asker, conv.workspace_id!, question, guests, "teams", {
             teamsScope: { key: threadKey, idleMinutes: conv.kind === "channel" ? undefined : CHAT_FOLLOWUP_MINUTES },
             newQuestion: Boolean(fresh),
+            readers: await chatReaders(conv, activity),
           });
-          const card = answerCard(question, result, (await workspaceName(conv)) ?? "Workspace");
+          const card = answerCard(question, { ...result, signInUrl: portalUrl(`/knowledge?ws=${encodeURIComponent(conv.workspace_id!)}#signins`) }, (await workspaceName(conv)) ?? "Workspace");
           await span("teams", "Send the answer card to Teams", () => reply(card)).then(
             () => notePostOk(conv.id),
             async (e) => {

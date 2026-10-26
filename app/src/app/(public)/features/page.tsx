@@ -41,12 +41,12 @@ const GROUPS: { id: string; title: string; lead: string; items: Feature[] }[] = 
   {
     id: "admin",
     title: "For admins",
-    lead: "Rules, records and costs, for Org Owners and Org Admins.",
+    lead: "Rules, records and usage, for Org Owners and Org Admins.",
     items: [
       { icon: "shield", title: "Guardrails", text: "A locked safety floor plus switches and custom rules for the whole company or one group.", points: ["Groups can be stricter, never looser", "Test a question against the rules before it matters", "Answers are checked against their sources"] },
       { icon: "audit", title: "Audit log and activity", text: `Who did what and when, and what ${BRAND.name} did step by step (timings and counts, never document text).`, points: ["Sign-ins, role changes, links, rule changes", "Reference codes on every error for quick support"] },
       { icon: "lock", title: "Roles and access", text: "Five roles from Org Owner to Viewer, Team Leads per group, and Microsoft sign-in you can require.", points: ["Import people from Microsoft 365", "Only Org Owners and Org Admins see billing"] },
-      { icon: "cloud", title: "Usage and billing", text: "AI use per group and per person, and your plan, in one place.", points: ["Change plan or cancel any time", "Nothing is deleted when a plan lapses: it turns read-only"] },
+      { icon: "cloud", title: "Usage and billing", text: "What it did per group (questions, meetings, documents, reminders), your AI allowance and your plan, in one place.", points: ["Export per group for chargeback", "Change plan or cancel any time", "Nothing is deleted when a plan lapses: it turns read-only"] },
     ],
   },
 ];

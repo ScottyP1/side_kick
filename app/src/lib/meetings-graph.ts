@@ -941,7 +941,7 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
     await creditGate("extract", orgId, { size: transcript.length });
   } catch (e) {
     if (e instanceof HttpError && (e.status === 402 || e instanceof FeatureOffError)) {
-      const reason = e.status === 402 ? "This month's meeting hours on your plan are used up." : "This month's AI credit is used up, so long meetings get no notes.";
+      const reason = e.status === 402 ? "This month's meeting hours on your plan are used up." : "This month's included AI is used up, so long meetings get no notes.";
       await auditAsSidekick(orgId, `Didn't write notes for the Teams meeting “${title}”: ${reason}`, "Agent action", workspaceId);
       return skip(reason, withGroup);
     }

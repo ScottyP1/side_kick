@@ -6,7 +6,10 @@
  * restrictions: feature switches that apply to this client only. Also its limits against use ("over limit"
  * / "near limit"), this month's AI credit with a one-off top-up, its plan terms (custom limits for
  * Enterprise or managed clients, AI credit override, contract price, partner/referrer, questions per person
- * per hour), and its AI use by feature and model (model names are only shown here, never in the portal).
+ * per hour), and its AI use by feature and model (model names are only shown here, never in the portal), plus
+ * AiUsagePanel: this month's AI cost, tokens, response time, failures, cost on pace, per group and per day, and
+ * a CSV with cost (GET /api/owner/tenants/:id/usage-export). The client's own Usage page shows counts and a
+ * percent only (lib/firm-usage.ts).
  * Roll-off: groups ending and the organization's pending deletion, with **End client** (read-only now,
  * deleted after 30 days) and links to Owner Console → Roll-offs to extend or cancel.
  * Operators only; opening the page is recorded in the operator log once per visit (reloads after a switch
@@ -42,7 +45,12 @@ type Detail = {
   terms: Terms;
   credit: Credit;
   limits: LimitLine[];
-  ai: { byModel: { feature: string; model: string; calls: number; cost: number; input: number; cached: number }[] };
+  ai: {
+    byModel: { feature: string; model: string; calls: number; cost: number; input: number; cached: number }[];
+    totals: { calls: number; cost: number; input: number; output: number; latency: number; errors: number };
+    byWorkspace: { name: string; calls: number; cost: number; latency: number }[];
+    daily: { d: string; calls: number; cost: number }[];
+  };
 };
 
 export default function ClientPage() {
@@ -121,6 +129,7 @@ function Client() {
         </div>
         <CreditPanel d={d} onSaved={() => load(true).catch(reportError)} />
       </div>
+      <AiUsagePanel d={d} />
       <TermsPanel d={d} onSaved={() => load(true).catch(reportError)} />
 
       <div className="grid g2">
@@ -240,6 +249,8 @@ function PlanPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
 }
 
 const money = (n: number) => `$${n.toFixed(2)}`;
+/** A token count, short: 950, 12.3k, 4.5M. */
+const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 /**
  * This month's AI credit (used of included, top-ups) and a one-off top-up for this month (POST
@@ -285,6 +296,64 @@ function CreditPanel({ d, onSaved }: { d: Detail; onSaved: () => void }) {
               {!d.ai.byModel.length && <tr><td colSpan={5} className="muted">No AI use this month.</td></tr>}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The client's AI use this month in Sidekick's terms (operators only): cost and cost on pace, requests and
+ * failures, tokens in and out, average response time, then cost per group and per day, and a CSV download with
+ * cost per group and month (GET /api/owner/tenants/:id/usage-export, last 12 months).
+ */
+function AiUsagePanel({ d }: { d: Detail }) {
+  const t = d.ai.totals;
+  const now = new Date();
+  const day = now.getUTCDate();
+  const days = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const projected = day ? (Number(t.cost) / day) * days : 0;
+  const maxDay = Math.max(0.0001, ...d.ai.daily.map((x) => Number(x.cost)));
+  return (
+    <div className="panel">
+      <div className="panel-h">
+        <h2>AI use this month</h2>
+        <a className="btn" href={`/api/owner/tenants/${d.org.id}/usage-export?months=12`} download>Export CSV with cost</a>
+      </div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="grid g4">
+          {[
+            ["AI cost", money(Number(t.cost)), `On pace for ${money(projected)}`],
+            ["Requests", Number(t.calls).toLocaleString(), `${t.errors} failed`],
+            ["Tokens", tokens(Number(t.input) + Number(t.output)), `${tokens(Number(t.input))} in · ${tokens(Number(t.output))} out`],
+            ["Avg response time", `${(Number(t.latency) / 1000).toFixed(1)} s`, t.calls ? `Over ${Number(t.calls).toLocaleString()} requests` : "No requests yet"],
+          ].map(([l, v, sub]) => (
+            <div key={l} className="kpi" style={{ cursor: "default" }}><span className="eyebrow">{l}</span><span className="v">{v}</span><span className="d muted">{sub}</span></div>
+          ))}
+        </div>
+        <div className="grid g2">
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Group</th><th className="r">Requests</th><th className="r">Avg time</th><th className="r">Cost</th></tr></thead>
+              <tbody>
+                {d.ai.byWorkspace.map((w) => <tr key={w.name}><td>{w.name}</td><td className="r num">{w.calls}</td><td className="r num">{(Number(w.latency) / 1000).toFixed(1)} s</td><td className="r num">{money(Number(w.cost))}</td></tr>)}
+                {!d.ai.byWorkspace.length && <tr><td colSpan={4} className="muted">No AI use this month.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <span className="eyebrow">Cost per day</span>
+            {!d.ai.daily.length ? <div className="empty">No AI use this month.</div> : (
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 120, paddingTop: 8 }}>
+                {d.ai.daily.map((x) => (
+                  <div key={x.d} title={`${x.d}: ${money(Number(x.cost))} · ${x.calls} requests`} style={{ flex: 1, minWidth: 4, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
+                    <div style={{ width: "100%", height: `${Math.max(3, (Number(x.cost) / maxDay) * 95)}px`, background: "var(--accent)", borderRadius: "4px 4px 0 0" }} />
+                    <span className="faint" style={{ fontSize: 10.5 }}>{Number(x.d.slice(8))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

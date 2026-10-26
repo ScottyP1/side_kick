@@ -31,7 +31,7 @@ export type Me = {
   workspaces: Workspace[];
   /** Plain status of AI answers (no model or provider names in the portal). */
   ai: { working: boolean };
-  /** This month's AI credit (Org Owners and Org Admins only; null for others). */
+  /** This month's AI allowance as a percent and level, never dollars (Org Owners and Org Admins only; null for others). */
   credit?: { level: "unlimited" | "ok" | "warn" | "essentials"; pct: number } | null;
   /**
    * The plan's name (null = managed by the Sidekick team), connectors included (0, 1, null = all) and its
@@ -210,8 +210,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Icon n="alert" />
                 <span>
                   {me.credit.level === "warn"
-                    ? <>Your organization has used {me.credit.pct}% of this month&apos;s AI credit. At 100%, {BRAND.name} keeps answering questions but pauses extras like reminders and the knowledge map.</>
-                    : <><b>This month&apos;s AI credit is used up.</b> {BRAND.name} still answers questions; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st.</>}{" "}
+                    ? <>Your organization has used {me.credit.pct}% of this month&apos;s included AI. At 100%, {BRAND.name} keeps answering questions but pauses extras like reminders and the knowledge map.</>
+                    : <><b>This month&apos;s included AI is used up.</b> {BRAND.name} still answers questions; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st.</>}{" "}
                   <Link href="/usage">Open Usage &amp; billing</Link>
                 </span>
               </div>

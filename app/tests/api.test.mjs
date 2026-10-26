@@ -1980,7 +1980,7 @@ test(`[${ENGINE}] Help chat: checks the person's own setup, cites articles (neve
   // The checks it ran.
   const checks = await admin("POST", "/api/support/assistant", { message: "which checks did you run?" });
   assert.equal(checks.status, 200, JSON.stringify(checks.body));
-  assert.deepEqual(checks.body.checks.map((c) => c.name), ["Teams chats", "Message tracking", "Microsoft 365", "Features", "Plan limits", "AI credit", "Recent errors"]);
+  assert.deepEqual(checks.body.checks.map((c) => c.name), ["Teams chats", "Message tracking", "Microsoft 365", "Features", "Plan limits", "AI allowance", "Recent errors"]);
   assert.match(checks.body.checks.find((c) => c.name === "Message tracking").summary, /Support test chat/);
   // A fix behind Confirm: nothing changes until the browser sends the card's request.
   const fix = await admin("POST", "/api/support/assistant", { message: "Please turn on tracking in our chat", conversation: checks.body.conversation });
@@ -2566,7 +2566,7 @@ test(`[${ENGINE}] permission matrix: every role gets exactly the access the role
   for (const role of EVERYONE) {
     const st = (await as[role]("GET", "/api/overview")).body.stats;
     const wholeOrg = ["owner", "admin"].includes(role);
-    assert.equal(st.spendScope, wholeOrg ? "org" : "you", `${role} spend scope`);
+    assert.equal(st.aiScope, wholeOrg ? "org" : "you", `${role} AI use scope`);
     if (wholeOrg) assert.equal(st.aiCallsMonth, org.aiCallsMonth, `${role} sees the company total`);
   }
   const before = (await member("GET", "/api/overview")).body.stats.aiCallsMonth;
@@ -3472,7 +3472,10 @@ test(`[${ENGINE}] plan limits: people, groups, documents, tracked chats and meet
   s.lee = c;
   const lines = (await c("GET", "/api/billing")).body.limits;
   const line = (k) => lines.find((l) => l.key === k);
-  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors", "aiCreditUsd"].map((k) => line(k).limit), [15, 1, 5, 30, 0, 500, 0, 40], "Starter's numbers");
+  assert.deepEqual(["seats", "workspaces", "chats", "meetingHours", "liveMeetingHours", "documents", "connectors"].map((k) => line(k).limit), [15, 1, 5, 30, 0, 500, 0], "Starter's numbers");
+  assert.equal(line("aiCreditUsd"), undefined, "the AI credit (dollars) isn't sent to the firm");
+  const ownerLines = (await owner("GET", `/api/owner/tenants/${await limitOrg()}`)).body.limits;
+  assert.equal(ownerLines.find((l) => l.key === "aiCreditUsd").limit, 40, "the operator still sees Starter's AI credit");
   // The operator tightens the limits for this client (custom terms), so each can be hit quickly. Groups
   // keep Starter's own limit (1), so the message offers extra groups or an upgrade.
   await terms({ limits: { seats: 2, chats: 0, meetingHours: 1, documents: 1 } });
@@ -3620,8 +3623,9 @@ test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answer
   assert.equal((await s.lou("GET", "/api/me")).body.credit, null, "Members don't get the credit banner");
   assert.equal((await ask(c, "zebra quokka again?")).body.aiMode, "full");
   const audit = JSON.stringify((await c("GET", "/api/audit")).body);
-  assert.match(audit, /80% of this month's AI credit \(\$10\.00\) is used/);
-  assert.equal(audit.match(/80% of this month's AI credit/g).length, 1, "the notice is written once a month");
+  assert.match(audit, /80% of this month's included AI is used/);
+  assert.equal(audit.match(/80% of this month's included AI/g).length, 1, "the notice is written once a month");
+  assert.doesNotMatch(audit, /\$10/, "the client's log has no dollar amounts");
 
   assert.equal((await ask(c, "__SPEND_2__ zebra quokka once more?")).status, 200);
   me = (await c("GET", "/api/me")).body;
@@ -3629,7 +3633,7 @@ test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answer
   const answered = await ask(s.lou, "zebra quokka still?");
   assert.equal(answered.status, 200, "answers keep working");
   assert.equal(answered.body.aiMode, "essentials");
-  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /AI credit \(\$10\.00\) is used up: essentials only/);
+  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /included AI is used up: essentials only/);
   assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Limit Co used up its AI credit/.test(l.action)), "the operator is told too");
   const orgId = await limitOrg();
   const models = (await owner("GET", `/api/owner/tenants/${orgId}?reload=1`)).body.ai.byModel.map((m) => m.model);
@@ -3639,7 +3643,7 @@ test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answer
   const assistant = await c("POST", "/api/assistant", { message: "hello", history: [] });
   assert.equal(assistant.status, 503);
   assert.equal(assistant.body.kind, "credit");
-  assert.match(assistant.body.error, /in-app assistant is paused because your organization has used this month's AI credit\. Answers to questions keep working/);
+  assert.match(assistant.body.error, /in-app assistant is paused because your organization has used this month's included AI\. Answers to questions keep working/);
   assert.equal(assistant.body.ref, undefined, "a pause isn't an app error");
   const map = await c("POST", "/api/memory/refresh", { ws: s.limitWs });
   assert.equal(map.status, 503);
@@ -3662,11 +3666,17 @@ test(`[${ENGINE}] AI credit: 80% warns the billing roles once, 100% keeps answer
   assert.equal(top.body.credit.creditUsd, 15);
   assert.equal(top.body.credit.level, "ok");
   assert.equal((await c("POST", "/api/assistant", { message: "hello", history: [] })).status, 200);
-  assert.match(JSON.stringify((await c("GET", "/api/audit")).body), /Added \$5\.00 of AI credit for \d{4}-\d{2} \(Go-live week\)/);
+  const topAudit = JSON.stringify((await c("GET", "/api/audit")).body);
+  assert.match(topAudit, /Added extra AI for \d{4}-\d{2} \(Go-live week\)/);
+  assert.doesNotMatch(topAudit, /\$5/, "the dollar amount is only in the operator log");
   assert.ok((await owner("GET", "/api/owner/releases")).body.log.some((l) => /Added \$5\.00 of AI credit for Limit Co/.test(l.action)));
   // Raising the credit itself works the same way.
   await terms({ aiCreditUsd: 100 });
-  assert.equal((await c("GET", "/api/usage")).body.credit.creditUsd, 105);
+  assert.equal((await owner("GET", `/api/owner/tenants/${orgId}?reload=1`)).body.credit.creditUsd, 105);
+  const allowance = (await c("GET", "/api/usage")).body.allowance;
+  assert.equal(allowance.level, "ok");
+  assert.equal(allowance.toppedUp, true);
+  assert.ok(allowance.pct > 9 && allowance.pct < 12, `about 10.5 of 105 used: ${allowance.pct}`);
 });
 
 test(`[${ENGINE}] rate limit: questions per person per hour, portal and Teams together, with a friendly message`, async () => {
@@ -3688,14 +3698,23 @@ test(`[${ENGINE}] usage export: a CSV per group and month with the engagement co
   const r = await s.lee("GET", "/api/usage/export?months=3");
   assert.equal(r.status, 200);
   const [head, ...lines] = r.body.trim().split("\r\n");
-  assert.equal(head, "Month,Group,Engagement code,Client,AI requests,AI cost (USD),Questions asked,Meetings imported,Meeting hours,Documents added");
+  assert.equal(head, "Month,Group,Engagement code,Client,Questions asked,Questions answered,Meetings imported,Meeting hours,Documents added,Reminders sent,Assistant replies");
+  assert.doesNotMatch(r.body, /cost|token|model|claude/i, "counts only: no AI cost, tokens or models for the firm");
   const month = new Date().toISOString().slice(0, 7);
   const row = lines.find((l) => l.includes("Limit Group")).split(",");
   assert.deepEqual(row.slice(0, 4), [month, "Limit Group", "WBS-1001", "Northwind Bank"]);
-  assert.ok(Number(row[5]) >= 10.5, "the AI cost charged to the group");
-  assert.ok(Number(row[6]) >= 5, "questions");
-  assert.equal(row[7], "2", "two meetings imported");
-  assert.equal(row[9], "1", "one document");
+  assert.ok(Number(row[4]) >= 5, "questions");
+  assert.equal(row[6], "2", "two meetings imported");
+  assert.equal(row[8], "1", "one document");
+  // The Owner Console's copy adds the AI requests and cost, for margin checks; clients can't fetch it.
+  const orgId = await limitOrg();
+  const withCost = await owner("GET", `/api/owner/tenants/${orgId}/usage-export?months=3`);
+  assert.equal(withCost.status, 200);
+  const [ownerHead, ...ownerLines] = withCost.body.trim().split("\r\n");
+  assert.equal(ownerHead, `${head},AI requests,AI cost (USD)`);
+  assert.ok(Number(ownerLines.find((l) => l.includes("Limit Group")).split(",")[12]) >= 10.5, "the AI cost charged to the group");
+  assert.equal((await s.lee("GET", `/api/owner/tenants/${orgId}/usage-export`)).status, 401, "clients can't fetch the copy with cost");
+  assert.equal((await owner("GET", `/api/owner/tenants/${orgId}/usage-export?months=0`)).status, 400);
   assert.ok(!/Workspace A|Fabrikam|Test Org/.test(r.body), "only this organization's groups");
   assert.match((await s.lee("GET", "/api/usage/export?month=2026-13")).body.error, /Month must look like/);
   assert.equal((await s.lee("GET", "/api/usage/export?months=99")).status, 400);
@@ -3723,6 +3742,54 @@ test(`[${ENGINE}] plain wording: the portal never shows model names; the Owner C
   assert.ok((await owner("GET", "/api/owner/releases")).body.models.ask, "the operator still sees the models");
   // "Powered by Claude" is said once, on the public trust pages.
   assert.match((await client()("GET", "/privacy")).body, /Powered by Claude/);
+});
+
+test(`[${ENGINE}] no cost internals for firms: an Org Owner's API responses have no AI cost, token or model keys`, async () => {
+  // The rule (lib/firm-usage.ts): firms see activity counts and their AI allowance as a percent; cost, tokens and
+  // models are only in the Owner Console. This org has real AI spend (the AI credit test above), so a leak shows.
+  const OPERATOR_ONLY = /^models?$|token|cost|usd|spend/i;
+  const leaks = (v, path = "") => {
+    if (Array.isArray(v)) return v.flatMap((x, i) => leaks(x, `${path}[${i}]`));
+    if (v && typeof v === "object") return Object.entries(v).flatMap(([k, x]) => [...(OPERATOR_ONLY.test(k) && !/^priceUsd$/.test(k) ? [`${path}.${k}`] : []), ...leaks(x, `${path}.${k}`)]);
+    return typeof v === "string" && /claude-|fake-claude|\$\d+\.\d\d of \$/i.test(v) ? [`${path} = ${v.slice(0, 80)}`] : [];
+  };
+  const c = s.lee;
+  assert.equal((await c("GET", "/api/me")).body.user.role, "Org Owner");
+  const traces = (await c("GET", "/api/activity?view=traces&limit=200")).body.traces;
+  const withAi = [];
+  for (const t of traces.slice(0, 40)) {
+    const one = await c("GET", `/api/activity?view=trace&id=${t.id}`);
+    if (one.body.spans.some((sp) => sp.kind === "ai")) withAi.push(one);
+  }
+  assert.ok(withAi.length, "there is a trace with an AI step to check");
+  const urls = ["/api/usage", "/api/billing", "/api/activity?view=traces&limit=200", "/api/me", "/api/overview", "/api/activity?view=overview&days=30", "/api/activity?view=live", "/api/activity?view=messages", `/api/workspaces/${s.limitWs}/usage`, "/api/audit"];
+  const found = [];
+  for (const url of urls) {
+    const r = await c("GET", url);
+    assert.equal(r.status, 200, `${url}: ${JSON.stringify(r.body).slice(0, 200)}`);
+    found.push(...leaks(r.body, url));
+  }
+  for (const t of withAi) found.push(...leaks(t.body, "trace"));
+  assert.deepEqual(found, [], "operator-only fields reached the firm");
+  // Even the billing plan list leaves out the plans' AI credit in dollars; the price (what they pay) stays.
+  const billing = (await c("GET", "/api/billing")).body;
+  assert.ok(billing.plans.every((p) => !("aiCreditUsd" in p) && typeof p.priceUsd === "number"));
+  assert.ok(billing.limits.every((l) => l.key !== "aiCreditUsd"), "the AI credit limit line (dollars) isn't sent");
+  // What the Usage page shows instead: counts and a percent.
+  const usage = (await c("GET", "/api/usage")).body;
+  assert.ok(usage.totals.questions >= 5 && usage.totals.meetings >= 1 && usage.totals.documents >= 1, JSON.stringify(usage.totals));
+  assert.ok(usage.byWorkspace.some((w) => w.name === "Limit Group" && w.questions >= 5));
+  assert.equal(typeof usage.allowance.pct, "number");
+  // The help chat's checks say the allowance as a percent, not dollars.
+  const help = (await c("POST", "/api/support/assistant", { message: "which checks did you run?" })).body;
+  assert.doesNotMatch(help.checks.find((x) => x.name === "AI allowance").summary, /\$/);
+  // The Owner Console keeps all of it, per client.
+  const detail = (await owner("GET", `/api/owner/tenants/${await limitOrg()}?reload=1`)).body;
+  // Fake Claude records the cost but 0 tokens, so the token fields are checked for presence, not size.
+  assert.ok(Number(detail.ai.totals.cost) > 0, `cost per client: ${JSON.stringify(detail.ai.totals)}`);
+  assert.ok(["input", "output", "latency", "errors", "calls"].every((k) => k in detail.ai.totals), "tokens, response time and failures per client");
+  assert.ok(detail.ai.byWorkspace.some((w) => w.name === "Limit Group" && Number(w.cost) > 0), "cost per group");
+  assert.ok(detail.ai.daily.length >= 1 && detail.ai.byModel.length >= 1, "cost per day and per model");
 });
 
 test(`[${ENGINE}] Teams Store: privacy, terms and sub-processor pages are public drafts that match what the code does`, async () => {
@@ -3846,7 +3913,11 @@ test(`[${ENGINE}] group pricing: extra groups or an upgrade make room, with pric
   const b = (await c("GET", "/api/billing")).body;
   assert.equal(b.priceUsd, 457, "Starter $199 + 2 × $129");
   const limit = (k) => b.limits.find((l) => l.key === k).limit;
-  assert.deepEqual([limit("workspaces"), limit("seats"), limit("meetingHours"), limit("aiCreditUsd")], [3, 45, 90, 120]);
+  assert.deepEqual([limit("workspaces"), limit("seats"), limit("meetingHours")], [3, 45, 90]);
+  // The extras' AI credit ($40 each) is only in dollars for the operator; the firm's add-on says "more included AI".
+  assert.equal(b.extraGroup.adds.aiCreditUsd, undefined);
+  const groupCo = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Group Co").id;
+  assert.equal((await owner("GET", `/api/owner/tenants/${groupCo}`)).body.limits.find((l) => l.key === "aiCreditUsd").limit, 120);
   for (const n of ["GC Two", "GC Three"]) assert.equal((await c("POST", "/api/workspaces", { name: n })).status, 200);
   const fourth = await c("POST", "/api/workspaces", { name: "GC Four" });
   assert.equal(fourth.status, 402);

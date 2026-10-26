@@ -21,7 +21,7 @@ The full rulebook, with every action and which roles may do it, is [Roles and pe
 
 Owners and Admins see every workspace. Everyone else, Team Leads included, sees only the workspaces they've been added to. Only an Org Owner or Org Admin can make someone a Team Lead.
 
-**Your menu follows your role.** Everyone has Overview, Groups, Knowledge & docs, Firm library, Meetings, Memory & gaps, Settings (your own account) and Help & support. Usage & billing, AI models & agent, Guardrails, Activity and Security & audit are for Org Owners and Org Admins; Connectors and Users & access also for Team Leads. See [Roles and permissions](roles-and-permissions.md).
+**Your menu follows your role.** Everyone has Overview, Groups, Knowledge & docs, Firm library, Meetings, Memory & gaps, Settings (your own account) and Help & support. Usage & billing, Guardrails, Activity and Security & audit are for Org Owners and Org Admins; Connectors and Users & access also for Team Leads. See [Roles and permissions](roles-and-permissions.md).
 
 The workspace you're in shows at the top of the pages that belong to one workspace (**Knowledge & docs**, **Meetings**, **Memory & gaps**). If you're in just one workspace it's a plain label; if you're in two or more it's a small menu to switch between them. Org-wide pages (Overview, Usage & billing, Users & access, Activity, Security & audit, Settings and the rest) don't show a workspace at all.
 
@@ -104,11 +104,11 @@ The chat box under the crystal ball on the home page, also behind the **round bu
 ## Audit log
 Sign-ins, access changes, uploads, deletions, Teams links and every action Sidekick takes on its own are recorded on **Security & audit**, with who did it and when.
 
-## Usage and cost
-Each AI request is metered: how much text went in and out (tokens), what it cost, and how long it took. **Usage & billing** shows this by feature, workspace and day.
+## Usage and the AI allowance
+**Usage & billing** shows what Sidekick did for your organization this month (questions answered, meetings written up, documents added, reminders sent, assistant replies) per day and per workspace, and how much of the plan's included AI is used, as a percentage. Each plan includes a monthly AI allowance; when it runs out, answers keep working and the extras pause until the 1st. What the AI costs and which models run it are the Sidekick team's side of the service and aren't shown in the portal.
 
 ## Help and support
-The round button's **I need help** tab is the **Help chat**: it answers from the help center and Sidekick's support articles, checks your own setup (Teams chats, tracking, paused features, plan limits, AI credit, recent errors) and can turn the conversation into a **support ticket** for the Sidekick team. You can also write to them on **Help & support** and follow your tickets there. The Help chat doesn't use your organization's AI credit. On the public website, the same button opens **Ask about Sidekick**, an AI help bot that answers only from public help content and can pass you to a person.
+The round button's **I need help** tab is the **Help chat**: it answers from the help center and Sidekick's support articles, checks your own setup (Teams chats, tracking, paused features, plan limits, AI allowance, recent errors) and can turn the conversation into a **support ticket** for the Sidekick team. You can also write to them on **Help & support** and follow your tickets there. The Help chat doesn't use your organization's AI allowance. On the public website, the same button opens **Ask about Sidekick**, an AI help bot that answers only from public help content and can pass you to a person.
 
 ## How your data is protected
 - Every request is checked: who you are, your role, and whether you belong to that workspace.

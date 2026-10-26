@@ -4,7 +4,7 @@
  * see names of active people (others get a count). Everything is filtered to the caller's own organization.
  *
  * Views
- * - overview (&days=1|7|30): request volume, failures, response times (p50/p95), AI calls and cost,
+ * - overview (&days=1|7|30): request volume, failures, response times (p50/p95), AI calls (a count),
  *   portal vs Teams, the busiest operations, requests per day, and guardrail counts per rule
  *   (`guardrails`, from guard_events: counts only).
  * - traces (&channel=portal|teams|system&status=error|refused|ok&q=text&limit=…): the most recent traces.
@@ -13,8 +13,9 @@
  * - live: the last few minutes, for the home page orb: active people, each connection's health
  *   (Teams, Claude, search, database), and recent work (used to tell whether Sidekick is busy).
  *
- * Traces hold timings, counts, model names and costs only; no document text (see lib/trace.ts). Model names
- * are left out of what the portal gets (they're for the Owner Console).
+ * Traces hold timings, counts, model names, tokens and costs only; no document text (see lib/trace.ts). The
+ * portal gets timings and counts: model names, token counts and AI cost are left out (`firmAttrs`,
+ * lib/firm-usage.ts), since those are Sidekick's internals and only the Owner Console shows them.
  */
 import { guardSummary } from "@/lib/guardrails";
 import { handle } from "@/lib/api";
@@ -22,6 +23,7 @@ import { HttpError, isAdmin, requireUser } from "@/lib/auth";
 import { all, DIALECT, get } from "@/lib/db";
 import { claudeConfigured } from "@/lib/claude";
 import { azureSearchConfigured, embeddingsConfigured } from "@/lib/azure-search";
+import { firmAttrs } from "@/lib/firm-usage";
 
 type TraceRow = { id: string; channel: string; name: string; actor: string | null; status: string; http_status: number | null; error: string | null; ref: string | null; duration_ms: number; span_count: number; db_queries: number; db_ms: number; started_at: string; workspace: string | null };
 
@@ -70,8 +72,8 @@ export const GET = handle(async (req: Request) => {
         if (r.status === "error") s.errors++;
       }
     }
-    const ai = await get<{ calls: number; cost: number; failed: number }>(
-      "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost, COALESCE(SUM(1 - ok), 0) AS failed FROM usage_events WHERE org_id = ? AND created_at >= ?",
+    const ai = await get<{ calls: number; failed: number }>(
+      "SELECT COUNT(*) AS calls, COALESCE(SUM(1 - ok), 0) AS failed FROM usage_events WHERE org_id = ? AND created_at >= ?",
       org, since,
     );
     const asked = await get<{ total: number; found: number }>(
@@ -94,7 +96,6 @@ export const GET = handle(async (req: Request) => {
         background: rows.filter((r) => r.channel === "system").length,
         people: new Set(rows.map((r) => r.actor).filter(Boolean)).size,
         aiCalls: ai?.calls ?? 0,
-        aiCost: ai?.cost ?? 0,
         aiFailed: ai?.failed ?? 0,
         questions: asked?.total ?? 0,
         answered: asked?.found ?? 0,
@@ -147,9 +148,8 @@ export const GET = handle(async (req: Request) => {
         trace.id,
       )
     ).map((s) => {
-      // Model names stay in the Owner Console: the portal shows plain "AI" steps.
-      const { model: _model, ...attrs } = JSON.parse(s.attrs || "{}") as Record<string, unknown>;
-      return { ...s, attrs };
+      // Model names, tokens and cost stay in the Owner Console: the portal shows plain "AI" steps with timings.
+      return { ...s, attrs: firmAttrs(JSON.parse(s.attrs || "{}") as Record<string, unknown>) };
     });
     return { trace, spans };
   }

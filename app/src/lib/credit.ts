@@ -127,9 +127,10 @@ async function notice(orgId: string, s: CreditStatus) {
   if (!r.changes) return;
   const credit = `$${s.creditUsd!.toFixed(2)}`;
   if (s.level === "warn") {
-    await auditAsSidekick(orgId, `80% of this month's AI credit (${credit}) is used`, "Billing");
+    // The client's log has no dollar amounts (firms see their AI allowance as a percent; lib/firm-usage.ts).
+    await auditAsSidekick(orgId, "80% of this month's included AI is used", "Billing");
   } else {
-    await auditAsSidekick(orgId, `This month's AI credit (${credit}) is used up: essentials only until the 1st (answers keep working)`, "Billing");
+    await auditAsSidekick(orgId, "This month's included AI is used up: essentials only until the 1st (answers keep working)", "Billing");
     const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", orgId);
     await platformLog(BRAND.name, `${org?.name ?? orgId} used up its AI credit (${credit}): essentials only`);
   }
@@ -137,7 +138,7 @@ async function notice(orgId: string, s: CreditStatus) {
 
 /** The plain message for a paused extra, worded for whoever reads it. */
 function pausedMessage(feature: string) {
-  return `${PAUSED[feature] ?? "This AI feature is"} paused because your organization has used this month's AI credit. Answers to questions keep working. The credit starts again on the 1st; an Org Owner or Org Admin can see the details on Usage & billing.`;
+  return `${PAUSED[feature] ?? "This AI feature is"} paused because your organization has used this month's included AI. Answers to questions keep working. The allowance starts again on the 1st; an Org Owner or Org Admin can see the details on Usage & billing.`;
 }
 
 /**
@@ -167,6 +168,7 @@ export async function grantTopUp(orgId: string, amountUsd: unknown, note: unknow
   const month = monthKey();
   await run("INSERT INTO credit_topups (id, org_id, month, amount_usd, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", newId(), orgId, month, Math.round(amount * 100) / 100, text, ownerName, now());
   forgetCredit(orgId);
-  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Added $${amount.toFixed(2)} of AI credit for ${month}${text ? ` (${text})` : ""}`, "Billing");
+  // The dollar amount is in the operator log; the client's log says only that extra AI was added.
+  await audit({ org_id: orgId, name: `${BRAND.name} team` }, `Added extra AI for ${month}${text ? ` (${text})` : ""}`, "Billing");
   return creditStatus(orgId, { fresh: true });
 }

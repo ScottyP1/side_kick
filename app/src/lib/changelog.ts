@@ -13,6 +13,17 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-25",
     label: "October 25, 2026",
+    title: "Usage & billing shows what Sidekick did for you",
+    changes: [
+      `Usage & billing now shows what ${BRAND.name} did this month: questions answered, meetings written up, documents added, reminders sent and assistant replies, per day and per group.`,
+      "Your AI allowance is a simple percentage (“4% of this month's included AI used”), with the same notices at 80% and when it's used up.",
+      "Export CSV has the same counts per group and month, with each group's engagement code and client, for chargeback.",
+      "The “AI models & agent” page is gone: which AI runs behind each feature is the Sidekick team's job. Paused features still show a plain notice where you use them.",
+    ],
+  },
+  {
+    date: "2026-10-25",
+    label: "October 25, 2026",
     title: "A nudge to start transcription",
     changes: [
       `When a call starts in one of a group's Teams chats (Meet now or the call button) and nobody has started transcription after about two minutes, ${BRAND.name} posts one short reminder showing where the button is. No transcript means no notes.`,

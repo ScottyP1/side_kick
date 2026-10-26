@@ -6,9 +6,11 @@
  * explains and tells Teams what to show: the tab page (/teams/tab) and, outside Teams, the portal's Meetings page.
  * Adding the tab to a meeting also adds the Sidekick bot to the meeting chat, which a Team Lead or admin can then
  * assign to the group in the portal (lib/teams/tab.ts). Outside Teams it just says to open it in Teams.
+ * Store rules: it explains the tab and what's needed first, links help and contact details, and follows Teams' theme.
  */
 import { useEffect, useState } from "react";
 import { BRAND } from "@/lib/brand";
+import { followTeamsTheme } from "../teams-theme";
 
 export default function TeamsTabConfig() {
   const [state, setState] = useState<"loading" | "ready" | "outside">("loading");
@@ -22,6 +24,7 @@ export default function TeamsTabConfig() {
         if (!cancelled) setState("outside");
         return;
       }
+      followTeamsTheme(app, await app.getContext());
       const origin = window.location.origin;
       pages.config.registerOnSaveHandler((save) => {
         pages.config
@@ -44,9 +47,13 @@ export default function TeamsTabConfig() {
         <>
           <p style={{ margin: 0 }}>This tab shows the group&apos;s meetings, the notes {BRAND.name} wrote and the open action items. Each person sees only the groups they belong to.</p>
           <p style={{ margin: 0 }} className="muted">Adding it to a meeting also brings {BRAND.shortName} into the meeting chat. Once a Team Lead or admin assigns that chat to a group in {BRAND.name}, the meeting&apos;s notes go to that group automatically.</p>
+          <p style={{ margin: 0 }} className="muted">Your organization needs a {BRAND.name} account, and you need to be in one of its groups to see anything here.</p>
           <p style={{ margin: 0 }} className="muted">{state === "loading" ? "Connecting to Teams…" : "Press Save to add the tab."}</p>
         </>
       )}
+      <p style={{ margin: 0, fontSize: 13 }} className="muted">
+        Questions? See the <a href="/docs/teams-guide" target="_blank" rel="noreferrer">help center</a> (opens in browser) or write to <a href={`mailto:${BRAND.supportEmail}`}>{BRAND.supportEmail}</a>.
+      </p>
     </main>
   );
 }

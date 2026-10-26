@@ -63,7 +63,7 @@ use (Usage & billing, Guardrails, Connectors, Activity, Security & audit) show t
 | See the firm library (the organization's policies and standards) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See which tools feed their group (the group page's Sources line: tool, name, last sync) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Open Connectors: which tool types the organization allows, their groups' connections, health and linked projects (only the connecting Team Lead or admin signs in for the group) | ✓ | ✓ | ✓ (own groups) | | |
-| Connect, reconnect or disconnect **their own** Jira or Azure DevOps account where the group chose "each person signs in" (Knowledge → Your sign-ins to tools); answers then only use what that account can open | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Connect, reconnect or disconnect **their own** Jira, Azure DevOps or Microsoft 365 files account where the group chose "each person signs in" (Knowledge → Your sign-ins to tools); answers then only use what that account can open | ✓ | ✓ | ✓ | ✓ | ✓ |
 | See a group's last 30 days on its page (questions, answers, meetings, documents, share of AI use) | ✓ | ✓ | ✓ (own groups) | | |
 | **Inside their workspaces: change** | | | | | |
 | Upload, rename or delete documents | ✓ | ✓ | ✓ | ✓ | |
@@ -101,7 +101,7 @@ use (Usage & billing, Guardrails, Connectors, Activity, Security & audit) show t
 | Turn automatic notes after Teams meetings on or off, check now, try a skipped meeting again | ✓ | ✓ | | | |
 | Turn "Group meetings record and transcribe by themselves" on or off (Teams also saves a video) | ✓ | ✓ | | | |
 | Connect an allowed tool for a group with the account the client gave them, reconnect or disconnect the group's connection | ✓ | ✓ | ✓ (own groups) | | |
-| Choose who sees what from a group's tool: one shared account, or each person signs in (Jira, Azure DevOps); see who has connected and whose sign-in expired | ✓ | ✓ | ✓ (own groups) | | |
+| Choose who sees what from a group's tool: one shared account, or each person signs in (Jira, Azure DevOps, Microsoft 365 files); see who has connected and whose sign-in expired | ✓ | ✓ | ✓ (own groups) | | |
 | Link projects through a group's connection (repositories, spaces, libraries), sync now or unlink | ✓ | ✓ | ✓ (own groups) | | |
 | Ask the Org Owner to allow a tool type for their group (with a reason), see the request's status, cancel their own | | ✓ | ✓ (own groups) | | |
 | See every request to allow a tool type | ✓ | ✓ | ✓ (own groups') | | |

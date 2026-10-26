@@ -44,6 +44,12 @@
  * to everyone who can open the site), a Jira site or ADO organization with `members: [names]` only to its members.
  * Their own token reaches Jira's `myself` and `issue/bulkfetch` (keys they can't open come back in `issueErrors`) and
  * ADO's `connectionData` and `workitemsbatch` with `errorPolicy: "Omit"` (null for items they can't read).
+ * Microsoft 365: a file or folder with `viewers` is open only to those people (a folder's list covers everything
+ * under it), a drive with `members` only to its members; a person's `GET /drives/<d>/items/<id>` answers 404 (403 for
+ * the drive) otherwise, and `POST /graph/$batch` runs such GETs (`state.graphBatchStatus` forces every reply's status,
+ * e.g. 429). Microsoft sign-ins remember the tenant in the sign-in address: `/organization` answers that tenant for
+ * a person signed in at a tenant id (`state.m365Tenants` lists the ones that sign-ins went to), and a refresh at a
+ * different tenant than the sign-in's is refused.
  * `revokeUser(kind, name)` revokes one person's sign-in (their calls 401, their refreshes fail); `counts.personal`
  * counts their API calls.
  *
@@ -258,8 +264,8 @@ export function createFakeTools({
   },
   lenient = false,
 } = {}) {
-  const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false, graphSitePage: 100, graphDeltaPage: 200, graphDeltaGone: false };
-  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, personal: { ado: 0, jira: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0 };
+  const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false, graphSitePage: 100, graphDeltaPage: 200, graphDeltaGone: false, graphBatchStatus: null, m365Tenants: [] };
+  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, personal: { ado: 0, jira: 0, m365: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0 };
   let nextUser = null; // signInAs: the next sign-in's person (null = the shared account)
   const revokedUsers = new Set(); // `${kind}:${name}`
   const limits = new Map(); // kind → { times, retryAfter, status }
@@ -271,11 +277,11 @@ export function createFakeTools({
   let base = "";
 
   const newToken = (p) => `${p}_${crypto.randomBytes(18).toString("base64url")}`;
-  const issue = (kind, user = null) => {
+  const issue = (kind, user = null, tenant = null) => {
     const a = newToken(`${kind}at`);
     const r = newToken(`${kind}rt`);
-    access.set(a, { kind, user, expires: Date.now() + state.ttl * 1000 });
-    refresh.set(r, { kind, user });
+    access.set(a, { kind, user, tenant, expires: Date.now() + state.ttl * 1000 });
+    refresh.set(r, { kind, user, tenant });
     return { access_token: a, refresh_token: r, expires_in: state.ttl, token_type: "Bearer" };
   };
 
@@ -294,6 +300,7 @@ export function createFakeTools({
         res.end(`<!doctype html><meta charset="utf-8"><title>${text}</title><body style="font-family:system-ui;padding:40px"><p style="color:#888">Made-up demo tool (no real account)</p><h1>${text}</h1></body>`);
       };
       let who = null; // the person whose token made this call (null = the shared account)
+      let whoTenant = null; // the Microsoft tenant a person's Microsoft 365 token was issued at (null = "organizations")
       const authed = (kind) => {
         const tok = (req.headers.authorization ?? "").replace(/^Bearer /, "");
         // Lenient (the standalone demo fake): tokens it handed out before a restart still work.
@@ -313,6 +320,7 @@ export function createFakeTools({
           return false;
         }
         who = t.user ?? null;
+        whoTenant = t.tenant ?? null;
         if (who && counts.personal[kind] !== undefined) counts.personal[kind]++;
         else counts.api[kind]++;
         return true;
@@ -320,6 +328,12 @@ export function createFakeTools({
       /** Whether the caller may open something with `viewers` / `members` lists (see the file comment). */
       const sees = (x) => !who || !x?.viewers || x.viewers.includes(who);
       const member = (x) => !who || !x?.members || x.members.includes(who);
+      /** Microsoft 365: the caller may open a file or folder if it and every folder above it let them (`viewers`). */
+      const m365Sees = (drive, it) => {
+        for (let cur = it; cur; cur = drive.items.find((x) => x.id === cur.parent)) if (!sees(cur)) return false;
+        return true;
+      };
+      const m365Member = (drive) => member(drive);
       const link = (next) => (next ? { link: `<${next}>; rel="next"` } : {});
 
       // ---- sign-in pages (approve at once) ----
@@ -330,7 +344,9 @@ export function createFakeTools({
         const q = url.searchParams;
         if (q.get("client_id") !== clients[kind].id) return send(400, { error: "invalid_client" });
         const code = crypto.randomUUID();
-        codes.set(code, { kind, challenge: q.get("code_challenge"), redirectUri: q.get("redirect_uri"), user: nextUser });
+        const tenant = kind === "m365" ? path.split("/")[2] : null;
+        if (tenant) state.m365Tenants.push(`${tenant} ${q.get("scope")}`);
+        codes.set(code, { kind, challenge: q.get("code_challenge"), redirectUri: q.get("redirect_uri"), user: nextUser, tenant: tenant && tenant !== "organizations" ? tenant : null });
         nextUser = null;
         const back = new URL(q.get("redirect_uri"));
         back.searchParams.set("code", code);
@@ -355,13 +371,15 @@ export function createFakeTools({
           if ((entra || kind === "github") && crypto.createHash("sha256").update(f.code_verifier ?? "").digest("base64url") !== c.challenge) return fail(400, "invalid_grant");
           if (c.user) revokedUsers.delete(`${kind}:${c.user}`);
           else revokedKinds.delete(kind);
-          return send(200, issue(kind, c.user));
+          return send(200, issue(kind, c.user, c.tenant ?? null));
         }
         if (grant === "refresh_token") {
           const r = refresh.get(f.refresh_token) ?? (lenient && String(f.refresh_token).startsWith(`${kind}rt_`) ? { kind } : undefined);
           if (!r || r.kind !== kind || (r.user ? revokedUsers.has(`${kind}:${r.user}`) : revokedKinds.has(kind))) return fail(400, kind === "github" ? "bad_refresh_token" : "invalid_grant");
+          // A refresh token only works at the tenant it was issued at.
+          if (r.tenant && path.split("/")[2] !== r.tenant) return fail(400, "invalid_grant");
           counts.refresh[kind]++;
-          const out = issue(kind, r.user ?? null);
+          const out = issue(kind, r.user ?? null, r.tenant ?? null);
           if (!entra) {
             refresh.delete(f.refresh_token); // rotating refresh tokens: the old one stops working
           } else {
@@ -617,7 +635,19 @@ export function createFakeTools({
         const rest = m[1];
         const w = world.m365;
         const graph = `${base}/graph`;
-        if (rest === "organization") return send(200, { value: [{ id: w.tenantId, displayName: w.tenantName }] });
+        if (rest === "organization") return send(200, { value: [{ id: whoTenant ?? w.tenantId, displayName: whoTenant && whoTenant !== w.tenantId ? "Another organization" : w.tenantName }] });
+        if (rest === "me") return send(200, { displayName: who ? (world.people?.[who] ?? who) : "Sidekick Reader", userPrincipalName: `${who ?? "reader"}@example.test` });
+        if (rest === "$batch" && req.method === "POST") {
+          // Each request: a GET of one item in a drive, answered as that GET would be for this caller.
+          const replies = (JSON.parse(body || "{}").requests ?? []).slice(0, 20).map((r) => {
+            const mm = String(r.url ?? "").match(/^\/drives\/([^/?]+)\/items\/([^/?]+)/);
+            const drive = mm && m365Drive(decodeURIComponent(mm[1]));
+            const it = drive && drive.items.find((x) => x.id === decodeURIComponent(mm[2]));
+            const status = state.graphBatchStatus ?? (!drive ? 404 : !m365Member(drive) ? 403 : !it || it.deleted || !m365Sees(drive, it) ? 404 : 200);
+            return { id: r.id, status, body: status === 200 ? { id: it.id } : { error: { code: status === 403 ? "accessDenied" : "itemNotFound" } } };
+          });
+          return send(200, { responses: replies });
+        }
         if (rest === "sites") {
           const start = Number(url.searchParams.get("skip") ?? 0);
           const part = w.sites.slice(start, start + state.graphSitePage);
@@ -638,7 +668,7 @@ export function createFakeTools({
         if ((m = rest.match(/^drives\/([^/]+)(?:\/(.+))?$/))) {
           const drive = m365Drive(m[1]);
           if (!drive) return send(404, { error: { code: "itemNotFound", message: "The drive was not found." } });
-          if (denied.has(`m365:${drive.id}`)) return send(403, { error: { code: "accessDenied", message: "Access denied" } });
+          if (denied.has(`m365:${drive.id}`) || !m365Member(drive)) return send(403, { error: { code: "accessDenied", message: "Access denied" } });
           const sub = m[2] ?? "";
           const pathOf = (id) => {
             const names = [];
@@ -672,7 +702,7 @@ export function createFakeTools({
           if ((m = sub.match(/^items\/([^/]+)(\/content)?$/))) {
             if (m[1] === `root-${drive.id}`) return send(200, { id: m[1], name: "root", root: {}, folder: {} });
             const it = drive.items.find((x) => x.id === m[1]);
-            if (!it || it.deleted) return send(404, { error: { code: "itemNotFound", message: "The resource could not be found." } });
+            if (!it || it.deleted || !m365Sees(drive, it)) return send(404, { error: { code: "itemNotFound", message: "The resource could not be found." } });
             if (m[2]) {
               res.writeHead(302, { location: `${base}/m365-download/${encodeURIComponent(drive.id)}/${encodeURIComponent(it.id)}?tempauth=ok-${encodeURIComponent(it.id)}` });
               return res.end();

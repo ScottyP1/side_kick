@@ -119,7 +119,7 @@ export type AnswerExtras = {
 };
 
 /** Tool names for the "Connect your …" button (lib/connector-text.ts `KIND_LABEL`, kept here so cards stay pure). */
-const TOOL_NAMES: Record<string, string> = { ado: "Azure DevOps", jira: "Jira", github: "GitHub", confluence: "Confluence", m365: "Microsoft 365" };
+const TOOL_NAMES: Record<string, string> = { ado: "Azure DevOps", jira: "Jira", github: "GitHub", confluence: "Confluence", m365: "Microsoft 365 files" };
 
 /**
  * The reply to a question: the question as the title (with a short "Following up on …" line when it built on the

@@ -35,7 +35,19 @@
  *   once per sync). A 410 ("the delta token expired") starts over from a full listing. At most
  *   `MAX_DOWNLOADS_PER_SYNC` downloads per sync; the rest come on the next run.
  *
- * Read-only: only GET requests are made. Tests and the demo world point `M365_LOGIN_BASE` and `M365_GRAPH_BASE` at
+ * - **Each person signs in** (`personal`, docs/ARCHITECTURE.md → Connectors): the connection's account still syncs,
+ *   but answers only use files the reader can open in SharePoint or OneDrive themselves. A person signs in at the
+ *   **connection's own Microsoft organization** (the authority is its tenant id, `conn.account`, not
+ *   "organizations"), so a consultant who is a guest in the client's tenant gets a token for the client's files;
+ *   refreshes go to the same tenant. Personal sign-ins ask only for `Files.Read.All` (read the files *they* can
+ *   open), `User.Read` and `offline_access` (`PERSONAL_SCOPE`): no `Sites.Read.All`, since they never list sites.
+ *   `personal.account` refuses a token for any other organization. Before an answer uses files, `canOpen` asks
+ *   Graph with the reader's token, in `$batch` calls of up to `BATCH` (20) `GET /drives/<drive>/items/<id>`
+ *   requests: 200 = open, 403/404 = closed (no access, or deleted), anything else (throttled, Graph down) throws so
+ *   the whole connection is left out and nothing is cached as closed. Graph applies SharePoint's own permissions
+ *   (broken inheritance, sharing links the person redeemed, groups), so nothing is copied into Sidekick.
+ *
+ * Read-only: only GET requests are made (plus `POST /$batch`, which only carries GETs). Tests and the demo world point `M365_LOGIN_BASE` and `M365_GRAPH_BASE` at
  * a fake Microsoft Graph (scripts/fake-tools.mjs); both overrides are ignored in production.
  */
 import "server-only";
@@ -44,9 +56,13 @@ import { BRAND } from "./brand";
 import { HttpError } from "./http-error";
 import { ACCEPTED, fileToText, MAX_DOCUMENT_CHARS, MAX_UPLOAD_BYTES } from "./extract";
 import { ConnectorError, isoOf, type WorkItem } from "./connector-text";
-import type { ChangePage, Provider } from "./connectors";
+import type { ChangePage, ConnectorRow, Provider } from "./connectors";
 
 const SCOPE = "offline_access User.Read Sites.Read.All Files.Read.All";
+/** A person's own sign-in ("each person signs in"): only what `canOpen` needs (see the file comment). */
+export const PERSONAL_SCOPE = "offline_access User.Read Files.Read.All";
+/** Graph's limit of requests in one `$batch` call. */
+export const BATCH = 20;
 /** File types read from Microsoft 365: the upload types except Teams transcripts (those go through Meetings). */
 export const READ_TYPES = ACCEPTED.filter((e) => e !== ".vtt");
 /** At most this many files downloaded per sync; the rest come on the next run (the cursor has moved). */
@@ -63,12 +79,26 @@ const conf = () => ({ id: process.env.M365_CLIENT_ID ?? "", secret: process.env.
 
 type TokenReply = { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
 
-async function token(form: Record<string, string>): Promise<TokenReply & { status: number }> {
+/** A Microsoft tenant id (a GUID; letters, digits, dots and dashes only, so it's safe in the sign-in address). */
+const TENANT_ID = /^[0-9a-z][0-9a-z.-]{0,99}$/i;
+
+/**
+ * Where and for what a sign-in goes: the group's connection uses the app's tenant setting and the full scopes; a
+ * person's own sign-in (`forPerson`) goes to the connection's Microsoft organization with `PERSONAL_SCOPE`.
+ */
+function signIn(forPerson?: ConnectorRow): { tenant: string; scope: string } {
+  if (!forPerson) return { tenant: conf().tenant, scope: SCOPE };
+  if (!TENANT_ID.test(forPerson.account)) throw new ConnectorError("notfound", "This Microsoft 365 connection doesn't name a Microsoft organization. Reconnect it, then try again.");
+  return { tenant: forPerson.account, scope: PERSONAL_SCOPE };
+}
+
+async function token(form: Record<string, string>, forPerson?: ConnectorRow): Promise<TokenReply & { status: number }> {
   const c = conf();
-  const res = await fetch(`${loginBase()}/${encodeURIComponent(c.tenant)}/oauth2/v2.0/token`, {
+  const at = signIn(forPerson);
+  const res = await fetch(`${loginBase()}/${encodeURIComponent(at.tenant)}/oauth2/v2.0/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: c.id, client_secret: c.secret, scope: SCOPE, ...form }),
+    body: new URLSearchParams({ client_id: c.id, client_secret: c.secret, scope: at.scope, ...form }),
     signal: AbortSignal.timeout(20_000),
   });
   return { status: res.status, ...((await res.json().catch(() => ({}))) as TokenReply) };
@@ -120,24 +150,25 @@ export const m365: Provider = {
   needsSite: false,
   configured: () => Boolean(conf().id && conf().secret),
 
-  authorizeUrl({ state, challenge, redirectUri }) {
+  authorizeUrl({ state, challenge, redirectUri, forPerson }) {
     const c = conf();
-    const url = new URL(`${loginBase()}/${enc(c.tenant)}/oauth2/v2.0/authorize`);
+    const at = signIn(forPerson);
+    const url = new URL(`${loginBase()}/${enc(at.tenant)}/oauth2/v2.0/authorize`);
     url.search = new URLSearchParams({
-      client_id: c.id, response_type: "code", redirect_uri: redirectUri, response_mode: "query", scope: SCOPE, state,
+      client_id: c.id, response_type: "code", redirect_uri: redirectUri, response_mode: "query", scope: at.scope, state,
       code_challenge: challenge, code_challenge_method: "S256", prompt: "select_account",
     }).toString();
     return url.toString();
   },
 
-  async exchange(code, verifier, redirectUri) {
-    const r = await token({ grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: verifier });
+  async exchange(code, verifier, redirectUri, forPerson) {
+    const r = await token({ grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: verifier }, forPerson);
     if (!r.access_token) return { error: r.error ?? `status ${r.status}` };
     return { access: r.access_token, refresh: r.refresh_token ?? null, expiresIn: r.expires_in ?? 3600 };
   },
 
-  async refresh(refreshToken) {
-    const r = await token({ grant_type: "refresh_token", refresh_token: refreshToken });
+  async refresh(refreshToken, forPerson) {
+    const r = await token({ grant_type: "refresh_token", refresh_token: refreshToken }, forPerson);
     // invalid_grant (revoked, consent withdrawn, password reset) and interaction_required both come as 400.
     if (!r.access_token) return { error: r.error ?? `status ${r.status}`, revoked: r.status === 400 || r.status === 401 };
     return { access: r.access_token, refresh: r.refresh_token ?? refreshToken, expiresIn: r.expires_in ?? 3600 };
@@ -152,6 +183,38 @@ export const m365: Provider = {
       throw new ConnectorError("access", `That Microsoft account belongs to ${org.displayName ?? "another organization"}, not the Microsoft organization linked to this ${BRAND.name} organization. Sign in with your own work account.`);
     }
     return { account: org.id, accountName: org.displayName ?? org.id, apiBase: graphBase(), webBase: "https://www.microsoft365.com" };
+  },
+
+  personal: {
+    /** The person's token must open the connection's own Microsoft organization (the client's tenant). */
+    async account(api, conn) {
+      const r = await api(`${conn.api_base}/organization?$select=id,displayName`, {}, { what: "your Microsoft organization" });
+      const org = ((r.json as GraphList<{ id?: string }>)?.value ?? [])[0];
+      if (!org?.id || org.id.toLowerCase() !== conn.account.toLowerCase()) {
+        throw new ConnectorError("access", `This Microsoft account can't open ${conn.account_name ?? "the client's"} SharePoint and OneDrive files. Sign in with the work account (or guest account) you use for that organization.`, 403);
+      }
+      const me = (await api(`${conn.api_base}/me?$select=displayName,userPrincipalName`)).json as { displayName?: string; userPrincipalName?: string } | null;
+      return { accountName: me?.displayName || me?.userPrincipalName || "Microsoft user" };
+    },
+    /** Which files the person can open: `$batch` GETs of each file in its drive (see the file comment). */
+    async canOpen(api, conn, ids, where) {
+      const open = new Set<string>();
+      const asks = ids.map((id) => ({ id, drive: m365Key(where.get(id) ?? "")?.drive })).filter((a): a is { id: string; drive: string } => Boolean(a.drive));
+      for (let i = 0; i < asks.length; i += BATCH) {
+        const part = asks.slice(i, i + BATCH);
+        const requests = part.map((a, n) => ({ id: String(n), method: "GET", url: `/drives/${enc(a.drive)}/items/${enc(a.id)}?$select=id` }));
+        const r = await api(`${conn.api_base}/$batch`, { method: "POST", body: { requests } }, { what: "who can open the files" });
+        const replies = (r.json as { responses?: { id?: string; status?: number; body?: { id?: string } }[] } | null)?.responses ?? [];
+        for (const [n, a] of part.entries()) {
+          const reply = replies.find((x) => x?.id === String(n));
+          if (reply?.status === 200) {
+            if (reply.body?.id === a.id) open.add(a.id); // an answer about some other item stays closed
+          } else if (reply?.status === 403 || reply?.status === 404) continue; // no access, or gone: closed
+          else throw new ConnectorError("busy", "Microsoft 365 didn't say who can open the files just now.", reply?.status ?? null);
+        }
+      }
+      return open;
+    },
   },
 
   async projects(api, conn) {

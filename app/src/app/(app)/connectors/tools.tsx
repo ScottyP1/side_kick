@@ -382,8 +382,8 @@ function Connection({ c, canManage, reload }: { c: ConnectorHealth; canManage: b
 
 /**
  * Who sees what from one connection (docs/ARCHITECTURE.md → Connectors): **one shared account** (everyone in the group
- * sees what it reads) or **each person signs in** (answers use only what the reader's own sign-in can open; Jira and
- * Azure DevOps). The group's managers switch it (PUT /api/connectors/<id>); in personal mode it says how many of the
+ * sees what it reads) or **each person signs in** (answers use only what the reader's own sign-in can open; Jira,
+ * Azure DevOps and Microsoft 365 files). The group's managers switch it (PUT /api/connectors/<id>); in personal mode it says how many of the
  * group's people have connected and whose sign-in expired, with a link to connect your own on Knowledge.
  */
 function WhoSees({ c, canManage, act, busy }: { c: ConnectorHealth; canManage: boolean; act: (label: string, fn: () => Promise<unknown>, done: string) => Promise<void>; busy: string }) {
@@ -456,7 +456,7 @@ function ConnectForm({ kind, groups }: { kind: Kind; groups: { id: string; name:
       </div>
       <div className="callout info" role="note">
         <b>{ACCOUNT_NOTE}</b>{" "}
-        You sign in with {t.signIn.replace("your ", "the client's ")}; {BRAND.name} only reads, and stores no password. Members and Viewers don&apos;t sign in, unless you later choose “each person signs in” (Jira, Azure DevOps).
+        You sign in with {t.signIn.replace("your ", "the client's ")}; {BRAND.name} only reads, and stores no password. Members and Viewers don&apos;t sign in, unless you later choose “each person signs in” (Jira, Azure DevOps, Microsoft 365 files).
         {kind === "github" && " Only repositories the client installed the Sidekick GitHub app on can be linked."}
         {kind === "m365" && ` The first time, Microsoft may ask an admin of the client's organization to approve ${BRAND.name} reading SharePoint and OneDrive files.`}
       </div>

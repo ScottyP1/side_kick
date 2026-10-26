@@ -1836,6 +1836,16 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
     assert.equal((await member("POST", "/api/connectors/links", { connector: id, ws: s.wsA, project })).status, 403, `${kind}: Members can't link`);
     assert.equal((await member("DELETE", `/api/connectors/${id}`)).status, 403);
     assert.equal((await member("GET", `/api/connectors/start?kind=${kind}&ws=${s.wsA}`)).status, 403);
+    if (kind === "m365") {
+      // "Each person signs in" on B's files: nobody outside B can sign in to it, see it as theirs or switch it back.
+      assert.equal((await admin("PUT", `/api/connectors/${id}`, { accessMode: "personal" })).status, 200);
+      assert.match(flashOf(await isoAsker("GET", `/api/connectors/mine/start?connector=${id}`)), /Connector not found/, "m365: A's Member can't sign in to B's files");
+      assert.match(flashOf(await other("GET", `/api/connectors/mine/start?connector=${id}`)), /Connector not found/, "m365: nor another organization");
+      assert.ok(!(await isoAsker("GET", "/api/connectors/mine")).body.signIns.some((x) => x.connectorId === id));
+      assert.equal((await lead("PUT", `/api/connectors/${id}`, { accessMode: "shared" })).status, 404);
+      assert.equal((await other("DELETE", `/api/connectors/mine/${id}`)).status, 404);
+      assert.ok(!leaks(await askA(isoAsker, "ZEBRA vault key Fabrikam merger handover")), "m365 personal: never reaches A");
+    }
     // Disconnecting removes the sign-in, the link and its search entries.
     assert.deepEqual((await admin("DELETE", `/api/connectors/${id}`)).body, { links: 1, items: 1 });
     assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE text LIKE '%ZEBRA-7731%' AND source_type = '${type}'`)), 0, `${kind}: search entries gone`);
@@ -5656,6 +5666,126 @@ test(`[${ENGINE}] connectors: Microsoft 365 connects (the client's own Microsoft
   assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Disconnected Microsoft 365 \(Northwind Traders\) from this group: removed its sign-in, 1 linked project and 1 imported item/);
   tools.state.graphDeltaPage = 200;
   assert.equal(await dbValue(`SELECT entra_tenant_id FROM orgs WHERE id = '${org}'`), own, "the organization's own Microsoft link is untouched");
+});
+
+test(`[${ENGINE}] connectors: Microsoft 365 files, each person signs in: answers only use files the reader can open in SharePoint (checked with their own token in a Graph $batch), sign-ins at the client's organization, expiry, throttling, Teams chats and other-org walls`, async () => {
+  const tenantNow = tools.world.m365.tenantId;
+  const c = await connectTool(admin, "m365");
+  assert.equal(c.to?.search, "?connected=m365", flashOf(c.done ?? c.start));
+  const conn = (await admin("GET", "/api/connectors")).body.connectors.find((x) => x.kind === "m365" && x.workspaceId === s.wsA);
+  assert.deepEqual([conn.personal.supported, conn.personal.reason], [true, null], "no more \"shared only\" reason on the tile");
+  // Files in the cutover folder: one only Ana may open (the folder she keeps private), one open to both.
+  tools.world.people = { ...tools.world.people, ana: "Ana Sharepoint", ben: "Ben Sharepoint" };
+  tools.m365File("b!ops-documents", { id: "sp-private-dir", name: "Ana private", folder: true, parent: "cut-folder", viewers: ["ana"] });
+  tools.m365File("b!ops-documents", { id: "sp-garnet", name: "Garnet salary bands.txt", parent: "sp-private-dir", content: () => Buffer.from("Garnet salary bands for the store managers, confidential.") });
+  tools.m365File("b!ops-documents", { id: "sp-topaz", name: "Topaz weekend rota.txt", parent: "cut-folder", content: () => Buffer.from("Topaz weekend rota: two staff per till on cutover Saturday.") });
+  const link = (await admin("POST", "/api/connectors/links", { connector: conn.id, ws: s.wsA, project: "b!ops-documents/cut-folder" })).body.link;
+  assert.equal(link.problem, null);
+  const files = (r) => r.body.sources.filter((x) => x.type === "page").map((x) => x.title.match(/(Garnet|Topaz|Onyx)/)?.[1]).filter(Boolean);
+  const GARNET = "Garnet salary bands store managers", TOPAZ = "Topaz weekend rota staff per till", ONYX = "Onyx till vendor contacts";
+  const ana = client(), ben = client(), lead = client();
+  for (const [call, name, email, role] of [[ana, "Ana Sharepoint", "ana.sp@test.local", "Member"], [ben, "Ben Sharepoint", "ben.sp@test.local", "Member"], [lead, "Lea Sharepoint", "lea.sp@test.local", "Team Lead"]]) {
+    const u = await admin("POST", "/api/users", { name, email, role, workspaces: [s.wsA] });
+    assert.equal((await firstSignIn(call, email, u.body.tempPassword)).status, 200);
+  }
+  // Shared account: everyone sees what the group's account reads, Ana's private file too.
+  assert.deepEqual(files(await askA(ben, GARNET, { types: ["documents"] })), ["Garnet"], "the gap this closes");
+  assert.deepEqual((await lead("PUT", `/api/connectors/${conn.id}`, { accessMode: "personal" })).body, { accessMode: "personal", removedSignIns: 0 });
+  // Not connected: no files, a note without file names.
+  const none = await askA(ben, TOPAZ, { types: ["documents"] });
+  assert.deepEqual(files(none), []);
+  assert.deepEqual(none.body.access.map((n) => [n.kind, n.reason, n.text]), [["m365", "connect", "Connect your Microsoft 365 files to include them in your answers."]]);
+  assert.doesNotMatch(JSON.stringify(none.body.access), /Topaz|rota/);
+  assert.deepEqual((await ben("GET", `/api/connectors/mine?ws=${s.wsA}`)).body.signIns.map((x) => [x.kind, x.label, x.status]), [["m365", "Microsoft 365 files", "none"]]);
+  // Each signs in at the client's own Microsoft organization, asking only for the personal scopes.
+  const signedTo = tools.state.m365Tenants.length;
+  const anaIn = await connectMine(ana, conn.id, "ana");
+  assert.equal(anaIn.to?.pathname + anaIn.to?.search, `/knowledge?ws=${s.wsA}&signedin=m365`, flashOf(anaIn.done ?? anaIn.start));
+  assert.deepEqual(tools.state.m365Tenants.slice(signedTo), [`${tenantNow} offline_access User.Read Files.Read.All`]);
+  assert.equal((await connectMine(ben, conn.id, "ben")).to?.pathname, "/knowledge");
+  assert.deepEqual((await ana("GET", `/api/connectors/mine?ws=${s.wsA}`)).body.signIns.map((x) => [x.status, x.accountName]), [["connected", "Ana Sharepoint"]]);
+  assert.match(await dbValue(`SELECT access_token FROM connector_user_tokens WHERE connector_id = '${conn.id}' AND account_name = 'Ana Sharepoint'`), /^enc1\./, "sealed at rest");
+  // Ana sees her private file; Ben never does and isn't told it exists; both see the open one.
+  const personalCalls = tools.counts.personal.m365;
+  assert.deepEqual(files(await askA(ana, GARNET, { types: ["documents"] })), ["Garnet"]);
+  assert.ok(tools.counts.personal.m365 > personalCalls, "checked with Ana's own token");
+  const benG = await askA(ben, GARNET, { types: ["documents"] });
+  assert.deepEqual([files(benG), benG.body.access], [[], []], "closed to Ben: left out silently");
+  assert.deepEqual(files(await askA(ben, TOPAZ, { types: ["documents"] })), ["Topaz"]);
+  const cachedCalls = tools.counts.personal.m365;
+  assert.deepEqual(files(await askA(ana, GARNET, { types: ["documents"] })), ["Garnet"]);
+  assert.equal(tools.counts.personal.m365, cachedCalls, "cached for a few minutes");
+  assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%sp-garnet%' OR attrs LIKE '%Garnet%' OR attrs LIKE '%m365at_%'")), 0, "no ids, titles or tokens in traces");
+
+  // A revoked sign-in turns "expired" (reconnect); everyone else's refreshes go back to the same organization.
+  tools.m365File("b!ops-documents", { id: "sp-onyx", name: "Onyx vendor contacts.txt", parent: "cut-folder", content: () => Buffer.from("Onyx till vendor contacts for the cutover weekend.") });
+  assert.equal((await admin("POST", `/api/connectors/links/${link.id}/sync`)).body.link.problem, null);
+  tools.revokeUser("m365", "ben");
+  tools.expireAccessTokens();
+  const benO = await askA(ben, ONYX, { types: ["documents"] });
+  assert.deepEqual([files(benO), benO.body.access.map((n) => n.reason)], [[], ["reconnect"]]);
+  assert.match(benO.body.access[0].text, /Your Microsoft 365 sign-in expired/);
+  // Graph throttles the check: nothing is shown (fail closed) and nothing is remembered as closed.
+  const refreshes = tools.counts.refresh.m365;
+  tools.state.graphBatchStatus = 429;
+  const anaBusy = await askA(ana, ONYX, { types: ["documents"] });
+  tools.state.graphBatchStatus = null;
+  assert.deepEqual([files(anaBusy), anaBusy.body.access.map((n) => n.reason)], [[], ["unavailable"]]);
+  assert.ok(tools.counts.refresh.m365 > refreshes, "Ana's token was renewed, at the client's organization (the fake refuses any other)");
+  assert.deepEqual(files(await askA(ana, ONYX, { types: ["documents"] })), ["Onyx"], "checked again once Graph answers");
+  await jobTick({ sweep: true, kinds: ["watch.all", "watch.org"] });
+  const finding = (await lead("GET", "/api/findings")).body.findings.find((f) => f.kind === "connector_signins" && f.subject === conn.id);
+  assert.ok(finding && /Microsoft 365/.test(finding.title) && /Ben Sharepoint/.test(finding.detail), JSON.stringify(finding));
+  assert.equal((await connectMine(ben, conn.id, "ben")).to?.pathname, "/knowledge", "reconnecting");
+  assert.deepEqual(files(await askA(ben, ONYX, { types: ["documents"] })), ["Onyx"]);
+
+  // Walls: someone outside the group or in another organization can't connect, switch or see it.
+  const otto = client();
+  const ou = await admin("POST", "/api/users", { name: "Otto Sharepoint", email: "otto.sp@test.local", role: "Member", workspaces: [s.wsB] });
+  assert.equal((await firstSignIn(otto, "otto.sp@test.local", ou.body.tempPassword)).status, 200);
+  assert.match(flashOf((await connectMine(otto, conn.id, "ana")).start), /Connector not found/);
+  assert.equal((await otto("DELETE", `/api/connectors/mine/${conn.id}`)).status, 404);
+  const elsewhere = client();
+  assert.equal((await signUpAs(elsewhere, { org: "Sharepoint Elsewhere", name: "Sal Else", email: "sal@spelsewhere.test", password: "correct horse battery", plan: "business" })).status, 200);
+  assert.match(flashOf((await connectMine(elsewhere, conn.id, "ana")).start), /Connector not found/, "another organization");
+  assert.equal((await elsewhere("PUT", `/api/connectors/${conn.id}`, { accessMode: "shared" })).status, 404);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM connector_user_tokens WHERE connector_id = '${conn.id}'`)), 2, "only Ana's and Ben's");
+
+  // Teams: only files everyone in the chat can open; a guest in the chat means no files at all.
+  const CHAT = "19:sharepoint-people@thread.v2";
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: CHAT, conversationType: "groupChat", tenantId: "tenant-1", name: "Files crew" } }));
+  const code = cardText(cardsOf(await waitForSent((m) => decodeURIComponent(m.url).includes(CHAT)))[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+  assert.equal((await admin("POST", "/api/teams-links", { code, ws: s.wsA })).status, 200);
+  const tenantBefore = await dbValue("SELECT entra_tenant_id FROM orgs WHERE name = 'Test Org'");
+  await dbExec("UPDATE orgs SET entra_tenant_id = 'tenant-1' WHERE name = 'Test Org'");
+  await dbExec("UPDATE users SET entra_oid = 'oid-ana-sp' WHERE email = 'ana.sp@test.local'");
+  await dbExec("UPDATE users SET entra_oid = 'oid-ben-sp' WHERE email = 'ben.sp@test.local'");
+  const person = (oid, name) => ({ id: `29:${oid}`, name, aadObjectId: oid, tenantId: "tenant-1", userRole: "user" });
+  const askChat = async (text) => {
+    const before = sent.length;
+    await toBot(activity({ type: "message", text: `<at>Sidekick</at> ${text}`, from: { id: "29:oid-ana-sp", name: "Ana in Teams", aadObjectId: "oid-ana-sp" }, conversation: { id: CHAT, conversationType: "groupChat", tenantId: "tenant-1" }, entities: [{ type: "mention", mentioned: { id: "bot", name: "Sidekick" }, text: "<at>Sidekick</at>" }] }));
+    return cardText(cardsOf(await waitForSent((m) => sent.indexOf(m) >= before && cardsOf(m).some((x) => cardText(x).includes(text))))[0]);
+  };
+  rosters.set(CHAT, [person("oid-ana-sp", "Ana"), person("oid-ben-sp", "Ben")]);
+  const chatG = await askChat(GARNET);
+  assert.doesNotMatch(chatG, /Garnet salary bands\.txt/, "Ben is in the chat and can't open it");
+  assert.match(chatG, /Microsoft 365 files were left out: not everyone in this chat/);
+  assert.match(await askChat(TOPAZ), /Topaz weekend rota\.txt/, "both can open it");
+  rosters.set(CHAT, [person("oid-ana-sp", "Ana"), { id: "29:guest", name: "Client guest", userRole: "guest", tenantId: "client-tenant" }]);
+  const guest = await askChat(TOPAZ);
+  assert.doesNotMatch(guest, /Topaz weekend rota\.txt/, "a guest can't be checked: no files");
+  assert.match(guest, /not everyone in this chat/);
+  rosters.set(CHAT, Array.from({ length: 21 }, (_, i) => (i === 0 ? person("oid-ana-sp", "Ana") : i === 1 ? person("oid-ben-sp", "Ben") : person(`oid-crowd-${i}`, `Crowd ${i}`))));
+  assert.doesNotMatch(await askChat(TOPAZ), /Topaz weekend rota\.txt/, "more than 20 people: not checked person by person");
+
+  // Back to one shared account: everyone's own sign-ins go. Tidy up for the tests below.
+  assert.equal((await admin("PUT", `/api/connectors/${conn.id}`, { accessMode: "shared" })).body.removedSignIns, 2);
+  assert.deepEqual(files(await askA(ben, GARNET, { types: ["documents"] })), ["Garnet"]);
+  assert.equal((await admin("DELETE", `/api/connectors/${conn.id}`)).status, 200);
+  const drive = tools.world.m365.sites[0].drives[0];
+  drive.items.splice(0, drive.items.length, ...drive.items.filter((x) => !x.id.startsWith("sp-")));
+  rosters.delete(CHAT);
+  await dbExec(`UPDATE orgs SET entra_tenant_id = ${tenantBefore ? `'${tenantBefore}'` : "NULL"} WHERE name = 'Test Org'`);
 });
 
 /* ---------- Connector permissions: the Org Owner approves, Team Leads link or ask (lib/connector-requests.ts) ---------- */

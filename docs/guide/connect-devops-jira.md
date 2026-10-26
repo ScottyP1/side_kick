@@ -98,7 +98,7 @@ Each tool and each linked project shows its status on Connectors:
 ## Who sees what: one shared account, or each person signs in
 Every group's connection has a **Who sees what** setting on Connectors (the group's Team Lead or an admin changes it):
 - **One shared account** (the default): everyone in the group sees what the connection's account can read. Fine when the whole team may open the whole board anyway.
-- **Each person signs in** (Jira and Azure DevOps): the group's account still keeps Sidekick up to date, but an answer only uses a ticket or work item **the person asking can open with their own account**. Use it when some issues have a security level, some Azure DevOps areas are restricted, or not everyone on the team has the same access.
+- **Each person signs in** (Jira, Azure DevOps and Microsoft 365 files): the group's account still keeps Sidekick up to date, but an answer only uses a ticket, work item or file **the person asking can open with their own account**. Use it when some issues have a security level, some Azure DevOps areas are restricted, some SharePoint folders or OneDrive files are shared with only part of the team, or not everyone on the team has the same access.
 
 When a group uses **Each person signs in**:
 1. Everyone in the group (Viewers too) opens **Knowledge** and, under **Your sign-ins to tools**, presses **Connect your Jira** (or Azure DevOps) and signs in with **their own** account for the client's site. It must be the same Jira site or Azure DevOps organization the group is connected to. Sidekick only reads and stores no password; the sign-in is kept encrypted and renewed by itself.
@@ -110,7 +110,13 @@ When a group uses **Each person signs in**:
 
 Switching back to **One shared account** removes everyone's own sign-ins. **Disconnect your Jira** (Knowledge) removes only yours. Leaving the group, or being removed from the organization, removes yours too.
 
-GitHub, Confluence and Microsoft 365 use one shared account for now. GitHub's own permissions are per repository (anyone who may open the repository may open all its issues), so the shared account already matches GitHub. Checking each person's access is planned for Confluence (page restrictions) and SharePoint/OneDrive (file permissions).
+**SharePoint and OneDrive files with "each person signs in":**
+- Each person presses **Connect your Microsoft 365 files** on Knowledge and signs in with the Microsoft account they use **for the client** (their client account, or the guest account the client invited them with). Sidekick sends them to the client's own Microsoft sign-in, so a guest account works.
+- Microsoft asks them to let Sidekick **read the files they can open** (Files.Read.All). That's all a person's sign-in asks for. If the client's Microsoft admin already approved Sidekick when the group connected, nobody else is asked for approval; some organizations still require an admin to approve every app, in which case the person sees "Need admin approval" and their admin approves once.
+- At the moment of the answer, Sidekick asks Microsoft which of the files it found the person can open (SharePoint's own permissions: folder sharing, broken inheritance, sharing links). A file someone can't open isn't used and isn't mentioned. Until someone connects, their answers say **"Connect your Microsoft 365 files to include them"**, without naming any file.
+- In Teams group chats, only files **everyone in the chat** can open are used, with the same rules as tickets above (client guests, people Sidekick doesn't know, or more than 20 people mean no files from Microsoft 365 in that answer, and the card says so).
+
+GitHub and Confluence use one shared account for now. GitHub's own permissions are per repository (anyone who may open the repository may open all its issues), so the shared account already matches GitHub. Checking each person's access is planned for Confluence (page restrictions).
 
 ## Unlink or switch off
 - **Unlink** (on a linked project) removes that project's items from the group's knowledge. The connection stays.

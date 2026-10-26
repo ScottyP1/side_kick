@@ -2,7 +2,7 @@
 
 /**
  * "Your sign-ins to tools" (Knowledge page, `#signins`): the group's connections in **each person signs in** mode
- * (Jira, Azure DevOps; docs/ARCHITECTURE.md → Connectors) and whether this person has connected their own account.
+ * (Jira, Azure DevOps, Microsoft 365 files; docs/ARCHITECTURE.md → Connectors) and whether this person has connected their own account.
  * Answers only use those tools' items when the person's own sign-in can open them, so each row says so and offers
  * Connect / Reconnect / Disconnect. Hidden when the group has no such connection. Reads GET /api/connectors/mine;
  * Connect goes to /api/connectors/mine/start (the tool's sign-in, then back here with `?signedin=<tool>`, or
@@ -23,7 +23,7 @@ export type MySignIn = {
 export type AccessNote = { connectorId: string; kind: string; reason: "connect" | "reconnect" | "chat" | "unavailable"; text: string };
 
 const connectHref = (connectorId: string) => `/api/connectors/mine/start?connector=${encodeURIComponent(connectorId)}`;
-const TOOL: Record<string, string> = { ado: "Azure DevOps", jira: "Jira" };
+const TOOL: Record<string, string> = { ado: "Azure DevOps", jira: "Jira", m365: "Microsoft 365 files" };
 
 /** The notes under an answer that left a tool's items out, each with its Connect / Reconnect button. */
 export function AccessNotes({ notes }: { notes?: AccessNote[] }) {

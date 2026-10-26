@@ -31,7 +31,7 @@ On a phone (or any narrow window) the sidebar makes way for two things:
 - The **menu button** (three lines, top left) opens everything else: every page your role can use (the same list as the sidebar), the switcher between your groups if you're in two or more, and **Sign out**. Tap outside it, press the ✕ or Escape to close it.
 
 ## Sources and citations
-When Sidekick answers, it first searches the group, and your organization's **firm library**, for the passages most related to your question (by keyword and by meaning, so different wording still finds the right passage), then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, its date and a short excerpt. Sources from the firm library are labelled **Firm policy**. If two sources disagree, Sidekick says so ("the sources disagree") and cites both.
+When Sidekick answers, it first searches the group, and your organization's **firm library**, for the passages most related to your question (by keyword and by meaning, so different wording still finds the right passage), then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, its date and a short excerpt. Each source is listed once (two parts of the same meeting show both timestamps), and a tag always points at a listed source. Sources from the firm library are labelled **Firm policy**. If two sources disagree, Sidekick says so ("the sources disagree") and cites both.
 
 Before answering, Sidekick puts the passages it found in order of how well they fit your whole question, and:
 - **Newer wins**: on the same topic a recent meeting or document counts a little more than an old one.
@@ -39,6 +39,9 @@ Before answering, Sidekick puts the passages it found in order of how well they 
 - **Notes first**: the meeting notes Sidekick wrote (summary and decisions) come before raw transcript lines, which are still there for the detail.
 - **No duplicates**: the same document uploaded twice, or a chat reply quoting the message it answers, is used once.
 - **Policy vs. project**: for policy questions (expenses, travel, approvals, rate cards, data handling) the firm library comes first; for facts about the engagement, the group's own sources do.
+- **What someone said**: for questions like "What did the client say about PCI?" the group's meetings, notes and chats come first, and the topic word ("PCI") counts far more than common words like "client".
+- **Who's speaking**: in meeting transcripts Sidekick knows which speakers are your organization's own people, and which were guests (Teams marks them, or the meeting was marked "Client guests attended"). It never guesses anyone's side or role, and it only names people the meeting already shows.
+- **Transcripts are read in overlapping pieces**, so a question and the answer to it ("that's on our side" / "PCI stays with security") are always read together.
 
 **Filters** in Ask narrow the sources to documents, meetings, Teams chats, decisions & notes or the firm library, and to a date range.
 

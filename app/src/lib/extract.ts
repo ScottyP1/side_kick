@@ -8,6 +8,7 @@
  *   (lib/connector-m365.ts) both read files through `fileToText`.
  * - **Chunking**: long text is cut into passages of about 1,200 characters on paragraph or speaker
  *   boundaries. Small passages make search precise and keep what we send to Claude short (and cheap).
+ *   Transcript passages overlap by the last speaker turn or two, so a statement and its reply stay together.
  */
 import "server-only";
 import path from "node:path";
@@ -162,32 +163,92 @@ export function vttToTranscript(vtt: string): string {
   return merged.join("\n");
 }
 
+/** A transcript line: `[00:01:33] Tom Becker: words` (what `vttToTranscript` writes). */
+const TURN = /^\[\d{2}:\d{2}:\d{2}\] [^:\n]{1,80}:/;
+
+/**
+ * True when text reads like a meeting transcript: at least three lines are timestamped speaker turns
+ * (`[00:01:33] Name: ...`). Transcripts get overlapping passages (see `chunk`).
+ */
+export function isTranscript(text: string): boolean {
+  let n = 0;
+  for (const line of text.split("\n")) if (TURN.test(line) && ++n >= 3) return true;
+  return false;
+}
+
+/** Most characters of speaker turns carried from the end of one transcript passage into the next. */
+export const TRANSCRIPT_OVERLAP = 400;
+
 /**
  * Splits text into ~`size`-character passages on page, paragraph or speaker boundaries. Each passage keeps
  * the most recent location label (page or timestamp) so citations can point to it. Very long paragraphs
  * are cut into fixed-size slices.
+ *
+ * **Transcripts overlap**: when the text is a meeting transcript (`isTranscript`), each new passage starts with
+ * the last whole speaker turn(s) of the one before (up to `TRANSCRIPT_OVERLAP` characters, at least one turn), so
+ * a statement and the reply to it always share a passage ("Tom: the card readers are a PCI question" / "Priya:
+ * PCI stays with Contoso security"). Turns are never cut in half. Other text doesn't overlap. Because the output
+ * changed, existing transcripts are re-cut once by `rechunkTranscripts` in lib/search.ts.
  */
 export function chunk(text: string, size = 1200): { text: string; loc: string }[] {
   const parts = text.split(/\n(?=\[(?:Page|Slide) \d+\])|\n{2,}|\n(?=\[\d{2}:\d{2}:\d{2}\])/);
+  const transcript = isTranscript(text);
   const chunks: { text: string; loc: string }[] = [];
-  let buf = "";
+  let buf: string[] = [];
+  let len = 0;
   let loc = "";
   const locOf = (s: string) => s.match(/^\[((?:Page|Slide) \d+|\d{2}:\d{2}:\d{2})\]/)?.[1] ?? "";
+  const add = (piece: string) => {
+    buf.push(piece);
+    len += (buf.length > 1 ? 1 : 0) + piece.length;
+  };
   for (const p of parts) {
     const piece = p.trim();
     if (!piece) continue;
-    if (!buf) loc = locOf(piece) || loc;
-    if (buf && buf.length + piece.length > size) {
-      chunks.push({ text: buf, loc });
-      buf = "";
-      loc = locOf(piece) || loc;
+    if (!buf.length) loc = locOf(piece) || loc;
+    if (buf.length && len + piece.length > size) {
+      chunks.push({ text: buf.join("\n"), loc });
+      // Carry the last speaker turn(s) into the next passage (transcripts only, whole turns only).
+      const carry: string[] = [];
+      if (transcript && piece.length <= size * 1.5) {
+        let carried = 0;
+        for (let i = buf.length - 1; i >= 0 && TURN.test(buf[i]); i--) {
+          if (carry.length && carried + buf[i].length > TRANSCRIPT_OVERLAP) break;
+          if (buf[i].length > TRANSCRIPT_OVERLAP * 1.5) break;
+          carry.unshift(buf[i]);
+          carried += buf[i].length + 1;
+        }
+      }
+      buf = [];
+      len = 0;
+      for (const c of carry) add(c);
+      loc = (carry.length ? locOf(carry[0]) : locOf(piece)) || loc;
     }
     if (piece.length > size * 1.5) {
       for (let i = 0; i < piece.length; i += size) chunks.push({ text: piece.slice(i, i + size), loc });
       continue;
     }
-    buf = buf ? `${buf}\n${piece}` : piece;
+    add(piece);
   }
-  if (buf) chunks.push({ text: buf, loc });
+  if (buf.length) chunks.push({ text: buf.join("\n"), loc });
   return chunks;
+}
+
+/**
+ * Joins a source's passages (in order) back into one text, dropping the speaker turns each transcript passage
+ * repeats from the one before (`chunk`'s overlap). Used to re-cut a transcript uploaded as a document, whose
+ * original text isn't kept, when chunking changes (`rechunkTranscripts` in lib/search.ts).
+ */
+export function unchunk(passages: string[]): string {
+  const lines: string[] = [];
+  for (const p of passages) {
+    const next = p.split("\n");
+    // The longest run of leading lines that repeats the end of what we have (at most a few turns).
+    let k = Math.min(next.length, lines.length, 20);
+    for (; k > 0; k--) {
+      if (next.slice(0, k).every((l, i) => l === lines[lines.length - k + i] && TURN.test(l))) break;
+    }
+    lines.push(...next.slice(k));
+  }
+  return lines.join("\n");
 }

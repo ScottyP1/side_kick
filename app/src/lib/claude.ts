@@ -170,6 +170,23 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
     if (question.includes("__UNGROUNDED__")) return { found: true, answer: "The cutover is definitely on Friday.", source_ids: ["S99"], conflict };
     if (question.includes("__CONTACT__")) return { found: true, answer: "Ask Maria at maria.chen@contoso.example or +1 (555) 010-2233 about the 48 stores [S1].", source_ids: ["S1"], conflict };
     if (question.includes("__SWEAR__")) return { found: true, answer: "The old runbook was shit, use the new one [S1].", source_ids: ["S1"], conflict };
+    // "__SPEAKERS__": answers with the speaker notes it was given (lib/speakers.ts) and the group's client, so tests
+    // can check what the prompt says about who is on which side.
+    if (question.includes("__SPEAKERS__")) {
+      const notes = [...content.matchAll(/<speakers>\n([\s\S]*?)\n<\/speakers>/g)].map((m) => m[1].replace(/\n/g, " | "));
+      return { found: true, answer: `${content.match(/^This group's client: (.+)$/m)?.[1] ?? "no client"} | ${notes.join(" | ") || "no speakers"} [S1]`, source_ids: ["S1"], conflict };
+    }
+    // "__DUPCITE__": cites two passages of one source (the first pair with the same title) under two tags, plus a tag
+    // that points at nothing (citation clean-up, lib/guard-text.ts tidyCitations).
+    if (question.includes("__DUPCITE__")) {
+      const tagged = [...content.matchAll(/<source id="(S\d+)"[^>]*title="([^"]*)"/g)].map((m) => ({ id: m[1], title: m[2] }));
+      const a = tagged.find((t, i) => tagged.some((u, j) => j > i && u.title === t.title));
+      const b = a && tagged.find((u) => u.id !== a.id && u.title === a.title);
+      const pair = a && b ? [a.id, b.id] : ["S1", "S2"];
+      return { found: true, answer: `It was raised twice [${pair[0]}] [${pair[1]}], see [S77].`, source_ids: pair, conflict };
+    }
+    // "__NOTHING__": an "I don't know" that still carries source tags but cites nothing.
+    if (question.includes("__NOTHING__")) return { found: false, answer: "I don't know: the sources don't say [S1][S2].", source_ids: [], conflict };
     const ids = [...content.matchAll(/<source id="(S\d+)"/g)].map((m) => m[1]);
     return { found: ids.length > 0, answer: ids.length ? `Test answer from ${ids.join(", ")} [S1].` : "Not in the sources.", source_ids: ids.slice(0, 2), conflict };
   }
@@ -177,6 +194,14 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
     // "__COMMITMENTS__" in a transcript: action items are worked out from what people said, following the rules the
     // notes prompt states (so a test catches the prompt losing them). Otherwise the canned notes below.
     if (content.includes("__COMMITMENTS__")) return fakeCommitments(content, system);
+    // "__FOLLOWUP__": a plan to review again saved as a dateless decision (as the real model once did), so tests can
+    // check that it's saved as a dated action item instead (lib/meeting-notes-rules.ts).
+    if (content.includes("__FOLLOWUP__")) {
+      return {
+        summary: "Test summary of the meeting.", decisions: [{ text: "Use the new claims ID alongside the legacy one", made_by: "Grace Lee" }, { text: "Review cutover prep progress again in two weeks", made_by: "Grace Lee" }],
+        action_items: [{ text: "Send the reconciliation report", owner: "Ana Silva", due: "in three days", due_date: null }], open_questions: [], pending_decisions: [], facts: [],
+      };
+    }
     return {
       summary: "Test summary of the meeting.",
       decisions: [{ text: "Test decision", made_by: "Priya Raman" }],

@@ -799,6 +799,104 @@ test(`[${engine}] ranking: at most three passages per source; versions of a docu
   assert.equal(rank.contentHash("a  b\nc"), rank.contentHash("a b c"));
 });
 
+test(`[${engine}] ranking: rarer question words count more, and "what did X say" questions prefer what people said`, () => {
+  const today = new Date("2026-10-21");
+  // Firm policies all mention "client"; only the transcript has "PCI".
+  const firm = (id, text) => cand(id, text, { origin: "firm", source_type: "firm" });
+  const list = [
+    firm("f1", "Client data handling standard: client data stays in the client's tenant."),
+    firm("f2", "Expense policy: when travelling for a client, book economy."),
+    firm("f3", "Travel note: the client's store operations centre is in Chicago."),
+    cand("kickoff", "[00:01:33] Tom Becker: From security: the new card readers in wave 2 stores are a PCI question.\n[00:01:44] Priya Raman: Understood. PCI stays with the client's security team."),
+  ];
+  assert.equal(rank.isSaidQuestion("What did the client say about PCI?"), true);
+  assert.equal(rank.isSaidQuestion("What was said about rollback?"), true);
+  assert.equal(rank.isSaidQuestion("When is the wave 2 cutover?"), false);
+  assert.equal(rank.rerank("What did the client say about PCI?", list, { today })[0].source_id, "kickoff");
+  assert.ok(!rank.terms("what did the client say").includes("say"), "verbs of speech aren't topic words");
+});
+
+const extract = await import("../src/lib/extract.ts");
+
+test(`[${engine}] transcript passages overlap by whole speaker turns, so a statement and its reply share a passage`, async () => {
+  const fs = await import("node:fs");
+  const vtt = fs.readFileSync(new URL("../../samples/contoso/meetings/2026-09-30 Contoso - Wave 1 retro and wave 2 kickoff.vtt", import.meta.url), "utf8");
+  const text = extract.vttToTranscript(vtt);
+  assert.equal(extract.isTranscript(text), true);
+  const pieces = extract.chunk(text, 500);
+  assert.ok(pieces.length >= 3, "cut into several passages");
+  assert.ok(pieces.some((p) => /Tom Becker: .*PCI question/.test(p.text) && /Priya Raman: Understood\. PCI stays/.test(p.text)), "Tom's line and Priya's reply are in one passage");
+  for (let i = 1; i < pieces.length; i++) {
+    const first = pieces[i].text.split("\n")[0];
+    assert.ok(pieces[i - 1].text.split("\n").includes(first), `passage ${i + 1} starts with a turn from passage ${i}`);
+    assert.match(first, /^\[\d{2}:\d{2}:\d{2}\] [^:]+:/, "whole turns only");
+    assert.equal(pieces[i].loc, first.slice(1, 9), "the location is the first turn's time");
+  }
+  // Rebuilding the text from overlapping passages gives the transcript back (for re-cutting uploaded transcripts).
+  assert.equal(extract.unchunk(pieces.map((p) => p.text)), text.split("\n").map((l) => l.trim()).filter(Boolean).join("\n"));
+  // Ordinary documents don't overlap.
+  const doc = Array.from({ length: 12 }, (_, i) => `Paragraph ${i}: ${"words ".repeat(30)}`).join("\n\n");
+  assert.equal(extract.isTranscript(doc), false);
+  const docPieces = extract.chunk(doc, 500);
+  const paras = docPieces.flatMap((p) => p.text.split("\n"));
+  assert.equal(new Set(paras).size, 12, "every paragraph once, none repeated");
+  assert.equal(paras.length, 12);
+});
+
+const gtext = await import("../src/lib/guard-text.ts");
+
+test(`[${engine}] citations: tags pointing at nothing are removed, two passages of one source are one entry`, () => {
+  const src = (id, sourceId, loc = "") => ({ id, sourceId, loc, title: sourceId });
+  const none = gtext.tidyCitations("I don't know: the sources don't say [S1] [S2].", []);
+  assert.equal(none.answer, "I don't know: the sources don't say.");
+  const dup = gtext.tidyCitations("Code freeze is Dec 1 [S1] [S3], see also [S2, S3] [S9].", [src("S1", "notes-a", "00:01:00"), src("S2", "sow"), src("S3", "notes-a", "00:04:10")]);
+  assert.deepEqual(dup.sources.map((s) => [s.id, s.loc]), [["S1", "00:01:00, 00:04:10"], ["S2", ""]]);
+  assert.equal(dup.answer, "Code freeze is Dec 1 [S1], see also [S2, S1].");
+  assert.equal(gtext.tidyCitations("Nov 12 [S1][S1].", [src("S1", "a")]).answer, "Nov 12 [S1].");
+  assert.equal(gtext.tidyCitations("Logged at [2026-10-07 15:40] [S1].", [src("S1", "a")]).answer, "Logged at [2026-10-07 15:40] [S1].", "other brackets stay");
+});
+
+const speakers = await import("../src/lib/speakers.ts");
+
+test(`[${engine}] speaker sides: only what's known (the firm's people, Teams guest marks, guest meetings), never a guess`, () => {
+  const text = "[00:00:05] Priya Raman: Hi all.\n[00:00:09] Tom Becker: From security.\n[00:00:15] Jordan Alvarez (Guest): Thanks.\n[00:00:20] Tom Becker: One more.";
+  assert.deepEqual(speakers.speakersIn(text), ["Priya Raman", "Tom Becker", "Jordan Alvarez (Guest)"]);
+  const team = new Set(["priya raman"]);
+  assert.equal(speakers.sideOf("Priya Raman", team, false), "team");
+  assert.equal(speakers.sideOf("PRIYA RAMAN", team, true), "team");
+  assert.equal(speakers.sideOf("Jordan Alvarez (Guest)", team, false), "guest");
+  assert.equal(speakers.sideOf("Tom Becker", team, false), null, "unknown without a guest meeting");
+  assert.equal(speakers.sideOf("Tom Becker", team, true), "outside");
+  const plain = speakers.speakerLine(speakers.speakersIn(text), team, false, "Fabrikam");
+  assert.equal(plain, "Priya Raman: Fabrikam (our team)\nJordan Alvarez (Guest): guest from outside Fabrikam, marked by Teams");
+  assert.match(speakers.speakerLine(["Tom Becker"], team, true, "Fabrikam"), /^Tom Becker: not one of Fabrikam's people in .+; this meeting had client guests$/);
+  assert.equal(speakers.speakerLine(["Tom Becker"], team, false, "Fabrikam"), "", "nothing said about an unknown speaker");
+});
+
+const notesRules = await import("../src/lib/meeting-notes-rules.ts");
+
+test(`[${engine}] meeting notes: "review again in two weeks" is a dated action item, not a decision`, () => {
+  assert.equal(notesRules.isFollowUp("Review cutover prep progress again in two weeks"), true);
+  assert.equal(notesRules.isFollowUp("Let's revisit the release train next month"), true);
+  assert.equal(notesRules.isFollowUp("Keep the legacy claim numbers as the primary key"), false);
+  assert.equal(notesRules.isFollowUp("Dress rehearsal on the weekend of November 14"), false);
+  assert.deepEqual(notesRules.relativeDue("again in two weeks", "2026-10-22"), { due: "in two weeks", dueDate: "2026-11-05" });
+  assert.equal(notesRules.relativeDue("in 3 days", "2026-10-30").dueDate, "2026-11-02");
+  assert.equal(notesRules.relativeDue("next week", "2026-10-22").dueDate, "2026-10-29");
+  assert.equal(notesRules.relativeDue("by the end of the month", "2026-10-22"), null, "only clear phrases");
+  const raw = {
+    summary: "s",
+    decisions: [{ text: "Keep legacy IDs", made_by: "Omar" }, { text: "Review cutover prep progress again in two weeks", made_by: "Grace" }],
+    action_items: [{ text: "Send the report", owner: "Ana", due: "tomorrow", due_date: null }, { text: "Book the room", owner: "Ben", due: "Oct 30", due_date: "2026-10-30" }],
+  };
+  const out = notesRules.tidyNotes(raw, "2026-10-22");
+  assert.deepEqual(out.decisions.map((d) => d.text), ["Keep legacy IDs"]);
+  assert.deepEqual(out.action_items.map((a) => [a.text, a.owner, a.due_date]), [
+    ["Send the report", "Ana", "2026-10-23"], ["Book the room", "Ben", "2026-10-30"], ["Review cutover prep progress again in two weeks", "Grace", "2026-11-05"],
+  ]);
+  assert.equal(raw.decisions.length, 2, "the input isn't changed");
+});
+
 const pnav = await import("../src/lib/portal-nav.ts");
 
 test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar is a short subset of them`, () => {

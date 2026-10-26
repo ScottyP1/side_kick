@@ -13,6 +13,9 @@
  * - `jobs.prune` (6 h): clears finished jobs (7 days), dead ones (30 days) and old failed-post records (30 days).
  * - `data.retention` (1 h): deletes traces, AI usage rows, audit entries, logs and expired sign-in rows past their
  *   retention, in batches (lib/retention.ts `RETENTION`). Counts: `retained` (rows deleted).
+ * - `search.capacity` (1 h): reads how full the Azure AI Search service is and alerts the operator at 70% and 90%
+ *   (lib/search-capacity.ts; nothing when search is the local keyword index). Counts: `searchChecked`,
+ *   `searchAlerts`, `searchCheckFailed`.
  *
  * Per organization:
  * - `watch.org` (payload `{}`; the job's org): runs every watcher for that organization (lib/watchers.ts). Counts:
@@ -70,6 +73,7 @@ import { watchCalls } from "./call-nudge";
 import { autoRecordOrgs, scanOrg } from "./auto-record";
 import { checkOrg, checkScheduledMeetings, meetingNudgeOrgs, planOrg } from "./meeting-nudge";
 import { span } from "./trace";
+import { checkSearchCapacity } from "./search-capacity";
 
 const MIN = 60_000;
 /** How often the watchers run for each organization. */
@@ -115,6 +119,12 @@ defineJob("data.retention", {
   everyMs: 60 * MIN,
   maxAttempts: 3,
   run: async () => ({ retained: Object.values(await pruneOldData()).reduce((a, b) => a + b, 0) }),
+});
+defineJob("search.capacity", {
+  label: "Check how full Azure AI Search is",
+  everyMs: 60 * MIN,
+  maxAttempts: 2,
+  run: async () => checkSearchCapacity(),
 });
 defineJob("watch.all", {
   label: "Schedule the watchers",

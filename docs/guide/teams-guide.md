@@ -79,7 +79,7 @@ Changes show on the card for everyone, in the portal's tracker, and in the audit
 Open Sidekick in the Teams app bar → **Meetings**, or add it as a tab to a chat, channel or meeting (**+** at the top). It shows the group's meetings, their notes and open action items, signed in with your Microsoft account. Adding it to a meeting also brings Sidekick into the meeting chat, so its notes can go to the right group.
 
 ## Reminders
-In chats where an Org Admin turned **Reminders** on, Sidekick posts a short **reminder card** once a day (at the chosen time, not on quiet days such as weekends) and right after each meeting. It lists up to six things that are still open:
+In chats where an Org Admin turned **Reminders** on, Sidekick posts a short **reminder card** once a day (at the chosen time, not on quiet days such as weekends). After a meeting there's no second card in the chat that got the notes: the notes card ends with one line such as "3 older items still open: Open in Sidekick" (leaving out what today's reminder already listed). A chat that doesn't get the group's notes gets a reminder card after each meeting instead, if *After meetings* is on. The reminder card lists up to six things that are still open:
 - action items that are **overdue** or have **no owner**;
 - **open questions** and **decisions still to make** that are due (or have been open for a week);
 - documents that look **out of date** compared with newer meetings or chat messages (for example the runbook says Nov 5 but the cutover moved to Nov 12);

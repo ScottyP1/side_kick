@@ -93,7 +93,7 @@ const MAX_PAGES = 2;
 const MESSAGES_PER_READ = 25;
 
 /** Where Microsoft refused what the reminder for scheduled meetings needs (saved for the Teams chats tab). */
-export const REMIND_DENIED = `${BRAND.name} can't see your groups' scheduled Teams meetings yet, so it can't remind them to start transcription. A Microsoft admin of your organization approves reading calendars and Teams meetings (Users & access → Approve ${BRAND.name} for your organization), and the Teams application access policy must include ${BRAND.name} (see "Automatic notes" in the help center).`;
+export const REMIND_DENIED = `${BRAND.name} can't see your groups' scheduled Teams meetings yet, so it can't remind them to start transcription. A Microsoft admin of your organization approves reading calendars and Teams meetings (Settings → Microsoft permissions → Approve ${BRAND.name} for your organization), and the Teams application access policy must include ${BRAND.name} (see "Automatic notes" in the help center).`;
 
 /** The card in the meeting's own chat: the call reminder's text, about a meeting. */
 export const MEETING_NUDGE_TEXT = "This meeting isn't being transcribed yet. So I can write the meeting notes afterwards, turn it on: **More (…) → Record and transcribe → Start transcription**. If someone already started it, ignore this.";

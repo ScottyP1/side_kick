@@ -100,6 +100,10 @@ const { publicKey: msPublic, privateKey: msPrivate } = crypto.generateKeyPairSyn
 const msJwk = { ...msPublic.export({ format: "jwk" }), kid: "test-key", alg: "RS256", use: "sig" };
 const msCodes = new Map();
 const consented = new Set(); // tenants whose Microsoft admin approved Sidekick
+// Claims of the app token per tenant (its `roles` claim lists the granted application permissions). Without an
+// entry the token is plain "tok-<tenant>", like a token with no roles claim.
+const tokenClaims = new Map();
+let tokenCalls = 0; // client-credentials token requests (Check now asks once; page loads never)
 const TEAMS_APP_ID = "sidekick-test-app";
 // Where Sidekick is installed (chat or team id → Graph installations), and where it removed itself from.
 const INSTALLED = new Map();
@@ -143,8 +147,10 @@ const microsoft = http.createServer((req, res) => {
       if (f.get("grant_type") === "client_credentials") {
         const tid = url.pathname.split("/")[1];
         if (f.get("client_id") !== MS_CLIENT_ID) return send(401, { error: "invalid_client" });
+        tokenCalls++;
         if (!consented.has(tid)) return send(400, { error: "unauthorized_client", error_description: "AADSTS7000229: missing service principal" });
-        return send(200, { access_token: `tok-${tid}`, expires_in: 3600 });
+        const claims = tokenClaims.get(tid);
+        return send(200, { access_token: claims ? `tok-${tid}.${b64(claims)}.fake-signature` : `tok-${tid}`, expires_in: 3600 });
       }
       const c = msCodes.get(f.get("code"));
       msCodes.delete(f.get("code"));
@@ -155,7 +161,7 @@ const microsoft = http.createServer((req, res) => {
     // Teams app installations in chats and teams (Sidekick removing itself).
     const apps = url.pathname.match(/^\/v1\.0\/(chats|teams)\/([^/]+)\/installedApps(?:\/(.+))?$/);
     if (apps) {
-      const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "");
+      const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "").split(".")[0];
       if (!consented.has(tid)) return send(403, { error: { code: "Forbidden" } });
       const where = decodeURIComponent(apps[2]);
       if (DENY_SELF_REMOVAL.has(where)) return send(403, { error: { code: "Forbidden" } });
@@ -171,7 +177,7 @@ const microsoft = http.createServer((req, res) => {
       }
     }
     if (url.pathname.startsWith("/v1.0/users")) {
-      const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "");
+      const tid = (req.headers.authorization ?? "").replace("Bearer tok-", "").split(".")[0];
       if (!consented.has(tid)) return send(403, { error: { code: "Authorization_RequestDenied" } });
       const people = DIRECTORY[tid] ?? [];
       const one = url.pathname.match(/^\/v1\.0\/users\/(.+)$/);
@@ -664,6 +670,76 @@ test(`[${ENGINE}] directory import: needs the Microsoft admin's approval, then i
   assert.equal((await microsoftSignIn(client(), { tid: TA, oid: guid("oid-pat"), email: "pat@a.test" })).to.pathname, "/");
 });
 
+test(`[${ENGINE}] Microsoft permissions: one checklist; Check now reads the app token's roles; leads look, Members can't; per org`, async () => {
+  const total = 8;
+  const at = (st, id) => st.rows.find((r) => r.id === id);
+  assert.equal((await mo("GET", "/api/microsoft-permissions")).status, 403, "Members can't see it");
+  const lead = await lou("GET", "/api/microsoft-permissions");
+  assert.equal(lead.status, 200);
+  assert.equal(lead.body.canAct, false, "Team Leads look only");
+  assert.equal((await lou("POST", "/api/microsoft-permissions")).status, 403);
+  // The approval in the last test was checked at once; its token had no roles claim, so nothing counts as approved.
+  const calls = tokenCalls;
+  const st = (await ann("GET", "/api/microsoft-permissions")).body;
+  assert.equal(tokenCalls, calls, "showing the checklist never asks Microsoft");
+  assert.equal(st.canAct, true);
+  assert.equal(st.connected, true);
+  assert.ok(st.approvedAt && st.checkedAt);
+  assert.equal(st.checkedBy, "Sidekick", "checked by itself after the approval");
+  assert.equal(st.rows.length, total);
+  assert.ok(st.rows.every((r) => r.status === "missing"), JSON.stringify(st.rows.map((r) => r.status)));
+  assert.ok(at(st, "User.Read.All").features.some((f) => f.label === "Import from Microsoft 365" && f.href === "/users"));
+  assert.ok(at(st, "CallTranscripts.Read.All").features.some((f) => f.label === "Meet now calls"));
+  assert.ok(st.chats.some((r) => r.id === "ChatMessage.Read.Chat"), "Teams' per-chat permissions are listed apart");
+
+  // Check now: one token request; its roles claim says what's granted (other apps' permissions are ignored).
+  tokenClaims.set(TA, { tid: TA, roles: ["User.Read.All", "OnlineMeetings.Read.All", "OnlineMeetingTranscript.Read.All", "Mail.Send"] });
+  const checked = await ann("POST", "/api/microsoft-permissions");
+  assert.equal(checked.status, 200, JSON.stringify(checked.body));
+  assert.deepEqual([checked.body.approved, checked.body.total], [3, total]);
+  assert.equal(tokenCalls, calls + 1);
+  assert.equal(at(checked.body.status, "User.Read.All").status, "approved");
+  assert.equal(at(checked.body.status, "OnlineMeetingTranscript.Read.All").status, "approved");
+  assert.equal(at(checked.body.status, "CallTranscripts.Read.All").status, "missing");
+  assert.ok(!checked.body.status.rows.some((r) => r.id === "Mail.Send"));
+  assert.equal(checked.body.status.checkedBy, "Ann Owner");
+  assert.match(JSON.stringify((await ann("GET", "/api/audit")).body), /Checked Sidekick's Microsoft permissions: 3 of 8 approved/);
+  // The Team Lead sees the same answer, read-only. The directory still works with the new token.
+  assert.equal(at((await lou("GET", "/api/microsoft-permissions")).body, "User.Read.All").status, "approved");
+  assert.equal((await ann("GET", "/api/directory?q=p")).status, 200);
+
+  // Approving from Settings comes back to Settings, and the checklist is checked again by itself.
+  const leadTry = await lou("GET", "/api/auth/microsoft/consent?from=settings");
+  assert.equal(new URL(leadTry.location).pathname + new URL(leadTry.location).search, "/settings?error=1&about=permissions");
+  assert.match(flashOf(leadTry), /Only Org Owners and Org Admins/);
+  const start = new URL((await ann("GET", "/api/auth/microsoft/consent?from=settings")).location);
+  assert.equal(start.pathname, `/${TA}/v2.0/adminconsent`);
+  tokenClaims.set(TA, { tid: TA, roles: st.rows.map((r) => r.id) });
+  const back = await ann("GET", `/api/auth/microsoft/callback?admin_consent=True&tenant=${TA}&state=${start.searchParams.get("state")}`);
+  assert.equal(new URL(back.location).pathname + new URL(back.location).search, "/settings?microsoft=approved");
+  const after = (await ann("GET", "/api/microsoft-permissions")).body;
+  assert.ok(after.rows.every((r) => r.status === "approved"), JSON.stringify(after.rows.map((r) => [r.id, r.status])));
+  assert.equal(after.checkedBy, "Sidekick");
+  // A refused approval started from Settings lands back on Settings with the reason.
+  const cancel = new URL((await ann("GET", "/api/auth/microsoft/consent?from=settings")).location);
+  const no = await ann("GET", `/api/auth/microsoft/callback?error=access_denied&state=${cancel.searchParams.get("state")}`);
+  assert.equal(new URL(no.location).pathname + new URL(no.location).search, "/settings?error=1&about=permissions");
+  assert.match(flashOf(no), /Approval was cancelled/);
+
+  // Org B: its own checklist, never Org A's answer. Its tenant hasn't approved Sidekick: Microsoft refuses the token.
+  const b = (await bob("GET", "/api/microsoft-permissions")).body;
+  assert.equal(b.checkedAt, null);
+  assert.equal(b.checkedBy, null);
+  assert.ok(b.rows.every((r) => r.status === "unknown"), "Not checked yet");
+  const bCheck = await bob("POST", "/api/microsoft-permissions");
+  assert.equal(bCheck.status, 200, JSON.stringify(bCheck.body));
+  assert.equal(bCheck.body.approved, 0);
+  assert.ok(bCheck.body.status.rows.every((r) => r.status === "missing"));
+  assert.equal((await ann("GET", "/api/microsoft-permissions")).body.checkedBy, "Sidekick", "Org A's check is untouched");
+  assert.doesNotMatch(JSON.stringify((await bob("GET", "/api/audit")).body), /3 of 8 approved/);
+  assert.doesNotMatch(JSON.stringify((await ann("GET", "/api/audit")).body), /0 of 8 approved/);
+});
+
 test(`[${ENGINE}] isolation: another org never sees or imports this org's directory, people or waiting chats`, async () => {
   // Org B's tenant isn't approved: consent needed, nothing from tenant A.
   const b = await bob("GET", "/api/directory?q=pat");
@@ -797,7 +873,12 @@ test(`[${ENGINE}] stuck chats: Microsoft refuses the self-removal, admins see it
   }
   assert.ok(finding, "the Org Owner sees the finding");
   assert.match(finding.detail, /TeamsAppInstallation\.ReadWriteSelfForChat\.All/);
-  assert.equal(finding.actionHref, "/users");
+  assert.equal(finding.actionHref, "/settings#microsoft-permissions");
+  // Settings → Microsoft permissions marks the chat permission Not approved: the refusal is newer than the last check.
+  const perms = (await ann("GET", "/api/microsoft-permissions")).body.rows;
+  const selfChat = perms.find((p) => p.id === "TeamsAppInstallation.ReadWriteSelfForChat.All");
+  assert.equal(selfChat.status, "missing");
+  assert.match(selfChat.reason, /refused Sidekick leaving a chat/);
   assert.ok(!(await grace("GET", "/api/findings")).body.findings.some((x) => x.kind === "self_removal"), "admins only");
 
   // Grace removes Sidekick in Teams and adds it back: the chat waits to be assigned again, for her and the Org Owner.

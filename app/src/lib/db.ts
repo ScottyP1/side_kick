@@ -871,6 +871,9 @@ function migrate(conn: DatabaseSync) {
   if (!has("teams_conversations", "added_by")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN added_by TEXT");
   if (!has("teams_conversations", "added_by_oid")) conn.exec("ALTER TABLE teams_conversations ADD COLUMN added_by_oid TEXT");
   if (!has("orgs", "graph_consent_at")) conn.exec("ALTER TABLE orgs ADD COLUMN graph_consent_at TEXT");
+  // Settings → Microsoft permissions (lib/graph-permissions.ts): the last "Check now" (granted application
+  // permissions as JSON, or "[]" when Microsoft refused the app token), when and by whom.
+  for (const col of ["graph_roles", "graph_roles_at", "graph_roles_by"]) if (!has("orgs", col)) conn.exec(`ALTER TABLE orgs ADD COLUMN ${col} TEXT`);
   conn.exec("CREATE INDEX IF NOT EXISTS teams_conversations_tenant ON teams_conversations(tenant_id)");
   // Unassigned chats (lib/teams/install.ts): since when a chat waits (Sidekick leaves after 7 days), the team's
   // Microsoft 365 group id (to remove Sidekick from a channel's team), and a pending departure.

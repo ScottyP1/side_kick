@@ -1031,6 +1031,9 @@ test(`[${ENGINE}] directory permission missing: email matching can't run, so the
   assert.ok((await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.some((m) => m.title === "Meeting nodir"), "matching by saved account ids still works");
   const forAnn = (await ann("GET", "/api/meetings/auto")).body;
   assert.match(forAnn.directoryProblem ?? "", /approve reading your directory/);
+  const dirRow = (await ann("GET", "/api/microsoft-permissions")).body.rows.find((r) => r.id === "User.Read.All");
+  assert.equal(dirRow.status, "missing", "Settings → Microsoft permissions marks the directory permission Not approved");
+  assert.match(dirRow.reason, /refused reading your directory/);
   assert.match((await lou("GET", "/api/meetings/auto")).body.directoryProblem ?? "", /added by email/, "a Team Lead sees it too");
   assert.equal((await mo("GET", "/api/meetings/auto")).body.directoryProblem, null, "a Member doesn't");
   assert.equal((await bob("GET", "/api/meetings/auto")).body.directoryProblem ?? null, null, "another org doesn't");

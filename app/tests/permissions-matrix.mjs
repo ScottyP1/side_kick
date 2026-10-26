@@ -29,6 +29,8 @@ export const MATRIX = [
   { what: "See the rules Sidekick follows (Help & support)", method: "GET", url: (s) => `/api/rules?ws=${s.wsA}`, allow: EVERYONE },
   { what: "Open Guardrails (switches, custom rules and their text, how often rules fired)", method: "GET", url: () => "/api/guardrails", allow: ADMINS },
   { what: "See Microsoft sign-in status", method: "GET", url: () => "/api/auth/microsoft", allow: EVERYONE },
+  { what: "See the Microsoft permissions checklist (Settings; Team Leads read-only)", method: "GET", url: () => "/api/microsoft-permissions", allow: MANAGERS },
+  { what: "Check Microsoft permissions now", method: "POST", url: () => "/api/microsoft-permissions", allow: ADMINS },
   // Inside a workspace they belong to (read)
   { what: "Read documents in their workspaces", method: "GET", url: (s) => `/api/docs?ws=${s.wsA}`, allow: EVERYONE },
   { what: "Read meetings in their workspaces", method: "GET", url: (s) => `/api/meetings?ws=${s.wsA}`, allow: EVERYONE },

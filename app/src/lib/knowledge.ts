@@ -32,7 +32,7 @@ function fixedDocs(): KnowledgeDoc[] {
     kind: "pricing",
     title: `${p.name} plan: price and what's included`,
     url: "/pricing",
-    text: `${p.name}: ${p.selfService ? `$${p.priceUsd} per organization per month (test-mode prices, not final), extra groups $${EXTRA_GROUP.priceUsd} a month each` : `from about $${p.priceUsd} per month, priced per contract by the Sidekick team`}. ${p.blurb} Includes: ${p.features.join("; ")}. Every self-service plan starts with a free trial. Monthly AI credit: ${p.aiCreditUsd === null ? "set per contract" : `$${p.aiCreditUsd}`}.`,
+    text: `${p.name}: ${p.selfService ? `$${p.priceUsd} per organization per month (test-mode prices, not final), extra groups $${EXTRA_GROUP.priceUsd} a month each` : `from about $${p.priceUsd} per month, priced per contract by the Sidekick team`}. ${p.blurb} Includes: ${p.features.join("; ")}. Every self-service plan starts with a free trial. Includes a monthly AI allowance${p.aiCreditUsd === null ? " set per contract" : ""}; bigger plans include more.`,
   }));
   staticDocs = [...guides, ...faq, ...plans];
   return staticDocs;

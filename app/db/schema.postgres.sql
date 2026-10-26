@@ -325,6 +325,10 @@ CREATE TABLE IF NOT EXISTS search_capacity (
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS duration_min INTEGER;
 -- Owner Console: a temporary password from scripts/reset-password.mjs must be changed at next sign-in.
 ALTER TABLE platform_admins ADD COLUMN IF NOT EXISTS must_change_password INTEGER NOT NULL DEFAULT 0;
+-- Owner Console sign-in with Microsoft (lib/owner.ts): the tenant id + object id linked to an owner.
+ALTER TABLE platform_admins ADD COLUMN IF NOT EXISTS entra_tid TEXT;
+ALTER TABLE platform_admins ADD COLUMN IF NOT EXISTS entra_oid TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS platform_admins_entra ON platform_admins(entra_tid, entra_oid);
 -- Two-step sign-in (lib/mfa.ts), for portal users (account_kind 'user') and Owner Console owners ('owner').
 -- A factor is an authenticator app (kind 'totp': secret, last_step stops a code being used twice) or a
 -- passkey (kind 'passkey': credential_id, public_key, counter). enabled = 0 while still being set up.
@@ -697,6 +701,12 @@ CREATE TABLE IF NOT EXISTS meeting_nudges (
 CREATE INDEX IF NOT EXISTS meeting_nudges_due ON meeting_nudges(org_id, status, starts_at);
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS remind_checked_at TEXT;
 ALTER TABLE auto_meetings ADD COLUMN IF NOT EXISTS remind_error TEXT;
+-- Search index upkeep (lib/search.ts rechunkTranscripts): which one-time re-index steps each organization has had,
+-- e.g. name 'transcript_chunks' version 2 = its transcripts were re-cut into overlapping passages.
+CREATE TABLE IF NOT EXISTS index_versions (
+  org_id TEXT NOT NULL REFERENCES orgs(id), name TEXT NOT NULL, version INTEGER NOT NULL, done_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, name)
+);
 -- ---------------------------------------------------------------------------------------------------------
 -- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
 -- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and

@@ -60,7 +60,7 @@ export const MATRIX = [
   { what: "Resolve or dismiss knowledge gaps", method: "POST", url: () => "/api/gaps", body: {}, allow: EDITORS },
   { what: "Snooze a Needs attention item", method: "POST", url: () => "/api/findings", body: { id: NOPE, action: "snooze" }, allow: MANAGERS },
   // Money
-  { what: "See Usage & billing (the whole company's AI spend)", method: "GET", url: () => "/api/usage", allow: ADMINS },
+  { what: "See Usage & billing (the whole company's activity and AI allowance)", method: "GET", url: () => "/api/usage", allow: ADMINS },
   { what: "See the plan and subscription", method: "GET", url: () => "/api/billing", allow: ADMINS },
   { what: "Export usage per group (CSV, for chargeback)", method: "GET", url: () => "/api/usage/export?months=1", allow: ADMINS },
   { what: "Pay, change the plan or extra groups, or cancel it", method: "POST", url: () => "/api/billing", body: { action: "nope" }, allow: ["owner"] },

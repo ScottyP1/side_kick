@@ -22,7 +22,8 @@ type Ctx = { params: Promise<{ id: string }> };
  * person (role, workspaces, Microsoft-linked, last active), every workspace (members, documents, meetings)
  * its feature switches and its subscription (plan, status, what it allows now; null = managed by the
  * Sidekick team), its plan terms (custom limits, AI credit override, contract price, partner), every limit
- * with its use, this month's AI credit, and its AI use by feature and model (models are shown only here,
+ * with its use, this month's AI credit, and its AI use this month: by feature and model, in total (requests, cost,
+ * tokens, average response time, failures), per group and per day (models, tokens and cost are shown only here,
  * never in the client portal). Never any document or meeting content.
  */
 export const GET = handle(async (req: Request, { params }: Ctx) => {
@@ -65,6 +66,15 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
     limits: (await limitReport(org.id, credit.usedUsd)).lines,
     ai: {
       byModel: await all("SELECT feature, model, COUNT(*) calls, COALESCE(SUM(cost_usd),0) cost, COALESCE(SUM(input_tokens + cache_read_tokens + cache_write_tokens),0) input, COALESCE(SUM(cache_read_tokens),0) cached FROM usage_events WHERE org_id = ? AND created_at >= ? GROUP BY feature, model ORDER BY cost DESC", org.id, monthStart()),
+      // What the client's own Usage page showed before Oct 25, 2026 (firms now see counts and a percent only).
+      totals: await get("SELECT COUNT(*) calls, COALESCE(SUM(cost_usd),0) cost, COALESCE(SUM(input_tokens + cache_read_tokens + cache_write_tokens),0) input, COALESCE(SUM(output_tokens),0) output, COALESCE(AVG(latency_ms),0) latency, COALESCE(SUM(1 - ok),0) errors FROM usage_events WHERE org_id = ? AND created_at >= ?", org.id, monthStart()),
+      byWorkspace: await all(
+        `SELECT COALESCE(w.name, 'Organization-wide (no group)') AS name, COUNT(*) calls, COALESCE(SUM(u.cost_usd),0) cost, COALESCE(AVG(u.latency_ms),0) latency
+           FROM usage_events u LEFT JOIN workspaces w ON w.id = u.workspace_id
+          WHERE u.org_id = ? AND u.created_at >= ? GROUP BY w.id, w.name ORDER BY cost DESC`,
+        org.id, monthStart(),
+      ),
+      daily: await all("SELECT substr(created_at, 1, 10) AS d, COUNT(*) calls, COALESCE(SUM(cost_usd),0) cost FROM usage_events WHERE org_id = ? AND created_at >= ? GROUP BY substr(created_at, 1, 10) ORDER BY substr(created_at, 1, 10)", org.id, monthStart()),
     },
   };
 });

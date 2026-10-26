@@ -2,7 +2,7 @@
 
 Sidekick writes the notes for your group's meetings: a short summary, the **decisions**, **action items** (with owners and dates as spoken), **open questions**, and lasting facts like requirements, risks and terms. Notes land in the right group in the portal, are posted to the group's notes chat in Teams, and answers can use them straight away.
 
-**Action items are commitments, however they were said.** Nobody needs to say "action item". "I'll send it over", "let me check with finance", "leave it with me", or a "yes" / "on it" to someone's request all count, and the owner is the person who took it on. Ideas that were only floated ("maybe we could…") aren't action items unless someone then takes them on.
+**Action items are commitments, however they were said.** Nobody needs to say "action item". "I'll send it over", "let me check with finance", "leave it with me", or a "yes" / "on it" to someone's request all count, and the owner is the person who took it on. Ideas that were only floated ("maybe we could…") aren't action items unless someone then takes them on. A plan to look at something again ("let's review this again in two weeks") is an action item with its date (two weeks after the meeting), not a decision.
 
 There are two ways meetings get to Sidekick:
 - **Automatic notes after Teams meetings**: when a Teams meeting of a group's people ends, Sidekick reads its transcript and writes the notes by itself. That includes scheduled meetings and calls started with **Meet now** inside a group chat. No bot joins the call.

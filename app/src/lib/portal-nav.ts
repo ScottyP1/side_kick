@@ -8,9 +8,10 @@
  *   the person's role again on the server (lib/auth.ts), so a hidden page typed by hand still refuses.
  * - **Who sees what** (Oct 24, 2026): everyone gets the pages for the client work (Overview, Groups, Knowledge &
  *   docs, Firm library, Meetings, Memory & gaps) plus Settings (for most people just "My account") and Help &
- *   support. Running the organization is for Org Owners and Org Admins only: Usage & billing, AI models & agent,
- *   Guardrails (everyone else reads "Rules Sidekick follows" on Help & support), Activity and Security & audit.
- *   Connectors and Users & access are also for Team Leads (their own groups). Members and Viewers see which tools
+ *   support. Running the organization is for Org Owners and Org Admins only: Usage & billing, Guardrails (everyone else reads "Rules Sidekick follows" on Help & support), Activity and Security & audit.
+ *   Connectors and Users & access are also for Team Leads (their own groups). There is no "AI models & agent" page
+ *   any more (removed Oct 25, 2026, for every firm role): which models run, agent internals and AI cost are
+ *   Sidekick's business and live only in the Owner Console. Members and Viewers see which tools
  *   feed a group on that group's page.
  * - **Phone tab bar**: on phones (under 860px) the sidebar is replaced by a floating pill bar at the bottom with
  *   up to four destinations (`phoneTabs`) plus the assistant button, and a menu button at the top that opens
@@ -44,7 +45,6 @@ export const PORTAL_NAV: NavGroup[] = [
     items: [
       { href: "/home", label: "Overview", short: "Home", icon: "home" },
       { href: "/usage", label: "Usage & billing", short: "Usage", icon: "chart", allow: admins },
-      { href: "/agent", label: "AI models & agent", icon: "cpu", allow: admins },
     ],
   },
   {

@@ -16,6 +16,7 @@ operations review is in `docs/security/`.
 | The site is down (uptime alert email) | [Site down](#the-site-is-down) |
 | Microsoft 365 trial ends Nov 14, 2026 | [Trial end](#microsoft-365-trial-ending-nov-14-2026) |
 | Locked out of the portal or the Owner Console | [Locked out](#locked-out-of-the-portal-or-the-owner-console) |
+| Turn on Owner Console sign-in with Microsoft, or add a second operator | [Owner Console sign-in with Microsoft](#owner-console-sign-in-with-microsoft) |
 | A merge didn't deploy ("Deploy skipped") | [Deploy skipped](#deploy-skipped) |
 | Set up (or renew) the Azure DevOps / Jira / GitHub / Confluence connector apps | [Connector apps](#connector-apps-azure-devops-jira-github-confluence) |
 | A customer's connector shows "Sign-in expired" or a problem | [Connector problems](#connector-problems) |
@@ -550,6 +551,64 @@ Microsoft 365 Business Basic trial that turns into a paid subscription ($8.40/mo
   subscription and the live portal. Before cancelling: turn off the bot's Teams channel and the reminders
   switch (Owner Console), make sure budget and uptime alerts also go to the outlook.com address (they do
   as of Oct 2026), and note in PROGRESS that Teams testing needs a new tenant.
+
+## Owner Console sign-in with Microsoft
+
+The Owner Console's normal way in is **Sign in with Microsoft** (lib/owner.ts). Only the accounts in
+`SIDEKICK_OWNER_MS_ACCOUNTS` get in: a comma list of `tenantId:objectId` pairs, read from Microsoft's verified
+ID token (never the email). Anyone else gets one plain refusal and an operator-log entry naming the email,
+tenant id and object id that tried. The first sign-in creates the owner account (or links the one with the same
+email), so no setup code is needed. It uses the same Entra app as portal sign-in (`CLIENT_ID`, **Sidekick Bot**
+on the live site) with its own callback address.
+
+**Turn it on (live site)**, after `az login` as the Sidekick Labs admin:
+
+1. Find Cody's object id (the tenant id is `30f4623e-15fc-4ee4-af04-b02c1ffb6d57`):
+
+   ```bash
+   az ad user show --id CodyScott@SidekickLabs334.onmicrosoft.com --query id -o tsv
+   ```
+
+2. Add the Owner Console callback as a second Web redirect URI on the Entra app. `--web-redirect-uris`
+   **replaces** the list, so list the current ones first and pass them all again plus the new one:
+
+   ```bash
+   APP=$(az containerapp show -g sidekick-rg -n sidekick-app --query "properties.template.containers[0].env[?name=='CLIENT_ID'].value | [0]" -o tsv)
+   az ad app show --id "$APP" --query web.redirectUris
+   az ad app update --id "$APP" --web-redirect-uris <every current URI> https://<live host>/api/owner/auth/microsoft/callback
+   ```
+
+   Without it Microsoft answers `AADSTS50011` (redirect URI mismatch) and the console shows that code.
+3. Set the allowlist (a plain setting, not a secret: ids aren't passwords):
+
+   ```bash
+   az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars SIDEKICK_OWNER_MS_ACCOUNTS=30f4623e-15fc-4ee4-af04-b02c1ffb6d57:<object id>
+   ```
+
+4. Open `/owner/login`, press **Sign in with Microsoft**, sign in as CodyScott@SidekickLabs334. The operator log
+   shows "Created the owner account … from Microsoft sign-in" (or "Linked …" if a password owner with that
+   email existed) and "Signed in to the Owner Console (Microsoft …)".
+
+**MFA.** Microsoft security defaults make every admin of the Sidekick Labs tenant use MFA, so Microsoft does
+the strong check. If Microsoft's ID token lists the sign-in methods (`amr`), it must include MFA (`mfa`,
+`ngcmfa`, `mngcmfa` or `fido`), or the sign-in is refused and logged. Microsoft's v2.0 ID tokens usually **leave
+`amr` out**; then Sidekick can't see the method and relies on the tenant's rule, and the operator log says
+"the token doesn't list the method, tenant policy requires MFA". So: never turn security defaults (or an
+equivalent Conditional Access "require MFA" policy) off for that tenant. For a second check that Sidekick
+enforces itself, add a **passkey** under Owner Console → Security: it's then asked for after every Microsoft
+sign-in. (An authenticator app alone isn't asked after Microsoft.) Removing a passkey later needs the
+account's password: an owner made by Microsoft sign-in has none anyone knows, so set one first with
+`reset-password --owner` (below).
+
+**Add a second operator later.** Have them press Sign in with Microsoft once: they're refused, and the operator
+log (Releases & switches → log) shows their email, tenant id and object id. Add `,<tenant id>:<object id>` to
+`SIDEKICK_OWNER_MS_ACCOUNTS` (same `az containerapp update` command, all entries in one value) and they can sign
+in. Remove an entry to take access away; their open session ends within 12 hours (or at once: delete their rows from `owner_sessions` by `admin_id`).
+
+**Locked out because Microsoft sign-in is broken** (expired client secret, Microsoft outage, lost MFA device):
+use the password way in. Run `reset-password --owner <your email>` (Locked out, below) to get a one-time
+password, then on `/owner/login` press **Other ways to sign in**. For a lost MFA device, the Sidekick Labs
+tenant's admin recovery applies (Microsoft's own); a lost passkey: add `--reset-2fa`.
 
 ## Locked out of the portal or the Owner Console
 

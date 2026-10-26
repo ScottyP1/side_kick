@@ -113,16 +113,16 @@ Fix: create the encryption-key secret on the Container App (docs/HOSTING.md → 
   },
   {
     slug: "ai-credit-essentials",
-    title: "\"Essentials only\": what happens when the monthly AI credit runs out",
+    title: "\"Essentials only\": what happens when the monthly AI allowance runs out",
     level: "public",
-    tags: ["billing", "ai credit", "essentials", "limits"],
-    body: `Every plan includes a monthly AI credit. At 80% Org Owners and Org Admins see a notice. At 100% ${BRAND.name} switches to **essentials only** until the 1st of next month:
+    tags: ["billing", "ai allowance", "ai credit", "essentials", "limits"],
+    body: `Every plan includes a monthly AI allowance. Org Owners and Org Admins see how much is used, as a percentage, on **Usage & billing**. At 80% they see a notice. At 100% ${BRAND.name} switches to **essentials only** until the 1st of next month:
 
 - Answers to questions keep working (in Teams and the portal), and so do the guardrail checks.
 - Notes for short meetings keep working.
 - Extras pause with a plain notice: automatic reminders, knowledge map updates, the in-app assistant and notes for long meetings.
 
-Nothing is deleted. The credit starts again on the 1st; the ${BRAND.name} team can also add a one-off top-up. The Help chat and support tickets never use your AI credit.`,
+Nothing is deleted. The allowance starts again on the 1st; the ${BRAND.name} team can also add extra AI for the month. The Help chat and support tickets never use your AI allowance.`,
   },
 ];
 

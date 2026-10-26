@@ -110,6 +110,18 @@
       "facts": [["no", "never", "not"]],
       "sources": ["Client data handling standard"],
       "firm": true
+    },
+    {
+      "id": "pci-client",
+      "q": "What did the client say about PCI?",
+      "facts": [["Tom"], ["their side", "our side", "on their side", "Contoso's side", "Contoso security"]],
+      "sources": ["kickoff|Sprint 14|SOW"]
+    },
+    {
+      "id": "stores-client",
+      "q": "What did the client say about how many stores are in wave 2?",
+      "facts": [["52"], ["48"]],
+      "sources": ["client status|kickoff|Jordan"]
     }
   ]
 }

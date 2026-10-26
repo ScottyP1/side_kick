@@ -462,6 +462,9 @@ test(`[${engine}] help center: only the four customer guides, links rewritten, s
   for (const bad of ["owner-guide", "README", "../PROGRESS", "PROGRESS", "constructor", "__proto__", "hasOwnProperty", ""]) assert.equal(help.guide(bad), null, bad);
   assert.equal(help.helpLink("admin-guide.md#4-add-people"), "/docs/admin-guide#4-add-people");
   assert.equal(help.helpLink("owner-guide.md"), null);
+  assert.equal(help.helpLink("/privacy#microsoft"), "/privacy#microsoft", "public website pages keep their link");
+  assert.equal(help.helpLink("/privacy/subprocessors"), "/privacy/subprocessors");
+  assert.equal(help.helpLink("/owner"), null, "portal and console paths don't");
   assert.equal(help.helpLink("../ARCHITECTURE.md"), null);
   assert.equal(help.helpLink("javascript:alert(1)"), null);
   assert.equal(help.helpLink("https://learn.microsoft.com/x"), "https://learn.microsoft.com/x");
@@ -711,6 +714,39 @@ test(`[${engine}] brand: one setting names the product in the Teams manifest, pa
   assert.match(layout, /title: BRAND\.name/, "the root page title comes from the brand");
 });
 
+test(`[${engine}] Teams Store: the manifest passes Microsoft's schema and the Store checks, and the icons have the right sizes`, async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const teams = path.join(import.meta.dirname, "../../teams");
+  const { fillBrand, validateManifest } = await import("../scripts/teams-manifest.mjs");
+  // The package script's placeholders, filled with made-up values the way it fills them.
+  const filled = fillBrand(fs.readFileSync(path.join(teams, "manifest.template.json"), "utf8"))
+    .replaceAll("{{AAD_APP_ID}}", "00000000-0000-0000-0000-0000000000aa")
+    .replaceAll("{{BOT_ID}}", "00000000-0000-0000-0000-0000000000bb")
+    .replaceAll("{{PUBLIC_URL}}", "https://app.sidekick.example")
+    .replaceAll("{{PUBLIC_HOST}}", "app.sidekick.example")
+    .replaceAll("{{WEBSITE_URL}}", "https://sidekick.example")
+    .replaceAll("{{WEBSITE_HOST}}", "sidekick.example");
+  const manifest = JSON.parse(filled);
+  assert.deepEqual(validateManifest(manifest), [], "no schema or Store problems");
+  assert.equal(manifest.developer.privacyUrl, "https://sidekick.example/privacy");
+  assert.equal(manifest.developer.termsOfUseUrl, "https://sidekick.example/terms");
+  assert.ok(manifest.description.full.includes("Microsoft Teams"), "the long description names Microsoft Teams in full first");
+  assert.ok(manifest.description.full.split(/\s+/).length < 500, "the long description stays under 500 words");
+  // The checks really catch problems (a broken manifest isn't waved through).
+  const bad = { ...manifest, version: "1.7", validDomains: ["https://x.devtunnels.ms"], description: { ...manifest.description, short: "x".repeat(81) } };
+  const problems = validateManifest(bad).join("\n");
+  assert.match(problems, /MAJOR\.MINOR\.PATCH/);
+  assert.match(problems, /protocol/);
+  assert.match(problems, /tunnel/);
+  assert.match(problems, /longer than 80/);
+  assert.deepEqual(validateManifest({ ...manifest, validDomains: ["x.devtunnels.ms"] }, { store: false }), [], "the dev-tunnel package may use a tunnel");
+  // PNG width and height are bytes 16–23 of the file: color 192×192, outline 32×32 (Store rule).
+  const size = (f) => { const b = fs.readFileSync(path.join(teams, f)); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
+  assert.deepEqual(size("color.png"), [192, 192]);
+  assert.deepEqual(size("outline.png"), [32, 32]);
+});
+
 const rank = await import("../src/lib/rank.ts");
 /** A search candidate for the ranking tests. */
 const cand = (id, text, extra = {}) => ({ rowid: 0, text, title: `${id}.md`, loc: "", source_type: "document", source_id: id, audience: "internal", origin: "group", date: "2026-10-01", ...extra });
@@ -763,6 +799,104 @@ test(`[${engine}] ranking: at most three passages per source; versions of a docu
   assert.equal(rank.contentHash("a  b\nc"), rank.contentHash("a b c"));
 });
 
+test(`[${engine}] ranking: rarer question words count more, and "what did X say" questions prefer what people said`, () => {
+  const today = new Date("2026-10-21");
+  // Firm policies all mention "client"; only the transcript has "PCI".
+  const firm = (id, text) => cand(id, text, { origin: "firm", source_type: "firm" });
+  const list = [
+    firm("f1", "Client data handling standard: client data stays in the client's tenant."),
+    firm("f2", "Expense policy: when travelling for a client, book economy."),
+    firm("f3", "Travel note: the client's store operations centre is in Chicago."),
+    cand("kickoff", "[00:01:33] Tom Becker: From security: the new card readers in wave 2 stores are a PCI question.\n[00:01:44] Priya Raman: Understood. PCI stays with the client's security team."),
+  ];
+  assert.equal(rank.isSaidQuestion("What did the client say about PCI?"), true);
+  assert.equal(rank.isSaidQuestion("What was said about rollback?"), true);
+  assert.equal(rank.isSaidQuestion("When is the wave 2 cutover?"), false);
+  assert.equal(rank.rerank("What did the client say about PCI?", list, { today })[0].source_id, "kickoff");
+  assert.ok(!rank.terms("what did the client say").includes("say"), "verbs of speech aren't topic words");
+});
+
+const extract = await import("../src/lib/extract.ts");
+
+test(`[${engine}] transcript passages overlap by whole speaker turns, so a statement and its reply share a passage`, async () => {
+  const fs = await import("node:fs");
+  const vtt = fs.readFileSync(new URL("../../samples/contoso/meetings/2026-09-30 Contoso - Wave 1 retro and wave 2 kickoff.vtt", import.meta.url), "utf8");
+  const text = extract.vttToTranscript(vtt);
+  assert.equal(extract.isTranscript(text), true);
+  const pieces = extract.chunk(text, 500);
+  assert.ok(pieces.length >= 3, "cut into several passages");
+  assert.ok(pieces.some((p) => /Tom Becker: .*PCI question/.test(p.text) && /Priya Raman: Understood\. PCI stays/.test(p.text)), "Tom's line and Priya's reply are in one passage");
+  for (let i = 1; i < pieces.length; i++) {
+    const first = pieces[i].text.split("\n")[0];
+    assert.ok(pieces[i - 1].text.split("\n").includes(first), `passage ${i + 1} starts with a turn from passage ${i}`);
+    assert.match(first, /^\[\d{2}:\d{2}:\d{2}\] [^:]+:/, "whole turns only");
+    assert.equal(pieces[i].loc, first.slice(1, 9), "the location is the first turn's time");
+  }
+  // Rebuilding the text from overlapping passages gives the transcript back (for re-cutting uploaded transcripts).
+  assert.equal(extract.unchunk(pieces.map((p) => p.text)), text.split("\n").map((l) => l.trim()).filter(Boolean).join("\n"));
+  // Ordinary documents don't overlap.
+  const doc = Array.from({ length: 12 }, (_, i) => `Paragraph ${i}: ${"words ".repeat(30)}`).join("\n\n");
+  assert.equal(extract.isTranscript(doc), false);
+  const docPieces = extract.chunk(doc, 500);
+  const paras = docPieces.flatMap((p) => p.text.split("\n"));
+  assert.equal(new Set(paras).size, 12, "every paragraph once, none repeated");
+  assert.equal(paras.length, 12);
+});
+
+const gtext = await import("../src/lib/guard-text.ts");
+
+test(`[${engine}] citations: tags pointing at nothing are removed, two passages of one source are one entry`, () => {
+  const src = (id, sourceId, loc = "") => ({ id, sourceId, loc, title: sourceId });
+  const none = gtext.tidyCitations("I don't know: the sources don't say [S1] [S2].", []);
+  assert.equal(none.answer, "I don't know: the sources don't say.");
+  const dup = gtext.tidyCitations("Code freeze is Dec 1 [S1] [S3], see also [S2, S3] [S9].", [src("S1", "notes-a", "00:01:00"), src("S2", "sow"), src("S3", "notes-a", "00:04:10")]);
+  assert.deepEqual(dup.sources.map((s) => [s.id, s.loc]), [["S1", "00:01:00, 00:04:10"], ["S2", ""]]);
+  assert.equal(dup.answer, "Code freeze is Dec 1 [S1], see also [S2, S1].");
+  assert.equal(gtext.tidyCitations("Nov 12 [S1][S1].", [src("S1", "a")]).answer, "Nov 12 [S1].");
+  assert.equal(gtext.tidyCitations("Logged at [2026-10-07 15:40] [S1].", [src("S1", "a")]).answer, "Logged at [2026-10-07 15:40] [S1].", "other brackets stay");
+});
+
+const speakers = await import("../src/lib/speakers.ts");
+
+test(`[${engine}] speaker sides: only what's known (the firm's people, Teams guest marks, guest meetings), never a guess`, () => {
+  const text = "[00:00:05] Priya Raman: Hi all.\n[00:00:09] Tom Becker: From security.\n[00:00:15] Jordan Alvarez (Guest): Thanks.\n[00:00:20] Tom Becker: One more.";
+  assert.deepEqual(speakers.speakersIn(text), ["Priya Raman", "Tom Becker", "Jordan Alvarez (Guest)"]);
+  const team = new Set(["priya raman"]);
+  assert.equal(speakers.sideOf("Priya Raman", team, false), "team");
+  assert.equal(speakers.sideOf("PRIYA RAMAN", team, true), "team");
+  assert.equal(speakers.sideOf("Jordan Alvarez (Guest)", team, false), "guest");
+  assert.equal(speakers.sideOf("Tom Becker", team, false), null, "unknown without a guest meeting");
+  assert.equal(speakers.sideOf("Tom Becker", team, true), "outside");
+  const plain = speakers.speakerLine(speakers.speakersIn(text), team, false, "Fabrikam");
+  assert.equal(plain, "Priya Raman: Fabrikam (our team)\nJordan Alvarez (Guest): guest from outside Fabrikam, marked by Teams");
+  assert.match(speakers.speakerLine(["Tom Becker"], team, true, "Fabrikam"), /^Tom Becker: not one of Fabrikam's people in .+; this meeting had client guests$/);
+  assert.equal(speakers.speakerLine(["Tom Becker"], team, false, "Fabrikam"), "", "nothing said about an unknown speaker");
+});
+
+const notesRules = await import("../src/lib/meeting-notes-rules.ts");
+
+test(`[${engine}] meeting notes: "review again in two weeks" is a dated action item, not a decision`, () => {
+  assert.equal(notesRules.isFollowUp("Review cutover prep progress again in two weeks"), true);
+  assert.equal(notesRules.isFollowUp("Let's revisit the release train next month"), true);
+  assert.equal(notesRules.isFollowUp("Keep the legacy claim numbers as the primary key"), false);
+  assert.equal(notesRules.isFollowUp("Dress rehearsal on the weekend of November 14"), false);
+  assert.deepEqual(notesRules.relativeDue("again in two weeks", "2026-10-22"), { due: "in two weeks", dueDate: "2026-11-05" });
+  assert.equal(notesRules.relativeDue("in 3 days", "2026-10-30").dueDate, "2026-11-02");
+  assert.equal(notesRules.relativeDue("next week", "2026-10-22").dueDate, "2026-10-29");
+  assert.equal(notesRules.relativeDue("by the end of the month", "2026-10-22"), null, "only clear phrases");
+  const raw = {
+    summary: "s",
+    decisions: [{ text: "Keep legacy IDs", made_by: "Omar" }, { text: "Review cutover prep progress again in two weeks", made_by: "Grace" }],
+    action_items: [{ text: "Send the report", owner: "Ana", due: "tomorrow", due_date: null }, { text: "Book the room", owner: "Ben", due: "Oct 30", due_date: "2026-10-30" }],
+  };
+  const out = notesRules.tidyNotes(raw, "2026-10-22");
+  assert.deepEqual(out.decisions.map((d) => d.text), ["Keep legacy IDs"]);
+  assert.deepEqual(out.action_items.map((a) => [a.text, a.owner, a.due_date]), [
+    ["Send the report", "Ana", "2026-10-23"], ["Book the room", "Ben", "2026-10-30"], ["Review cutover prep progress again in two weeks", "Grace", "2026-11-05"],
+  ]);
+  assert.equal(raw.decisions.length, 2, "the input isn't changed");
+});
+
 const pnav = await import("../src/lib/portal-nav.ts");
 
 test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar is a short subset of them`, () => {
@@ -781,7 +915,7 @@ test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar 
     const mine = hrefs(u);
     assert.equal(mine.includes("/usage"), ["owner", "orgAdmin"].includes(who), `${who}: Usage`);
     assert.equal(mine.includes("/users"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Users`);
-    for (const href of ["/usage", "/agent", "/guardrails", "/activity", "/audit"]) assert.equal(mine.includes(href), u.admin, `${who}: ${href} is for Org Owners and Org Admins`);
+    for (const href of ["/usage", "/guardrails", "/activity", "/audit"]) assert.equal(mine.includes(href), u.admin, `${who}: ${href} is for Org Owners and Org Admins`);
     assert.equal(mine.includes("/connectors"), ["owner", "orgAdmin", "lead"].includes(who), `${who}: Connectors`);
     for (const href of ["/home", "/workspaces", "/knowledge", "/firm-library", "/meetings", "/memory", "/settings", "/help"]) assert.ok(mine.includes(href), `${who}: ${href} is for everyone`);
     for (const inGroup of [true, false]) {

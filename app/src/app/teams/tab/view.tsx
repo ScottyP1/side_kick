@@ -9,10 +9,16 @@
  * Sign-in is Teams single sign-on: the page asks Teams for a token and sends it as `Authorization: Bearer …` to
  * /api/teams-tab on every call (no cookies; they're blocked in Teams' frame on the web). Outside Teams the page
  * says to open it there, with a link to the portal.
+ *
+ * Teams Store rules it follows: a loading message within 2 seconds, never a dead end (an error says what happened
+ * with **Try again** and a link to help), Teams' theme (always dark in a meeting, `followTeamsTheme`), links that
+ * leave Teams say so ("opens in browser"), no pricing or upgrade prompts (they're not allowed on mobile), and no
+ * horizontal scrolling at phone width.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtDate, Pill } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { followTeamsTheme } from "../teams-theme";
 
 type Meeting = { id: string; title: string; held_at: string; status: string; source: string | null; decisions: number; open_actions: number };
 type Action = { id: string; text: string; owner: string | null; due: string | null; status: string; meeting?: string | null };
@@ -59,6 +65,7 @@ export default function TeamsTab() {
     setView(await call<View>(`?${q}`));
   }, [call]);
 
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -70,6 +77,7 @@ export default function TeamsTab() {
         return;
       }
       const ctx = await app.getContext();
+      followTeamsTheme(app, ctx);
       chat.current = ctx.chat?.id ?? ctx.channel?.id ?? null;
       token.current = () => authentication.getAuthToken();
       try {
@@ -80,6 +88,7 @@ export default function TeamsTab() {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : `${BRAND.name} couldn't sign you in.`);
         setPhase("error");
+        app.notifySuccess(); // the page itself loaded: Teams should show it (with the error), not its own failure screen
       }
     })().catch((e) => {
       if (cancelled) return;
@@ -89,7 +98,7 @@ export default function TeamsTab() {
     return () => {
       cancelled = true;
     };
-  }, [load]);
+  }, [load, attempt]);
 
   const act = async (action: string, id: string) => {
     if (!view?.ws) return;
@@ -106,7 +115,18 @@ export default function TeamsTab() {
 
   if (phase === "connecting") return <Shell><p className="muted">Connecting to Teams…</p></Shell>;
   if (phase === "outside") return <Shell><p>This page works inside Microsoft Teams. In a browser, use the <a href="/meetings">{BRAND.name} portal</a>.</p></Shell>;
-  if (phase === "error" || !view) return <Shell><div className="callout bad"><div>{error}</div></div></Shell>;
+  if (phase === "error" || !view) {
+    return (
+      <Shell>
+        <div className="callout bad" role="alert"><div>{error || `${BRAND.name} couldn't load this.`}</div></div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn small" onClick={() => { setError(""); setPhase("connecting"); setAttempt((n) => n + 1); }}>Try again</button>
+          <a className="btn small ghost" href="/docs/teams-guide" target="_blank" rel="noreferrer">Help (opens in browser)</a>
+        </div>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>Still stuck? Write to <a href={`mailto:${BRAND.supportEmail}`}>{BRAND.supportEmail}</a>.</p>
+      </Shell>
+    );
+  }
 
   const group = view.groups.find((g) => g.id === view.ws);
   return (
@@ -117,11 +137,11 @@ export default function TeamsTab() {
             {view.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
         ) : <h1 style={{ margin: 0, fontSize: 18 }}>{group?.name ?? BRAND.name}</h1>}
-        <a className="btn small ghost" href={view.portal} target="_blank" rel="noreferrer">Open in {BRAND.name}</a>
+        <a className="btn small ghost" href={view.portal} target="_blank" rel="noreferrer">Open in {BRAND.name} (opens in browser)</a>
       </div>
       {error && <div className="callout bad" role="alert"><div>{error}</div></div>}
       {!view.ws ? (
-        <p className="muted">You&apos;re not in any group yet. Ask your Team Lead or admin to add you.</p>
+        <p className="muted">You&apos;re not in any group yet. Ask your Team Lead or admin to add you to the group for your client; its meetings, notes and action items then show here.</p>
       ) : view.meeting ? (
         <MeetingNotes m={view.meeting} canEdit={view.user.canEdit} busy={busy} onBack={() => load(view.ws)} onAct={act} />
       ) : (
@@ -153,9 +173,9 @@ export default function TeamsTab() {
   );
 }
 
-/** The page frame: a little padding, Sidekick's styles. */
+/** The page frame: a little padding, Sidekick's styles, never wider than the frame (no sideways scrolling on phones). */
 function Shell({ children }: { children: React.ReactNode }) {
-  return <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 900 }}>{children}</main>;
+  return <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 900, overflowWrap: "anywhere" }}>{children}</main>;
 }
 
 /** Open action items with owner and due date, and Mark done / Reopen for people who can edit. */

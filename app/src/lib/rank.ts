@@ -8,7 +8,8 @@
  *   meaning in Azure). search.ts adds what the database knows about each one's source: its date, whether it
  *   comes from the group or the firm library, a hash of its document's text and whether it's outdated.
  * - **Re-ranking** (`rerank`): each candidate gets a score for how well it fits the *whole* question (how many
- *   of the question's words it contains, whether it has them next to each other as in the question, and a
+ *   of the question's words it contains, rarer words counting more, so a generic word like "client" that most
+ *   candidates share can't outweigh the topic word "PCI"; whether it has them next to each other as in the question, and a
  *   share of the engine's own order, which carries meaning-based matches the words alone miss). Then:
  *   - **Freshness**: newer group sources win on the same topic (a meeting from this week beats one from two
  *     months ago, a little). Firm documents don't age this way: a policy is valid until it's superseded.
@@ -16,6 +17,8 @@
  *     version (same name apart from "v2", "final", a date…) is down-ranked, and the answer prompt flags it.
  *   - **Priority**: for policy and compliance questions ("Can I expense…", "What's the travel policy…") the
  *     firm library ranks higher; for engagement facts the group's own sources do.
+ *   - **What someone said** (`isSaidQuestion`): for "what did the client say about X?" the group's meetings,
+ *     notes and chats rank higher and the firm library lower; "say", "said", "told"… don't count as topic words.
  *   - **Summaries first**: meeting notes (the summary and decisions Sidekick wrote) rank a little above raw
  *     transcript passages; the transcript is still there for the detail.
  * - **De-duplication** (`dedupe`, inside `rerank`): the same document uploaded twice (same text hash), or a
@@ -57,10 +60,16 @@ const STOP = new Set(
   "a an and are as at be but by can could did do does for from had has have how i if in into is it its me my of on or our so than that the their them then there these they this to was we were what when where which who why will with would you your about again also any just more most much not now only other over some such too very done get got let make made need should tell us please".split(" "),
 );
 
+// Verbs of speech ("what did the client say about…"): they tell us the answer is in what someone said, not what
+// the topic is, so they don't count towards a passage's fit (`isSaidQuestion` uses them instead).
+const SPEECH = new Set("say said says saying tell told telling mention mentioned mentions think thought ask asked asking".split(" "));
+/** A transcript line inside a passage: `[00:01:33] Tom Becker: …`. */
+const SPOKEN = /^\[\d{2}:\d{2}:\d{2}\] [^:\n]{1,80}:/m;
+
 /** The meaningful words of a text: lower case, stop words dropped, a light plural/verb ending removed ("stores" → "store"). */
 export function terms(text: string): string[] {
   return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
-    .filter((w) => w.length > 1 && !STOP.has(w))
+    .filter((w) => w.length > 1 && !STOP.has(w) && !SPEECH.has(w))
     .map((w) => (w.length > 4 ? w.replace(/(ing|ed|es|s)$/, "") : w));
 }
 
@@ -71,6 +80,16 @@ export function terms(text: string): string[] {
  */
 export function isPolicyQuestion(question: string): boolean {
   return /\b(polic(y|ies)|allowed|allowance|permitted|approv\w*|expens\w*|reimburs\w*|travel|per diem|mileage|complian\w*|standards?|templates?|guidelines?|procedures?|rate cards?|day rates?|billing rates?|code of conduct|gifts?|hospitality|conflicts? of interest|retention|confidential\w*|gdpr|privacy|procurement|methodolog\w*|can i (claim|expense|book|bill)|can we (claim|expense|book|bill)|are we allowed|must we|firm('s)? (rule|policy|standard))\b/i.test(question);
+}
+
+/**
+ * True when a question asks what someone said in a meeting or chat ("What did the client say about PCI?", "What
+ * did Tom mention about the card readers?", "What was said about rollback?"). Then the group's meetings, meeting
+ * notes and chats rank higher and the firm library lower: the answer is in what people said, not in a policy.
+ */
+export function isSaidQuestion(question: string): boolean {
+  return /\b(what|how|did|has|have|when)\b[^?]{0,60}\b(say|said|says|tell|told|mention(ed)?|think|thought|ask(ed)?|raise[ds]?|propose[ds]?|suggest(ed)?|agree[ds]?|object(ed)?|complain(ed)?|want(ed)?)\b/i.test(question)
+    || /\bwhat was (said|discussed|agreed)\b/i.test(question);
 }
 
 /**
@@ -156,10 +175,15 @@ export function rerank(question: string, candidates: Candidate[], opts: { limit?
   // Word pairs as they stand in the question ("cutover date"), to reward passages that keep them together.
   const pairs = qt.slice(1).map((w, i) => `${qt[i]} ${w}`);
   const policy = isPolicyQuestion(question);
+  const said = isSaidQuestion(question);
+  const bags = candidates.map((c) => terms(`${c.title} ${c.text}`));
+  // Rarer question words count more: "pci" (in a few candidates) outweighs "client" (in most of them).
+  const weight = new Map(q.map((w) => [w, Math.log(1 + candidates.length / (1 + bags.filter((b) => b.includes(w)).length))]));
+  const total = q.reduce((n, w) => n + weight.get(w)!, 0);
   const scored: Ranked[] = candidates.map((c, i) => {
-    const words = terms(`${c.title} ${c.text}`);
+    const words = bags[i];
     const bag = new Set(words);
-    const coverage = q.length ? q.filter((w) => bag.has(w)).length / q.length : 0;
+    const coverage = total ? q.filter((w) => bag.has(w)).reduce((n, w) => n + weight.get(w)!, 0) / total : 0;
     const seq = new Set(words.slice(1).map((w, j) => `${words[j]} ${w}`));
     const phrase = pairs.length ? pairs.filter((p) => seq.has(p)).length / pairs.length : 0;
     const prior = 1 / (1 + i / 5);
@@ -168,7 +192,9 @@ export function rerank(question: string, candidates: Candidate[], opts: { limit?
     if (c.origin === "group" && c.date) score *= 0.9 + 0.2 * Math.pow(0.5, ageDays(c.date, today) / 45);
     if (c.outdated) score *= 0.55;
     if (policy) score *= c.origin === "firm" ? 1.25 : 1;
-    else score *= c.origin === "firm" ? 0.85 : 1;
+    else score *= c.origin === "firm" ? (said ? 0.7 : 0.85) : 1;
+    // People speaking: meetings, their notes, chats, and transcripts uploaded as documents ("[00:01:33] Tom: …").
+    if (said && (["meeting", "notes", "chat"].includes(c.source_type) || SPOKEN.test(c.text))) score *= 1.2;
     if (c.source_type === "notes") score *= 1.15;
     return { ...c, score: Math.round(score * 10000) / 10000 };
   });

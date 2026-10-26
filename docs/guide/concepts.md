@@ -21,7 +21,7 @@ The full rulebook, with every action and which roles may do it, is [Roles and pe
 
 Owners and Admins see every workspace. Everyone else, Team Leads included, sees only the workspaces they've been added to. Only an Org Owner or Org Admin can make someone a Team Lead.
 
-**Your menu follows your role.** Everyone has Overview, Groups, Knowledge & docs, Firm library, Meetings, Memory & gaps, Settings (your own account) and Help & support. Usage & billing, AI models & agent, Guardrails, Activity and Security & audit are for Org Owners and Org Admins; Connectors and Users & access also for Team Leads. See [Roles and permissions](roles-and-permissions.md).
+**Your menu follows your role.** Everyone has Overview, Groups, Knowledge & docs, Firm library, Meetings, Memory & gaps, Settings (your own account) and Help & support. Usage & billing, Guardrails, Activity and Security & audit are for Org Owners and Org Admins; Connectors and Users & access also for Team Leads. See [Roles and permissions](roles-and-permissions.md).
 
 The workspace you're in shows at the top of the pages that belong to one workspace (**Knowledge & docs**, **Meetings**, **Memory & gaps**). If you're in just one workspace it's a plain label; if you're in two or more it's a small menu to switch between them. Org-wide pages (Overview, Usage & billing, Users & access, Activity, Security & audit, Settings and the rest) don't show a workspace at all.
 
@@ -31,7 +31,7 @@ On a phone (or any narrow window) the sidebar makes way for two things:
 - The **menu button** (three lines, top left) opens everything else: every page your role can use (the same list as the sidebar), the switcher between your groups if you're in two or more, and **Sign out**. Tap outside it, press the ✕ or Escape to close it.
 
 ## Sources and citations
-When Sidekick answers, it first searches the group, and your organization's **firm library**, for the passages most related to your question (by keyword and by meaning, so different wording still finds the right passage), then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, its date and a short excerpt. Sources from the firm library are labelled **Firm policy**. If two sources disagree, Sidekick says so ("the sources disagree") and cites both.
+When Sidekick answers, it first searches the group, and your organization's **firm library**, for the passages most related to your question (by keyword and by meaning, so different wording still finds the right passage), then answers **only from those passages**. Every claim is tagged with its source, like **[S1]**, and the source list shows the document or meeting, the page or timestamp, its date and a short excerpt. Each source is listed once (two parts of the same meeting show both timestamps), and a tag always points at a listed source. Sources from the firm library are labelled **Firm policy**. If two sources disagree, Sidekick says so ("the sources disagree") and cites both.
 
 Before answering, Sidekick puts the passages it found in order of how well they fit your whole question, and:
 - **Newer wins**: on the same topic a recent meeting or document counts a little more than an old one.
@@ -39,6 +39,9 @@ Before answering, Sidekick puts the passages it found in order of how well they 
 - **Notes first**: the meeting notes Sidekick wrote (summary and decisions) come before raw transcript lines, which are still there for the detail.
 - **No duplicates**: the same document uploaded twice, or a chat reply quoting the message it answers, is used once.
 - **Policy vs. project**: for policy questions (expenses, travel, approvals, rate cards, data handling) the firm library comes first; for facts about the engagement, the group's own sources do.
+- **What someone said**: for questions like "What did the client say about PCI?" the group's meetings, notes and chats come first, and the topic word ("PCI") counts far more than common words like "client".
+- **Who's speaking**: in meeting transcripts Sidekick knows which speakers are your organization's own people, and which were guests (Teams marks them, or the meeting was marked "Client guests attended"). It never guesses anyone's side or role, and it only names people the meeting already shows.
+- **Transcripts are read in overlapping pieces**, so a question and the answer to it ("that's on our side" / "PCI stays with security") are always read together.
 
 **Filters** in Ask narrow the sources to documents, meetings, Teams chats, decisions & notes or the firm library, and to a date range.
 
@@ -104,11 +107,11 @@ The chat box under the crystal ball on the home page, also behind the **round bu
 ## Audit log
 Sign-ins, access changes, uploads, deletions, Teams links and every action Sidekick takes on its own are recorded on **Security & audit**, with who did it and when.
 
-## Usage and cost
-Each AI request is metered: how much text went in and out (tokens), what it cost, and how long it took. **Usage & billing** shows this by feature, workspace and day.
+## Usage and the AI allowance
+**Usage & billing** shows what Sidekick did for your organization this month (questions answered, meetings written up, documents added, reminders sent, assistant replies) per day and per workspace, and how much of the plan's included AI is used, as a percentage. Each plan includes a monthly AI allowance; when it runs out, answers keep working and the extras pause until the 1st. What the AI costs and which models run it are the Sidekick team's side of the service and aren't shown in the portal.
 
 ## Help and support
-The round button's **I need help** tab is the **Help chat**: it answers from the help center and Sidekick's support articles, checks your own setup (Teams chats, tracking, paused features, plan limits, AI credit, recent errors) and can turn the conversation into a **support ticket** for the Sidekick team. You can also write to them on **Help & support** and follow your tickets there. The Help chat doesn't use your organization's AI credit. On the public website, the same button opens **Ask about Sidekick**, an AI help bot that answers only from public help content and can pass you to a person.
+The round button's **I need help** tab is the **Help chat**: it answers from the help center and Sidekick's support articles, checks your own setup (Teams chats, tracking, paused features, plan limits, AI allowance, recent errors) and can turn the conversation into a **support ticket** for the Sidekick team. You can also write to them on **Help & support** and follow your tickets there. The Help chat doesn't use your organization's AI allowance. On the public website, the same button opens **Ask about Sidekick**, an AI help bot that answers only from public help content and can pass you to a person.
 
 ## How your data is protected
 - Every request is checked: who you are, your role, and whether you belong to that workspace.

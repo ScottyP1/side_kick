@@ -58,7 +58,7 @@ import { MAX_CHAT_PEOPLE, type Readers } from "../connector-access";
 import { CHAT_FOLLOWUP_MINUTES } from "../conversations";
 import { recordFeedback } from "../feedback";
 import { failureReason, span, traceFailed, traceScope, withTrace } from "../trace";
-import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, noticeCard, notSetUpCard, REMIND_PREFIX, unknownTenantCard, VERBS, type ActionItemInput } from "./cards";
+import { actionItemCard, answerCard, helpCard, linkCard, meetingNotesCard, noticeCard, notSetUpCard, REMIND_PREFIX, unknownTenantCard, VERBS, type ActionItemInput, type Installer } from "./cards";
 import { adderName, holdForUnknownAdder, leaveChat, mayAddSidekick, recognizeAdder, reopenChat, UNKNOWN_ADDER, WAITING_DAYS } from "./install";
 import { workspaceMemberCommand, type ChatPerson } from "./members";
 import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } from "../tenants";
@@ -301,11 +301,11 @@ async function tenantGate(a: InboundActivity): Promise<{ ok: true; org: TenantOr
 const usesPicker = (conv: TeamsConversation, org: TenantOrg | undefined) => !!org && conv.kind !== "personal";
 
 /**
- * The card for a chat that isn't linked yet: "I'm not set up for this chat yet" (no buttons, no code) where the
- * picker rules apply; otherwise the classic link-code card.
+ * The card for a chat that isn't linked yet: "I'm not set up for this chat yet" (no code) where the picker rules
+ * apply; otherwise the classic link-code card. On install it's also the welcome message, greeting `installer`.
  */
-async function unlinkedCard(conv: TeamsConversation, org: TenantOrg | undefined) {
-  return usesPicker(conv, org) ? notSetUpCard(conv.kind, WAITING_DAYS) : linkCard(await freshLinkCode(conv), conv.kind);
+async function unlinkedCard(conv: TeamsConversation, org: TenantOrg | undefined, installer?: Installer) {
+  return usesPicker(conv, org) ? notSetUpCard(conv.kind, WAITING_DAYS, installer) : linkCard(await freshLinkCode(conv), conv.kind, installer);
 }
 
 /** The "sign up first" card for a tenant no Sidekick org is tied to (multi-tenant mode). */
@@ -552,7 +552,9 @@ function registerHandlers(app: App) {
     // Added back after someone removed it: the chat works again (and the watcher's finding resolves).
     if (conv.removed_at) await run("UPDATE teams_conversations SET removed_at = NULL, removed_by = NULL WHERE id = ?", conv.id);
     conv = { ...conv, leaving: null, removed_at: null };
-    if (conv.workspace_id) return void (await send(helpCard(await workspaceName(conv))));
+    // The welcome message (once per install, Teams Store rules): it greets the person who added Sidekick by @mention.
+    const installer = { id: activity.from.id, name: addedBy.name };
+    if (conv.workspace_id) return void (await send(helpCard(await workspaceName(conv), installer)));
     if (usesPicker(conv, gate.org)) {
       traceScope({ orgId: gate.org!.id });
       // Someone Sidekick can't place yet (not linked, no matching email): say how to fix it, don't leave for good.
@@ -563,7 +565,7 @@ function registerHandlers(app: App) {
         return;
       }
     }
-    await send(await unlinkedCard(conv, gate.org));
+    await send(await unlinkedCard(conv, gate.org, installer));
   });
 
   app.on("install.remove", async ({ activity }) => sidekickRemoved(activity));

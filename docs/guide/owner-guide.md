@@ -2,22 +2,41 @@
 
 For the **Sidekick operator** (whoever runs Sidekick as a service), not for client users. The console lives at `/owner` and has its own sign-in, separate from every client account.
 
-## First sign-in
-The first owner account is created once, at `/owner/setup`:
+## Signing in
+**Sign in with Microsoft** is the normal way in: on `/owner/login`, press the button and sign in with your
+Microsoft work account (for Cody: CodyScott@SidekickLabs334). Only the Microsoft accounts the server lists in
+`SIDEKICK_OWNER_MS_ACCOUNTS` get in, identified by their organization (tenant) id and account (object) id, never
+by email. Anyone else sees "This Microsoft account can't sign in to the Owner Console." and the attempt goes in
+the operator log (Releases & switches → log) with the account's email and ids.
+- **The first time**, the owner account is made from your Microsoft name and email (or, if an owner account with
+  that email already exists, it's linked to your Microsoft account). No setup code needed.
+- **Strong sign-in**: Microsoft asks for your second step (MFA) itself (the Sidekick Labs tenant has security
+  defaults on). If Microsoft's reply says the sign-in *didn't* use MFA, the console refuses it.
+- **Passkey (optional)**: if you add a passkey under **Security**, the console asks for it after Microsoft too.
+- The button only shows when the server is set up for it (RUNBOOKS → Owner Console sign-in with Microsoft).
+  It never signs you in to the client portal, and a portal sign-in never opens the console.
+
+**Other ways to sign in** (the small link under the button): email and password, for recovery and for a
+laptop copy without Microsoft. When Microsoft sign-in isn't set up, the password form shows straight away.
+
+### Password accounts (fallback)
+The first password owner account is created once, at `/owner/setup` (only offered while Microsoft sign-in is off):
 - **On a laptop:** open `http://localhost:3000/owner` on the machine running Sidekick.
 - **On the live site:** setup is off until you give the server a one-time **setup code**. Put a long random
   value (at least 16 characters) in the Container App secret `SIDEKICK_SETUP_CODE`, open `/owner/setup`,
   enter the code with your details, then **remove the secret** again. Without it, production refuses setup
   outright (the old "only from localhost" check trusted an address the caller can fake).
 
-After that, sign in at `/owner/login`. Owner sessions last 12 hours. 5 wrong passwords for one owner email
+After that, sign in at `/owner/login` (under **Other ways to sign in** when Microsoft is on). Owner sessions last 12 hours. 5 wrong passwords for one owner email
 (or 20 from one network address) in 15 minutes pause owner sign-in for 15 minutes, even with the right
 password; failed sign-ins on real owner accounts and the pause are in the operator log (Releases & switches).
 Owner passwords need at least 12 characters and must not be one from a known data breach (use a different password from your client login).
 
 **Security** (in the menu): change the owner password (signs out your other browsers) and turn on **two-step sign-in** with a passkey or an authenticator app, exactly like a client's Settings page. Strongly recommended: the console sees every client. Save the backup codes in your password manager.
 
-**Lost the owner password, or a client's Org Owner is locked out?** Run the reset command on the Mac (`docs/RUNBOOKS.md` → Locked out). It prints a one-time password in your terminal only; signing in with it asks for a new password first. Lost the phone too? Add `--reset-2fa` to remove two-step sign-in from that account. (If there's no owner account on the live site yet, `--owner` creates one, as an alternative to the setup code.)
+An owner account made by Microsoft sign-in has no password anyone knows: to use the password way in, give it one with the reset command below (`--owner <email>`).
+
+**Microsoft sign-in broken, lost the owner password, or a client's Org Owner is locked out?** Run the reset command on the Mac (`docs/RUNBOOKS.md` → Locked out). It prints a one-time password in your terminal only; signing in with it asks for a new password first. Lost the phone too? Add `--reset-2fa` to remove two-step sign-in from that account. (If there's no owner account on the live site yet, `--owner` creates one, as an alternative to the setup code.)
 
 The portal's own first-run setup (the very first organization on an empty install) follows the same rule
 (localhost on a laptop, the setup code in production). After that, organizations are created in two ways: **self-service sign-up** at `/signup` (a company signs itself up; **off until you open it**, see below), or **Add a client** here. Nobody inside a client organization can create another one, and the home assistant can't either.
@@ -58,6 +77,7 @@ Plans and their limits live in one file, `app/src/lib/plans.ts` (Starter, Team, 
 **On a client's page:**
 - **Limits this month**: every limit with its use and Near / Over flags.
 - **AI credit**: used of included (with top-ups), and **Add top-up**: a one-off amount for this month, with an optional note. The table below shows their AI use by feature **and model**: model names are shown only here, never in the client portal (clients see "AI answers: working").
+- **AI use this month**: what the client's own Usage page showed until October 2026: AI cost and cost on pace, requests and failures, tokens in and out, average response time, cost per group and per day, and **Export CSV with cost** (their usage export plus AI requests and AI cost per group and month; the export is recorded in the operator log). **Clients never see cost, tokens, response times or models**: their Usage & billing shows activity counts and their AI allowance as a percentage, their audit log says "Added extra AI" without the amount, and their Activity steps keep timings only (`app/src/lib/firm-usage.ts`).
 - **Plan terms**: custom limits (leave empty for the plan's number, type "unlimited" for none), the **AI credit per month** override, the **contract price per month** (Enterprise and managed clients; it's their revenue in MRR and margin), the **partner or referrer** who brought them, and **questions per person per hour** (default 60). **Save plan terms**.
 - **Plan**: you can also put a client on **Enterprise** (not offered to buyers). Enterprise starts from its own defaults (unlimited groups, 1,000 people, 2,400 meeting hours, $3,200 AI credit, 100 live meeting hours) until you set terms.
 - **AI use by model** includes **Cached**: the share of input read from the prompt cache (cheaper). The stable part of each prompt (instructions and the client's guardrail rules) is cached; short prompts are below the model's minimum and won't show cache reads.
@@ -72,7 +92,7 @@ Top-ups and terms are recorded in the operator log and the client's own audit lo
 Click a client on **Clients** to see:
 - **People**: everyone in that organization with their role, the workspaces they can use ("All groups" for Org Owners and Org Admins), whether they sign in with Microsoft or a password, and when they were last active.
 - **Plan**: plan, status and the controls to change them (see above).
-- **Limits this month**, **AI credit** (with top-ups and AI use by model) and **Plan terms** (see "Plan limits, AI credit and plan terms").
+- **Limits this month**, **AI credit** (with top-ups and AI use by model), **AI use this month** and **Plan terms** (see "Plan limits, AI credit and plan terms").
 - **Workspaces**: each one with its number of members, documents and meetings.
 - **Restrictions for this client**: the same switches as the kill switches, but for **this client only**, for example turning off the in-app assistant or document uploads for one organization. Their people see a calm notice (not an error dialog): "… is turned off for your organization by the Sidekick team", with "contact the Sidekick team" for their Org Owner and "ask your Org Owner" for everyone else. It isn't listed under App errors and doesn't count as a Claude error. A feature paused for everyone stays off whatever this switch says.
 

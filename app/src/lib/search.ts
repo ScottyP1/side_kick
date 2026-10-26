@@ -36,8 +36,8 @@
  *   lib/search-capacity.ts so the Owner Console warns before the tier is full (nothing to read for the local index).
  */
 import "server-only";
-import { all, DIALECT, run, type Param } from "./db";
-import { chunk } from "./extract";
+import { all, DIALECT, get, now, run, type Param } from "./db";
+import { chunk, isTranscript, unchunk } from "./extract";
 import { span, spanAttrs } from "./trace";
 import { azureCount, azureIndex, azureRemove, azureSearch, azureSearchConfigured, azureServiceStats, azureSetAudience } from "./azure-search";
 import { rerank, versionKey, type Candidate, type Ranked } from "./rank";
@@ -239,6 +239,84 @@ export async function reindexAzure(): Promise<number> {
 /** Sources read per round by `reindexAzure`. */
 const REINDEX_PAGE = 200;
 
+/** The current way transcripts are cut into passages (2 = overlapping speaker turns, `chunk` in extract.ts). */
+export const TRANSCRIPT_CHUNKS_VERSION = 2;
+
+/**
+ * One-time upkeep for one organization: re-cuts the passages of transcripts indexed before transcript passages
+ * overlapped (`chunk` in extract.ts), locally and on Azure when configured. Covers meetings (from the transcript
+ * kept on the meeting) and transcripts uploaded as documents (their text rebuilt from their passages with
+ * `unchunk`, since the file itself isn't kept). Sources whose passages already match are left alone, so it is
+ * safe to run again. When everything is done the org is marked in `index_versions`, and later calls return at
+ * once. Returns how many sources were re-cut.
+ *
+ * Who calls it: `ensureTranscriptsRechunked` (once per org per server start, from the first question), and tests.
+ * Always scoped to `orgId`; never reads another org's passages.
+ */
+export async function rechunkTranscripts(orgId: string): Promise<number> {
+  const done = await get<{ version: number }>("SELECT version FROM index_versions WHERE org_id = ? AND name = 'transcript_chunks'", orgId);
+  if (done && done.version >= TRANSCRIPT_CHUNKS_VERSION) return 0;
+  return span("index", "Re-cut transcript passages", async () => {
+    type Row = { text: string; title: string; loc: string; source_type: string; source_id: string; workspace_id: string; audience: string };
+    // Transcript passages start with a timestamped speaker turn; only sources with one can need re-cutting.
+    const ids = await all<{ source_id: string; source_type: string }>(
+      `SELECT DISTINCT source_id, source_type FROM passages WHERE org_id = ? AND source_type IN ('meeting', 'document') AND text LIKE '[%] %:%' ORDER BY source_id`,
+      orgId,
+    );
+    let changed = 0;
+    for (const { source_id, source_type } of ids) {
+      const rows = await all<Row>(
+        "SELECT text, title, loc, source_type, source_id, workspace_id, audience FROM passages WHERE org_id = ? AND source_id = ? ORDER BY rowid", orgId, source_id,
+      );
+      if (!rows.length) continue;
+      const kept = source_type === "meeting"
+        ? (await get<{ transcript: string }>("SELECT transcript FROM meetings WHERE id = ? AND org_id = ?", source_id, orgId))?.transcript
+        : unchunk(rows.map((r) => r.text));
+      if (!kept || !isTranscript(kept)) continue;
+      const pieces = chunk(kept);
+      if (pieces.length === rows.length && pieces.every((p, i) => p.text === rows[i].text && p.loc === rows[i].loc)) continue;
+      const f = rows[0];
+      await run("DELETE FROM passages WHERE org_id = ? AND source_id = ?", orgId, source_id);
+      const stmt = `INSERT INTO passages (text, title, loc, source_type, source_id, workspace_id, org_id, audience) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+      for (const p of pieces) await run(stmt, p.text, f.title, p.loc, f.source_type, source_id, f.workspace_id, orgId, f.audience);
+      if (azureSearchConfigured()) {
+        await azureRemove(source_id).catch((e) => console.error("Azure AI Search: delete failed", e));
+        await azureIndex({ orgId, workspaceId: f.workspace_id, sourceType: f.source_type, sourceId: source_id, title: f.title, audience: f.audience, pieces })
+          .catch((e) => console.error("Azure AI Search: indexing failed (local index still updated)", e));
+      }
+      changed++;
+    }
+    await run(
+      "INSERT INTO index_versions (org_id, name, version, done_at) VALUES (?, 'transcript_chunks', ?, ?) ON CONFLICT (org_id, name) DO UPDATE SET version = excluded.version, done_at = excluded.done_at",
+      orgId, TRANSCRIPT_CHUNKS_VERSION, now(),
+    );
+    spanAttrs({ checked: ids.length, recut: changed, azure: azureSearchConfigured() });
+    return changed;
+  });
+}
+
+declare global {
+  var __sidekickRechunk: Map<string, Promise<number>> | undefined;
+}
+
+/**
+ * Starts `rechunkTranscripts` for one organization at most once per server start (in the background of its first
+ * question; a failure is logged and retried on the next question). Returns the promise, so tests can wait for it.
+ */
+export function ensureTranscriptsRechunked(orgId: string): Promise<number> {
+  const runs = (globalThis.__sidekickRechunk ??= new Map());
+  let p = runs.get(orgId);
+  if (!p) {
+    p = rechunkTranscripts(orgId).catch((e) => {
+      runs.delete(orgId);
+      console.error("Search: re-cutting earlier transcripts failed (will retry)", e);
+      return 0;
+    });
+    runs.set(orgId, p);
+  }
+  return p;
+}
+
 declare global {
   var __sidekickAzureBackfill: Promise<void> | undefined;
 }
@@ -258,9 +336,10 @@ function ensureBackfilled() {
   return globalThis.__sidekickAzureBackfill;
 }
 
-// Common words that say nothing about the topic ("what", "the", ...). Dropped from questions before searching.
+// Common words that say nothing about the topic ("what", "the", ...), and verbs of speech ("what did the client
+// say about PCI?": the topic is PCI). Dropped from questions before searching.
 const STOP = new Set(
-  "a an and are as at be but by can could did do does for from had has have how i if in into is it its me my of on or our so than that the their them then there these they this to was we were what when where which who why will with would you your about again also any just more most much not now only other over some such too very did done get got let make made need should".split(" "),
+  "a an and are as at be but by can could did do does for from had has have how i if in into is it its me my of on or our so than that the their them then there these they this to was we were what when where which who why will with would you your about again also any just more most much not now only other over some such too very did done get got let make made need should say said says tell told mention mentioned".split(" "),
 );
 
 /** The meaningful words of a question (lower-case letters/digits, stop words removed, no duplicates). */

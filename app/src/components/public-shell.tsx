@@ -76,7 +76,7 @@ function SiteFooter() {
   const cols: [string, [string, string][]][] = [
     ["Product", [["/features", "Features"], ["/how-it-works", "How it works"], ["/security", "Security & trust"], ["/pricing", "Pricing"], ["/changelog", "Changelog"]]],
     ["Help", [["/faq", "FAQ"], ["/docs", "Help center"], ["/support", "Support"], ["/login", "Sign in"], ["/signup", "Get started"]]],
-    ["Legal", [["/privacy", "Privacy policy"], ["/terms", "Terms of use"]]],
+    ["Legal", [["/privacy", "Privacy policy"], ["/terms", "Terms of use"], ["/privacy/subprocessors", "Sub-processors"]]],
   ];
   return (
     <footer className="site-foot">

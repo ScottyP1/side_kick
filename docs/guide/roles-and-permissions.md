@@ -31,7 +31,7 @@ they give that person another role. Make them an **Org Admin** if they should ke
 Everyone gets the pages for the client work: **Overview**, **Groups**, **Knowledge & docs**, **Firm library**
 (read-only unless you're an admin), **Meetings**, **Memory & gaps**, **Settings** and **Help & support**.
 
-- **Org Owners and Org Admins** also get **Usage & billing**, **AI models & agent**, **Guardrails**, **Activity**
+- **Org Owners and Org Admins** also get **Usage & billing**, **Guardrails**, **Activity**
   and **Security & audit**, and Settings shows the **company settings** (Microsoft sign-in, two-step sign-in for
   everyone, branding, export and roll-offs) as well as **My account**.
 - **Team Leads** also get **Connectors** and **Users & access** (for the groups they lead).
@@ -45,7 +45,7 @@ Typing the address of a page that isn't in your menu shows a short message sayin
 ✓ = allowed. Workspace actions also need the person to be in that workspace (Org Owners and Org Admins
 are in all of them). Anything not allowed is refused with a message naming who can do it, e.g. "Only the
 Org Owner can do this" or "Only Org Owners and Org Admins can do this". Pages a role can't
-use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Security & audit) show the same kind of message instead of their content.
+use (Usage & billing, Guardrails, Connectors, Activity, Security & audit) show the same kind of message instead of their content.
 
 | What | Org Owner | Org Admin | Team Lead | Member | Viewer |
 |---|:-:|:-:|:-:|:-:|:-:|
@@ -82,11 +82,12 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | See Needs attention about a tool request for their groups (approved: connect it; declined, with the note) | ✓ | ✓ | ✓ (own groups) | | |
 | Snooze a Needs attention item for a week | ✓ | ✓ | ✓ (own groups' items) | | |
 | **Money** | | | | | |
-| See their own AI use this month on the home page | ✓ | ✓ | ✓ | ✓ | ✓ |
-| See Usage & billing and the whole company's AI spend | ✓ | ✓ | | | |
+| See how often Sidekick helped them this month on the home page (a count) | | | ✓ | ✓ | ✓ |
+| See the share of this month's AI allowance used, on the home page | ✓ | ✓ | | | |
+| See Usage & billing: the whole company's activity counts and AI allowance (a percentage; AI cost and models are never shown) | ✓ | ✓ | | | |
 | See the plan and subscription (on Usage & billing) | ✓ | ✓ | | | |
-| Export usage per group as CSV (AI cost by engagement code, for chargeback) | ✓ | ✓ | | | |
-| See the AI credit notice (80% used, used up) | ✓ | ✓ | | | |
+| Export usage per group as CSV (activity counts by engagement code, for chargeback) | ✓ | ✓ | | | |
+| See the AI allowance notice (80% used, used up) | ✓ | ✓ | | | |
 | Pay for the plan, change it or its extra groups, or cancel it | ✓ | | | | |
 | See the note that Sidekick changed someone's role (a retired Billing Admin is now a Member) | ✓ | | | | |
 | **Running the organization** | | | | | |

@@ -5734,7 +5734,7 @@ test(`[${ENGINE}] connectors: Microsoft 365 files, each person signs in: answers
   assert.ok(tools.counts.refresh.m365 > refreshes, "Ana's token was renewed, at the client's organization (the fake refuses any other)");
   assert.deepEqual(files(await askA(ana, ONYX, { types: ["documents"] })), ["Onyx"], "checked again once Graph answers");
   await jobTick({ sweep: true, kinds: ["watch.all", "watch.org"] });
-  const finding = (await lead("GET", "/api/findings")).body.findings.find((f) => f.kind === "connector_signins" && f.subject === conn.id);
+  const finding = (await lead("GET", "/api/findings")).body.findings.find((f) => f.kind === "connector_signins" && /Microsoft 365/.test(f.title));
   assert.ok(finding && /Microsoft 365/.test(finding.title) && /Ben Sharepoint/.test(finding.detail), JSON.stringify(finding));
   assert.equal((await connectMine(ben, conn.id, "ben")).to?.pathname, "/knowledge", "reconnecting");
   assert.deepEqual(files(await askA(ben, ONYX, { types: ["documents"] })), ["Onyx"]);

@@ -5,7 +5,7 @@
 //
 // It costs money, so it is never part of `npm test` or CI: it refuses to start without `--budget <dollars>`
 // (at most $5), and refuses inside the test runner or CI. Spend is read from the app's own usage records
-// (/api/usage, the cost column of usage_events) after every step; before each step it stops if the money
+// (the cost column of usage_events in the copy's database) after every step; before each step it stops if the money
 // already spent plus a reserve (1.5x the dearest step so far, or a first guess) would pass the budget.
 //
 // Usage (the Claude key is read from an env file and passed only to the throwaway copy; it is never printed):
@@ -209,8 +209,16 @@ try {
     ok(await admin("POST", "/api/firm", undefined, { form }), f.path);
   }
 
-  // Spend from the app's own usage records, and the budget guard.
-  const spent = async () => Number((await admin("GET", "/api/usage")).body?.totals?.cost ?? 0);
+  // Spend from the copy's own usage records (the cost column of usage_events, read from its database: /api/usage
+  // no longer shows dollars since firm usage went cost-free), and the budget guard.
+  const spent = async () => {
+    const db = new DatabaseSync(path.join(dataDir, "sidekick.db"), { readOnly: true, timeout: 10000 });
+    try {
+      return Number(db.prepare("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM usage_events").get().c);
+    } finally {
+      db.close();
+    }
+  };
   let total = await spent();
   let dearest = 0;
   /** Runs one costed step if the budget allows; returns { value, cost, ms } or null when it stopped. */

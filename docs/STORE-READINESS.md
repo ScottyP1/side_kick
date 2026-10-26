@@ -58,7 +58,7 @@ product names in the name, semantic version, bot commands). The test suite runs 
 |---|---|---|
 | Commands have title + description, no duplicates, no leading "/", list scopes = bot scopes (MF) | ✅ | Checked by `validateManifest`. 7 commands. |
 | At least 3 prompt starters, all working (GF/MF) | ✅ | The 7 commands are the prompt starters; each has a handler in `lib/teams/bot.ts`. |
-| Every input gets a valid reply, including "hi", "help" and nonsense; never a dead end (MF) | ✅ / 🔧 | Anything that isn't a command is answered as a question (or "I don't know" + logged gap). Unlinked chats now say what has to happen next, and every first-run card has **Help center (opens in browser)**. |
+| Every input gets a valid reply, including "hi", "help" and nonsense; never a dead end (MF) | ✅ / 🔧 | Anything that isn't a command is answered as a question (or "I don't know" + logged gap). Unlinked chats now say what has to happen next, and every first-run card links the help center (a **Help center (opens in browser)** button; the action-free "not set up yet" card has the address in its text). |
 | Help answers inside Teams, doesn't only redirect out (MF) | ✅ | `@Sidekick help` → help card with all commands. |
 | Welcome message: once on install, not on every command or on help (MF) | ✅ | Sent only from `install.add`; `help` sends the help card without the greeting. |
 | Welcome states the app name, value, setup steps and a command summary; calls out admin dependencies and limitations (MF) | 🔧 | `helpCard`/`linkCard`/`notSetUpCard` with `installer`: greeting, what Sidekick does, the AI note, setup and admin dependency note (`SETUP_NOTE`), "mention me with help". |

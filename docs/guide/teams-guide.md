@@ -133,7 +133,7 @@ In one of a group's chats, its **Team Lead** (or an **Org Owner/Admin**) can typ
 | `@Sidekick help` | Show what Sidekick can do here |
 
 ## The welcome message and help
-When Sidekick is added somewhere, it posts **one** welcome message, greeting the person who added it: what it does, what has to happen before it works there (a Team Lead or admin assigns the chat, or enters the link code), and that its answers are written by AI. It never repeats the welcome; mention **@Sidekick help** any time for the list of commands. Every card has a **Help center (opens in browser)** button that opens these guides.
+When Sidekick is added somewhere, it posts **one** welcome message, greeting the person who added it: what it does, what has to happen before it works there (a Team Lead or admin assigns the chat, or enters the link code), and that its answers are written by AI. It never repeats the welcome; mention **@Sidekick help** any time for the list of commands. Its cards link these guides with a **Help center (opens in browser)** button (the "not set up yet" notice gives the address in its text).
 
 ## AI answers can be wrong
 Sidekick's answers, meeting notes and reminders are written by AI (Claude, by Anthropic) from your group's own content. They can be incomplete or wrong, so check the sources on the card. Click **👎 Not helpful** on a bad answer (your admins see the counts), and report anything harmful or badly wrong to Support. Your content isn't used to train AI models.

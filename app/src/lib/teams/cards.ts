@@ -178,8 +178,9 @@ export function linkCard(code: string, kind: string, installer?: Installer): IAd
 
 /**
  * Shown once when Sidekick is added to a chat or channel whose Microsoft organization uses Sidekick, by a Team
- * Lead or admin (and again if someone mentions Sidekick there before it's assigned). Only a help-center button:
- * assigning happens only in the portal, on the group's page. On install it greets `installer` (the welcome message).
+ * Lead or admin (and again if someone mentions Sidekick there before it's assigned). No buttons (assigning happens
+ * only in the portal, on the group's page); the help center's address is in the text. On install it greets
+ * `installer` (the welcome message).
  */
 export function notSetUpCard(kind: string, days: number, installer?: Installer): IAdaptiveCard {
   const where = kind === "channel" ? "channel" : "chat";
@@ -187,8 +188,8 @@ export function notSetUpCard(kind: string, days: number, installer?: Installer):
     ...header(BRAND.name, `I'm not set up for this ${where} yet`),
     ...welcomeIntro(installer),
     text(`A Team Lead needs to assign this ${where} to a group in the ${BRAND.name} portal. Until then I won't read, save or answer anything here.`),
-    text(`If nobody assigns it within ${days} days, I'll leave the ${where}. Mention me with **help** to see what I can do once I'm set up.`, { size: "Small", isSubtle: true }),
-  ], [helpCenterAction()]), installer);
+    text(`If nobody assigns it within ${days} days, I'll leave the ${where}. Mention me with **help** to see what I can do once I'm set up, or read the help center (opens in browser): ${helpCenterUrl()}`, { size: "Small", isSubtle: true }),
+  ]), installer);
 }
 
 /**

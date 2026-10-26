@@ -213,8 +213,8 @@ const selfRemovalDenied: Watcher = {
       kind: "self_removal", workspaceId: null, subject: "", audience: "admins", severity: "warn",
       title: `${BRAND.name} isn't allowed to remove itself from Teams chats`,
       detail: `It should have left ${rows.slice(0, 3).map((r) => quote(chatName(r), 50)).join(", ")}${rows.length > 3 ? ` and ${rows.length - 3} more` : ""}, but Microsoft refused: your Microsoft admin hasn't approved the permission “TeamsAppInstallation.ReadWriteSelfForChat.All” (and “…ReadWriteSelfForTeam.All” for channels). ${BRAND.name} reads and answers nothing there meanwhile.`,
-      nextStep: `A Microsoft admin approves it once: Users & access → Approve ${BRAND.name} for your organization (or in the Entra admin center: App registrations → ${BRAND.name} → API permissions → Grant admin consent). ${BRAND.name} then leaves those chats within the hour. Or remove ${BRAND.name} from them in Teams yourself.`,
-      actionHref: "/users", actionLabel: "Approve in Microsoft", data: { chats: rows.length, runbook: "docs/RUNBOOKS.md#teams-sidekick-cant-remove-itself-from-chats" },
+      nextStep: `A Microsoft admin approves it once: Settings → Microsoft permissions → Approve ${BRAND.name} for your organization (or in the Entra admin center: App registrations → ${BRAND.name} → API permissions → Grant admin consent). ${BRAND.name} then leaves those chats within the hour. Or remove ${BRAND.name} from them in Teams yourself.`,
+      actionHref: "/settings#microsoft-permissions", actionLabel: "Microsoft permissions", data: { chats: rows.length, runbook: "docs/RUNBOOKS.md#teams-sidekick-cant-remove-itself-from-chats" },
     }];
   },
 };

@@ -54,9 +54,15 @@ export const PERMISSIONS_EXPLAINED = [
   { name: "Teams chat and channel messages (resource-specific, per chat)", what: `Not part of this approval: granted per chat or team when ${BRAND.name} is added there. ${BRAND.name} reads a chat's messages only once it's assigned to a group.` },
 ] as const;
 
+/**
+ * The message when Microsoft refuses Sidekick's app token for a tenant: Sidekick isn't approved there at all.
+ * Settings → Microsoft permissions reads it back from features' recorded errors (lib/graph-permissions.ts).
+ */
+export const NOT_APPROVED = `${BRAND.name} isn't approved for your Microsoft 365 organization yet. A Microsoft admin of your organization needs to approve it once (Settings → Microsoft permissions → Approve ${BRAND.name} for your organization).`;
+
 /** Thrown when the organization's Microsoft admin hasn't approved Sidekick (yet). The JSON says `consent: "needed"`. */
 export class ConsentNeededError extends HttpError {
-  constructor(message = `${BRAND.name} isn't approved for your Microsoft 365 organization yet. A Microsoft admin of your organization needs to approve it once (Users & access → Approve ${BRAND.name} for your organization).`) {
+  constructor(message = NOT_APPROVED) {
     super(409, message);
     withErrorDetails(this, { consent: "needed" });
   }
@@ -75,6 +81,13 @@ const tokens = new Map<string, { token: string; expires: number }>();
 async function graphToken(tenantId: string): Promise<string> {
   const cached = tokens.get(tenantId);
   if (cached && cached.expires > Date.now() + 60_000) return cached.token;
+  const { token, expiresIn } = await requestAppToken(tenantId);
+  tokens.set(tenantId, { token, expires: Date.now() + expiresIn * 1000 });
+  return token;
+}
+
+/** Asks Microsoft for a new app token for this tenant (client credentials), never from the cache. */
+async function requestAppToken(tenantId: string): Promise<{ token: string; expiresIn: number }> {
   const c = entraConfig();
   const res = await fetch(`${LOGIN_BASE}/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`, {
     method: "POST",
@@ -90,8 +103,44 @@ async function graphToken(tenantId: string): Promise<string> {
     // or approved in that tenant.
     throw new ConsentNeededError();
   }
-  tokens.set(tenantId, { token: body.access_token, expires: Date.now() + (body.expires_in ?? 3600) * 1000 });
-  return body.access_token;
+  return { token: body.access_token, expiresIn: body.expires_in ?? 3600 };
+}
+
+/**
+ * The application permissions this tenant's Microsoft admin has granted Sidekick, read from a fresh app token's
+ * `roles` claim (Microsoft lists every granted application permission there, e.g. `User.Read.All`): one call, no
+ * Graph probing. Returns `[]` when Microsoft refuses the token because Sidekick isn't approved in the tenant at
+ * all. The new token also replaces the cached one, so later Graph calls use what was just granted. Used only by
+ * "Check now" on Settings → Microsoft permissions (lib/graph-permissions.ts).
+ * @throws HttpError 502 when Microsoft can't be reached or refuses Sidekick's own credentials
+ */
+export async function appTokenRoles(tenantId: string): Promise<string[]> {
+  let got: { token: string; expiresIn: number };
+  try {
+    got = await requestAppToken(tenantId);
+  } catch (e) {
+    if (e instanceof ConsentNeededError) {
+      tokens.delete(tenantId);
+      return [];
+    }
+    throw e;
+  }
+  tokens.set(tenantId, { token: got.token, expires: Date.now() + got.expiresIn * 1000 });
+  return tokenRoles(got.token);
+}
+
+/**
+ * The `roles` claim of a Microsoft access token (a JWT: header.payload.signature, base64url). Only read, never
+ * trusted for access: Sidekick doesn't check the signature, because Microsoft Graph itself enforces the
+ * permissions; this just shows them. [] for anything that isn't a readable JWT.
+ */
+export function tokenRoles(token: string): string[] {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { roles?: unknown };
+    return Array.isArray(payload.roles) ? payload.roles.filter((r): r is string => typeof r === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -169,7 +218,7 @@ async function graphErrorCode(res: Response): Promise<string | null> {
 const graphGet = <T>(tenantId: string, path: string, headers: Record<string, string> = {}) =>
   graphCall<T>(tenantId, "GET", path, {
     headers,
-    deniedMessage: `${BRAND.name} is connected to your Microsoft 365 organization but can't read its directory yet. A Microsoft admin needs to approve the “Read all users' full profiles” permission (Users & access → Approve ${BRAND.name} for your organization).`,
+    deniedMessage: `${BRAND.name} is connected to your Microsoft 365 organization but can't read its directory yet. A Microsoft admin needs to approve the “Read all users' full profiles” permission (Settings → Microsoft permissions → Approve ${BRAND.name} for your organization).`,
   });
 
 /* ------------------------------------------------------------------ */
@@ -385,33 +434,45 @@ const STATE_MINUTES = 15;
  * Privileged Role Administrator or Cloud Application Administrator).
  */
 export async function startAdminConsent(req: Request): Promise<{ url: string; state: string }> {
+  // Started from Settings → Microsoft permissions (`?from=settings`) or Users & access: Microsoft comes back there.
   const user = await requireUser(["Org Owner", "Org Admin"]);
   const tenant = await requireDirectoryTenant(user);
   const state = crypto.randomBytes(24).toString("base64url");
   await run("DELETE FROM oidc_states WHERE expires_at < ?", now());
   await run(
     "INSERT INTO oidc_states (state, verifier, nonce, mode, user_id, next_path, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    state, "-", "-", "consent", user.id, "/users", new Date(Date.now() + STATE_MINUTES * 60_000).toISOString(),
+    state, "-", "-", "consent", user.id, consentReturnPath(req), new Date(Date.now() + STATE_MINUTES * 60_000).toISOString(),
   );
   const url = new URL(`${LOGIN_BASE}/${encodeURIComponent(tenant)}/v2.0/adminconsent`);
   url.search = new URLSearchParams({ client_id: entraConfig().clientId, scope: "https://graph.microsoft.com/.default", redirect_uri: redirectUri(req), state }).toString();
   return { url: url.toString(), state };
 }
 
-/** True if this callback request is the reply to an admin-consent round trip (its state was saved with mode "consent"). */
-export async function isConsentReply(req: Request): Promise<boolean> {
+/** Where the admin-consent round trip started (and so ends): Settings → Microsoft permissions, or Users & access. */
+export function consentReturnPath(req: Request): "/settings" | "/users" {
+  return new URL(req.url).searchParams.get("from") === "settings" ? "/settings" : "/users";
+}
+
+/**
+ * If this callback request is the reply to an admin-consent round trip (its state was saved with mode "consent"),
+ * the page it started from (`/settings` or `/users`), where the browser goes back to; otherwise null.
+ */
+export async function consentReplyPath(req: Request): Promise<"/settings" | "/users" | null> {
   const state = new URL(req.url).searchParams.get("state");
-  if (!state) return false;
-  return (await get<{ mode: string }>("SELECT mode FROM oidc_states WHERE state = ?", state))?.mode === "consent";
+  if (!state) return null;
+  const saved = await get<{ mode: string; next_path: string | null }>("SELECT mode, next_path FROM oidc_states WHERE state = ?", state);
+  if (saved?.mode !== "consent") return null;
+  return saved.next_path === "/settings" ? "/settings" : "/users";
 }
 
 /**
  * Finishes the admin-consent round trip: checks the state against the browser cookie, that the person who
  * started it is still an Org Owner/Admin, and that Microsoft says the approval was for the org's own tenant;
- * then records it on the org (`graph_consent_at`) and in the audit log. The state is used up.
+ * then records it on the org (`graph_consent_at`) and in the audit log. The state is used up. Returns who approved
+ * (the callback then refreshes Settings → Microsoft permissions, lib/graph-permissions.ts).
  * @throws HttpError 400/403 with a plain reason (cancelled, wrong tenant, expired, other browser)
  */
-export async function finishAdminConsent(req: Request, cookieState: string | undefined): Promise<void> {
+export async function finishAdminConsent(req: Request, cookieState: string | undefined): Promise<User> {
   const q = new URL(req.url).searchParams;
   const state = q.get("state") ?? "";
   const saved = await get<{ user_id: string | null; expires_at: string }>("SELECT user_id, expires_at FROM oidc_states WHERE state = ? AND mode = 'consent'", state);
@@ -431,7 +492,8 @@ export async function finishAdminConsent(req: Request, cookieState: string | und
   if (q.get("admin_consent")?.toLowerCase() !== "true") throw new HttpError(400, "Microsoft didn't confirm the approval. Try again.");
   tokens.delete(tenant);
   await run("UPDATE orgs SET graph_consent_at = ? WHERE id = ?", now(), user.org_id);
-  await audit(user, `Approved ${BRAND.name} for the organization's Microsoft 365 (directory read permission)`, "Policy change");
+  await audit(user, `Approved ${BRAND.name} for the organization's Microsoft 365 (all the permissions it asks for)`, "Policy change");
+  return user;
 }
 
 export { OIDC_COOKIE };

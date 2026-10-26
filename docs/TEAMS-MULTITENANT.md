@@ -42,7 +42,7 @@ Azure, Entra, Teams admin and Partner Center; nothing in the repo changes these.
      the same code works with the broader `TeamsAppInstallation.ReadWriteForChat.All` /
      `ReadWriteForTeam.All` instead (only the permission in Entra changes).
    - Press **Grant admin consent for Sidekick Labs** (so it works in your own tenant). Each customer's admin
-     approves it in their own tenant from Sidekick (Users & access → Approve Sidekick for your organization).
+     approves it in their own tenant from Sidekick (Settings → Microsoft permissions → Approve Sidekick for your organization).
 5. **Branding & properties**: name, logo, publisher domain (step 6), home page, privacy and terms URLs
    (`/privacy`, `/terms` on the site). Customers see these on Microsoft's approval screen.
 

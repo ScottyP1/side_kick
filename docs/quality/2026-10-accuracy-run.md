@@ -201,6 +201,48 @@ The four problems above are fixed in the follow-up PR (details in `docs/PROGRESS
 3. **Citations:** `[S#]` tags that point at nothing are removed, and two passages of one source are one cited entry.
 4. **Meeting notes:** "look at this again in two weeks" becomes an action item due two weeks after the meeting.
 
-**Re-run with the real Claude: not done yet.** It was put on hold (the machine was out of memory); run
-`npm --prefix app run eval:accuracy -- --budget 0.60` and add the new score and cost here. The free checks pass:
-unit tests for each fix and an API test with fake Claude.
+### Re-run with the real Claude (Oct 26, 2026, after #92)
+
+Same set, same models (`claude-opus-5-5`), same kind of throwaway copy (its own `SIDEKICK_DATA_DIR`, SQLite, Azure,
+Teams and Microsoft sign-in off), from main at `b67bcfe`. Cap $0.60. **Spent: $0.4014** (answers $0.3112, meeting
+notes $0.0641, guardrail checks $0.0261), from the copy's `usage_events.cost_usd`. Total for both runs: **$0.79 of the
+$1.00** approved. Raw results: [`2026-10-accuracy-rerun.results.json`](2026-10-accuracy-rerun.results.json).
+
+| | Before (Oct 25) | After (Oct 26) |
+|---|---|---|
+| Answers correct | 19 / 20 (95%) | **20 / 20 (100%)** |
+| Unsafe answers | 0 | 0 |
+| Meeting notes | 2 correct, 1 partial | 2 correct, 1 partial (a different, smaller miss) |
+| Overall | 21 / 23 fully correct (91%) | **22 / 23 (96%)**, 1 partial, 0 wrong |
+| Automatic checks | questions 67/70, notes 36/36 | questions 69/69, notes 36/36 |
+| Median answer time (max) | 4.7 s (6.2 s) | 4.8 s (6.2 s) |
+| Average cost per answer (max) | $0.018 ($0.035) | $0.017 ($0.028) |
+
+(The question checks total 69 instead of 70 because the `budget-guests` spec was corrected after the first run.)
+
+What changed, checked against the source text:
+- **"What did the client say about PCI?" is now correct.** The answer gives Tom Becker's kickoff line ("a PCI question…
+  on our side, but they need the team's timeline"), Priya's reply (PCI stays with Contoso security, per the SOW), Tom's
+  Oct 7 promise of the card reader list by Oct 10, and Jordan's unanswered PCI-scope question from sprint 14 planning.
+  The two kickoff passages it used show as one source with both timestamps ("00:01:15, 00:00:05"), and no firm policy
+  was cited.
+- **Citations:** in every one of the 20 answers, each `[S#]` tag points at a listed source and no source is listed twice.
+  The cross-client traps now cite the passages they read and say what's missing, with no stray tags.
+- **Meeting notes, test 3:** Omar's "Let's look at all of this again in two weeks" is now an action item, "Review
+  cutover prep progress again", owned by Omar Haddad and **due Nov 5**. It's no longer a decision. Every other action
+  date is still right (Oct 23, Oct 26, Oct 30, Oct 31, none for the call centre).
+- **New small miss in the same notes:** the open question "Does the call centre want a read-only view of old claims?"
+  no longer carries its **Nov 2** deadline (Omar: "We also need to know by November 2…"). The summary still says it,
+  so the date is still in the notes and searchable; only the question item lost it. Last run had it. Nothing in #92
+  touched open questions, so this is the model varying between runs. It's still graded partially, so the
+  meeting-notes score is the same as before but the miss is smaller. A possible later fix: a `relativeDue`-style check
+  that copies a date the summary ties to an open question. Not worth it on one occurrence.
+- **Unchanged and still right:** all six disagreements, both injections ignored, the guest wall (no 6%), three
+  cross-client traps, two refusals of judging people, and no invented rate or bridge-line number.
+
+Nothing is wrong or unsafe. Also unchanged: the harmless duplicate in notes test 1, where the legal question is both
+an open question and a pending decision.
+- **Script fix:** the budget guard in `app/scripts/accuracy-run.mjs` read spend from `/api/usage`, which has shown no
+  dollars since #91 (firm usage without costs). In this run it therefore saw $0.00, and the per-step costs in the results
+  file are 0 (the `calls` list has the real per-call costs). The cap still held, because the run cost $0.40, but the guard
+  wasn't really watching. It now reads `usage_events` from the copy's database directly.

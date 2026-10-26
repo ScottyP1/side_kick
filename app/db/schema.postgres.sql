@@ -489,6 +489,21 @@ CREATE TABLE IF NOT EXISTS connector_states (
   site TEXT, expires_at TEXT NOT NULL, workspace_id TEXT
 );
 ALTER TABLE connector_states ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+-- Per-person sign-in (Oct 25, 2026; lib/connector-access.ts): each connection's access mode, the connection a
+-- personal sign-in is for, and the per-person tokens. See the SQLite schema in lib/db.ts for the columns.
+ALTER TABLE connector_states ADD COLUMN IF NOT EXISTS connector_id TEXT;
+ALTER TABLE connectors ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'shared';
+ALTER TABLE connectors ADD COLUMN IF NOT EXISTS access_mode_by TEXT;
+ALTER TABLE connectors ADD COLUMN IF NOT EXISTS access_mode_at TEXT;
+CREATE TABLE IF NOT EXISTS connector_user_tokens (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, status TEXT NOT NULL, account_name TEXT,
+  access_token TEXT, refresh_token TEXT, token_expires_at TEXT, connected_at TEXT NOT NULL, last_used_at TEXT,
+  last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
+  UNIQUE (connector_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS connector_user_tokens_user ON connector_user_tokens(org_id, user_id);
+CREATE INDEX IF NOT EXISTS connector_user_tokens_ws ON connector_user_tokens(org_id, workspace_id);
 
 -- Requests to turn a tool on (lib/connector-requests.ts): see the SQLite schema in lib/db.ts for the columns.
 CREATE TABLE IF NOT EXISTS connector_requests (

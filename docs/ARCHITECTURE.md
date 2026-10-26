@@ -207,6 +207,85 @@ Quality check: `npm --prefix app run eval:answers` runs the accuracy test set (`
 4. Unlinked conversation in a tied tenant (channel/group chat): on install the installer must be a Team Lead/admin (else Sidekick leaves, install.ts); it then waits to be assigned in the portal, and Sidekick reads, saves and answers nothing there (mentions get the "not set up yet" notice). Elsewhere (untied tenant, 1:1) the link-code card. Assigned via the picker → every message is tracked. Linked → `add`/`remove @name` commands (members.ts), or typing indicator now and the answer card after the request returns.
 5. A channel/group message that doesn't mention Sidekick (delivered thanks to the manifest's resource-specific consent) is saved only if the chat is tracked (`recordChatMessage`), otherwise ignored; never answered.
 
+## Connectors (outside tools)
+`lib/connectors.ts` is the framework; each tool is a `Provider` (`connector-ado.ts`, `-jira.ts`, `-github.ts`,
+`-confluence.ts`, `-m365.ts`). Read-only, **per group**: the Org Owner allows tool types, the group's Team Lead (or an
+Org Owner/Admin) connects the group's **connection** with the account the client gave the team, links projects, and a
+sync job copies their items into `connector_items` and the search index (source types `workitem` / `page`).
+
+### Per-person sign-in (Oct 25, 2026)
+**Problem.** A connection reads with one account, so every member's answers could cite an item that some of them
+can't open in the tool (a Jira issue with a security level, an Azure DevOps area someone isn't allowed in).
+**Goal: an answer only uses connector items the people who will read it can open.**
+
+**Two modes per connection** (`connectors.access_mode`, chosen by the group's Team Lead or an Org Owner/Admin on
+Connectors; audited):
+- **Shared account** (`shared`, the default and what existed before): everyone in the group sees what the
+  connection's account can read. Right for tools without per-item permissions, and when the client gives the whole
+  team the same access anyway.
+- **Each person signs in** (`personal`): the connection's account still does the **syncing** (it should be a
+  read-only account that can read every linked project), but it no longer decides what anyone sees. Each member
+  connects their own account ("Connect your Jira") and answers use only the items *their* account can open.
+  Only for tools that implement the per-person check (`Provider.personal`): **Jira and Azure DevOps**. The others are
+  **shared only for now** (`PERSONAL_UNSUPPORTED` says why on the tile):
+  - GitHub: permissions are per repository, never per issue, so anyone who may open the linked repository may open
+    every issue in it. The shared account already matches GitHub's own rule.
+  - Confluence: pages can carry view restrictions. It needs a per-person CQL check (the same interface as Jira's);
+    planned.
+  - SharePoint/OneDrive: planned as option (c) below, Graph's own permissions on each file stored in the index.
+
+**Per-person tokens** (`connector_user_tokens`): one row per connection and person, the tool's account name, access
+and refresh tokens **sealed** with `SIDEKICK_ENCRYPTION_KEY` (context `connector_user_tokens.<column>:<row id>`, so
+a token copied onto another row won't open), refreshed shortly before they run out (one refresh at a time per row,
+rotated refresh tokens saved). A refused refresh turns the row **expired** ("Reconnect your Jira"); nothing else
+changes. Any member of the group (Viewers too, since they may ask) signs in from **Knowledge** (and from Connectors
+for Team Leads/admins), through the same `/api/connectors/callback` as group connections (the saved state carries
+`connector_id`, which marks a personal sign-in), so **no extra redirect address** is needed on the tools' apps.
+The account must open the **same site** as the connection (Jira: the same cloud id; Azure DevOps: the same
+organization), otherwise it's refused. Leaving the group, being removed from the organization, switching the
+connection back to shared, disconnecting it, or deleting the group deletes the person's tokens.
+
+**How answers respect permissions: option (a), a query-time check, for both Jira and Azure DevOps.** The shared index
+stays as it is (one copy per group, synced by the connection's account). When an answer is about to be written,
+the candidates from personal connections (at most ~30 passages) are checked **with the reader's own token**:
+- Jira: `POST /rest/api/3/issue/bulkfetch` with the candidate keys; issues it doesn't return (404/no permission) are
+  closed to that person. One call for up to 100 keys.
+- Azure DevOps: `POST /_apis/wit/workitemsbatch` with `errorPolicy: "Omit"`; items the person can't read come back
+  `null`. One call for up to 200 ids.
+Results are cached **in memory for 5 minutes** per token row and item (`ACCESS_CACHE_SECONDS`), so follow-ups don't
+call the tool again; a reconnect or disconnect starts a fresh cache. Why (a): it costs one small call per answer,
+needs no second copy of anything, and asks the tool itself, which is the only place that knows about security
+levels, area-path permissions and group memberships. (b) per-person sync would multiply storage and sync traffic by
+the group size for the same answer; (c) copying ACLs into the index fits SharePoint (Graph exposes them), but
+Jira's permission schemes and ADO's area security can't be resolved from item data alone.
+**Fail closed:** an item is only used when the check said yes. Not connected, sign-in expired, the tool down or slow
+(4-second limit), or an unexpected answer → that connection's items are left out of this answer, never shown.
+There are **no "public" items** in this version: Sidekick can't tell from its side which items everyone may open,
+so a person who hasn't connected gets the answer without that tool and a note: "Connect your Jira to include its
+tickets" (with a button). The note appears only when that tool had something relevant.
+
+**Teams chats: the intersection.** An answer in a group chat or channel is read by everyone there, so items are
+checked for **everyone in the chat**: the chat's roster (from Teams) is matched to the group's Sidekick people by
+Microsoft account; an item is used only if **every** person in the chat has connected and can open it. If anyone in
+the chat isn't a known member of the group (a client guest, someone not signed in to Sidekick with Microsoft), hasn't
+connected, the roster can't be read, or the chat has more than `MAX_CHAT_PEOPLE` (20) people, the personal
+connection's items are left out and the card says "Jira tickets were left out: not everyone in this chat has
+connected Jira" (no names: guests may read it). We chose this over "fall back to the shared account" because the
+shared account would show some people items they can't open, which is the very thing this feature prevents. A 1:1
+chat with Sidekick is the asker alone (like the portal). The same check backs the "Connect your Jira" card: when
+someone asks in Teams and a tool they haven't connected had something relevant, the answer card carries the button.
+
+**Group-wide outputs** that aren't written for one reader (the knowledge map, meeting notes, reminders) leave out
+the items of personal connections altogether.
+
+**Admin view.** Connectors shows, per personal connection, how many members have connected, and who is expired. The
+watcher `connector_signins` raises one finding per connection for its managers ("2 people's Jira sign-ins expired");
+the person themselves sees "Reconnect your Jira" on Knowledge (and in the Teams card the next time it matters). Every check is a trace step
+(kind `connector`, "Check who can open the cited items": counts only, never keys or titles), and connecting,
+disconnecting and expiring are audited in the group. The new table has an `org_id`, so Postgres row-level
+security covers it automatically (the policy loop at the end of `db/schema.postgres.sql`), and it's listed in
+`ORG_TABLES` and `deleteWorkspace`.
+
 ## Row-level security (the second lock)
 The walls above live in application code. Behind them, Postgres itself refuses to hand out another org's rows
 (details, measured overhead and the full list of system paths: `docs/security/2026-10-row-level-security.md`).

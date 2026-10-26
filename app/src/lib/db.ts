@@ -45,7 +45,8 @@ const CONNECTORS_TABLE = `CREATE TABLE IF NOT EXISTS connectors (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT, kind TEXT NOT NULL, status TEXT NOT NULL,
   account TEXT NOT NULL, account_name TEXT, api_base TEXT NOT NULL, web_base TEXT NOT NULL,
   access_token TEXT, refresh_token TEXT, token_expires_at TEXT,
-  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL
+  connected_by TEXT, connected_at TEXT NOT NULL, last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
+  access_mode TEXT NOT NULL DEFAULT 'shared', access_mode_by TEXT, access_mode_at TEXT
 );`;
 
 /**
@@ -527,8 +528,21 @@ CREATE INDEX IF NOT EXISTS connector_items_ws ON connector_items(org_id, workspa
 -- A connector sign-in in progress (OAuth state + PKCE verifier), used once, kept 10 minutes.
 CREATE TABLE IF NOT EXISTS connector_states (
   state TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, verifier TEXT NOT NULL,
-  site TEXT, expires_at TEXT NOT NULL, workspace_id TEXT
+  site TEXT, expires_at TEXT NOT NULL, workspace_id TEXT, connector_id TEXT
 );
+-- Per-person sign-in to a group's connection in "each person signs in" mode (connectors.access_mode = 'personal';
+-- lib/connector-access.ts, docs/ARCHITECTURE.md → Connectors): one row per connection and person. Tokens are
+-- sealed (lib/secret-box.ts, context connector_user_tokens.<column>:<id>). status = connected | expired (a refused
+-- refresh: the person reconnects). account_name = who they are in the tool (shown to them and the group's managers).
+CREATE TABLE IF NOT EXISTS connector_user_tokens (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, status TEXT NOT NULL, account_name TEXT,
+  access_token TEXT, refresh_token TEXT, token_expires_at TEXT, connected_at TEXT NOT NULL, last_used_at TEXT,
+  last_error TEXT, last_error_at TEXT, updated_at TEXT NOT NULL,
+  UNIQUE (connector_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS connector_user_tokens_user ON connector_user_tokens(org_id, user_id);
+CREATE INDEX IF NOT EXISTS connector_user_tokens_ws ON connector_user_tokens(org_id, workspace_id);
 -- A request to turn a tool on for the organization (lib/connector-requests.ts): a Team Lead or Org Admin asks for
 -- one of their groups, the Org Owner approves (turning the tool on) or declines with a note. status = pending |
 -- approved | declined | cancelled; at most one pending request per tool and group (connector_requests_open).
@@ -1006,6 +1020,11 @@ function migrate(conn: DatabaseSync) {
     }
   }
   if (!has("connector_states", "workspace_id")) conn.exec("ALTER TABLE connector_states ADD COLUMN workspace_id TEXT");
+  if (!has("connector_states", "connector_id")) conn.exec("ALTER TABLE connector_states ADD COLUMN connector_id TEXT");
+  // Per-person sign-in (Oct 25, 2026): each connection's access mode.
+  if (!has("connectors", "access_mode")) conn.exec("ALTER TABLE connectors ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'shared'");
+  if (!has("connectors", "access_mode_by")) conn.exec("ALTER TABLE connectors ADD COLUMN access_mode_by TEXT");
+  if (!has("connectors", "access_mode_at")) conn.exec("ALTER TABLE connectors ADD COLUMN access_mode_at TEXT");
   for (const sql of CONNECTOR_GROUP_MIGRATION) conn.exec(sql);
   // Data migrations (same SQL as Postgres, see `DATA_MIGRATIONS`), all or nothing. A savepoint rather than BEGIN,
   // because a code reload can re-run this while a transaction is open.

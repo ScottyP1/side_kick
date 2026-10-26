@@ -40,6 +40,9 @@ type LinkHealth = {
 type ConnectorHealth = {
   id: string; kind: Kind; label: string; workspaceId: string; workspaceName: string; account: string; accountName: string | null; status: "ok" | "expired" | "error" | "waiting";
   problem: string | null; connectedBy: string | null; connectedAt: string; lastSyncAt: string | null; lastOkAt: string | null; links: LinkHealth[];
+  /** Who sees what: one shared account, or each person signs in (lib/connectors.ts `setAccessMode`). */
+  accessMode: "shared" | "personal";
+  personal: { supported: boolean; reason: string | null; people: number; connected: number; expired: string[] };
 };
 /** A request to allow a tool type (lib/connector-requests.ts `ConnectorRequest`). */
 type ToolRequest = {
@@ -371,7 +374,49 @@ function Connection({ c, canManage, reload }: { c: ConnectorHealth; canManage: b
       </div>
       {error && <div className="callout bad" role="alert">{error}</div>}
       {c.problem && <div className={`callout ${c.status === "expired" ? "bad" : "warn"}`} role="status">{c.problem}</div>}
+      <WhoSees c={c} canManage={canManage} act={act} busy={busy} />
       <Links c={c} canLink={canManage} reload={reload} act={act} busy={busy} />
+    </div>
+  );
+}
+
+/**
+ * Who sees what from one connection (docs/ARCHITECTURE.md → Connectors): **one shared account** (everyone in the group
+ * sees what it reads) or **each person signs in** (answers use only what the reader's own sign-in can open; Jira and
+ * Azure DevOps). The group's managers switch it (PUT /api/connectors/<id>); in personal mode it says how many of the
+ * group's people have connected and whose sign-in expired, with a link to connect your own on Knowledge.
+ */
+function WhoSees({ c, canManage, act, busy }: { c: ConnectorHealth; canManage: boolean; act: (label: string, fn: () => Promise<unknown>, done: string) => Promise<void>; busy: string }) {
+  const t = TOOLS[c.kind];
+  const p = c.personal;
+  if (!p.supported) return <div className="muted" style={{ fontSize: 12.5 }}>Who sees what: one shared account (everyone in the group sees what it reads). {p.reason}</div>;
+  const setMode = (mode: "shared" | "personal") => {
+    if (mode === c.accessMode) return;
+    const ok = mode === "personal"
+      ? confirm(`Switch ${t.name} in ${c.workspaceName} to "each person signs in"? Answers will only use ${t.items} each reader can open with their own ${t.name} account, so everyone needs to connect theirs on Knowledge. The group's account keeps syncing.`)
+      : confirm(`Switch ${t.name} in ${c.workspaceName} back to one shared account? Everyone in the group will see what that account reads, and everyone's own sign-ins are removed.`);
+    if (ok) void act("mode", () => api(`/api/connectors/${c.id}`, { method: "PUT", json: { accessMode: mode } }), mode === "personal" ? `${t.name}: each person signs in now` : `${t.name}: one shared account now`);
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="muted">Who sees what:</span>
+        {canManage ? (
+          <div className="seg" role="group" aria-label={`Who sees what from ${t.name}`}>
+            <button type="button" aria-pressed={c.accessMode === "shared"} disabled={busy === "mode"} onClick={() => setMode("shared")}>One shared account</button>
+            <button type="button" aria-pressed={c.accessMode === "personal"} disabled={busy === "mode"} onClick={() => setMode("personal")}>Each person signs in</button>
+          </div>
+        ) : <b>{c.accessMode === "personal" ? "Each person signs in" : "One shared account"}</b>}
+      </div>
+      {c.accessMode === "personal" ? (
+        <div className="muted" style={{ fontSize: 12.5 }}>
+          {p.connected} of {p.people} {p.people === 1 ? "person" : "people"} in the group connected their own {t.name}. Answers only use {t.items} the reader can open; in Teams chats, only ones everyone in the chat can open.
+          {p.expired.length > 0 && <> <span style={{ color: "var(--bad)" }}>Sign-in expired: {p.expired.join(", ")}.</span></>}
+          {" "}<a href={`/knowledge?ws=${encodeURIComponent(c.workspaceId)}#signins`}>Connect your own</a>
+        </div>
+      ) : (
+        <div className="muted" style={{ fontSize: 12.5 }}>Everyone in the group sees what this account reads. Choose “each person signs in” if not everyone may open every {t.items.replace(/s$/, "")}.</div>
+      )}
     </div>
   );
 }
@@ -411,7 +456,7 @@ function ConnectForm({ kind, groups }: { kind: Kind; groups: { id: string; name:
       </div>
       <div className="callout info" role="note">
         <b>{ACCOUNT_NOTE}</b>{" "}
-        You sign in with {t.signIn.replace("your ", "the client's ")}; {BRAND.name} only reads, and stores no password. Members and Viewers never sign in.
+        You sign in with {t.signIn.replace("your ", "the client's ")}; {BRAND.name} only reads, and stores no password. Members and Viewers don&apos;t sign in, unless you later choose “each person signs in” (Jira, Azure DevOps).
         {kind === "github" && " Only repositories the client installed the Sidekick GitHub app on can be linked."}
         {kind === "m365" && ` The first time, Microsoft may ask an admin of the client's organization to approve ${BRAND.name} reading SharePoint and OneDrive files.`}
       </div>

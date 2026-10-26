@@ -110,7 +110,16 @@ export function openLabel(title: string): string {
 }
 
 /** What the answer card shows besides the answer itself. */
-export type AnswerExtras = { blocked?: string | null; conflict?: boolean; followUp?: string | null; questionId?: string | null };
+export type AnswerExtras = {
+  blocked?: string | null; conflict?: boolean; followUp?: string | null; questionId?: string | null;
+  /** Notes when a connection in "each person signs in" mode left items out (lib/connector-access.ts `AccessNote`). */
+  access?: { kind: string; reason: string; text: string }[];
+  /** Where "Connect your …" opens (the group's Knowledge page, Your sign-ins to tools). */
+  signInUrl?: string;
+};
+
+/** Tool names for the "Connect your …" button (lib/connector-text.ts `KIND_LABEL`, kept here so cards stay pure). */
+const TOOL_NAMES: Record<string, string> = { ado: "Azure DevOps", jira: "Jira", github: "GitHub", confluence: "Confluence", m365: "Microsoft 365" };
 
 /**
  * The reply to a question: the question as the title (with a short "Following up on …" line when it built on the
@@ -118,6 +127,8 @@ export type AnswerExtras = { blocked?: string | null; conflict?: boolean; follow
  * its origin ("Firm policy · …" for the firm library), location, an "may be out of date" flag, and a short excerpt;
  * a work item from a connector (Azure DevOps, Jira, GitHub) also gets an "Open #4821" button to the tool, and a
  * Confluence page an "Open in Confluence" button and a Microsoft 365 file "Open in SharePoint" / "Open in OneDrive" (`openLabel`).
+ * When a connection in "each person signs in" mode left items out, a short note says so (no item names) with a
+ * "Connect your Jira" button to the portal (`access`, `signInUrl`).
  * Unanswered questions say they were logged as a gap; questions refused by the guardrails (`blocked`) say the
  * organization's guardrails apply instead. Answered (and "I don't know") replies get 👍/👎 buttons and a hint
  * about "new question".
@@ -151,11 +162,18 @@ export function answerCard(question: string, answer: { found: boolean; answer: s
   } else if (!answer.found) {
     body.push(text("I logged this as a knowledge gap so the team can fill it in.", { size: "Small", isSubtle: true }));
   }
-  if (answer.blocked || !answer.questionId) return card(body);
+  const notes = answer.access ?? [];
+  for (const n of notes) body.push(text(`🔒 ${n.text}`, { size: "Small", isSubtle: true, spacing: "Small" }));
+  const signIn = notes.find((n) => n.reason !== "unavailable");
+  const connect = signIn && answer.signInUrl && /^https?:\/\//.test(answer.signInUrl)
+    ? [{ type: "Action.OpenUrl", title: `${signIn.reason === "reconnect" ? "Reconnect" : "Connect"} your ${TOOL_NAMES[signIn.kind] ?? "tool"}`, url: answer.signInUrl }]
+    : [];
+  if (answer.blocked || !answer.questionId) return card(body, connect);
   body.push(text(`AI-generated: check the sources. Ask a follow-up the same way, or start with **new question** to start afresh.`, { size: "Small", isSubtle: true, spacing: "Medium" }));
   return card(body, [
     { type: "Action.Execute", title: "👍 Helpful", verb: VERBS.feedbackUp, data: { questionId: answer.questionId } },
     { type: "Action.Execute", title: "👎 Not helpful", verb: VERBS.feedbackDown, data: { questionId: answer.questionId } },
+    ...connect,
   ]);
 }
 

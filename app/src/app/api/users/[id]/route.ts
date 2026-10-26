@@ -74,6 +74,8 @@ export const DELETE = handle(async (_req: Request, { params }: Ctx) => {
   }
   const { admin, target } = await load((await params).id);
   if (target.id === admin.id) throw new HttpError(403, "You can't remove yourself. Ask the Org Owner or another Org Admin.");
+  // Their own sign-ins to tools ("each person signs in") go with them.
+  await run("DELETE FROM connector_user_tokens WHERE user_id = ? AND org_id = ?", target.id, admin.org_id);
   await run("DELETE FROM users WHERE id = ?", target.id);
   await forgetSecondFactors("user", target.id);
   await audit(admin, `Removed ${target.name}`, "Access");

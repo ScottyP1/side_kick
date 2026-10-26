@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, CitedText, Pill, Spinner, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { AccessNotes, type AccessNote } from "@/components/my-sign-ins";
 
 type Source = { id: string; title: string; loc: string; type: string; excerpt?: string; origin?: "group" | "firm"; date?: string | null; outdated?: string | null; url?: string | null; appliesTo?: number };
 type Answer = {
@@ -20,6 +21,8 @@ type Answer = {
   questionId?: string | null;
   conversation?: string;
   followUp?: string | null;
+  /** A tool in "each person signs in" mode left items out of this answer ("Connect your Jira…"). */
+  access?: AccessNote[];
 };
 /** One exchange shown in the panel: what was typed and the answer. */
 type Exchange = { question: string; answer: Answer; vote?: "up" | "down" };
@@ -208,6 +211,7 @@ export function AskPanel({ ws, admin, onAsked }: { ws: string; admin: boolean; o
                 {latest.answer.sources.map((s) => <SourceLine key={s.id} s={s} />)}
               </div>
             )}
+            <AccessNotes notes={latest.answer.access} />
             {latest.answer.questionId && (
               <div className="actions" style={{ alignItems: "center" }}>
                 <span className="muted" style={{ fontSize: 12.5 }}>Was this helpful?</span>

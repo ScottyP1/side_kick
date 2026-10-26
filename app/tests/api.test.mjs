@@ -41,15 +41,18 @@ const sent = [];
 const TEAM = { id: "19:team-test@thread.tacv2", name: "Contoso Migration" };
 // Conversations whose posts the fake Teams refuses (500), for the failed-posts watcher test.
 const failPosts = new Set();
+// Chat rosters by conversation id (the "each person signs in" test); every other chat has three unknown people.
+const rosters = new Map();
 const connector = http.createServer((req, res) => {
   if ([...failPosts].some((c) => decodeURIComponent(req.url).includes(c))) {
     res.writeHead(500, { "content-type": "application/json" });
     return void res.end(JSON.stringify({ error: { code: "ServiceError", message: "Teams is unavailable" } }));
   }
-  // A chat's roster (the notes picker's member counts): three people in every chat.
-  if (req.method === "GET" && /^\/v3\/conversations\/[^/]+\/members\/?$/.test(decodeURIComponent(req.url).split("?")[0])) {
+  // A chat's roster (the notes picker's member counts, who reads an answer): three people unless `rosters` says otherwise.
+  const rosterOf = /^\/v3\/conversations\/([^/]+)\/members\/?$/.exec(decodeURIComponent(req.url).split("?")[0]);
+  if (req.method === "GET" && rosterOf) {
     res.writeHead(200, { "content-type": "application/json" });
-    return void res.end(JSON.stringify([{ id: "29:a", name: "A" }, { id: "29:b", name: "B" }, { id: "29:c", name: "C" }]));
+    return void res.end(JSON.stringify(rosters.get(rosterOf[1]) ?? [{ id: "29:a", name: "A" }, { id: "29:b", name: "B" }, { id: "29:c", name: "C" }]));
   }
   if (req.method === "GET" && decodeURIComponent(req.url).startsWith(`/v3/teams/${TEAM.id}`)) {
     res.writeHead(200, { "content-type": "application/json" });
@@ -171,6 +174,24 @@ const allowTool = (call, kind, allowed = true) => call("PUT", "/api/connectors/k
 async function connectTool(call, kind, site, ws = s.wsA) {
   const start = await call("GET", `/api/connectors/start?kind=${kind}&ws=${ws}${site ? `&site=${encodeURIComponent(site)}` : ""}`);
   if (start.status !== 307 || !start.location?.startsWith(TOOLS_BASE)) return { start };
+  const approve = await fetch(start.location, { redirect: "manual" });
+  const back = new URL(approve.headers.get("location"));
+  const done = await call("GET", back.pathname + back.search);
+  return { start, done, to: done.location ? new URL(done.location) : null };
+}
+
+/**
+ * Connects a person's **own** account to a group connection in "each person signs in" mode, like "Connect your Jira"
+ * on Knowledge: the fake tool signs in as `as` (its people, scripts/fake-tools.mjs `signInAs`). Returns the start
+ * response, the callback's and where the browser lands (`to`).
+ */
+async function connectMine(call, connectorId, as) {
+  tools.signInAs(as);
+  const start = await call("GET", `/api/connectors/mine/start?connector=${connectorId}`);
+  if (start.status !== 307 || !start.location?.startsWith(TOOLS_BASE)) {
+    tools.signInAs(null);
+    return { start };
+  }
   const approve = await fetch(start.location, { redirect: "manual" });
   const back = new URL(approve.headers.get("location"));
   const done = await call("GET", back.pathname + back.search);
@@ -1740,6 +1761,15 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
   assert.equal((await lead("DELETE", `/api/connectors/${s.ado}`)).status, 404);
   assert.match(flashOf((await connectTool(lead, "ado", "northwind", s.wsB)).start), /Group not found/, "A's Team Lead can't connect for B");
   assert.ok(!(await lead("GET", "/api/connectors")).body.connectors.some((c) => c.workspaceId === s.wsB), "nor see B's connection");
+  // "Each person signs in": B's connection never shows up as one to sign in to from A or another organization, and
+  // nobody outside B can switch its mode or start a personal sign-in to it.
+  assert.equal((await lead("GET", `/api/connectors/mine?ws=${s.wsB}`)).status, 404);
+  assert.ok(!(await lead("GET", "/api/connectors/mine")).body.signIns.some((x) => x.workspaceId === s.wsB));
+  assert.equal((await other("GET", `/api/connectors/mine?ws=${s.wsB}`)).status, 404);
+  assert.equal((await lead("PUT", `/api/connectors/${s.ado}`, { accessMode: "personal" })).status, 404, "A's Team Lead can't change B's");
+  assert.equal((await other("PUT", `/api/connectors/${s.ado}`, { accessMode: "personal" })).status, 404);
+  assert.equal((await other("DELETE", `/api/connectors/mine/${s.ado}`)).status, 404);
+  assert.match(flashOf(await other("GET", `/api/connectors/mine/start?connector=${s.ado}`)), /Connector not found/);
   assert.equal((await other("GET", `/api/connectors/${s.ado}/projects`)).status, 404);
   assert.equal((await other("DELETE", `/api/connectors/${s.ado}`)).status, 404);
   assert.equal((await other("POST", `/api/connectors/links/${zl.body.link.id}/sync`)).status, 404);
@@ -5143,6 +5173,171 @@ test(`[${ENGINE}] connectors: Jira connects (rotating refresh tokens), pages thr
   s.jira = jira.id;
   tools.state.jiraProjectPage = 50;
   tools.state.jiraIssuePage = 50;
+});
+
+test(`[${ENGINE}] connectors: each person signs in (Jira, Azure DevOps): answers only use items the reader can open, sign-ins expire to "reconnect", Teams chats use what everyone in them can open`, async () => {
+  // Made-up people in the fake tools, each with their own account there; Ana may open more than Ben.
+  tools.world.people = { ana: "Ana Ruiz (Northwind)", ben: "Ben Okafor (Northwind)", cy: "Cy Outsider" };
+  const jiraOps = tools.world.jira.sites[0].projects.find((p) => p.key === "OPS");
+  const now = () => new Date().toISOString();
+  const issue = (key, summary, viewers) => ({ key, type: "Task", summary, status: "To Do", assignee: null, duedate: null, updated: now(), description: summary, labels: [], comments: [], blockedBy: [], ...(viewers ? { viewers } : {}) });
+  jiraOps.issues.push(issue("OPS-21", "Zircon payroll audit for the vendor", ["ana"]), issue("OPS-23", "Obsidian ledger handover"));
+  const adoTools = tools.world.ado.orgs.northwind.projects.find((p) => p.name === "Internal Tools");
+  adoTools.items.push({ id: 4870, type: "Task", title: "Quartz escrow release for the store leases", state: "New", assignedTo: null, due: null, changed: now(), description: "<p>Quartz escrow release.</p>", tags: [], comments: [], blockedBy: [], parent: null, viewers: ["ana"] });
+  const jiraLink = (await admin("POST", "/api/connectors/links", { connector: s.jira, ws: s.wsA, project: "OPS" })).body.link;
+  const adoLink = (await admin("POST", "/api/connectors/links", { connector: s.ado, ws: s.wsA, project: "Internal Tools" })).body.link;
+  assert.equal(jiraLink.items, 2, "the group's account syncs everything, private items too");
+  assert.ok(adoLink.items >= 1 && !adoLink.problem, JSON.stringify(adoLink));
+  // Two Members of workspace A.
+  const ana = client(), ben = client();
+  for (const [call, name, email] of [[ana, "Ana Ruiz", "ana.pp@test.local"], [ben, "Ben Okafor", "ben.pp@test.local"]]) {
+    const u = await admin("POST", "/api/users", { name, email, role: "Member", workspaces: [s.wsA] });
+    assert.equal((await firstSignIn(call, email, u.body.tempPassword)).status, 200);
+  }
+  // A Team Lead of workspace A (earlier password sessions were ended by the Microsoft "require" test).
+  const ppLead = client();
+  const lu = await admin("POST", "/api/users", { name: "Pia Lead", email: "pia.pp@test.local", role: "Team Lead", workspaces: [s.wsA] });
+  assert.equal((await firstSignIn(ppLead, "pia.pp@test.local", lu.body.tempPassword)).status, 200);
+  // The test's own items among the cited work items (other tests' items may be cited next to them).
+  const work = (r) => r.body.sources.filter((x) => x.type === "workitem").map((x) => x.title.match(/(OPS-\d+|#4870)/)?.[1]).filter(Boolean);
+  const ZIRCON = "Zircon payroll audit vendor", OBSIDIAN = "Obsidian ledger handover", QUARTZ = "Quartz escrow release store leases";
+  // Shared account (the default): everyone sees what the group's account reads, so Ben sees Ana's private ticket.
+  assert.deepEqual(work(await askA(ben, ZIRCON, { types: ["work"] })), ["OPS-21"], "the gap this feature closes");
+  const shared = (await admin("GET", "/api/connectors")).body.connectors.find((c) => c.id === s.jira);
+  assert.deepEqual([shared.accessMode, shared.personal.supported], ["shared", true]);
+  // Choosing who sees what: the group's managers only, a known mode only; audited.
+  assert.equal((await ben("PUT", `/api/connectors/${s.jira}`, { accessMode: "personal" })).status, 403, "Members can't change it");
+  assert.equal((await ppLead("PUT", `/api/connectors/${s.jira}`, { accessMode: "everyone" })).status, 400);
+  const sw = await ppLead("PUT", `/api/connectors/${s.jira}`, { accessMode: "personal" });
+  assert.deepEqual(sw.body, { accessMode: "personal", removedSignIns: 0 }, JSON.stringify(sw.body));
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Switched Jira to \\"each person signs in\\"/);
+  // Not connected yet: nothing from Jira, and the answer says how to include it (no item names in the note).
+  const none = await askA(ben, ZIRCON, { types: ["work"] });
+  assert.deepEqual(work(none), [], "never a ticket the reader hasn't proved they can open");
+  assert.deepEqual(none.body.access.map((n) => [n.kind, n.reason, n.connectorId]), [["jira", "connect", s.jira]]);
+  assert.match(none.body.access[0].text, /^Connect your Jira to include its tickets/);
+  assert.doesNotMatch(JSON.stringify(none.body.access), /Zircon|OPS-21/);
+  assert.deepEqual(work(await askA(ben, OBSIDIAN, { types: ["work"] })), [], "public tickets too, until they connect");
+  assert.deepEqual((await ben("GET", `/api/connectors/mine?ws=${s.wsA}`)).body.signIns.map((x) => [x.kind, x.status]), [["jira", "none"]]);
+  // Each connects their own account (the same callback address as group connections), and lands back on Knowledge.
+  const anaIn = await connectMine(ana, s.jira, "ana");
+  assert.equal(anaIn.to?.pathname + anaIn.to?.search, `/knowledge?ws=${s.wsA}&signedin=jira`, flashOf(anaIn.done ?? anaIn.start));
+  assert.equal((await connectMine(ben, s.jira, "ben")).to?.pathname, "/knowledge");
+  const mine = (await ana("GET", `/api/connectors/mine?ws=${s.wsA}`)).body;
+  assert.deepEqual(mine.signIns.map((x) => [x.kind, x.status, x.accountName]), [["jira", "connected", "Ana Ruiz (Northwind)"]]);
+  assert.doesNotMatch(JSON.stringify(mine), /jiraat_|jirart_|enc1\./, "no token in any response");
+  assert.match(await dbValue(`SELECT access_token FROM connector_user_tokens WHERE connector_id = '${s.jira}' AND account_name LIKE 'Ana%'`), /^enc1\./, "sealed at rest");
+  assert.match(await dbValue(`SELECT refresh_token FROM connector_user_tokens WHERE connector_id = '${s.jira}' AND account_name LIKE 'Ana%'`), /^enc1\./);
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Connected their own Jira sign-in \(Ana Ruiz \(Northwind\)\) for this group, read-only/);
+  // Answers respect each person's own access: Ana sees her private ticket, Ben never does (and isn't told it exists).
+  const anaZ = await askA(ana, ZIRCON, { types: ["work"] });
+  assert.deepEqual(work(anaZ), ["OPS-21"]);
+  assert.match(anaZ.body.sources[0].url, /\/jira-web\/northwind\/browse\/OPS-21$/);
+  const benZ = await askA(ben, ZIRCON, { types: ["work"] });
+  assert.deepEqual([work(benZ), benZ.body.access], [[], []], "closed to Ben: left out silently");
+  assert.deepEqual(work(await askA(ben, OBSIDIAN, { types: ["work"] })), ["OPS-23"], "open to both");
+  // Checked once, then reused for a few minutes (the cache): the same question doesn't call Jira again.
+  const calls = tools.counts.personal.jira;
+  assert.deepEqual(work(await askA(ana, ZIRCON, { types: ["work"] })), ["OPS-21"]);
+  assert.equal(tools.counts.personal.jira, calls, "cached");
+  // Group-wide outputs (knowledge map, meeting notes) leave personal connections out: everyone in the group reads them.
+  assert.equal((await admin("POST", "/api/memory/refresh", { ws: s.wsA })).status, 200);
+  // Every check is a trace step with counts only.
+  assert.ok(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE name = 'Check who can open the cited items'")) > 0);
+  assert.equal(Number(await dbValue("SELECT COUNT(*) FROM trace_spans WHERE attrs LIKE '%OPS-21%' OR attrs LIKE '%Zircon%' OR attrs LIKE '%jiraat_%'")), 0, "no keys, titles or tokens in traces");
+
+  // A person's sign-in that Atlassian revokes turns "expired": their answers leave Jira out and say "reconnect".
+  jiraOps.issues.push(issue("OPS-24", "Basalt freight schedule"));
+  assert.equal((await admin("POST", `/api/connectors/links/${jiraLink.id}/sync`)).body.link.problem, null);
+  tools.revokeUser("jira", "ben");
+  tools.expireAccessTokens();
+  const benB = await askA(ben, "Basalt freight schedule", { types: ["work"] });
+  assert.deepEqual(work(benB), []);
+  assert.deepEqual(benB.body.access.map((n) => n.reason), ["reconnect"]);
+  assert.equal((await ben("GET", `/api/connectors/mine?ws=${s.wsA}`)).body.signIns[0].status, "expired");
+  assert.deepEqual(work(await askA(ana, "Basalt freight schedule", { types: ["work"] })), ["OPS-24"], "Ana's own sign-in refreshes and works");
+  assert.match(JSON.stringify((await admin("GET", "/api/audit")).body), /Ben Okafor's own Jira sign-in expired or was revoked/);
+  const health = (await ppLead("GET", "/api/connectors")).body.connectors.find((c) => c.id === s.jira);
+  assert.deepEqual([health.accessMode, health.personal.connected, health.personal.expired], ["personal", 1, ["Ben Okafor"]], "managers see who connected and who expired");
+  await jobTick({ sweep: true, kinds: ["watch.all", "watch.org"] });
+  const finding = (await ppLead("GET", "/api/findings")).body.findings.find((f) => f.kind === "connector_signins");
+  assert.ok(finding && /1 person's own Jira sign-in expired/.test(finding.title) && /Ben Okafor/.test(finding.detail), JSON.stringify(finding));
+  assert.ok(!(await ben("GET", "/api/findings")).body.findings.some((f) => f.kind === "connector_signins"), "for the group's managers");
+  assert.equal((await connectMine(ben, s.jira, "ben")).to?.pathname, "/knowledge", "reconnecting");
+  assert.deepEqual(work(await askA(ben, "Basalt freight schedule", { types: ["work"] })), ["OPS-24"]);
+  await jobTick({ sweep: true, kinds: ["watch.all", "watch.org"] });
+  assert.ok(!(await ppLead("GET", "/api/findings")).body.findings.some((f) => f.kind === "connector_signins"), "resolved once they reconnect");
+
+  // Walls: another organization, someone outside the group and the wrong connection never get through.
+  const outsider = client();
+  const ou = await admin("POST", "/api/users", { name: "Otto Outside", email: "otto.pp@test.local", role: "Member", workspaces: [s.wsB] });
+  assert.equal((await firstSignIn(outsider, "otto.pp@test.local", ou.body.tempPassword)).status, 200);
+  assert.equal((await outsider("GET", `/api/connectors/mine?ws=${s.wsA}`)).status, 404, "not their group");
+  assert.deepEqual((await outsider("GET", "/api/connectors/mine")).body.signIns, [], "their own groups have none");
+  assert.match(flashOf((await connectMine(outsider, s.jira, "cy")).start), /Connector not found/);
+  assert.equal((await outsider("DELETE", `/api/connectors/mine/${s.jira}`)).status, 404);
+  const elsewhere = client();
+  assert.equal((await signUpAs(elsewhere, { org: "Per Person Elsewhere", name: "Elle Else", email: "elle@ppelsewhere.test", password: "correct horse battery", plan: "business" })).status, 200);
+  assert.match(flashOf((await connectMine(elsewhere, s.jira, "cy")).start), /Connector not found/, "another organization");
+  assert.equal((await elsewhere("PUT", `/api/connectors/${s.jira}`, { accessMode: "shared" })).status, 404);
+  assert.equal((await elsewhere("GET", `/api/connectors/mine?ws=${s.wsA}`)).status, 404);
+  assert.match(flashOf((await connectMine(ben, s.ado, "ben")).start), /uses one shared account/, "a shared connection has nothing to connect");
+
+  // Teams: a group chat's answer is read by everyone in it, so only items **everyone** there can open are used.
+  const CHAT = "19:per-person@thread.v2";
+  await toBot(activity({ type: "installationUpdate", action: "add", conversation: { id: CHAT, conversationType: "groupChat", tenantId: "tenant-1", name: "Ops crew" } }));
+  const code = cardText(cardsOf(await waitForSent((m) => decodeURIComponent(m.url).includes(CHAT)))[0]).match(/[A-Z2-9]{4}-[A-Z2-9]{4}/)[0];
+  assert.equal((await admin("POST", "/api/teams-links", { code, ws: s.wsA })).status, 200);
+  const tenantBefore = await dbValue("SELECT entra_tenant_id FROM orgs WHERE name = 'Test Org'");
+  await dbExec("UPDATE orgs SET entra_tenant_id = 'tenant-1' WHERE name = 'Test Org'");
+  await dbExec("UPDATE users SET entra_oid = 'oid-ana-pp' WHERE email = 'ana.pp@test.local'");
+  await dbExec("UPDATE users SET entra_oid = 'oid-ben-pp' WHERE email = 'ben.pp@test.local'");
+  const person = (oid, name) => ({ id: `29:${oid}`, name, aadObjectId: oid, tenantId: "tenant-1", userRole: "user" });
+  const fromAna = { id: "29:oid-ana-pp", name: "Ana in Teams", aadObjectId: "oid-ana-pp" };
+  const askChat = async (text, convo = { id: CHAT, conversationType: "groupChat", tenantId: "tenant-1" }) => {
+    const before = sent.length;
+    await toBot(activity({ type: "message", text: `<at>Sidekick</at> ${text}`, from: fromAna, conversation: convo, entities: [{ type: "mention", mentioned: { id: "bot", name: "Sidekick" }, text: "<at>Sidekick</at>" }] }));
+    return cardText(cardsOf(await waitForSent((m) => sent.indexOf(m) >= before && cardsOf(m).some((c) => cardText(c).includes(text))))[0]);
+  };
+  rosters.set(CHAT, [person("oid-ana-pp", "Ana"), person("oid-ben-pp", "Ben")]);
+  const chatZ = await askChat(ZIRCON);
+  assert.doesNotMatch(chatZ, /OPS-21|Zircon payroll audit for the vendor/, "Ben is in the chat and can't open it");
+  assert.match(chatZ, /not everyone in this chat has connected Jira/);
+  assert.match(await askChat(OBSIDIAN), /OPS-23/, "both can open it");
+  rosters.set(CHAT, [person("oid-ana-pp", "Ana"), { id: "29:guest", name: "Client guest", userRole: "guest", tenantId: "client-tenant" }]);
+  const withGuest = await askChat(OBSIDIAN);
+  assert.doesNotMatch(withGuest, /OPS-23/, "someone in the chat can't be checked: nothing from Jira");
+  assert.match(withGuest, /not everyone in this chat/);
+  assert.match(withGuest, /Connect your Jira/, "with the button to Knowledge");
+  // A 1:1 chat with Sidekick is the asker alone (like the portal).
+  assert.match(await askChat(ZIRCON, { id: "conv-1", conversationType: "personal", tenantId: "tenant-1" }), /OPS-21/);
+
+  // Azure DevOps works the same way: the account must open the connection's own organization.
+  assert.equal((await ppLead("PUT", `/api/connectors/${s.ado}`, { accessMode: "personal" })).status, 200);
+  tools.world.ado.orgs.northwind.members = ["ana", "ben"];
+  const cy = await connectMine(ben, s.ado, "cy");
+  assert.equal(cy.to?.pathname + cy.to?.search, "/knowledge?error=1", "an account outside the organization");
+  assert.match(flashOf(cy.done), /can't open the Azure DevOps organization “northwind”/);
+  assert.equal((await connectMine(ana, s.ado, "ana")).to?.pathname, "/knowledge");
+  assert.equal((await connectMine(ben, s.ado, "ben")).to?.pathname, "/knowledge");
+  delete tools.world.ado.orgs.northwind.members;
+  assert.deepEqual(work(await askA(ana, QUARTZ, { types: ["work"] })), ["#4870"]);
+  assert.deepEqual(work(await askA(ben, QUARTZ, { types: ["work"] })), [], "an area Ben isn't allowed in");
+  assert.deepEqual((await ben("GET", `/api/connectors/mine?ws=${s.wsA}`)).body.signIns.map((x) => [x.kind, x.status]).sort(), [["ado", "connected"], ["jira", "connected"]]);
+  // Disconnecting your own sign-in: only yours, audited.
+  assert.deepEqual((await ben("DELETE", `/api/connectors/mine/${s.ado}`)).body, { removed: true });
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM connector_user_tokens WHERE connector_id = '${s.ado}'`)), 1, "Ana's stays");
+
+  // Back to one shared account: everyone's own sign-ins go, and the group sees what its account reads again.
+  for (const id of [s.jira, s.ado]) assert.ok((await admin("PUT", `/api/connectors/${id}`, { accessMode: "shared" })).body.removedSignIns >= 1);
+  assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM connector_user_tokens WHERE connector_id IN ('${s.jira}', '${s.ado}')`)), 0);
+  assert.deepEqual(work(await askA(ben, ZIRCON, { types: ["work"] })), ["OPS-21"]);
+  // Tidy up for the tests below (they count the original items).
+  for (const l of [jiraLink, adoLink]) assert.equal((await admin("DELETE", `/api/connectors/links/${l.id}`)).status, 200);
+  jiraOps.issues.splice(0, jiraOps.issues.length, ...jiraOps.issues.filter((i) => !/^OPS-2[134]$/.test(i.key)));
+  adoTools.items.splice(0, adoTools.items.length, ...adoTools.items.filter((i) => i.id !== 4870));
+  rosters.delete(CHAT);
+  await dbExec(`UPDATE orgs SET entra_tenant_id = ${tenantBefore ? `'${tenantBefore}'` : "NULL"} WHERE name = 'Test Org'`);
 });
 
 test(`[${ENGINE}] connectors: plans limit how many tool types (none, one, all) with an upgrade message; a Team Lead connects and links only for their own groups`, async () => {

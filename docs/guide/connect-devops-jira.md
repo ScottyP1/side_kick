@@ -11,7 +11,7 @@ Sidekick only **reads**. It never creates, changes or comments on anything in th
 ## What you need
 - **Your plan.** Starter doesn't include connectors; Team allows one tool type (Azure DevOps, Jira, GitHub, Confluence *or* Microsoft 365; SharePoint and OneDrive together count as one); Business and Enterprise allow all of them. However many groups connect an allowed tool, it counts once. Connectors shows what yours includes, and **Usage & billing** lets the Org Owner upgrade.
 - **The right role.** The **Org Owner** only chooses which tool *types* the organization allows (a switch per tool on Connectors; the Org Owner never signs in to a client's tool). Each group's **Team Lead** (or an Org Owner/Admin, for any group) then connects an allowed tool **for their group** and links projects. A Team Lead or Org Admin who needs a tool that isn't allowed presses **Request**. **Members and Viewers never sign in to tools** and don't see the Connectors page: answers in a group use that group's connections, and the group's page lists them (**Sources**).
-- **An account from the client.** Every client engagement has its own tools and logins, so the Team Lead connects with the account the client gave the team. Everyone in the group will see what this account can read. Best: a **read-only account the client provides for Sidekick**. Sidekick sees exactly what that account can see, nothing more.
+- **An account from the client.** Every client engagement has its own tools and logins, so the Team Lead connects with the account the client gave the team. Everyone in the group will see what this account can read. Best: a **read-only account the client provides for Sidekick**. Sidekick sees exactly what that account can see, nothing more. If not everyone on the team may open everything that account can, choose **Each person signs in** (Jira and Azure DevOps, see "Who sees what" below).
 
 ## How it works: the Org Owner allows, each group connects, Team Leads can ask
 1. **The Org Owner allows tool types.** On **Connectors**, every tool has an **Allowed / Not allowed** switch (only the Org Owner sees it). Switching one on doesn't sign in to anything: it lets the groups connect it.
@@ -95,6 +95,23 @@ Each tool and each linked project shows its status on Connectors:
 - **"asked Sidekick to slow down (rate limit)"**: the tool limits how many requests it answers per hour (GitHub especially; Microsoft 365 too when many files change at once). Sidekick stops, keeps what it has read, and carries on from where it stopped on a later sync. Nothing to do.
 - **Sign-in expired**: the tool's sign-in ran out or was revoked (for example the person who connected it left, or an admin removed the app). Syncing pauses until the group's Team Lead (or an admin) presses **Reconnect** and signs in again with the client's account (Home shows it under Needs attention); the items already read stay until then.
 
+## Who sees what: one shared account, or each person signs in
+Every group's connection has a **Who sees what** setting on Connectors (the group's Team Lead or an admin changes it):
+- **One shared account** (the default): everyone in the group sees what the connection's account can read. Fine when the whole team may open the whole board anyway.
+- **Each person signs in** (Jira and Azure DevOps): the group's account still keeps Sidekick up to date, but an answer only uses a ticket or work item **the person asking can open with their own account**. Use it when some issues have a security level, some Azure DevOps areas are restricted, or not everyone on the team has the same access.
+
+When a group uses **Each person signs in**:
+1. Everyone in the group (Viewers too) opens **Knowledge** and, under **Your sign-ins to tools**, presses **Connect your Jira** (or Azure DevOps) and signs in with **their own** account for the client's site. It must be the same Jira site or Azure DevOps organization the group is connected to. Sidekick only reads and stores no password; the sign-in is kept encrypted and renewed by itself.
+2. Until someone connects, their answers leave that tool out and say so: "Connect your Jira to include its tickets" with a button. In Teams the answer card has the same button.
+3. Sidekick checks with the tool, at the moment of the answer, which of the tickets it found the person can open (it remembers each check for 5 minutes). If the tool doesn't answer quickly, the tickets are left out of that answer rather than guessed. A ticket someone can't open is simply not used: the answer doesn't mention that it exists.
+4. If a person's own sign-in expires or is revoked, their answers say **"Your Jira sign-in expired"** with **Reconnect**, and the group's Team Lead sees under Needs attention whose sign-ins expired. On Connectors the group's managers see how many people have connected.
+5. **In Teams group chats and channels** everyone in the chat reads the answer, so Sidekick only uses tickets **everyone in the chat** has connected and can open. If someone in the chat isn't in the group, is a client guest, hasn't connected, or the chat has more than 20 people, that tool's tickets are left out and the card says so ("not everyone in this chat has connected Jira"). In a 1:1 chat with Sidekick it's just you, like the portal.
+6. Things written for the whole group, such as the knowledge map and meeting notes, leave out the tickets of a connection where each person signs in.
+
+Switching back to **One shared account** removes everyone's own sign-ins. **Disconnect your Jira** (Knowledge) removes only yours. Leaving the group, or being removed from the organization, removes yours too.
+
+GitHub, Confluence and Microsoft 365 use one shared account for now. GitHub's own permissions are per repository (anyone who may open the repository may open all its issues), so the shared account already matches GitHub. Checking each person's access is planned for Confluence (page restrictions) and SharePoint/OneDrive (file permissions).
+
 ## Unlink or switch off
 - **Unlink** (on a linked project) removes that project's items from the group's knowledge. The connection stays.
 - **Disconnect** (the group's Team Lead or an admin, on the group's connection) forgets that group's sign-in and removes every project and item it read. Other groups' connections are untouched.
@@ -102,7 +119,7 @@ Each tool and each linked project shows its status on Connectors:
 - Deleting a group removes the projects linked to it and their items. Ending your organization's plan removes everything, as for all other data.
 
 ## Good to know
-- **Walls hold.** Each group's connection, its sign-in and what it read belong to that group only. Work items belong to the group their project is linked to, exactly like documents: other groups, other organizations and the Sidekick assistant of someone outside the group never see them. Client guests only ever see items from projects marked Shareable.
+- **Walls hold.** Each group's connection, its sign-in (and everyone's own sign-ins to it) and what it read belong to that group only. Work items belong to the group their project is linked to, exactly like documents: other groups, other organizations and the Sidekick assistant of someone outside the group never see them. Client guests only ever see items from projects marked Shareable.
 - **Nothing is written back.** Sidekick asks only for read access in every tool.
 - **Each sync reads at most 2,000 changed items** (Confluence: 1,000 pages; Microsoft 365: 200 files); a very large board, repository, space or library catches up over a few syncs.
 - **Deleted items**: a work item, issue or page deleted in the tool stays in Sidekick until you unlink and link the project again. Microsoft 365 is different: deleted files leave on the next sync by themselves.
@@ -110,7 +127,7 @@ Each tool and each linked project shows its status on Connectors:
 <!-- help-center:skip -->
 
 ## For developers
-- Code: `app/src/lib/connectors.ts` (framework: sign-in, sealed tokens and refresh, rate limits, sync, health), `connector-requests.ts` (allowing tool types, requests to allow one: approve, decline, cancel, Home findings via the `connector_request` watcher, Teams notices), `connector-ado.ts`, `connector-jira.ts`, `connector-github.ts`, `connector-confluence.ts`, `connector-text.ts`; routes under `app/src/app/api/connectors/`; page `app/src/app/(app)/connectors/`.
+- Code: `app/src/lib/connectors.ts` (framework: sign-in, sealed tokens and refresh, rate limits, sync, health, access mode and each person's own sign-in), `connector-access.ts` (each person signs in: the question-time check, cache, Teams readers, "my sign-ins"; design in `docs/ARCHITECTURE.md` → Connectors), `connector-requests.ts` (allowing tool types, requests to allow one: approve, decline, cancel, Home findings via the `connector_request` watcher, Teams notices), `connector-ado.ts`, `connector-jira.ts`, `connector-github.ts`, `connector-confluence.ts`, `connector-text.ts`; routes under `app/src/app/api/connectors/`; page `app/src/app/(app)/connectors/`.
 - Tests: `app/tests/api.test.mjs` ("connectors: …" and the isolation test) against the fake tools in `app/scripts/fake-tools.mjs`; the demo world allows Azure DevOps, Jira, Confluence and Microsoft 365 (approved through a request), connects them per group (Contoso's four, Litware's own Azure DevOps) and leaves GitHub not allowed with one declined and one waiting request (docs/DEMO.md). Moving the old one-per-organization connections into groups: `CONNECTOR_GROUP_MIGRATION` in `app/src/lib/db.ts` (tested in `app/tests/db.test.mjs`).
 - Setting up the real apps: `docs/RUNBOOKS.md` → Connector apps.
 <!-- /help-center:skip -->

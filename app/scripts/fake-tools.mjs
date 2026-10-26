@@ -38,6 +38,15 @@
  * - **Web pages** (`/ado-web/...`, `/jira-web/...`, `/gh-web/...`, `/confluence-web/...`, `/m365-web/...`): a plain
  *   page per item, so links in the demo open something.
  *
+ * **People** ("each person signs in", lib/connector-access.ts): `signInAs(name)` makes the **next** sign-in a named
+ * person's (otherwise it's the shared account, which sees everything). A person's tokens only see what they may:
+ * an item (Jira issue, ADO work item) with `viewers: [names]` is open only to those people (`viewers` absent = open
+ * to everyone who can open the site), a Jira site or ADO organization with `members: [names]` only to its members.
+ * Their own token reaches Jira's `myself` and `issue/bulkfetch` (keys they can't open come back in `issueErrors`) and
+ * ADO's `connectionData` and `workitemsbatch` with `errorPolicy: "Omit"` (null for items they can't read).
+ * `revokeUser(kind, name)` revokes one person's sign-in (their calls 401, their refreshes fail); `counts.personal`
+ * counts their API calls.
+ *
  * Test controls: `revoke(kind)` (sign-in revoked: API calls 401, refreshes fail), `deny(kind, project)` (403 for one
  * project, repository or space), `rateLimit(kind, { times, retryAfter, status })` (the next `times` API calls answer
  * "slow down" with `Retry-After`), `state.githubEvilNext` (the issues list's next link points off the API: it must
@@ -250,7 +259,9 @@ export function createFakeTools({
   lenient = false,
 } = {}) {
   const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false, graphSitePage: 100, graphDeltaPage: 200, graphDeltaGone: false };
-  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0 };
+  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, personal: { ado: 0, jira: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0 };
+  let nextUser = null; // signInAs: the next sign-in's person (null = the shared account)
+  const revokedUsers = new Set(); // `${kind}:${name}`
   const limits = new Map(); // kind → { times, retryAfter, status }
   const codes = new Map(); // code → { kind, challenge, redirectUri }
   const access = new Map(); // token → { kind, expires }
@@ -260,11 +271,11 @@ export function createFakeTools({
   let base = "";
 
   const newToken = (p) => `${p}_${crypto.randomBytes(18).toString("base64url")}`;
-  const issue = (kind) => {
+  const issue = (kind, user = null) => {
     const a = newToken(`${kind}at`);
     const r = newToken(`${kind}rt`);
-    access.set(a, { kind, expires: Date.now() + state.ttl * 1000 });
-    refresh.set(r, { kind });
+    access.set(a, { kind, user, expires: Date.now() + state.ttl * 1000 });
+    refresh.set(r, { kind, user });
     return { access_token: a, refresh_token: r, expires_in: state.ttl, token_type: "Bearer" };
   };
 
@@ -282,11 +293,12 @@ export function createFakeTools({
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(`<!doctype html><meta charset="utf-8"><title>${text}</title><body style="font-family:system-ui;padding:40px"><p style="color:#888">Made-up demo tool (no real account)</p><h1>${text}</h1></body>`);
       };
+      let who = null; // the person whose token made this call (null = the shared account)
       const authed = (kind) => {
         const tok = (req.headers.authorization ?? "").replace(/^Bearer /, "");
         // Lenient (the standalone demo fake): tokens it handed out before a restart still work.
         const t = access.get(tok) ?? (lenient && tok.startsWith(`${kind}at_`) ? { kind, expires: Infinity } : undefined);
-        if (!t || t.kind !== kind || t.expires < Date.now() || revokedKinds.has(kind)) {
+        if (!t || t.kind !== kind || t.expires < Date.now() || (t.user ? revokedUsers.has(`${kind}:${t.user}`) : revokedKinds.has(kind))) {
           counts.unauthorized++;
           send(401, { message: "Unauthorized" });
           return false;
@@ -300,9 +312,14 @@ export function createFakeTools({
           send(lim.status, { message: "API rate limit exceeded" }, h);
           return false;
         }
-        counts.api[kind]++;
+        who = t.user ?? null;
+        if (who && counts.personal[kind] !== undefined) counts.personal[kind]++;
+        else counts.api[kind]++;
         return true;
       };
+      /** Whether the caller may open something with `viewers` / `members` lists (see the file comment). */
+      const sees = (x) => !who || !x?.viewers || x.viewers.includes(who);
+      const member = (x) => !who || !x?.members || x.members.includes(who);
       const link = (next) => (next ? { link: `<${next}>; rel="next"` } : {});
 
       // ---- sign-in pages (approve at once) ----
@@ -313,7 +330,8 @@ export function createFakeTools({
         const q = url.searchParams;
         if (q.get("client_id") !== clients[kind].id) return send(400, { error: "invalid_client" });
         const code = crypto.randomUUID();
-        codes.set(code, { kind, challenge: q.get("code_challenge"), redirectUri: q.get("redirect_uri") });
+        codes.set(code, { kind, challenge: q.get("code_challenge"), redirectUri: q.get("redirect_uri"), user: nextUser });
+        nextUser = null;
         const back = new URL(q.get("redirect_uri"));
         back.searchParams.set("code", code);
         back.searchParams.set("state", q.get("state") ?? "");
@@ -335,14 +353,15 @@ export function createFakeTools({
           codes.delete(f.code);
           if (!c || c.kind !== kind || c.redirectUri !== f.redirect_uri) return fail(400, kind === "github" ? "bad_verification_code" : "invalid_grant");
           if ((entra || kind === "github") && crypto.createHash("sha256").update(f.code_verifier ?? "").digest("base64url") !== c.challenge) return fail(400, "invalid_grant");
-          revokedKinds.delete(kind);
-          return send(200, issue(kind));
+          if (c.user) revokedUsers.delete(`${kind}:${c.user}`);
+          else revokedKinds.delete(kind);
+          return send(200, issue(kind, c.user));
         }
         if (grant === "refresh_token") {
           const r = refresh.get(f.refresh_token) ?? (lenient && String(f.refresh_token).startsWith(`${kind}rt_`) ? { kind } : undefined);
-          if (!r || r.kind !== kind || revokedKinds.has(kind)) return fail(400, kind === "github" ? "bad_refresh_token" : "invalid_grant");
+          if (!r || r.kind !== kind || (r.user ? revokedUsers.has(`${kind}:${r.user}`) : revokedKinds.has(kind))) return fail(400, kind === "github" ? "bad_refresh_token" : "invalid_grant");
           counts.refresh[kind]++;
-          const out = issue(kind);
+          const out = issue(kind, r.user ?? null);
           if (!entra) {
             refresh.delete(f.refresh_token); // rotating refresh tokens: the old one stops working
           } else {
@@ -360,6 +379,22 @@ export function createFakeTools({
         const [, orgName, projectName, rest] = m;
         const org = world.ado.orgs[orgName];
         if (!org) return send(404, { message: "Organization not found" });
+        // Not a member of this organization: ADO answers 401 even with a good token.
+        if (!member(org)) return send(401, { message: "Not a member of this organization" });
+        if (rest === "connectionData" && !projectName) {
+          return send(200, { authenticatedUser: { providerDisplayName: who ? (world.people?.[who] ?? who) : "Northwind reader", id: `u-${who ?? "shared"}` } });
+        }
+        // Org-level work item batch (the per-person check): with errorPolicy Omit, items the caller can't read are null.
+        if (rest === "wit/workitemsbatch" && !projectName && req.method === "POST") {
+          const b = JSON.parse(body || "{}");
+          const find = (id) => org.projects.flatMap((p) => p.items).find((x) => x.id === Number(id));
+          const value = (b.ids ?? []).map((id) => {
+            const it = find(id);
+            return it && sees(it) ? { id: it.id, fields: { "System.Id": it.id } } : null;
+          });
+          if (b.errorPolicy !== "Omit" && value.includes(null)) return send(404, { message: "Work item not found or no access" });
+          return send(200, { count: value.length, value });
+        }
         if (rest === "projects" && !projectName) {
           const start = Number(url.searchParams.get("continuationToken") ?? 0);
           const page = org.projects.slice(start, start + state.adoProjectPage);
@@ -408,12 +443,25 @@ export function createFakeTools({
       // ---- Jira REST ----
       if (path === "/jira-api/oauth/token/accessible-resources") {
         if (!authed("jira")) return;
-        return send(200, world.jira.sites.map((s) => ({ id: s.id, name: s.name, url: `${base}/jira-web/${s.name}`, scopes: ["read:jira-work", "read:jira-user"] })));
+        return send(200, world.jira.sites.filter(member).map((s) => ({ id: s.id, name: s.name, url: `${base}/jira-web/${s.name}`, scopes: ["read:jira-work", "read:jira-user"] })));
       }
       if ((m = path.match(/^\/jira-api\/ex\/jira\/([^/]+)\/rest\/api\/3\/(.+)$/))) {
         if (!authed("jira")) return;
         const site = world.jira.sites.find((s) => s.id === m[1]);
         if (!site) return send(404, { message: "Site not found" });
+        if (!member(site)) return send(401, { message: "Not a member of this site" });
+        if (m[2] === "myself") return send(200, { accountId: `acc-${who ?? "shared"}`, displayName: who ? (world.people?.[who] ?? who) : "Northwind reader" });
+        if (m[2] === "issue/bulkfetch" && req.method === "POST") {
+          const b = JSON.parse(body || "{}");
+          const all = site.projects.flatMap((p) => p.issues);
+          const issues = [], issueErrors = [];
+          for (const key of b.issueIdsOrKeys ?? []) {
+            const it = all.find((x) => x.key === key);
+            if (it && sees(it)) issues.push({ key: it.key, fields: { summary: it.summary } });
+            else issueErrors.push({ id: key, status: 404, errorMessages: ["Issue does not exist or you do not have permission to see it."] });
+          }
+          return send(200, { issues, issueErrors });
+        }
         if (m[2] === "project/search") {
           const start = Number(url.searchParams.get("startAt") ?? 0);
           const size = Math.min(Number(url.searchParams.get("maxResults") ?? 50), state.jiraProjectPage);
@@ -695,6 +743,10 @@ export function createFakeTools({
     },
     /** The sign-in was revoked (or expired): API calls answer 401 and refreshes fail, until someone connects again. */
     revoke: (kind) => revokedKinds.add(kind),
+    /** The next sign-in (of any tool) is this person's own; `null` (or not calling it) = the shared account. */
+    signInAs: (name) => { nextUser = name; },
+    /** One person's sign-in to a tool was revoked: their calls answer 401 and their refreshes fail until they sign in again. */
+    revokeUser: (kind, name) => revokedUsers.add(`${kind}:${name}`),
     /**
      * The next `times` API calls of a tool answer "slow down": `status` 429 (default) or 403 (GitHub's rate limit,
      * with `x-ratelimit-remaining: 0`), with `Retry-After: retryAfter` seconds. `rateLimit(kind)` clears it.

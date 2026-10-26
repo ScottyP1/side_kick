@@ -3,24 +3,29 @@
  * connecting a tool. Finishes the connection (lib/connectors.ts `finishConnect`: state + browser cookie checked,
  * code swapped for tokens, tokens sealed, saved for the group that started it) and lands on /connectors?connected=<tool>, or on /connectors?error=1
  * with the reason in a short-lived message cookie (lib/flash.ts). Audited ("Connected Azure DevOps …").
+ * A person's **own** sign-in ("Connect your Jira", started from /api/connectors/mine/start) comes back here too and
+ * lands on /knowledge?ws=<group>&signedin=<tool> (or /knowledge?error=1): the `sk_connector_to` cookie says so.
  * This address must be registered on each tool's app (docs/RUNBOOKS.md → Connector apps).
  */
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { errorMessageFor, handle } from "@/lib/api";
-import { CONNECTOR_COOKIE, connectorRedirectUri, finishConnect } from "@/lib/connectors";
+import { CONNECTOR_COOKIE, CONNECTOR_BACK_COOKIE, connectorRedirectUri, finishConnect } from "@/lib/connectors";
 import { FLASH_COOKIE, FLASH_SECONDS } from "@/lib/flash";
 
 export const GET = handle(async (req: Request) => {
   const jar = await cookies();
   const cookieState = jar.get(CONNECTOR_COOKIE)?.value;
   jar.delete({ name: CONNECTOR_COOKIE, path: "/api/connectors" });
+  const toKnowledge = jar.get(CONNECTOR_BACK_COOKIE)?.value === "knowledge";
+  jar.delete({ name: CONNECTOR_BACK_COOKIE, path: "/api/connectors" });
   const go = (path: string) => NextResponse.redirect(new URL(path, connectorRedirectUri(req)));
   try {
     const done = await finishConnect(req, cookieState);
+    if (done.personal) return go(`/knowledge?ws=${encodeURIComponent(done.ws)}&signedin=${done.kind}#signins`);
     return go(`/connectors?connected=${done.kind}#tool-${done.kind}`);
   } catch (e) {
     jar.set(FLASH_COOKIE, await errorMessageFor(req, e), { path: "/", maxAge: FLASH_SECONDS, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
-    return go("/connectors?error=1");
+    return go(toKnowledge ? "/knowledge?error=1#signins" : "/connectors?error=1");
   }
 });

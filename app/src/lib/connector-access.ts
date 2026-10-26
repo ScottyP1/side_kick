@@ -51,12 +51,14 @@ export type Readers =
  */
 export type AccessNote = { connectorId: string; kind: ConnectorKind; reason: "connect" | "reconnect" | "chat" | "unavailable"; text: string };
 
-/** What a tool's items are called in the notes ("tickets" for Jira, "work items" for Azure DevOps). */
-const itemsWord = (kind: ConnectorKind) => (kind === "jira" ? "tickets" : isPageKind(kind) ? "pages" : "work items");
+/** What a tool's items are called in the notes ("tickets" for Jira, "work items" for Azure DevOps, "files" for Microsoft 365). */
+const itemsWord = (kind: ConnectorKind) => (kind === "jira" ? "tickets" : kind === "m365" ? "files" : isPageKind(kind) ? "pages" : "work items");
 
 /** The note's wording for each reason (plain, no item names). */
 export function noteText(kind: ConnectorKind, reason: AccessNote["reason"]): string {
   const tool = KIND_LABEL[kind];
+  // "Microsoft 365" alone could mean mail or calendars: say which part of it.
+  if (reason === "connect" && kind === "m365") return "Connect your Microsoft 365 files to include them in your answers.";
   if (reason === "connect") return `Connect your ${tool} to include its ${itemsWord(kind)} in your answers.`;
   if (reason === "reconnect") return `Your ${tool} sign-in expired. Reconnect it to include its ${itemsWord(kind)} again.`;
   if (reason === "chat") return `${tool} ${itemsWord(kind)} were left out: not everyone in this chat has connected ${tool}, or some people here can't be checked.`;
@@ -86,7 +88,8 @@ function remember(t: Pick<PersonalTokenRow, "id" | "connected_at">, externalId: 
 const timeout = <T>(p: Promise<T>, ms: number) =>
   Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new ConnectorError("busy", "timed out")), ms))]);
 
-type CandidateItem = { id: string; external_id: string; connector_id: string; kind: ConnectorKind };
+/** A candidate passage's item: `project` is its link's key (Microsoft 365: the drive a file id belongs to). */
+type CandidateItem = { id: string; external_id: string; connector_id: string; kind: ConnectorKind; project: string };
 
 /**
  * Which candidate sources the readers may **not** see, and the notes explaining it (see the file comment). Only
@@ -107,7 +110,7 @@ export async function screenConnectorSources(
   for (let i = 0; i < ids.length; i += 100) {
     const part = ids.slice(i, i + 100);
     items.push(...await all<CandidateItem>(
-      `SELECT i.id, i.external_id, c.id AS connector_id, c.kind FROM connector_items i
+      `SELECT i.id, i.external_id, c.id AS connector_id, c.kind, l.project FROM connector_items i
          JOIN connector_links l ON l.id = i.link_id AND l.org_id = i.org_id JOIN connectors c ON c.id = l.connector_id AND c.org_id = l.org_id
         WHERE i.org_id = ? AND i.workspace_id = ? AND c.workspace_id = ? AND c.access_mode = 'personal' AND i.id IN (${part.map(() => "?").join(", ")})`,
       orgId, workspaceId, workspaceId, ...part,
@@ -151,6 +154,7 @@ export async function screenConnectorSources(
       }
       // Each reader's answer, from the cache or one call to the tool; an item stays only if everyone can open it.
       let open = new Set(list.map((it) => it.external_id));
+      const where = new Map(list.map((it) => [it.external_id, it.project]));
       let failed: AccessNote["reason"] | null = null;
       for (const t of tokens) {
         const ask = list.map((it) => it.external_id).filter((x) => open.has(x) && cached(t, x, at) === undefined);
@@ -158,7 +162,7 @@ export async function screenConnectorSources(
         fromCache += list.length - ask.length;
         if (ask.length) {
           try {
-            const yes = await timeout(p.canOpen(personalApi(t, kind), conn, ask), CHECK_TIMEOUT_MS);
+            const yes = await timeout(p.canOpen(personalApi(t, kind), conn, ask, where), CHECK_TIMEOUT_MS);
             checked += ask.length;
             for (const x of ask) {
               remember(t, x, yes.has(x), at);
@@ -211,7 +215,7 @@ export async function mySignIns(user: User, ws?: string | null): Promise<MySignI
     user.id, user.org_id, ...groups,
   );
   return rows.map((r) => ({
-    connectorId: r.id, kind: r.kind, label: KIND_LABEL[r.kind], workspaceId: r.workspace_id, workspaceName: r.workspace_name,
+    connectorId: r.id, kind: r.kind, label: r.kind === "m365" ? "Microsoft 365 files" : KIND_LABEL[r.kind], workspaceId: r.workspace_id, workspaceName: r.workspace_name,
     status: r.status === "connected" ? "connected" : r.status === "expired" ? "expired" : "none", accountName: r.account_name, connectedAt: r.connected_at,
     problem: r.status === "expired" ? r.last_error : null,
   }));

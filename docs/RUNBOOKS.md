@@ -816,6 +816,17 @@ Azure or Entra is changed by Claude or by the app.
    folder and ask about a file (the answer cites "SharePoint file: …" with an Open in SharePoint link). Any Microsoft
    work account can connect a group (normally one the client provides, in the client's own tenant); it doesn't
    have to be the tenant the Sidekick organization linked for sign-in.
+6. **"Each person signs in" for Microsoft 365 files** needs **nothing new** on this app: a person's own sign-in asks
+   for a subset of the permissions above, all **delegated**: `Files.Read.All` (so Sidekick can ask Graph "can this
+   person open this file?", with their own token, at question time), `User.Read` (who they are and which
+   organization the token is for) and `offline_access` (a refresh token, so they don't sign in again every hour).
+   Not `Sites.Read.All`: a person's token never lists sites, it only checks files the group's connection already
+   synced. Sidekick sends each person to the **connection's own tenant** sign-in (`login.microsoftonline.com/<client
+   tenant id>`), so a consultant invited as a guest gets a token for the client's files. `Files.Read.All` delegated
+   doesn't normally need an admin, but many companies turn off user consent; then the client's admin approves once
+   (the same admin-consent link as step 3 covers everyone in that tenant). To check (made-up data only): switch the
+   test group's Microsoft 365 connection to **Each person signs in**, share one file in the test site with only one
+   of the demo users, connect both demo users on Knowledge and ask about that file as each.
 
 Costs: none from Microsoft, Atlassian or GitHub for these apps. Each sync is a few API calls per linked project every 15
 minutes (no AI calls; items only cost AI when someone asks).

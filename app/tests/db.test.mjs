@@ -1058,6 +1058,45 @@ test("connectors: Microsoft 365 helpers: file cards, skipped notes, Graph links 
   assert.equal(readZipParts(bomb, () => true, 1_000_000).length, 1);
 });
 
+test("connectors: Microsoft 365 files, each person signs in: the access check batches 20 files a call, 403/404 is closed, anything else throws (fail closed); personal sign-ins go to the connection's own organization", async () => {
+  const m = await import("../src/lib/connector-m365.ts");
+  const { ConnectorError } = await import("../src/lib/connector-text.ts");
+  const conn = { api_base: "https://graph.example/v1.0", account: "33333333-cccc-4ddd-8eee-000000000003", account_name: "Northwind Traders" };
+  const ids = Array.from({ length: 23 }, (_, i) => `f${i}`);
+  const where = new Map(ids.map((id) => [id, id === "f22" ? "../bad key" : "b!ops/folder"]));
+  const calls = [];
+  // f1 is closed (403), f2 is gone (404), f3's answer is for another item; the rest are open.
+  const api = async (url, init) => {
+    calls.push({ url, n: init.body.requests.length });
+    return { json: { responses: init.body.requests.map((r) => {
+      const id = r.url.match(/items\/([^?]+)/)[1];
+      return { id: r.id, status: id === "f1" ? 403 : id === "f2" ? 404 : 200, body: { id: id === "f3" ? "other" : id } };
+    }) } };
+  };
+  const open = await m.m365.personal.canOpen(api, conn, ids, where);
+  assert.deepEqual(calls.map((c) => [c.url, c.n]), [["https://graph.example/v1.0/$batch", 20], ["https://graph.example/v1.0/$batch", 2]], "20 per call; the file with a bad key isn't asked");
+  assert.ok(open.has("f0") && open.has("f21"));
+  for (const closed of ["f1", "f2", "f3", "f22"]) assert.ok(!open.has(closed), closed);
+  // Throttled or unexpected: it throws, so nothing is used and nothing is remembered as closed.
+  const throttled = async (_url, init) => ({ json: { responses: init.body.requests.map((r) => ({ id: r.id, status: 429 })) } });
+  await assert.rejects(m.m365.personal.canOpen(throttled, conn, ["f0"], where), (e) => e instanceof ConnectorError && e.reason === "busy");
+  await assert.rejects(m.m365.personal.canOpen(async () => ({ json: null }), conn, ["f0"], where), ConnectorError, "no answer at all");
+  // A person signs in at the connection's Microsoft organization with the narrower scopes; the group at "organizations".
+  const saved = { ...process.env };
+  Object.assign(process.env, { M365_CLIENT_ID: "app", M365_CLIENT_SECRET: "secret", M365_TENANT: "" });
+  try {
+    const mine = new URL(m.m365.authorizeUrl({ state: "s", challenge: "c", redirectUri: "https://app.example/cb", forPerson: conn }));
+    assert.equal(mine.pathname, `/${conn.account}/oauth2/v2.0/authorize`);
+    assert.equal(mine.searchParams.get("scope"), m.PERSONAL_SCOPE);
+    assert.ok(!m.PERSONAL_SCOPE.includes("Sites.Read.All"), "least privilege: a person never lists sites");
+    const group = new URL(m.m365.authorizeUrl({ state: "s", challenge: "c", redirectUri: "https://app.example/cb" }));
+    assert.equal(group.pathname, "/organizations/oauth2/v2.0/authorize");
+    assert.throws(() => m.m365.authorizeUrl({ state: "s", challenge: "c", redirectUri: "https://app.example/cb", forPerson: { ...conn, account: "../evil" } }), ConnectorError);
+  } finally {
+    process.env = saved;
+  }
+});
+
 /* ---------- Job queue (src/lib/jobs.ts) ---------- */
 
 const jobs = await import("../src/lib/jobs.ts");

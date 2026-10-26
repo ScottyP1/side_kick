@@ -226,13 +226,13 @@ Connectors; audited):
 - **Each person signs in** (`personal`): the connection's account still does the **syncing** (it should be a
   read-only account that can read every linked project), but it no longer decides what anyone sees. Each member
   connects their own account ("Connect your Jira") and answers use only the items *their* account can open.
-  Only for tools that implement the per-person check (`Provider.personal`): **Jira and Azure DevOps**. The others are
+  Only for tools that implement the per-person check (`Provider.personal`): **Jira, Azure DevOps and Microsoft 365
+  files** (SharePoint, OneDrive; added Oct 26, 2026). The others are
   **shared only for now** (`PERSONAL_UNSUPPORTED` says why on the tile):
   - GitHub: permissions are per repository, never per issue, so anyone who may open the linked repository may open
     every issue in it. The shared account already matches GitHub's own rule.
   - Confluence: pages can carry view restrictions. It needs a per-person CQL check (the same interface as Jira's);
     planned.
-  - SharePoint/OneDrive: planned as option (c) below, Graph's own permissions on each file stored in the index.
 
 **Per-person tokens** (`connector_user_tokens`): one row per connection and person, the tool's account name, access
 and refresh tokens **sealed** with `SIDEKICK_ENCRYPTION_KEY` (context `connector_user_tokens.<column>:<row id>`, so
@@ -245,13 +245,28 @@ The account must open the **same site** as the connection (Jira: the same cloud 
 organization), otherwise it's refused. Leaving the group, being removed from the organization, switching the
 connection back to shared, disconnecting it, or deleting the group deletes the person's tokens.
 
-**How answers respect permissions: option (a), a query-time check, for both Jira and Azure DevOps.** The shared index
+**How answers respect permissions: option (a), a query-time check, for Jira, Azure DevOps and Microsoft 365 files.** The shared index
 stays as it is (one copy per group, synced by the connection's account). When an answer is about to be written,
 the candidates from personal connections (at most ~30 passages) are checked **with the reader's own token**:
 - Jira: `POST /rest/api/3/issue/bulkfetch` with the candidate keys; issues it doesn't return (404/no permission) are
   closed to that person. One call for up to 100 keys.
 - Azure DevOps: `POST /_apis/wit/workitemsbatch` with `errorPolicy: "Omit"`; items the person can't read come back
   `null`. One call for up to 200 ids.
+- Microsoft 365 files: Graph `POST /$batch` with one `GET /drives/<drive>/items/<id>?$select=id` per candidate file
+  (up to 20 per call; the drive comes from the item's link key, which `canOpen` receives as `where`). 200 = open,
+  403/404 = closed; a throttled or failed reply (429, 5xx, anything else) throws, so that connection's files are
+  left out of the answer ("didn't confirm … try again") and nothing is cached as closed. Graph applies SharePoint's
+  own rules (unique permissions on folders/files, groups, sharing links the person redeemed), which is why we ask it
+  rather than copy permissions. A person signs in at the **connection's tenant** (`login.microsoftonline.com/<tenant
+  id>`, not `organizations`), so a consultant who is a B2B guest in the client's tenant gets a token for the client's
+  files; their refreshes go to the same tenant, and `personal.account` refuses a token for any other organization.
+  Personal scopes are only `Files.Read.All User.Read offline_access` (no `Sites.Read.All`: a person never lists
+  sites). **Considered and not built (yet): a sync-time pre-filter (option (c)).** Graph exposes each file's
+  `permissions`, so the sync could store "who may open this" and drop obviously closed files before asking. It
+  would save a call when many candidates are closed, but costs one extra call per file per sync, goes stale between
+  syncs (a share removed 10 minutes ago would still look open), and can't resolve nested groups or sharing links
+  without more calls, so it could only ever **narrow** the candidates; the question-time check stays the guarantee.
+  Worth adding only if the check's latency shows up on the Activity page.
 Results are cached **in memory for 5 minutes** per token row and item (`ACCESS_CACHE_SECONDS`), so follow-ups don't
 call the tool again; a reconnect or disconnect starts a fresh cache. Why (a): it costs one small call per answer,
 needs no second copy of anything, and asks the tool itself, which is the only place that knows about security

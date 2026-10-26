@@ -21,8 +21,8 @@
  *   When a refresh is refused (revoked, expired after long disuse) the connector turns **expired** and the group's
  *   Team Lead or an admin must reconnect; nothing is deleted.
  * - **Access mode** (`connectors.access_mode`, docs/ARCHITECTURE.md → Connectors): **shared** (the default: everyone
- *   in the group sees what the connection's account can read) or **personal** ("each person signs in", Jira and Azure
- *   DevOps only: `Provider.personal`). In personal mode the connection's account still syncs, but answers only use
+ *   in the group sees what the connection's account can read) or **personal** ("each person signs in", Jira, Azure
+ *   DevOps and Microsoft 365 files: `Provider.personal`). In personal mode the connection's account still syncs, but answers only use
  *   items the reader's **own** sign-in can open (lib/connector-access.ts checks them at question time). Each
  *   person's tokens are in `connector_user_tokens`, sealed and refreshed like the group's (`personalApi`); a refused
  *   refresh turns that person's row expired. Personal sign-ins use the same callback as group connections
@@ -147,9 +147,16 @@ export type Provider = {
   configured(): boolean;
   /** Extra headers on every API call (GitHub: its media type, API version and a User-Agent). */
   headers?: Record<string, string>;
-  authorizeUrl(o: { state: string; challenge: string; redirectUri: string }): string;
-  exchange(code: string, verifier: string, redirectUri: string): Promise<Tokens | { error: string }>;
-  refresh(refreshToken: string): Promise<Tokens | { error: string; revoked: boolean }>;
+  /**
+   * The tool's sign-in page. `forPerson` is set for a person's **own** sign-in to that connection ("each person signs
+   * in"); a tool may sign them in differently (Microsoft 365: at the connection's own Microsoft organization, so a
+   * client guest gets a token for the client's files, with the narrower personal scopes). Others ignore it.
+   */
+  authorizeUrl(o: { state: string; challenge: string; redirectUri: string; forPerson?: ConnectorRow }): string;
+  /** Swaps the sign-in code for tokens (`forPerson`: as in `authorizeUrl`). */
+  exchange(code: string, verifier: string, redirectUri: string, forPerson?: ConnectorRow): Promise<Tokens | { error: string }>;
+  /** Renews tokens (`forPerson`: as in `authorizeUrl`; a person's refresh must go where they signed in). */
+  refresh(refreshToken: string, forPerson?: ConnectorRow): Promise<Tokens | { error: string; revoked: boolean }>;
   /** Which account/site the signed-in person's token opens (checks access). */
   account(api: ToolApi, site: string | null): Promise<{ account: string; accountName: string; apiBase: string; webBase: string }>;
   projects(api: ToolApi, conn: ConnectorRow): Promise<{ key: string; name: string }[]>;
@@ -159,12 +166,14 @@ export type Provider = {
    * "Each person signs in" (only tools that have it; the others are shared only, `PERSONAL_UNSUPPORTED`). `api` calls
    * the tool with **one person's** token. `account` checks that person's sign-in opens the connection's own site
    * (`ConnectorError` "access" otherwise) and says who they are there; `canOpen` returns which of the given external
-   * ids (item keys, as stored in `connector_items.external_id`) that person can open. Must fail closed: anything not
-   * clearly open is left out of the set.
+   * ids (item keys, as stored in `connector_items.external_id`) that person can open. `where` gives each id's linked
+   * project key (`connector_links.project`), for tools whose item ids only mean something inside it (Microsoft 365:
+   * a file id within its drive). Must fail closed: anything not clearly open is left out of the set; a tool that
+   * couldn't say (throttled, down) throws, so nothing is cached as closed.
    */
   personal?: {
     account(api: ToolApi, conn: ConnectorRow): Promise<{ accountName: string }>;
-    canOpen(api: ToolApi, conn: ConnectorRow, externalIds: string[]): Promise<Set<string>>;
+    canOpen(api: ToolApi, conn: ConnectorRow, externalIds: string[], where: Map<string, string>): Promise<Set<string>>;
   };
 };
 
@@ -180,9 +189,8 @@ export const providerFor = (kind: ConnectorKind): Provider => PROVIDERS[kind];
 export const PERSONAL_UNSUPPORTED: Partial<Record<ConnectorKind, string>> = {
   github: "GitHub permissions are per repository, never per issue: anyone who may open the linked repository may open all its issues, so the shared account already matches GitHub's own rule.",
   confluence: "Shared only for now: checking Confluence page restrictions for each person is planned.",
-  m365: "Shared only for now: using SharePoint's own file permissions for each person is planned.",
 };
-/** True when the tool can check each person's own access (Jira, Azure DevOps). */
+/** True when the tool can check each person's own access (Jira, Azure DevOps, Microsoft 365 files). */
 export const supportsPersonal = (kind: ConnectorKind) => Boolean(PROVIDERS[kind].personal);
 
 /** Checks a tool name from a request ("ado", "jira", "github", "confluence" or "m365"), or 400. */
@@ -421,7 +429,10 @@ async function personalToken(t: Pick<PersonalTokenRow, "id" | "org_id">, kind: C
       await markPersonalExpired(cur, kind);
       throw new ConnectorError("auth", personalExpiredMessage(kind));
     }
-    const r = await span("connector", `Refresh a person's ${KIND_LABEL[kind]} sign-in`, () => PROVIDERS[kind].refresh(openSecret(cur.refresh_token!, userCtx(cur.id, "refresh_token"))))
+    // The connection the person signed in to (Microsoft 365 renews at that connection's own Microsoft organization).
+    const conn = await get<ConnectorRow>("SELECT * FROM connectors WHERE id = ? AND org_id = ?", cur.connector_id, cur.org_id);
+    if (!conn) throw new ConnectorError("auth", personalExpiredMessage(kind));
+    const r = await span("connector", `Refresh a person's ${KIND_LABEL[kind]} sign-in`, () => PROVIDERS[kind].refresh(openSecret(cur.refresh_token!, userCtx(cur.id, "refresh_token")), conn))
       .catch((e) => {
         if (e instanceof ConnectorError) throw e;
         throw new ConnectorError("network", `${BRAND.name} couldn't reach ${KIND_LABEL[kind]} to renew your sign-in.`);
@@ -519,7 +530,7 @@ export async function startPersonalConnect(req: Request, user: User, connectorRa
     state, user.org_id, user.id, c.kind, verifier, new Date(Date.now() + STATE_MINUTES * 60_000).toISOString(), c.workspace_id, c.id,
   );
   const challenge = b64url(crypto.createHash("sha256").update(verifier).digest());
-  return { url: p.authorizeUrl({ state, challenge, redirectUri: connectorRedirectUri(req) }), state };
+  return { url: p.authorizeUrl({ state, challenge, redirectUri: connectorRedirectUri(req), forPerson: c }), state };
 }
 
 /**
@@ -536,7 +547,7 @@ async function finishPersonal(req: Request, saved: { org_id: string; user_id: st
   const p = PROVIDERS[c.kind];
   if (!p.personal || c.access_mode !== "personal") throw new HttpError(409, `This group's ${KIND_LABEL[c.kind]} uses one shared account now, so there's nothing to connect for yourself.`);
   return span("connector", `Connect your own ${KIND_LABEL[c.kind]}`, async () => {
-    const tokens = await p.exchange(code, saved.verifier, connectorRedirectUri(req)).catch(() => ({ error: "unreachable" }));
+    const tokens = await p.exchange(code, saved.verifier, connectorRedirectUri(req), c).catch(() => ({ error: "unreachable" }));
     if ("error" in tokens) {
       console.error(`Connector sign-in: personal ${c.kind} token exchange failed`, tokens.error);
       throw new HttpError(502, `${KIND_LABEL[c.kind]} didn't confirm the sign-in. Try again.`);

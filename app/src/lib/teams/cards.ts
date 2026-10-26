@@ -53,6 +53,45 @@ const header = (eyebrow: string, title: string): Block[] => [
   text(title, { size: "Large", weight: "Bolder", spacing: "Small" }),
 ];
 
+/**
+ * The person who added Sidekick to a chat or channel (Teams' `from` on the install event), greeted by @mention.
+ * `name` is null when neither Teams nor Sidekick knows it: the welcome then thanks without a mention.
+ */
+export type Installer = { id: string; name: string | null };
+
+/**
+ * Shown on every first-run card: what's AI about Sidekick and how to report a bad answer (Teams Store rules for
+ * AI-generated content: a visible disclaimer and a way to report).
+ */
+export const AI_NOTE = `Answers and notes are written by AI (Claude) from your group's own content and can be wrong: check the sources. Report a bad answer with 👎 or at ${BRAND.supportEmail}.`;
+
+/** Who must do what before Sidekick works (Store rule: call out admin dependencies and limitations up front). */
+export const SETUP_NOTE = `${BRAND.name} needs your organization's ${BRAND.name} account and a one-time admin approval for Microsoft 365. It works in 1:1 chats, group chats, channels and meeting chats.`;
+
+/** The welcome greeting for whoever added Sidekick ("Thanks for adding me, <at>Ana</at>."), or nothing. */
+const welcomeIntro = (installer?: Installer): Block[] =>
+  installer
+    ? [
+        text(`Thanks for adding me${installer.name ? `, <at>${installer.name}</at>` : ""}. I'm ${BRAND.name}: I answer this team's questions from its own documents and meetings, with sources, and post meeting notes and reminders. Mention me with **help** for the list of commands.`),
+        text(AI_NOTE, { size: "Small", isSubtle: true, spacing: "Small" }),
+      ]
+    : [];
+
+/** Adds the Teams mention entity a card needs so `<at>name</at>` in its text becomes a real @mention. */
+function withMention(c: IAdaptiveCard, installer?: Installer): IAdaptiveCard {
+  if (!installer?.name) return c;
+  return { ...c, msteams: { entities: [{ type: "mention", text: `<at>${installer.name}</at>`, mentioned: { id: installer.id, name: installer.name } }] } } as unknown as IAdaptiveCard;
+}
+
+/** The help-center button. Its title says it leaves Teams (Store rule for links that open a browser). */
+const helpCenterAction = (): Block => ({ type: "Action.OpenUrl", title: "Help center (opens in browser)", url: helpCenterUrl() });
+
+/**
+ * The public help center's Teams guide, from the same setting as `portalUrl` in lib/tenants.ts (SIDEKICK_PUBLIC_URL).
+ * Not imported from there: cards stay free of the database and request helpers, so unit tests can load them.
+ */
+const helpCenterUrl = () => `${(process.env.SIDEKICK_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "")}/docs/teams-guide`;
+
 // Card text is Markdown, so strip the source's own Markdown (headings, bold) from excerpts.
 const plain = (s: string) => s.replace(/[#*_`>|]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -113,37 +152,44 @@ export function answerCard(question: string, answer: { found: boolean; answer: s
     body.push(text("I logged this as a knowledge gap so the team can fill it in.", { size: "Small", isSubtle: true }));
   }
   if (answer.blocked || !answer.questionId) return card(body);
-  body.push(text(`Ask a follow-up the same way, or start with **new question** to start afresh.`, { size: "Small", isSubtle: true, spacing: "Medium" }));
+  body.push(text(`AI-generated: check the sources. Ask a follow-up the same way, or start with **new question** to start afresh.`, { size: "Small", isSubtle: true, spacing: "Medium" }));
   return card(body, [
     { type: "Action.Execute", title: "👍 Helpful", verb: VERBS.feedbackUp, data: { questionId: answer.questionId } },
     { type: "Action.Execute", title: "👎 Not helpful", verb: VERBS.feedbackDown, data: { questionId: answer.questionId } },
   ]);
 }
 
-/** Shown in a conversation that isn't linked yet: explains linking and shows the 8-character code. */
-export function linkCard(code: string, kind: string): IAdaptiveCard {
+/**
+ * Shown in a conversation that isn't linked yet: explains linking and shows the 8-character code. On install it's
+ * the welcome message, greeting `installer` by @mention.
+ */
+export function linkCard(code: string, kind: string, installer?: Installer): IAdaptiveCard {
   const where = kind === "channel" ? "channel" : "chat";
-  return card([
+  return withMention(card([
     ...header(BRAND.name, `Link this ${where} to a group`),
+    ...welcomeIntro(installer),
     text(`I don't know which group this ${where} belongs to yet, so I can't answer from its documents and meetings.`),
     text(`A Team Lead or admin can link it on the group's page in the ${BRAND.name} portal (**Teams chats**), with this code:`),
     text(code, { size: "ExtraLarge", weight: "Bolder", fontType: "Monospace", horizontalAlignment: "Center", spacing: "Medium" }),
     text("The code works for 24 hours. Mention me with **link** to get a new one.", { size: "Small", isSubtle: true }),
-  ]);
+    text(SETUP_NOTE, { size: "Small", isSubtle: true }),
+  ], [helpCenterAction()]), installer);
 }
 
 /**
  * Shown once when Sidekick is added to a chat or channel whose Microsoft organization uses Sidekick, by a Team
- * Lead or admin (and again if someone mentions Sidekick there before it's assigned). No buttons: assigning
- * happens only in the portal, on the group's page.
+ * Lead or admin (and again if someone mentions Sidekick there before it's assigned). No buttons (assigning happens
+ * only in the portal, on the group's page); the help center's address is in the text. On install it greets
+ * `installer` (the welcome message).
  */
-export function notSetUpCard(kind: string, days: number): IAdaptiveCard {
+export function notSetUpCard(kind: string, days: number, installer?: Installer): IAdaptiveCard {
   const where = kind === "channel" ? "channel" : "chat";
-  return card([
+  return withMention(card([
     ...header(BRAND.name, `I'm not set up for this ${where} yet`),
+    ...welcomeIntro(installer),
     text(`A Team Lead needs to assign this ${where} to a group in the ${BRAND.name} portal. Until then I won't read, save or answer anything here.`),
-    text(`If nobody assigns it within ${days} days, I'll leave the ${where}.`, { size: "Small", isSubtle: true }),
-  ]);
+    text(`If nobody assigns it within ${days} days, I'll leave the ${where}. Mention me with **help** to see what I can do once I'm set up, or read the help center (opens in browser): ${helpCenterUrl()}`, { size: "Small", isSubtle: true }),
+  ]), installer);
 }
 
 /**
@@ -177,15 +223,25 @@ export function unknownTenantCard(signupUrl: string): IAdaptiveCard {
       ...header(BRAND.name, `${BRAND.name} isn't set up for your organization yet`),
       text(`Sign up at ${signupUrl} and connect your Microsoft 365 organization. Then a Team Lead or admin adds me to this chat again and assigns it to a group.`),
       text("Until then I don't read or keep anything from this chat.", { size: "Small", isSubtle: true }),
+      text(SETUP_NOTE, { size: "Small", isSubtle: true }),
     ],
     [{ type: "Action.OpenUrl", title: "Sign up", url: signupUrl }],
   );
 }
 
-/** What Sidekick can do here, and which workspace this conversation is linked to (if any). */
-export function helpCard(workspace: string | null): IAdaptiveCard {
-  return card([
+/**
+ * What Sidekick can do here, and which workspace this conversation is linked to (if any). Answers `help` (and an
+ * empty mention) everywhere, linked or not, so it never dead-ends: unlinked chats get the next step, and every
+ * version has the help-center button (Teams Store rule: help answers inside Teams and offers a way forward).
+ * With `installer` it's the welcome message for a chat that was already linked when Sidekick was added: it greets
+ * the person who added it by @mention (Store rule for group chats and channels). Sent once per install, never
+ * again on `help`.
+ */
+export function helpCard(workspace: string | null, installer?: Installer): IAdaptiveCard {
+  return withMention(card([
     ...header(BRAND.name, workspace ? `Linked to ${workspace}` : "Not linked to a group yet"),
+    ...welcomeIntro(installer),
+    ...(workspace ? [] : [text(`To get started, a Team Lead or admin links this chat to a group in the ${BRAND.name} portal. Until then I can't answer from any group's documents or meetings.`)]),
     text("Mention me with a question and I'll answer from this group's documents, meetings and chats and your firm library, with sources. Follow-ups build on the last answer: in a channel, reply in the same thread; in a chat, within 30 minutes."),
     {
       type: "FactSet",
@@ -202,7 +258,9 @@ export function helpCard(workspace: string | null): IAdaptiveCard {
       ],
     },
     text("Depending on how the Team Lead set up this group, I post meeting notes and action items here after each meeting, and reminders about what's still open.", { size: "Small", isSubtle: true }),
-  ]);
+    ...(installer ? [] : [text(AI_NOTE, { size: "Small", isSubtle: true })]),
+    text(SETUP_NOTE, { size: "Small", isSubtle: true }),
+  ], [helpCenterAction()]), installer);
 }
 
 /** A decision, requirement, risk, fact or term on the notes card, with its "Save to knowledge" state. */

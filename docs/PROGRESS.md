@@ -43,6 +43,7 @@ A coordinating session reviews and merges PRs (waits for GitHub's `test` check);
 1. PR open (`claude/sad-morse-044d59`): **search capacity alert** (Owner Console, hourly) + **quieter reminders after meetings** (one line on the notes card instead of a second card).
 2. Final clean **pitch/website capture** before **Nov 12** (screenshots + video from the demo world and the live tenant; walkthroughs also capture video).
 3. **Delete the 6 Teams test users by Nov 13** (the trial ends Nov 14; see Cody's to-dos).
+3b. Optional "my own mailbox, only for me" Outlook connector: per-person, used only for that person's private questions (1:1 chat with Sidekick / portal), never in group answers; off by default because many IT departments refuse mailbox access. Planner per-person works like Jira if a customer uses it. (Outlook/Planner shared-mailbox build was dropped Oct 26: most teams don't use them.)
 4. More connectors on the same framework (Outlook, Planner), per-person sign-in to tools, official logos once permitted, live meetings (Enterprise), Teams Store, real brand + domain, Stripe, optional staging site.
 
 **Cody's to-dos** (only he can do these)

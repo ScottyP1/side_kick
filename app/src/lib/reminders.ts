@@ -11,8 +11,11 @@
  *   @mentions) is saved in `chat_messages` and made searchable as a "chat" source, so Ask and the
  *   knowledge map can use what was said in Teams (e.g. "cutover moved to Nov 12"). Untracked chats are
  *   never stored. Kept 90 days (`purgeOldChatMessages`).
- * - **Reminders** (`sendReminder`): a card with up to six points, posted once a day per chat and right
- *   after a meeting. Steps:
+ * - **Reminders** (`sendReminder`): a card with up to six points, posted once a day per chat (the daily digest).
+ *   After a meeting there is no second card in the chats that just got the notes: their notes card ends with one
+ *   short line instead, "3 older items still open: Open in Sidekick" (`olderOpenFor`), leaving out what today's
+ *   digest already listed. Only a chat that wants reminders after meetings but doesn't get the notes still gets a
+ *   card (`remindAfterMeeting`). Steps:
  *   1. `gatherReminders` picks the items **in code**: action items that are overdue or have no owner,
  *      open questions and decisions still to make that are due (or a week old), and "Out of date" or
  *      "Conflicting information" gaps from the knowledge map. Snoozed, dismissed and done items are left
@@ -45,9 +48,9 @@ import { assertEnabled, flagEnabled, orgFlagEnabled } from "./owner";
 import { indexText, removeIndexed } from "./search";
 import { chatTitle } from "./sidekick";
 import { span, spanAttrs, traceScope, withTrace } from "./trace";
-import { addDays, applySettingsChanges, dailySlotDue, localTime, parseChatSettings, type ChatSettings, type ReminderKinds } from "./reminder-rules";
+import { addDays, applySettingsChanges, dailySlotDue, localTime, olderOpenCount, parseChatSettings, type ChatSettings, type ReminderKinds } from "./reminder-rules";
 import { noticeCard, reminderCard, VERBS, type ReminderPointInput, type ReminderSource } from "./teams/cards";
-import { postCard, type TeamsConversation } from "./teams/bot";
+import { notesTargets, postCard, type TeamsConversation } from "./teams/bot";
 import { BRAND } from "./brand";
 import { assertFeature } from "./limits";
 
@@ -247,10 +250,11 @@ const gapKey = (text: string) => `gap:${crypto.createHash("sha256").update(text)
  * @param opts.kinds     which kinds the chat wants
  * @param opts.today     the chat's local date ("YYYY-MM-DD"); "overdue" means due before today
  * @param opts.excludeMeetingId leave out items from this meeting (its notes were just posted)
+ * @param opts.limit     at most this many (default `MAX_CANDIDATES`, what Claude chooses from)
  * Always scoped to one org and one workspace. Snoozed (until the snooze ends), dismissed and done items
  * are left out, and any item that can't be traced to a real source is dropped.
  */
-export async function gatherReminders(orgId: string, workspaceId: string, opts: { guests: boolean; kinds: ReminderKinds; today: string; excludeMeetingId?: string | null }): Promise<Candidate[]> {
+export async function gatherReminders(orgId: string, workspaceId: string, opts: { guests: boolean; kinds: ReminderKinds; today: string; excludeMeetingId?: string | null; limit?: number }): Promise<Candidate[]> {
   return span("remind", "Pick what to remind about", async () => {
     const out: Candidate[] = [];
     const meetingSource = (r: { title: string | null; held_at: string | null; external_guests: number | null }): Source[] =>
@@ -324,7 +328,7 @@ export async function gatherReminders(orgId: string, workspaceId: string, opts: 
       (c) => c.sources.length && !hidden.has(c.key) && (!opts.guests || c.sources.every((s) => s.shareable)) && (!opts.excludeMeetingId || c.meetingId !== opts.excludeMeetingId),
     );
     spanAttrs({ found: out.length, kept: kept.length, guests: opts.guests });
-    return kept.slice(0, MAX_CANDIDATES);
+    return kept.slice(0, opts.limit ?? MAX_CANDIDATES);
   });
 }
 
@@ -560,18 +564,50 @@ const linkedChats = (workspaceId?: string) =>
   );
 
 /**
- * Right after a meeting's notes were posted: sends a reminder to each chat of that workspace that wants
- * one after meetings, leaving out the meeting's own items (they were just posted as cards). One failing
- * chat doesn't stop the others. Called from the meeting routes after the response is sent.
+ * For the meeting-notes card posted in `conv` (lib/teams/bot.ts `notesCardFor`): how many items from earlier are
+ * still open there, for its "N older items still open: Open in Sidekick" line. 0 (no line) when reminders are paused
+ * (owner switch, or for this organization), the chat has reminders or "after meetings" off, or today's daily reminder
+ * in this chat already listed every one of them (`olderOpenCount`). Counts only, by code: no Claude call. The same
+ * walls as the digest apply (this group only; a chat with client guests counts only shareable items; the chat's
+ * chosen kinds; snoozed and dismissed items left out); the meeting's own items are on the card already.
+ */
+export async function olderOpenFor(conv: TeamsConversation, meetingId: string): Promise<number> {
+  if (!conv.org_id || !conv.workspace_id) return 0;
+  if (!(await flagEnabled("remind")) || !(await orgFlagEnabled(conv.org_id, "remind"))) return 0;
+  const settings = await getChatSettings(conv);
+  if (!settings.reminders || !settings.afterMeeting) return 0;
+  const today = todayFor(settings);
+  const open = await gatherReminders(conv.org_id, conv.workspace_id, { guests: conv.guests === 1, kinds: settings.kinds, today, excludeMeetingId: meetingId, limit: 1000 });
+  if (!open.length) return 0;
+  // Today's daily reminder in this chat (its slot is the chat's local date): what it listed isn't counted again.
+  const digest = await get<{ json: string | null }>("SELECT json FROM reminder_runs WHERE conversation_id = ? AND org_id = ? AND slot = ? AND reason = 'daily' AND status = 'posted'", conv.id, conv.org_id, today);
+  let listed: string[] = [];
+  try {
+    listed = ((JSON.parse(digest?.json ?? "{}") as { points?: { key?: unknown }[] }).points ?? []).map((p) => String(p.key ?? ""));
+  } catch {
+    listed = []; // an unreadable old run: count everything rather than hide it
+  }
+  return olderOpenCount(open.map((c) => c.key), listed);
+}
+
+/**
+ * Right after a meeting's notes were posted: a reminder card for each chat of that workspace that wants one after
+ * meetings **and didn't just get the notes**, leaving out the meeting's own items. The chats that got the notes card
+ * don't get a second card: their notes card already says how many older items are still open (`olderOpenFor`).
+ * Respects the owner's and the organization's reminder switches and each chat's `reminders` / `afterMeeting`
+ * settings. One failing chat doesn't stop the others. Called after the notes are posted (meeting import and
+ * reprocess routes after the response is sent; the `meetings.notes` job for automatic notes).
  */
 export async function remindAfterMeeting(orgId: string, meetingId: string): Promise<number> {
   // Worked out before any trace starts: with reminders paused, no chat linked (Teams not set up) or no chat
   // wanting a reminder after meetings, nothing is recorded, so Activity doesn't count Teams work that never ran.
   if (!(await flagEnabled("remind")) || !(await orgFlagEnabled(orgId, "remind"))) return 0;
-  const m = await get<{ workspace_id: string; status: string }>("SELECT workspace_id, status FROM meetings WHERE id = ? AND org_id = ?", meetingId, orgId);
+  const m = await get<{ workspace_id: string; status: string; external_guests: number }>("SELECT workspace_id, status, external_guests FROM meetings WHERE id = ? AND org_id = ?", meetingId, orgId);
   if (!m || m.status !== "Ready") return 0;
+  // The chats that take this meeting's notes (the group's "Meeting notes go to" choice): no card after their notes.
+  const notesChats = new Set((await notesTargets(orgId, m)).map((c) => c.id));
   const chats: TeamsConversation[] = [];
-  for (const conv of (await linkedChats(m.workspace_id)).filter((c) => c.org_id === orgId)) {
+  for (const conv of (await linkedChats(m.workspace_id)).filter((c) => c.org_id === orgId && !notesChats.has(c.id))) {
     const s = await getChatSettings(conv);
     if (s.reminders && s.afterMeeting) chats.push(conv);
   }

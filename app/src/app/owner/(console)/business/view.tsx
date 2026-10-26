@@ -5,7 +5,7 @@
  * an Azure dashboard. MRR and margin (plan revenue minus AI cost), plan mix, trials ending soon, failed
  * payments, sign-ups per week, every client's usage against its plan with "near limit" / "over limit" flags
  * and its partner, and the app's own infrastructure health (health checks, running release, recent deploys,
- * app errors). Data: GET /api/owner/business. Operators only. Prices are test-mode placeholders.
+ * app errors, and how full Azure AI Search is: storage and indexes against the tier's limits, lib/search-capacity.ts). Data: GET /api/owner/business. Operators only. Prices are test-mode placeholders.
  */
 
 import Link from "next/link";
@@ -30,8 +30,49 @@ type B = {
     releases: { commit_sha: string | null; released_at: string | null; first_seen_at: string }[];
     errors24h: number;
     recentErrors: { ref: string; status: number; route: string | null; created_at: string }[];
+    searchCapacity: Capacity | null;
   };
 };
+type Capacity = {
+  tier: string | null;
+  storage: { usedBytes: number; quotaBytes: number | null; pct: number | null } | null;
+  indexes: { used: number; quota: number | null; pct: number | null } | null;
+  documents: number | null;
+  level: "ok" | "warn" | "full";
+  message: string | null;
+  checkedAt: string | null;
+  error: string | null;
+};
+
+const mb = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`);
+
+/** Azure AI Search use against the tier's limits (operators only), with the upgrade alert while it's 70%+ full. */
+function SearchCapacity({ c }: { c: Capacity }) {
+  const kind = c.level === "full" ? "bad" : c.level === "warn" ? "warn" : "good";
+  const row = (label: string, value: string, pct: number | null) => (
+    <div className="bar-row">
+      <span>{label}<div className="muted" style={{ fontSize: 12.5 }}>{value}</div></span>
+      <div className="bar" role="img" aria-label={`${label}: ${pct ?? 0}% used`}><span style={{ width: `${Math.min(100, pct ?? 0)}%`, background: pct !== null && pct >= 90 ? "var(--bad)" : pct !== null && pct >= 70 ? "var(--warn)" : undefined }} /></div>
+      <span className="num r">{pct === null ? "—" : `${pct}%`}</span>
+    </div>
+  );
+  return (
+    <div className="panel" id="search-capacity">
+      <div className="panel-h"><h2>Search capacity</h2><Pill kind={kind}>{c.tier ? `${c.tier} tier` : "Azure AI Search"}</Pill></div>
+      <div className="panel-b">
+        {c.message && <div className={`callout ${kind}`} role="status" style={{ marginBottom: 12 }}><div><b>{c.message}.</b> How: docs/RUNBOOKS.md, “Upgrade the search tier”.</div></div>}
+        {c.storage && row("Storage", `${mb(c.storage.usedBytes)} of ${c.storage.quotaBytes ? mb(c.storage.quotaBytes) : "no limit"}`, c.storage.pct)}
+        {c.indexes && row("Indexes", `${c.indexes.used} of ${c.indexes.quota ?? "no limit"}`, c.indexes.pct)}
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+          {c.checkedAt ? `Checked ${fmtTime(c.checkedAt)}, every hour.` : "Not checked yet: the first check runs within the hour."}
+          {c.documents !== null && ` ${c.documents.toLocaleString("en-US")} passages indexed.`}
+          {" "}Warns at 70% of storage or one index left, and again at 90%.
+        </p>
+        {c.error && <div className="callout bad" role="alert"><div>The last check failed: {c.error}</div></div>}
+      </div>
+    </div>
+  );
+}
 
 const money = (n: number) => `${n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -174,6 +215,7 @@ export default function BusinessPage() {
           </div>
         </div>
       </div>
+      {b.infra.searchCapacity && <SearchCapacity c={b.infra.searchCapacity} />}
     </>
   );
 }

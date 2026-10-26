@@ -10,7 +10,9 @@
  * - `clients`: per client: plan, status, people, revenue, AI cost, margin, AI credit used, the limits at 80%
  *   or more (`near`) or over (`over`), and the partner/referrer.
  * - `infra`: the app's own health facts (as /api/health), the build and release it runs, the last releases
- *   seen, and app errors in the last 24 hours (latest 5 with their reference codes).
+ *   seen, app errors in the last 24 hours (latest 5 with their reference codes), and `searchCapacity`: how full
+ *   the Azure AI Search service is (storage and indexes against the tier's limits, the tier, the alert while it's
+ *   70%+ full; null on the local keyword index; lib/search-capacity.ts).
  *
  * Revenue rules (test-mode prices, lib/plans.ts): an **active** subscription counts people × the plan's
  * price per person; Enterprise and managed clients count the contract price the team set
@@ -23,6 +25,7 @@ import { creditStatus } from "@/lib/credit";
 import { limitReport, monthStart } from "@/lib/limits";
 import { monthlyPrice, planById, planWithExtras, STATUS_LABEL, type PlanId, type SubStatus } from "@/lib/plans";
 import { buildInfo, healthFacts, noteRelease } from "@/lib/ops";
+import { searchCapacity } from "@/lib/search-capacity";
 
 type OrgRow = {
   id: string; name: string; status: string; created_at: string;
@@ -99,6 +102,7 @@ export const GET = handle(async () => {
       releases: await all("SELECT commit_sha, released_at, first_seen_at FROM app_releases ORDER BY first_seen_at DESC LIMIT 10"),
       errors24h: Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM app_errors WHERE created_at >= ?", since24))?.n ?? 0),
       recentErrors: await all("SELECT ref, status, route, created_at FROM app_errors ORDER BY id DESC LIMIT 5"),
+      searchCapacity: await searchCapacity(),
     },
   };
 });

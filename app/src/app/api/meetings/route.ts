@@ -99,7 +99,8 @@ export const POST = handle(async (req: Request) => {
   // Post the notes to the workspace's linked Teams channels without making the portal wait.
   after(async () => {
     await postMeetingNotes(user.org_id, id).catch((e) => console.error("Teams notes post failed", e));
-    // Then a reminder in the chats that want one after meetings (what's still open from earlier).
+    // Then a reminder card only in chats that want one after meetings but did not get the notes (the notes card
+    // itself says how many older items are still open).
     await remindAfterMeeting(user.org_id, id).catch((e) => console.error("Teams reminders after the meeting failed", e));
   });
   return { id };

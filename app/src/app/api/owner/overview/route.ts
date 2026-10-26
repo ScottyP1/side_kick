@@ -1,10 +1,12 @@
 /**
- * GET /api/owner/overview: platform-wide AI spend, clients, error rate and response times for the Owner Console home.
- * Who: platform operators only.
+ * GET /api/owner/overview: platform-wide AI spend, clients, error rate and response times for the Owner Console home,
+ * plus `alerts`: things the operator must act on (today: "Search is almost full" from lib/search-capacity.ts, while
+ * the Azure AI Search service is 70%+ full). Who: platform operators only.
  */
 import { handle } from "@/lib/api";
 import { all, get } from "@/lib/db";
 import { requireOwner } from "@/lib/owner";
+import { searchCapacity } from "@/lib/search-capacity";
 
 export const GET = handle(async () => {
   await requireOwner();
@@ -22,7 +24,9 @@ export const GET = handle(async () => {
     "SELECT COALESCE(SUM(cost_usd),0) cost, COUNT(*) calls, COALESCE(SUM(1-ok),0) errors FROM usage_events WHERE created_at >= ?",
     day,
   ))!;
+  const search = await searchCapacity();
   return {
+    alerts: search?.message ? [{ kind: search.level === "full" ? "bad" : "warn", text: search.message, href: "/owner/business#search-capacity" }] : [],
     kpis: {
       tenants: await n("SELECT COUNT(*) n FROM orgs"),
       activeTenants: await n("SELECT COUNT(DISTINCT org_id) n FROM usage_events WHERE created_at >= ?", since7),

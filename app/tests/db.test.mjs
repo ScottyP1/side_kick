@@ -271,6 +271,14 @@ test(`[${engine}] reminder timing: local time zone, quiet days, at or after the 
   assert.equal(rules.addDays("2026-10-31", 2), "2026-11-02");
 });
 
+test("reminders after a meeting: the notes card counts older open items, minus what today's daily reminder listed", () => {
+  assert.equal(rules.olderOpenCount(["action:1", "item:2", "gap:3"], []), 3, "no digest today: all of them");
+  assert.equal(rules.olderOpenCount(["action:1", "item:2", "gap:3"], ["action:1", "item:2"]), 1, "the digest listed two");
+  assert.equal(rules.olderOpenCount(["action:1", "item:2"], ["action:1", "item:2", "action:9"]), 0, "all listed: no line");
+  assert.equal(rules.olderOpenCount([], ["action:1"]), 0);
+  assert.equal(rules.olderOpenCount(["action:1", "action:1"], []), 1, "an item counts once");
+});
+
 const guard = await import("../src/lib/guard-text.ts");
 
 test(`[${engine}] guardrails: chat timestamps and dates aren't masked as phone numbers, real phone numbers are`, () => {
@@ -1304,6 +1312,83 @@ test(`[${engine}] retention: old traces, usage, audit and expired rows go in bat
   assert.equal(await count("SELECT COUNT(*) AS n FROM conversations WHERE id = ?", conv), 0, "expired conversations go");
   assert.equal(await count("SELECT COUNT(*) AS n FROM conversation_turns WHERE conversation_id = ?", conv), 0);
   assert.equal(again.traces, 0, "nothing left to do the second time");
+});
+
+test(`[${engine}] search capacity: a no-op on the local index; reads a fake servicestats, alerts at 70% / one index left and again at 90%`, async () => {
+  const http = await import("node:http");
+  const cap = await import("../src/lib/search-capacity.ts");
+  const saved = { endpoint: process.env.AZURE_SEARCH_ENDPOINT, key: process.env.AZURE_SEARCH_API_KEY };
+  const logs = async () => Number((await db.get("SELECT COUNT(*) AS n FROM platform_log WHERE actor = 'Search capacity check'")).n);
+  const MB = 1024 * 1024;
+  // Pure rules: storage share and indexes left.
+  const at = (storageMb, indexes, quota = 3) => cap.capacityLevel({ storage: { usage: storageMb * MB, quota: 50 * MB }, indexes: { usage: indexes, quota } });
+  assert.deepEqual([at(2, 1), at(2, 2), at(35, 1), at(45, 1), at(2, 3), at(34.9, 13, 15)], ["ok", "warn", "warn", "full", "full", "ok"]);
+  assert.deepEqual([cap.tierFromLimits(3), cap.tierFromLimits(15), cap.tierFromLimits(7)], ["Free", "Basic", null]);
+  assert.match(cap.capacityMessage("warn", "Free"), /upgrade to Basic \(about \$75\/month\) before uploads fail/);
+  assert.equal(cap.capacityMessage("ok", "Free"), null);
+
+  // Not configured (local keyword index): nothing read, nothing saved, nothing shown.
+  delete process.env.AZURE_SEARCH_ENDPOINT;
+  delete process.env.AZURE_SEARCH_API_KEY;
+  await db.run("DELETE FROM search_capacity");
+  const logs0 = await logs();
+  assert.deepEqual(await cap.checkSearchCapacity(), { searchChecked: 0, searchAlerts: 0, searchCheckFailed: 0 });
+  assert.equal(await cap.searchCapacity(), null);
+  assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM search_capacity")).n), 0);
+
+  // A fake Azure AI Search service: today's live numbers (2 MB of 50 MB, 2 of 3 indexes).
+  const seen = [];
+  let answer = { storageSize: { usage: 2 * MB, quota: 50 * MB }, indexesCount: { usage: 2, quota: 3 }, documentCount: { usage: 812, quota: null }, vectorIndexSize: { usage: 0, quota: 26 * MB } };
+  let status = 200;
+  const server = http.createServer((req, res) => {
+    seen.push({ url: req.url, key: req.headers["api-key"] });
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(status === 200 ? { counters: answer, limits: {} } : { error: { message: "Forbidden: wrong key" } }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  process.env.AZURE_SEARCH_ENDPOINT = `http://127.0.0.1:${server.address().port}/`;
+  process.env.AZURE_SEARCH_API_KEY = "fake-search-key-for-tests";
+  try {
+    assert.equal((await cap.searchCapacity()).checkedAt, null, "configured, not checked yet");
+    assert.deepEqual(await cap.checkSearchCapacity(), { searchChecked: 1, searchAlerts: 1, searchCheckFailed: 0 }, "all indexes but one used: warned");
+    assert.deepEqual(seen[0], { url: "/servicestats?api-version=2024-07-01", key: "fake-search-key-for-tests" });
+    let v = await cap.searchCapacity();
+    assert.deepEqual([v.tier, v.level, v.storage.pct, v.indexes.used, v.indexes.quota, v.indexes.pct, v.documents, v.error], ["Free", "warn", 4, 2, 3, 66.7, 812, null]);
+    assert.match(v.message, /^Search is almost full: upgrade to Basic/);
+    assert.equal(await logs(), logs0 + 1);
+    assert.match((await db.get("SELECT action FROM platform_log WHERE actor = 'Search capacity check' ORDER BY id DESC LIMIT 1")).action, /indexes 2 of 3, tier Free/);
+    assert.equal((await cap.checkSearchCapacity()).searchAlerts, 0, "the same level isn't raised twice");
+
+    // 46 MB of 50 MB (92%): raised again.
+    answer = { ...answer, storageSize: { usage: 46 * MB, quota: 50 * MB } };
+    assert.equal((await cap.checkSearchCapacity()).searchAlerts, 1);
+    v = await cap.searchCapacity();
+    assert.deepEqual([v.level, v.storage.pct], ["full", 92]);
+    assert.equal(await logs(), logs0 + 2);
+
+    // After an upgrade to Basic (15 GB, 15 indexes): back to ok, no message; a later rise would alert again.
+    answer = { ...answer, storageSize: { usage: 46 * MB, quota: 15 * 1024 * MB }, indexesCount: { usage: 2, quota: 15 } };
+    assert.equal((await cap.checkSearchCapacity()).searchAlerts, 0);
+    v = await cap.searchCapacity();
+    assert.deepEqual([v.tier, v.level, v.message], ["Basic", "ok", null]);
+
+    // A failed read keeps the last numbers and says why (not thrown, so the job doesn't hammer a wrong key).
+    status = 403;
+    assert.deepEqual(await cap.checkSearchCapacity(), { searchChecked: 0, searchAlerts: 0, searchCheckFailed: 1 });
+    v = await cap.searchCapacity();
+    assert.deepEqual([v.tier, v.level], ["Basic", "ok"]);
+    assert.match(v.error, /Forbidden: wrong key/);
+    status = 200;
+    await cap.checkSearchCapacity();
+    assert.equal((await cap.searchCapacity()).error, null, "the next good read clears it");
+  } finally {
+    server.close();
+    for (const [k, val] of [["AZURE_SEARCH_ENDPOINT", saved.endpoint], ["AZURE_SEARCH_API_KEY", saved.key]]) {
+      if (val === undefined) delete process.env[k];
+      else process.env[k] = val;
+    }
+    await db.run("DELETE FROM search_capacity");
+  }
 });
 
 test("scale indexes: the SQLite and Postgres schemas create the same ones", async () => {

@@ -58,7 +58,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { all, get, newId, now, run, tx } from "./db";
 import { audit, auditAsSidekick, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, requireManage, type Role, type User } from "./auth";
-import { ConsentNeededError, directoryPerson, findOrCreateMicrosoftUser, graphCall, linkByEmail } from "./directory";
+import { ConsentNeededError, directoryPerson, findOrCreateMicrosoftUser, graphCall, linkByEmail, NOT_APPROVED } from "./directory";
 import { entraConfigured } from "./entra";
 import { enqueue } from "./jobs";
 import { span } from "./trace";
@@ -250,6 +250,8 @@ export async function autoNotesStatus(orgId: string, opts: { workspaceIds: strin
     lastCheckAt: row?.last_poll_at ?? null,
     lastOkAt: row?.last_ok_at ?? null,
     lastError: row?.last_error ?? null,
+    /** The last error is a Microsoft permission not approved: the page links to Settings → Microsoft permissions. */
+    permissionMissing: Boolean(row?.last_error && [NOT_APPROVED, TRANSCRIPT_DENIED, ADHOC_DENIED].includes(row.last_error)),
     // Email matching blocked by a missing directory permission (lib/meeting-group.ts `noteDirectory`): managers only.
     directoryProblem: opts.manager ? row?.directory_error ?? null : null,
     instant: Boolean(sub && sub.expires_at > now()),
@@ -532,7 +534,7 @@ export const TRANSCRIPT_DENIED = `${BRAND.name} can't read your Teams meeting tr
  * The plain message when Microsoft refuses ad hoc call transcripts (Meet now) while scheduled meetings may work: the
  * tenant approved Sidekick before `CallTranscripts.Read.All` was added, so its Microsoft admin approves again.
  */
-export const ADHOC_DENIED = `${BRAND.name} can't read transcripts of Teams calls started with Meet now (for example in a group chat) yet. A Microsoft admin of your organization needs to approve the new call transcripts permission (Users & access → Approve ${BRAND.name} for your organization). Scheduled Teams meetings aren't affected.`;
+export const ADHOC_DENIED = `${BRAND.name} can't read transcripts of Teams calls started with Meet now (for example in a group chat) yet. A Microsoft admin of your organization needs to approve the new call transcripts permission (Settings → Microsoft permissions → Approve ${BRAND.name} for your organization). Scheduled Teams meetings aren't affected.`;
 
 /**
  * Messages for Graph refusals that need a tenant switch rather than a permission: since Microsoft's 2026 change,

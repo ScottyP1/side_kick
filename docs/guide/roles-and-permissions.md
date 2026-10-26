@@ -113,7 +113,8 @@ use (Usage & billing, AI models & agent, Guardrails, Connectors, Activity, Secur
 | Remove Sidekick from a Teams chat | ✓ | ✓ | ✓ (own groups' chats, or waiting chats they added) | | |
 | Import people from Microsoft 365 | ✓ | ✓ | ✓ (Members and Viewers, own workspaces) | | |
 | `@Sidekick add` / `remove @name` in a linked Teams chat | ✓ | ✓ | ✓ (Members and Viewers, that chat's workspace if they lead it) | | |
-| Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval) | ✓ | ✓ | | | |
+| See the Microsoft permissions checklist (Settings → Microsoft permissions) | ✓ | ✓ | ✓ (read-only) | | |
+| Approve Sidekick for the company's Microsoft 365 (starts Microsoft's admin approval), and Check now on Microsoft permissions | ✓ | ✓ | | | |
 | See the audit log and Activity (traces, performance) | ✓ | ✓ | | | |
 | Change branding (logo, brand color) | ✓ | ✓ | | | |
 | Make a workspace's guardrails stricter, write custom rules (Team plan and up), use "Test it" | ✓ | ✓ | | | |

@@ -116,7 +116,7 @@ export async function knownPeople(orgId: string, participants: Participant[], ca
 }
 
 /** What the Meetings panel says while the directory permission is missing (see `noteDirectory`). */
-export const DIRECTORY_NEEDED = `${BRAND.name} can't recognise people who were added by email and haven't signed in with Microsoft yet, so meetings with them may wait under Pick a group. A Microsoft admin needs to approve reading your directory: Users & access → Approve ${BRAND.name} for your organization.`;
+export const DIRECTORY_NEEDED = `${BRAND.name} can't recognise people who were added by email and haven't signed in with Microsoft yet, so meetings with them may wait under Pick a group. A Microsoft admin needs to approve reading your directory: Settings → Microsoft permissions → Approve ${BRAND.name} for your organization.`;
 
 /**
  * Records whether the organization's directory could be read for meeting matching (`auto_meetings.directory_error`):

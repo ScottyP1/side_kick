@@ -3666,8 +3666,10 @@ test(`[${ENGINE}] no cost internals for firms: an Org Owner's API responses have
   assert.doesNotMatch(help.checks.find((x) => x.name === "AI allowance").summary, /\$/);
   // The Owner Console keeps all of it, per client.
   const detail = (await owner("GET", `/api/owner/tenants/${await limitOrg()}?reload=1`)).body;
-  assert.ok(detail.ai.totals.cost > 0 && detail.ai.totals.input > 0, "cost and tokens per client");
-  assert.ok(detail.ai.byWorkspace.some((w) => w.name === "Limit Group" && w.cost > 0), "cost per group");
+  // Fake Claude records the cost but 0 tokens, so the token fields are checked for presence, not size.
+  assert.ok(Number(detail.ai.totals.cost) > 0, `cost per client: ${JSON.stringify(detail.ai.totals)}`);
+  assert.ok(["input", "output", "latency", "errors", "calls"].every((k) => k in detail.ai.totals), "tokens, response time and failures per client");
+  assert.ok(detail.ai.byWorkspace.some((w) => w.name === "Limit Group" && Number(w.cost) > 0), "cost per group");
   assert.ok(detail.ai.daily.length >= 1 && detail.ai.byModel.length >= 1, "cost per day and per model");
 });
 

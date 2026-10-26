@@ -2557,7 +2557,7 @@ test(`[${ENGINE}] permission matrix: every role gets exactly the access the role
   for (const role of EVERYONE) {
     const st = (await as[role]("GET", "/api/overview")).body.stats;
     const wholeOrg = ["owner", "admin"].includes(role);
-    assert.equal(st.spendScope, wholeOrg ? "org" : "you", `${role} spend scope`);
+    assert.equal(st.aiScope, wholeOrg ? "org" : "you", `${role} AI use scope`);
     if (wholeOrg) assert.equal(st.aiCallsMonth, org.aiCallsMonth, `${role} sees the company total`);
   }
   const before = (await member("GET", "/api/overview")).body.stats.aiCallsMonth;

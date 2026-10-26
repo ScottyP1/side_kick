@@ -13,7 +13,7 @@ import { BRAND } from "@/lib/brand";
 import { FindingRows, useFindings } from "@/components/findings";
 
 type Overview = {
-  stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; aiCallsMonth: number; spendScope: "org" | "you" };
+  stats: { workspaces: number; documents: number; meetings: number; questions: number; answered: number; openActions: number; noOwner: number; decisions: number; aiCallsMonth: number; aiScope: "org" | "you" };
   recentMeetings: { id: string; title: string; held_at: string; status: string; workspace: string; color: string; workspace_id: string }[];
   attention: {
     failedDocs: { id: string; name: string; error: string; workspace_id: string }[];

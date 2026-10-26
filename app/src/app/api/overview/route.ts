@@ -2,8 +2,8 @@
  * GET /api/overview: numbers for the portal home page across the workspaces this user can see.
  * AI use this month, as a count of AI requests (`aiCallsMonth`; never the cost, which is only in the Owner
  * Console): roles that may see usage and billing (Org Owner, Org Admin) get the whole organization's total
- * (`spendScope: "org"`); everyone else gets only the calls made for them, in the portal or from a linked Teams
- * account (`spendScope: "you"`).
+ * (`aiScope: "org"`); everyone else gets only the calls made for them, in the portal or from a linked Teams
+ * account (`aiScope: "you"`).
  */
 import { handle } from "@/lib/api";
 import { isAdmin, requireUser, workspaceIdsFor } from "@/lib/auth";
@@ -31,7 +31,7 @@ export const GET = handle(async () => {
       noOwner: await one("SELECT COUNT(*) n FROM action_items WHERE workspace_id IN (__WS__) AND status != 'Done' AND (owner IS NULL OR owner = '')"),
       decisions: await one("SELECT COUNT(*) n FROM items WHERE workspace_id IN (__WS__) AND kind = 'decision'"),
       aiCallsMonth: mine.calls,
-      spendScope: wholeOrg ? "org" : "you",
+      aiScope: wholeOrg ? "org" : "you",
     },
     recentMeetings: ids.length
       ? await all(`SELECT m.id, m.title, m.held_at, m.status, w.name AS workspace, w.color, w.id AS workspace_id FROM meetings m JOIN workspaces w ON w.id = m.workspace_id WHERE m.workspace_id IN (${ph}) ORDER BY m.created_at DESC LIMIT 5`, ...ids)

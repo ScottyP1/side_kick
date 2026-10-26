@@ -2,7 +2,8 @@
 
 /**
  * Activity (/activity): what Sidekick did for this organization, like an APM tool (Dynatrace-style).
- * - Overview: request volume, failures, response times, AI calls and cost, portal vs Teams, busiest operations.
+ * - Overview: request volume, failures, response times, AI calls, portal vs Teams, busiest operations.
+ *   No AI cost, tokens or model names anywhere on this page (the API leaves them out; they're in the Owner Console).
  * - Traces: every request and Teams message; click one for its step-by-step waterfall (search, AI,
  *   embeddings, Teams delivery, database time).
  * - Messages: questions asked in the portal and in Teams, and whether Sidekick found the answer.
@@ -12,13 +13,13 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "@/components/shell";
-import { api, fmtTime, Modal, Pill, Spinner, usd, useReportError } from "@/components/ui";
+import { api, fmtTime, Modal, Pill, Spinner, useReportError } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 
 type Overview = {
   days: number;
   guardrails: { total: number; blocked: number; rules: { rule: string; label: string; total: number }[] };
-  kpis: { requests: number; failed: number; refused: number; errorRate: number; p50: number; p95: number; teams: number; portal: number; background: number; people: number; aiCalls: number; aiCost: number; aiFailed: number; questions: number; answered: number };
+  kpis: { requests: number; failed: number; refused: number; errorRate: number; p50: number; p95: number; teams: number; portal: number; background: number; people: number; aiCalls: number; aiFailed: number; questions: number; answered: number };
   series: { key: string; requests: number; errors: number }[];
   operations: { name: string; count: number; errors: number; p50: number; p95: number }[];
 };
@@ -91,7 +92,7 @@ function OverviewTab() {
         <Kpi label="Requests" value={k.requests.toLocaleString()} sub={`${k.portal} portal · ${k.teams} Teams${k.background ? ` · ${k.background} background` : ""}`} />
         <Kpi label="Failures" value={pctText(k.errorRate)} sub={`${k.failed} failed · ${k.refused} refused (not allowed / not found)`} tone={k.failed ? "bad" : undefined} />
         <Kpi label="Response time" value={ms(k.p50)} sub={`typical · slowest 5% take ${ms(k.p95)} or more`} />
-        <Kpi label="AI work" value={`${k.aiCalls} calls`} sub={`${usd(k.aiCost)}${k.aiFailed ? ` · ${k.aiFailed} failed` : ""}`} tone={k.aiFailed ? "bad" : undefined} />
+        <Kpi label="AI work" value={`${k.aiCalls} calls`} sub={k.aiFailed ? `${k.aiFailed} failed` : "All worked"} tone={k.aiFailed ? "bad" : undefined} />
         <Kpi label="Questions answered" value={k.questions ? pctText(k.answered / k.questions) : "—"} sub={`${k.answered} of ${k.questions} found in the sources`} />
         <Kpi label="People active" value={String(k.people)} sub="signed-in people and Teams users" />
         <Kpi label="Guardrails" value={`${o.guardrails.blocked} refused`} sub={o.guardrails.total ? `${o.guardrails.total - o.guardrails.blocked} answers cleaned · most: ${o.guardrails.rules[0].label}` : "nothing refused or cleaned up"} />
@@ -326,7 +327,7 @@ function TraceDetail({ id, onClose }: { id: string; onClose: () => void }) {
                   {(attrs.length > 0 || s.error) && (
                     <div className="wf-attrs">
                       {s.error && <span style={{ color: "var(--bad)" }}>{s.error} · </span>}
-                      {attrs.map(([key, v]) => `${key.replace(/_/g, " ")}: ${typeof v === "number" && key.startsWith("cost") ? usd(v) : String(v)}`).join(" · ")}
+                      {attrs.map(([key, v]) => `${key.replace(/_/g, " ")}: ${String(v)}`).join(" · ")}
                     </div>
                   )}
                 </div>

@@ -102,7 +102,7 @@ export const FAQ: readonly FaqItem[] = [
     id: "ai-limit",
     q: "What happens when we reach our plan's AI allowance?",
     a: [
-      `Each plan includes a monthly AI credit. Admins see a warning when you've used 80% of it. At the limit ${BRAND.name} keeps the essentials running and pauses the rest until the next month or until you change plan, so nothing is lost and nothing is billed by surprise.`,
+      `Each plan includes a monthly AI allowance, and bigger plans include more. Admins see how much is used as a percentage, and a warning at 80%. At the limit ${BRAND.name} keeps the essentials running and pauses the rest until the next month or until you change plan, so nothing is lost and nothing is billed by surprise.`,
       "The amounts may still change while pricing is being decided.",
     ],
     topics: ["pricing"],
@@ -111,7 +111,7 @@ export const FAQ: readonly FaqItem[] = [
     id: "group-pricing",
     q: "How is it priced?",
     a: [
-      `Per organization per month, by the number of groups you run (one group per client engagement), not per person. Each plan includes some groups and a number of people, meeting hours and AI credit. Need one more engagement? Add an extra group to any plan for ${usd(EXTRA_GROUP.priceUsd)} a month; it also adds ${EXTRA_GROUP.adds.seats} people, ${EXTRA_GROUP.adds.meetingHours} meeting hours and ${usd(EXTRA_GROUP.adds.aiCreditUsd)} of AI credit.`,
+      `Per organization per month, by the number of groups you run (one group per client engagement), not per person. Each plan includes some groups and a number of people, meeting hours and AI allowance. Need one more engagement? Add an extra group to any plan for ${usd(EXTRA_GROUP.priceUsd)} a month; it also adds ${EXTRA_GROUP.adds.seats} people, ${EXTRA_GROUP.adds.meetingHours} meeting hours and more included AI.`,
       `When you add a group past your plan, ${BRAND.name} shows the cheaper of adding extra groups or moving to the next plan, with the monthly price of each. Groups that are ending don't count. The amounts may still change while pricing is being decided.`,
     ],
     topics: ["pricing"],

@@ -3,12 +3,14 @@
 /**
  * The Plan section at the top of Usage & billing (/usage): the organization's plan (priced per organization
  * by groups, lib/plans.ts), its extra groups and monthly price, subscription status, every plan limit with
- * its use (people, groups, tracked chats, meeting hours, documents, connectors, AI credit; "Over limit" when
+ * its use (people, groups, tracked chats, meeting hours, documents, connectors; "Over limit" when
  * a plan shrank below what's used, nothing is ever deleted), every plan feature (included, or "Not in your
  * plan" with "still in use" when a smaller plan kept what was already set up), and (the Org Owner) pay, change
  * plan, add or remove extra groups, cancel, and the test-mode "simulate a failed payment". Org Admins see it
  * read-only. Organizations managed by the Sidekick team (no self-service subscription) and Enterprise see
  * their limits and a note to contact the team.
+ * The included AI is shown as a percent on the Usage page (AllowancePanel), never in dollars: /api/billing leaves
+ * the AI credit out of the limits, the plans and the extra-group add-on (lib/firm-usage.ts).
  *
  * Arriving from the group-limit message (`/usage?groups=N`, from New group) shows the two ways to make room
  * for N groups, cheaper first: extra groups on this plan, or the next plan up (`groupOptions`).
@@ -156,7 +158,7 @@ export function PlanSection() {
         {b.canManage ? (
           <>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <label htmlFor="extra-groups" className="muted">Extra groups ({usd(b.extraGroup.priceUsd)} each / month, +{b.extraGroup.adds.seats} people, +{b.extraGroup.adds.meetingHours} meeting hours, +{usd(b.extraGroup.adds.aiCreditUsd)} AI credit each)</label>
+              <label htmlFor="extra-groups" className="muted">Extra groups ({usd(b.extraGroup.priceUsd)} each / month, +{b.extraGroup.adds.seats} people, +{b.extraGroup.adds.meetingHours} meeting hours, and more included AI each)</label>
               <input id="extra-groups" className="input num" type="number" min={0} max={b.maxExtraGroups} style={{ width: 80 }} value={wantExtras} onChange={(e) => setExtras(Math.max(0, Math.min(b.maxExtraGroups, Math.floor(Number(e.target.value) || 0))))} />
               <button className="btn" disabled={wantExtras === extraNow} onClick={() => setConfirm("extras")}>Update</button>
             </div>
@@ -178,7 +180,7 @@ export function PlanSection() {
       </div>
       {confirm === "change" && next && (
         <Modal title={`Switch to ${next.name}?`} onClose={() => setConfirm(null)} footer={<><button className="btn" onClick={() => setConfirm(null)}>Back</button><button className="btn primary" onClick={() => act("change", `You're on the ${next.name} plan now`)}>Switch plan</button></>}>
-          <p style={{ margin: 0 }}>{planWithExtras(next, extraNow)} is {usd(monthlyPrice(next, extraNow))} a month for the organization, for {limitText(limitsWithExtras(next, extraNow).workspaces)} groups, up to {limitText(limitsWithExtras(next, extraNow).seats)} people, {limitText(next.chats)} tracked chats, {limitText(next.meetingHours)} meeting hours a month, {limitText(next.documents)} documents and {usd(next.aiCreditUsd ?? 0)} of AI credit a month{extraNow ? `, plus what your ${extraNow} extra group${extraNow === 1 ? "" : "s"} add` : ""}. It applies straight away; the paid-until date stays the same. If you use more than a smaller plan allows, nothing is deleted: you just can&apos;t add more until you&apos;re under the limit.</p>
+          <p style={{ margin: 0 }}>{planWithExtras(next, extraNow)} is {usd(monthlyPrice(next, extraNow))} a month for the organization, for {limitText(limitsWithExtras(next, extraNow).workspaces)} groups, up to {limitText(limitsWithExtras(next, extraNow).seats)} people, {limitText(next.chats)} tracked chats, {limitText(next.meetingHours)} meeting hours a month, {limitText(next.documents)} documents and its monthly AI allowance{extraNow ? `, plus what your ${extraNow} extra group${extraNow === 1 ? "" : "s"} add` : ""}. It applies straight away; the paid-until date stays the same. If you use more than a smaller plan allows, nothing is deleted: you just can&apos;t add more until you&apos;re under the limit.</p>
           {lost(next).length > 0 && <p style={{ margin: "10px 0 0" }}>{next.name} doesn&apos;t include {lost(next).map((k) => FEATURE_LABEL[k]).join(", ")}. What&apos;s already set up keeps working (Team Leads stay Team Leads, rules and reminders stay on), but nothing new can be added.</p>}
         </Modal>
       )}
@@ -206,7 +208,10 @@ export function PlanSection() {
   );
 }
 
-/** Shows one limit's number: money for the AI credit, one decimal for meeting hours. */
+/**
+ * Shows one limit's number: one decimal for meeting hours, money for the AI credit. Only the Owner Console gets the
+ * AI credit line (it reuses `Limits`); /api/billing leaves it out for firms.
+ */
 const shown = (key: LimitKey, n: number) => (key === "aiCreditUsd" ? `$${n.toFixed(2)}` : key === "meetingHours" || key === "liveMeetingHours" ? String(Math.round(n * 10) / 10) : n.toLocaleString());
 
 /**

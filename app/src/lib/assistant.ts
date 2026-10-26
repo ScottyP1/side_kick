@@ -3,9 +3,9 @@
  *
  * It does two things:
  * 1. **Answers questions about Sidekick itself** ("how do I link a Teams channel?", "what does Viewer
- *    mean?", "what did we spend this month?"), from a short built-in guide (`GUIDE` below) plus a
+ *    mean?", "how much of our AI allowance is left?"), from a short built-in guide (`GUIDE` below) plus a
  *    snapshot of this person's own org: their role, the workspaces they can see, and (for roles that may
- *    see billing) this month's AI spend. It is not the project Q&A: questions about a client engagement
+ *    see billing) the share of this month's included AI used, as a percent (never AI cost or model names). It is not the project Q&A: questions about a client engagement
  *    go to Ask Sidekick on Knowledge & docs, which cites sources.
  * 2. **Proposes actions, never runs them.** When the person asks for something it can do (create a
  *    workspace, add a person, link a Teams chat, refresh a knowledge map, open a page), Claude returns a
@@ -45,12 +45,13 @@ import { assertEnabled } from "./owner";
 import { cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenTurn, type GuardPlace, type RuleId } from "./guardrails";
 import { addExchange, openConversation, priorSummary, standaloneQuestion } from "./conversations";
 import { BRAND } from "./brand";
+import { creditStatus } from "./credit";
+import { allowanceOf } from "./firm-usage";
 
 /** Pages the assistant can send someone to, with who may see each (mirrors the menu in lib/portal-nav.ts). */
 export const PAGES: Record<string, { label: string; href: string; who?: (u: User) => boolean }> = {
   overview: { label: "Overview", href: "/home" },
   usage: { label: "Usage & billing", href: "/usage", who: isAdmin },
-  agent: { label: "AI models & agent", href: "/agent", who: isAdmin },
   workspaces: { label: "Workspaces", href: "/workspaces" },
   knowledge: { label: "Knowledge & docs", href: "/knowledge" },
   meetings: { label: "Meetings", href: "/meetings" },
@@ -187,8 +188,8 @@ export function checkAction(user: User, a: ProposedAction | null, workspaces: { 
  */
 const GUIDE = `
 ${BRAND.name} is an AI teammate for Microsoft Teams used by delivery teams on client engagements.
-Pages (sidebar): Overview (home), Usage & billing, AI models & agent, Groups (the screens and older docs also call a group a "workspace"; say "group"), Knowledge & docs (upload documents, Ask ${BRAND.name} with cited sources), Meetings (import Teams .vtt / Word / text transcripts; ${BRAND.name} writes the summary, decisions, action items, open questions), Memory & gaps (knowledge map: topics with a 0-100 coverage score, gaps, conflicts, action-item tracker), Connectors (Azure DevOps Boards, Jira, GitHub Issues and Confluence, read-only: Org Owners/Admins connect a tool with its own sign-in (GitHub: the Sidekick GitHub App must be installed on their GitHub organization first), Owners/Admins/Team Leads link a project, repository or space to a group so its work items or pages feed answers with links, health and "Sync now" shown there; the plan sets how many tools: Starter none, Team one, Business all), Users & access, Guardrails (rules ${BRAND.name} always follows: a locked floor against hate, harassment, sexual content, harm, jailbreaks, crossing client walls and guessing; plus org-wide switches only the Org Owner can change, e.g. refuse swearing, stick to work, no judging people, steer HR/legal/medical questions, hide contact details, no competitor talk; Org Owners/Admins can make one workspace stricter with extra switches, add up to 20 custom rules like "Never quote day rates" (org-wide or per workspace; rules that loosen the guardrails are refused) and try a question in the Test it box; admins see counts of how often each rule fired), Activity (traces, waterfall, messages, audit trail), Security & audit, Settings.
-Who sees which page: everyone gets Overview, Groups, Knowledge & docs, Firm library (read-only unless admin), Meetings, Memory & gaps, Settings (just "My account" unless admin) and Help & support (which lists the rules ${BRAND.name} follows). Only Org Owners and Org Admins get Usage & billing, AI models & agent, Guardrails, Activity and Security & audit. Connectors and Users & access are for Org Owners/Admins and Team Leads; a group's page shows Members and Viewers which tools feed it, and its Team Lead its last 30 days.
+Pages (sidebar): Overview (home), Usage & billing (activity counts, plan limits and the AI allowance as a percent; no AI costs or model names, which the ${BRAND.name} team keeps to itself), Groups (the screens and older docs also call a group a "workspace"; say "group"), Knowledge & docs (upload documents, Ask ${BRAND.name} with cited sources), Meetings (import Teams .vtt / Word / text transcripts; ${BRAND.name} writes the summary, decisions, action items, open questions), Memory & gaps (knowledge map: topics with a 0-100 coverage score, gaps, conflicts, action-item tracker), Connectors (Azure DevOps Boards, Jira, GitHub Issues and Confluence, read-only: Org Owners/Admins connect a tool with its own sign-in (GitHub: the Sidekick GitHub App must be installed on their GitHub organization first), Owners/Admins/Team Leads link a project, repository or space to a group so its work items or pages feed answers with links, health and "Sync now" shown there; the plan sets how many tools: Starter none, Team one, Business all), Users & access, Guardrails (rules ${BRAND.name} always follows: a locked floor against hate, harassment, sexual content, harm, jailbreaks, crossing client walls and guessing; plus org-wide switches only the Org Owner can change, e.g. refuse swearing, stick to work, no judging people, steer HR/legal/medical questions, hide contact details, no competitor talk; Org Owners/Admins can make one workspace stricter with extra switches, add up to 20 custom rules like "Never quote day rates" (org-wide or per workspace; rules that loosen the guardrails are refused) and try a question in the Test it box; admins see counts of how often each rule fired), Activity (traces, waterfall, messages, audit trail), Security & audit, Settings.
+Who sees which page: everyone gets Overview, Groups, Knowledge & docs, Firm library (read-only unless admin), Meetings, Memory & gaps, Settings (just "My account" unless admin) and Help & support (which lists the rules ${BRAND.name} follows). Only Org Owners and Org Admins get Usage & billing, Guardrails, Activity and Security & audit. Connectors and Users & access are for Org Owners/Admins and Team Leads; a group's page shows Members and Viewers which tools feed it, and its Team Lead its last 30 days.
 Workspaces: one per client engagement; walls mean people only see workspaces they belong to (admins see all in their org). Each document is Internal or Shareable; when client guests are present only Shareable documents are used.
 Roles: Org Owner and Org Admin (everything: people, workspaces, Teams links, settings, Activity, Usage & billing; only the Org Owner pays, changes the plan or cancels), Team Lead (a Member who also adds people as Member or Viewer to the workspaces they lead, takes them off again, and links Teams chats to those workspaces; can't create workspaces or organizations, change roles or see other workspaces), Member (works in their workspaces: upload, import meetings, ask, refresh map), Viewer (read-only).
 Teams: add the ${BRAND.name} app to a chat or channel, write "@${BRAND.name} link" and it posts a link code; an admin enters the code here (or asks this assistant) to link it to a workspace. Then "@${BRAND.name} <question>" answers with sources, and processed meetings post a notes card with Assign / Done buttons on action items. "@${BRAND.name} help" lists commands. ${BRAND.name} only reads messages that mention it.
@@ -236,14 +237,8 @@ export async function assist(user: User, message: string, conversationId?: unkno
       )
     : [];
   const org = await get<{ name: string }>("SELECT name FROM orgs WHERE id = ?", user.org_id);
-  let spend: { calls: number; cost: number } | undefined;
-  if (isAdmin(user)) {
-    const d = new Date();
-    spend = await get<{ calls: number; cost: number }>(
-      "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost FROM usage_events WHERE org_id = ? AND created_at >= ?",
-      user.org_id, new Date(d.getFullYear(), d.getMonth(), 1).toISOString(),
-    );
-  }
+  // Admins get this month's AI allowance as a percent; never the cost in dollars or model names (lib/firm-usage.ts).
+  const allowance = isAdmin(user) ? allowanceOf(await creditStatus(user.org_id)) : undefined;
   const people = isAdmin(user) ? await get<{ n: number }>("SELECT COUNT(*) AS n FROM users WHERE org_id = ?", user.org_id) : undefined;
   const pages = Object.entries(PAGES).filter(([, p]) => !p.who || p.who(user)).map(([key, p]) => `${key} = ${p.label}`);
 
@@ -252,8 +247,7 @@ export async function assist(user: User, message: string, conversationId?: unkno
     organization: org?.name,
     people_in_org: people?.n,
     workspaces: workspaces.map((w) => ({ id: w.id, name: w.name, code: w.code, documents: w.docs, meetings: w.meetings, open_action_items: w.open_items })),
-    ai_spend_this_month_usd: spend ? Number(spend.cost.toFixed(2)) : "not visible to this role",
-    ai_calls_this_month: spend?.calls,
+    ai_allowance_this_month: allowance ? (allowance.level === "unlimited" ? "no limit" : `${Math.round(allowance.pct)}% of the plan's included AI used`) : "not visible to this role",
     pages,
     allowed_actions: allowedActions(user),
   };

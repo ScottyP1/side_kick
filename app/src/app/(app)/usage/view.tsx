@@ -1,29 +1,36 @@
 "use client";
 
 /**
- * Usage & billing (/usage): the organization's plan (PlanSection: status, limits, pay / change / cancel), the
- * monthly AI credit, then every AI request metered: tokens, cost and response time by feature, group and day,
- * and **Export CSV** (AI cost and activity per group with its engagement code, per month, for chargeback;
- * GET /api/usage/export). Plain wording: no model names (those are for the Sidekick team).
+ * Usage & billing (/usage): the organization's plan (PlanSection: price, status, limits, pay / change / cancel),
+ * what Sidekick did this month (questions answered, meetings written up, documents added, reminders sent,
+ * assistant replies: in total, per day and per group), the AI allowance as a percent of the plan's included AI,
+ * and **Export CSV** (the same counts per group with its engagement code, per month, for chargeback;
+ * GET /api/usage/export). No AI cost, tokens, response times or model names: those are Sidekick's internals and
+ * live in the Owner Console (lib/firm-usage.ts). Data: GET /api/usage.
  * Org Owners and Org Admins (only the Org Owner changes the plan).
  */
 
 import { useEffect, useState } from "react";
-import { api, ApiError, usd, useReportError, useToast } from "@/components/ui";
+import { api, ApiError, useReportError, useToast } from "@/components/ui";
 import { PlanSection } from "./plan";
 import { BRAND } from "@/lib/brand";
 
-type Credit = { month: string; creditUsd: number | null; topUpUsd: number; usedUsd: number; pct: number; level: "unlimited" | "ok" | "warn" | "essentials" };
+/** This month's AI allowance as the firm sees it: a percent and a level, no dollars (lib/firm-usage.ts). */
+type Allowance = { month: string; pct: number; level: "unlimited" | "ok" | "warn" | "essentials"; toppedUp: boolean };
+type Activity = { questions: number; answered: number; meetings: number; documents: number; reminders: number; assistant: number };
 
 type U = {
   period: { start: string; end: string; day: number; days: number };
-  totals: { calls: number; cost: number; input: number; output: number; latency: number; errors: number };
-  byFeature: { feature: string; calls: number; cost: number; latency: number }[];
-  byWorkspace: { name: string; color: string; calls: number; cost: number }[];
-  daily: { day: string; cost: number; calls: number }[];
-  credit: Credit;
+  totals: Activity;
+  byWorkspace: (Activity & { id: string | null; name: string; color: string })[];
+  daily: (Activity & { day: string })[];
+  allowance: Allowance;
 };
-const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", remind: "Reminders", embed: "Search embeddings" };
+
+/** Everything Sidekick did in one bucket (for the per-day chart). */
+const size = (a: Activity) => a.questions + a.meetings + a.documents + a.reminders + a.assistant;
+/** "3 questions", "1 meeting": a count with its word. */
+const n = (count: number, one: string, many = `${one}s`) => `${count.toLocaleString()} ${count === 1 ? one : many}`;
 
 /**
  * Downloads the usage CSV for the last `months` months. Problems (not allowed, server trouble) show as a
@@ -65,20 +72,28 @@ function ExportButton() {
   );
 }
 
-/** The month's AI credit: used / included (with top-ups), a meter, and what happens at 80% and 100%. */
-function CreditPanel({ c }: { c: Credit }) {
-  const pct = Math.min(100, c.pct);
+/**
+ * The month's AI allowance: a meter and "4% of this month's included AI used", then what happens at 80% and 100%.
+ * No dollar amounts: what the AI costs is Sidekick's business, the firm sees how much of its plan it has used.
+ */
+function AllowancePanel({ a }: { a: Allowance }) {
+  const pct = Math.min(100, a.pct);
+  const shown = a.pct > 0 && a.pct < 1 ? "Under 1%" : `${Math.round(a.pct)}%`;
   return (
     <div className="panel">
-      <div className="panel-h"><h2>AI credit this month</h2><span className="muted">{c.creditUsd === null ? "No limit" : `${Math.round(c.pct)}% used`}</span></div>
+      <div className="panel-h"><h2>AI allowance this month</h2>{a.level !== "unlimited" && <span className="muted">{a.level === "essentials" ? "Used up" : `${shown} used`}</span>}</div>
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <b className="num" style={{ fontSize: 18 }}>{usd(c.usedUsd)}{c.creditUsd !== null && <span className="muted" style={{ fontWeight: 400 }}> of {usd(c.creditUsd)}</span>}</b>
-        {c.creditUsd !== null && <div className="meter"><span style={{ width: `${pct}%`, background: c.level === "essentials" ? "var(--bad)" : c.level === "warn" ? "var(--warn)" : undefined }} /></div>}
-        {c.topUpUsd > 0 && <span className="muted">Includes a {usd(c.topUpUsd)} top-up from the {BRAND.name} team.</span>}
+        {a.level === "unlimited" ? <b>No limit on AI use</b> : (
+          <>
+            <b className="num" style={{ fontSize: 18 }}>{a.level === "essentials" ? "All" : shown} of this month&apos;s included AI used</b>
+            <div className="meter" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label="Share of this month's included AI used"><span style={{ width: `${pct}%`, background: a.level === "essentials" ? "var(--bad)" : a.level === "warn" ? "var(--warn)" : undefined }} /></div>
+          </>
+        )}
+        {a.toppedUp && <span className="muted">Includes extra AI the {BRAND.name} team added for this month.</span>}
         <span className="muted">
-          {c.creditUsd === null ? "Your organization's AI use isn't capped."
-            : c.level === "essentials" ? `Used up: ${BRAND.name} keeps answering questions and checking them against your guardrails; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st. Ask the ${BRAND.name} team for a top-up, or move to a bigger plan.`
-            : `At 80% the Org Owner and Org Admins see a notice. At 100% ${BRAND.name} keeps answering questions and pauses the extras until the 1st.`}
+          {a.level === "unlimited" ? "Your organization's AI use isn't capped."
+            : a.level === "essentials" ? `Used up: ${BRAND.name} keeps answering questions and checking them against your guardrails; reminders, knowledge map updates, the assistant and notes for long meetings are paused until the 1st. Ask the ${BRAND.name} team for more, or move to a bigger plan.`
+            : `Your plan includes a monthly AI allowance; it starts again on the 1st. At 80% the Org Owner and Org Admins see a notice. At 100% ${BRAND.name} keeps answering questions and pauses the extras until the 1st.`}
         </span>
       </div>
     </div>
@@ -93,14 +108,12 @@ export default function UsagePage() {
   }, []);
   if (err) return <div className="callout bad">{err}</div>;
   if (!u) return <span className="muted">Loading…</span>;
-  const projected = u.period.day ? (u.totals.cost / u.period.day) * u.period.days : 0;
-  const maxWs = Math.max(0.0001, ...u.byWorkspace.map((w) => w.cost));
-  const maxDay = Math.max(0.0001, ...u.daily.map((d) => d.cost));
+  const maxDay = Math.max(1, ...u.daily.map(size));
   // Every day of the month, so quiet days show as gaps instead of disappearing from the chart.
   const byDay = new Map(u.daily.map((d) => [d.day, d]));
   const monthDays = Array.from({ length: u.period.days }, (_, i) => {
     const day = new Date(Date.parse(u.period.start) + i * 86400000 + 12 * 3600000).toISOString().slice(0, 10);
-    return byDay.get(day) ?? { day, cost: 0, calls: 0 };
+    return byDay.get(day) ?? { day, questions: 0, answered: 0, meetings: 0, documents: 0, reminders: 0, assistant: 0 };
   });
   // The month's start is midnight on the server's clock (UTC in Azure), which is still the previous month
   // in US time zones; naming the month from its middle is right in every time zone.
@@ -112,71 +125,61 @@ export default function UsagePage() {
         <div>
           <div className="eyebrow">Usage & billing</div>
           <h1>{month}</h1>
-          <p>Every AI request is metered: cost, size and response time. Your plan includes a monthly AI credit; the plan&apos;s price is separate.</p>
+          <p>What {BRAND.name} did for your team this month, and how much of your plan&apos;s included AI you&apos;ve used.</p>
         </div>
         <ExportButton />
       </div>
       <PlanSection />
-      <div className="grid g4">
-        {[
-          ["AI spend this month", usd(u.totals.cost), `On pace for ${usd(projected)}`],
-          ["AI requests", u.totals.calls.toLocaleString(), `${u.totals.errors} failed`],
-          ["Tokens", `${((u.totals.input + u.totals.output) / 1000).toFixed(1)}k`, `${(u.totals.input / 1000).toFixed(1)}k in · ${(u.totals.output / 1000).toFixed(1)}k out`],
-          ["Avg response time", `${(u.totals.latency / 1000).toFixed(1)} s`, u.totals.calls ? `Average over ${u.totals.calls.toLocaleString()} request${u.totals.calls === 1 ? "" : "s"}` : "No requests yet"],
-        ].map(([l, v, d]) => (
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+        {([
+          ["Questions answered", u.totals.answered, u.totals.questions ? `of ${n(u.totals.questions, "question")} asked` : "None asked yet"],
+          ["Meetings written up", u.totals.meetings, "Notes, decisions and action items"],
+          ["Documents added", u.totals.documents, "To groups' knowledge"],
+          ["Reminders sent", u.totals.reminders, "Cards posted in Teams"],
+          ["Assistant replies", u.totals.assistant, "In the portal's assistant"],
+        ] as const).map(([l, v, d]) => (
           <div key={l} className="kpi" style={{ cursor: "default" }}>
             <span className="eyebrow">{l}</span>
-            <span className="v">{v}</span>
+            <span className="v">{v.toLocaleString()}</span>
             <span className="d muted">{d}</span>
           </div>
         ))}
       </div>
       <div className="grid g-main">
         <div className="panel">
-          <div className="panel-h"><h2>Spend per day</h2><span className="muted">This month</span></div>
+          <div className="panel-h"><h2>Activity per day</h2><span className="muted">This month</span></div>
           <div className="panel-b">
-            {!u.daily.length ? <div className="empty">No usage yet.</div> : (
+            {!u.daily.length ? <div className="empty">Nothing yet this month.</div> : (
               <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 160, paddingTop: 8 }}>
                 {monthDays.map((d) => (
-                  <div key={d.day} title={`${d.day}: ${usd(d.cost)} · ${d.calls} requests`} style={{ flex: 1, minWidth: 4, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
-                    <div style={{ width: "100%", height: d.calls ? `${Math.max(3, (d.cost / maxDay) * 130)}px` : 0, background: "var(--accent)", borderRadius: "4px 4px 0 0" }} />
-                    <span className="faint" style={{ fontSize: 10.5 }}>{Number(d.day.slice(8))}</span>
+                  <div key={d.day} title={`${d.day}: ${n(d.questions, "question")} · ${n(d.meetings, "meeting")} · ${n(d.documents, "document")} · ${n(d.reminders, "reminder")} · ${n(d.assistant, "assistant reply", "assistant replies")}`} style={{ flex: 1, minWidth: 4, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
+                    <div style={{ width: "100%", height: size(d) ? `${Math.max(3, (size(d) / maxDay) * 130)}px` : 0, background: "var(--accent)", borderRadius: "4px 4px 0 0" }} />
+                    {/* Day 1 and every 5th day only, so the numbers stay readable on phones. */}
+                    <span className="faint" style={{ fontSize: 10.5, visibility: Number(d.day.slice(8)) === 1 || Number(d.day.slice(8)) % 5 === 0 ? "visible" : "hidden" }}>{Number(d.day.slice(8))}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
         </div>
-        <div className="panel">
-          <div className="panel-h"><h2>By feature</h2></div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Feature</th><th className="r">Requests</th><th className="r">Avg time</th><th className="r">Cost</th></tr></thead>
-              <tbody>
-                {u.byFeature.map((f) => (
-                  <tr key={f.feature}><td>{FEATURE[f.feature] ?? f.feature}</td><td className="r num">{f.calls}</td><td className="r num">{(f.latency / 1000).toFixed(1)} s</td><td className="r num">{usd(f.cost)}</td></tr>
-                ))}
-                {!u.byFeature.length && <tr><td colSpan={4} className="muted">No usage yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <AllowancePanel a={u.allowance} />
       </div>
-      <div className="grid g2">
-        <div className="panel">
-          <div className="panel-h"><h2>By group</h2></div>
-          <div className="panel-b">
-            {!u.byWorkspace.length && <span className="muted">No usage yet.</span>}
-            {u.byWorkspace.map((w) => (
-              <div key={w.name} className="bar-row">
-                <span style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}><span className="swatch" style={{ background: w.color }} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span></span>
-                <div className="bar"><span style={{ width: `${(w.cost / maxWs) * 100}%`, background: w.color }} /></div>
-                <span className="num" style={{ textAlign: "right" }}>{usd(w.cost)}</span>
-              </div>
-            ))}
-          </div>
+      <div className="panel">
+        <div className="panel-h"><h2>By group</h2><span className="muted">This month</span></div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Group</th><th className="r">Questions</th><th className="r">Answered</th><th className="r">Meetings</th><th className="r">Documents</th><th className="r">Reminders</th><th className="r">Assistant</th></tr></thead>
+            <tbody>
+              {u.byWorkspace.map((w) => (
+                <tr key={w.id ?? "org"}>
+                  <td><span style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}><span className="swatch" style={{ background: w.color }} /><span>{w.name}</span></span></td>
+                  <td className="r num">{w.questions}</td><td className="r num">{w.answered}</td><td className="r num">{w.meetings}</td><td className="r num">{w.documents}</td><td className="r num">{w.reminders}</td><td className="r num">{w.assistant}</td>
+                </tr>
+              ))}
+              {!u.byWorkspace.length && <tr><td colSpan={7} className="muted">Nothing yet this month.</td></tr>}
+            </tbody>
+          </table>
         </div>
-        <CreditPanel c={u.credit} />
       </div>
     </>
   );

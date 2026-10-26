@@ -1,8 +1,8 @@
 /**
  * GET/POST /api/billing: the organization's plan and subscription (lib/billing.ts), and changing it.
  * GET (Org Owners and Org Admins, like Usage & billing): the subscription, what it allows
- * right now, seats and workspaces used, every limit with its use (`limits`, lib/limits.ts, incl. the AI
- * credit), every plan feature with whether it's included and what's in use (`features`, lib/limits.ts
+ * right now, seats and workspaces used, every limit with its use (`limits`, lib/limits.ts, without the AI
+ * credit line: firms see that as a percent on /api/usage, never in dollars, lib/firm-usage.ts), every plan feature with whether it's included and what's in use (`features`, lib/limits.ts
  * `featureReport`), every self-service plan, test mode, and whether this person may change it.
  * POST (the Org Owner only, `BILLING_ROLES`): { action, plan?, extraGroups? }
  *   - "pay": pay for `plan` with `extraGroups` extra groups (test mode: no money moves, no payment details) → active
@@ -18,15 +18,23 @@ import { BILLING_ROLES, BILLING_VIEW_ROLES, billingSummary, cancel, changePlan, 
 import { PLANS } from "@/lib/plans";
 import { creditStatus } from "@/lib/credit";
 import { featureReport, limitReport } from "@/lib/limits";
+import { firmLimits, withoutAiDollars } from "@/lib/firm-usage";
+
+/** The billing summary as a firm sees it: the extra group's add-on without its AI credit in dollars. */
+async function firmSummary(orgId: string) {
+  const summary = await billingSummary(orgId);
+  return { ...summary, extraGroup: { ...summary.extraGroup, adds: withoutAiDollars(summary.extraGroup.adds) } };
+}
 
 export const GET = handle(async () => {
   const user = await requireUser(BILLING_VIEW_ROLES);
   const credit = await creditStatus(user.org_id);
   return {
-    ...(await billingSummary(user.org_id)),
-    limits: (await limitReport(user.org_id, credit.usedUsd)).lines,
+    ...(await firmSummary(user.org_id)),
+    limits: firmLimits((await limitReport(user.org_id, credit.usedUsd)).lines),
     features: await featureReport(user.org_id),
-    plans: PLANS,
+    // The plans' AI credit is in dollars, so it's left out (the price is what they pay us).
+    plans: PLANS.map(withoutAiDollars),
     canManage: BILLING_ROLES.includes(user.role),
   };
 });
@@ -41,5 +49,5 @@ export const POST = handle(async (req: Request) => {
   else if (action === "cancel") await cancel(user);
   else if (action === "fail") await simulatePaymentFailed(user);
   else throw new HttpError(400, "Unknown billing action.");
-  return billingSummary(user.org_id);
+  return firmSummary(user.org_id);
 });

@@ -31,6 +31,10 @@
  *   never open another company's org.
  * The redirect address `<portal>/api/auth/microsoft/callback` must be added to the Entra app as a Web
  * redirect URI (the admin-consent round trip in lib/directory.ts comes back to the same address).
+ * - **Owner Console** (`mode: "owner"`): the platform operator signs in to /owner with the same Entra app but
+ *   through its own start and callback (`/api/owner/auth/microsoft/*`, a second Web redirect URI on the app),
+ *   so the reply can only ever start an Owner Console session, never a portal one (lib/owner.ts decides who).
+ *   `finishMicrosoftSignIn` refuses a saved sign-in whose mode doesn't belong to the callback using it.
  *
  * Tests point `ENTRA_LOGIN_BASE` at a fake Microsoft on localhost; that override is ignored in production.
  */
@@ -82,10 +86,19 @@ export function entraConfigured(): boolean {
  * server may sit behind a proxy); in development, from the address the browser used (localhost or the
  * tunnel). Either way Microsoft only accepts it if it's registered on the Entra app.
  */
-export function redirectUri(req: Request): string {
+export function redirectUri(req: Request, flow: SignInMode = "signin"): string {
   const base = process.env.NODE_ENV === "production" && process.env.SIDEKICK_PUBLIC_URL ? process.env.SIDEKICK_PUBLIC_URL : new URL(req.url).origin;
-  return `${base.replace(/\/$/, "")}/api/auth/microsoft/callback`;
+  return `${base.replace(/\/$/, "")}${flow === "owner" ? OWNER_CALLBACK_PATH : "/api/auth/microsoft/callback"}`;
 }
+
+/** Where Microsoft sends the Owner Console sign-in back to (registered on the Entra app as a second redirect URI). */
+export const OWNER_CALLBACK_PATH = "/api/owner/auth/microsoft/callback";
+
+/**
+ * What a Microsoft round trip is for: "signin" (portal sign-in), "link" (an Org Owner connecting the org's
+ * tenant) or "owner" (the platform operator signing in to the Owner Console; lib/owner.ts).
+ */
+export type SignInMode = "signin" | "link" | "owner";
 
 /** Only same-site paths like "/meetings" are allowed after sign-in, never another website. */
 export const safeNext = (next: string | null | undefined) => (next && /^\/(?!\/)[\w\-/?=&.%]*$/.test(next) ? next : "/");
@@ -96,10 +109,11 @@ const b64url = (b: Buffer) => b.toString("base64url");
  * Starts a Microsoft sign-in: saves a one-time state (with the PKCE verifier and nonce) and returns the
  * Microsoft address to send the browser to, plus the state for the browser cookie.
  *
- * @param mode   "signin" (anyone) or "link" (an Org Owner connecting the org's tenant; `userId` is them)
+ * @param mode   "signin" (anyone), "link" (an Org Owner connecting the org's tenant; `userId` is them) or
+ *               "owner" (the Owner Console; Microsoft replies to `OWNER_CALLBACK_PATH` instead)
  * @param next   where to go afterwards (same-site path)
  */
-export async function startMicrosoftSignIn(req: Request, mode: "signin" | "link", opts: { userId?: string; next?: string | null; loginHint?: string | null } = {}) {
+export async function startMicrosoftSignIn(req: Request, mode: SignInMode, opts: { userId?: string; next?: string | null; loginHint?: string | null } = {}) {
   if (!entraConfigured()) throw new HttpError(503, `Microsoft sign-in isn't set up on this ${BRAND.name} yet. Sign in with your email and password.`);
   const c = config();
   const state = b64url(crypto.randomBytes(24));
@@ -114,7 +128,7 @@ export async function startMicrosoftSignIn(req: Request, mode: "signin" | "link"
   url.search = new URLSearchParams({
     client_id: c.clientId,
     response_type: "code",
-    redirect_uri: redirectUri(req),
+    redirect_uri: redirectUri(req, mode),
     response_mode: "query",
     scope: "openid profile email",
     state,
@@ -127,11 +141,14 @@ export async function startMicrosoftSignIn(req: Request, mode: "signin" | "link"
   return { url: url.toString(), state };
 }
 
-/** Who Microsoft says signed in. */
-export type MicrosoftIdentity = { tenantId: string; objectId: string; email: string; name: string };
+/**
+ * Who Microsoft says signed in. `amr` (sign-in ID tokens only) lists how they proved it, e.g. ["pwd", "mfa"],
+ * or null when Microsoft didn't say (v2.0 ID tokens usually leave it out; see lib/owner.ts `ownerMfaEvidence`).
+ */
+export type MicrosoftIdentity = { tenantId: string; objectId: string; email: string; name: string; amr?: string[] | null };
 
 /** One saved sign-in attempt (see `startMicrosoftSignIn`). */
-type SavedState = { state: string; verifier: string; nonce: string; mode: "signin" | "link"; user_id: string | null; next_path: string | null };
+type SavedState = { state: string; verifier: string; nonce: string; mode: SignInMode; user_id: string | null; next_path: string | null };
 
 // Microsoft's signing keys per tenant, fetched and cached by jose (refreshed when Microsoft rotates them).
 const jwks = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
@@ -146,9 +163,12 @@ const keysFor = (tid: string) => {
  * token and verifies it (signature, issuer = the person's tenant, audience = our app, expiry, nonce).
  * The saved state is used up, so the same reply can't be used twice.
  *
+ * @param flow "portal" (the portal callback: modes signin and link) or "owner" (the Owner Console callback: mode
+ *   owner only). A sign-in started for one is refused by the other, so a portal round trip can never open the
+ *   Owner Console and the other way round.
  * @throws HttpError 400 with a plain message if anything doesn't check out
  */
-export async function finishMicrosoftSignIn(req: Request, cookieState: string | undefined): Promise<{ who: MicrosoftIdentity; saved: SavedState }> {
+export async function finishMicrosoftSignIn(req: Request, cookieState: string | undefined, flow: "portal" | "owner" = "portal"): Promise<{ who: MicrosoftIdentity; saved: SavedState }> {
   const q = new URL(req.url).searchParams;
   if (q.get("error")) {
     // The person cancelled, or their company blocked the app (e.g. admin consent needed).
@@ -165,6 +185,7 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
   const saved = await get<SavedState & { expires_at: string }>("SELECT * FROM oidc_states WHERE state = ?", state);
   await run("DELETE FROM oidc_states WHERE state = ?", state);
   if (!saved || saved.expires_at < now()) throw new HttpError(400, "That sign-in took too long. Try again.");
+  if ((saved.mode === "owner") !== (flow === "owner")) throw new HttpError(400, "That sign-in link doesn't belong here. Start again from the sign-in page.");
 
   const c = config();
   const tokenRes = await fetch(`${LOGIN_BASE}/${encodeURIComponent(c.tenant)}/oauth2/v2.0/token`, {
@@ -175,7 +196,7 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
       client_secret: c.clientSecret,
       grant_type: "authorization_code",
       code,
-      redirect_uri: redirectUri(req),
+      redirect_uri: redirectUri(req, saved.mode),
       code_verifier: saved.verifier,
       scope: "openid profile email",
     }),
@@ -204,7 +225,8 @@ export async function finishMicrosoftSignIn(req: Request, cookieState: string | 
   const email = String(claims.email ?? claims.preferred_username ?? "").trim().toLowerCase();
   const oid = String(claims.oid ?? "");
   if (!oid) throw new HttpError(400, "Microsoft's reply didn't include your account id.");
-  return { who: { tenantId: tid, objectId: oid, email, name: String(claims.name ?? email) }, saved };
+  const amr = Array.isArray(claims.amr) ? claims.amr.map((m) => String(m).toLowerCase()) : null;
+  return { who: { tenantId: tid, objectId: oid, email, name: String(claims.name ?? email), amr }, saved };
 }
 
 /**

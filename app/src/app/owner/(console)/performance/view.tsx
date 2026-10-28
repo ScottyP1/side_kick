@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { api, fmtTime, Pill, usd } from "@/components/ui";
+import { aiFeatureLabel } from "@/lib/ai-features";
 
 type G = { name: string; calls: number; errors: number; p50: number; p95: number; cost: number; cacheHit: number };
 type Tally = { up: number; down: number; helpful: number | null };
@@ -22,7 +23,6 @@ type P = {
   processing: { tenant: string; failed_docs: number; failed_meetings: number; unanswered: number; questions: number }[];
   appErrors: { ref: string; status: number; method: string | null; route: string | null; message: string; created_at: string }[];
 };
-const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", followup: "Follow-up rewrite" };
 const sec = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 function Table({ title, rows, label }: { title: string; rows: G[]; label: (n: string) => string }) {
@@ -97,7 +97,7 @@ export default function PerformancePage() {
           </div>
         )}
       </div>
-      <Table title="By feature" rows={p.byFeature} label={(n) => FEATURE[n] ?? n} />
+      <Table title="By feature" rows={p.byFeature} label={(n) => aiFeatureLabel(n)} />
       <Table title="By model" rows={p.byModel} label={(n) => n} />
       <div className="panel">
         <div className="panel-h"><h2>Processing health by client</h2></div>
@@ -127,7 +127,7 @@ export default function PerformancePage() {
                 <tr key={i}>
                   <td className="ts" style={{ whiteSpace: "nowrap" }}>{fmtTime(e.created_at)}</td>
                   <td>{e.tenant ?? "—"}</td>
-                  <td>{FEATURE[e.feature] ?? e.feature}</td>
+                  <td>{aiFeatureLabel(e.feature)}</td>
                   <td className="mono">{e.model}</td>
                   <td style={{ color: "var(--bad)" }}>{e.error ?? "Unknown error"}</td>
                 </tr>

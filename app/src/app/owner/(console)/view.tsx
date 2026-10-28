@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, fmtTime, Pill, usd } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { aiFeatureLabel } from "@/lib/ai-features";
 
 type O = {
   alerts: { kind: "warn" | "bad"; text: string; href: string }[];
@@ -20,7 +21,6 @@ type O = {
   topTenants: { id: string; name: string; status: string; cost: number; calls: number }[];
   recentErrors: { created_at: string; feature: string; model: string; error: string | null; tenant: string | null }[];
 };
-const FEATURE: Record<string, string> = { ask: "Answers", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", remind: "Reminders" };
 
 export default function OwnerOverview() {
   const [o, setO] = useState<O | null>(null);
@@ -137,7 +137,7 @@ export default function OwnerOverview() {
             {!o.recentErrors.length && <div className="li muted">No failed requests. 🎉</div>}
             {o.recentErrors.map((e, i) => (
               <div key={i} className="li">
-                <Pill kind="bad">{FEATURE[e.feature] ?? e.feature}</Pill>
+                <Pill kind="bad">{aiFeatureLabel(e.feature)}</Pill>
                 <div className="grow">
                   <b style={{ fontSize: 13 }}>{e.error ?? "Unknown error"}</b>
                   <div className="muted" style={{ fontSize: 12.5 }}>{e.tenant ?? "—"} · {fmtTime(e.created_at)}</div>

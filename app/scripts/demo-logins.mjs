@@ -48,11 +48,11 @@ All commands run in the repo folder (\`~/Desktop/sidekick\`, once the demo-world
 
 Answers come from **fake Claude** (short "Test answer…" replies) unless you start the copy without
 \`SIDEKICK_FAKE_CLAUDE=1\` (then your key in \`app/.env.local\` is used and it costs money). The seeded notes, answers in
-the history and knowledge maps are realistic either way. Importing a new meeting tries to post notes to the simulated
-Teams chats, which aren't running, so you'll see a harmless "Teams notes post failed" line in the terminal.
+the history and knowledge maps are realistic either way. Teams posts from the demo copy go to a fake Teams
+(started with the demo copy), so they succeed like in a working tenant.
 
 ${row("Owner Console operator (the Sidekick team)", OPERATOR.name, OPERATOR.email, passwords.operator, "Owner Console, every client organization (never their documents)", [
-  "**Business**: MRR and margin by plan, the trial ending in 4 days (Trey Research), the failed payment (Lucerne Partners), Northwind at ~84% of its AI credit.",
+  "**Business**: MRR and margin by plan, the trial ending in 4 days (Trey Research), the failed payment (Lucerne Partners), Northwind at ~68% of its AI credit (~84% after `seed:demo -- --credit-banner`).",
   "**Clients → Northwind Consulting**: people, groups, documents and meetings as counts only. You can't open a document or read a meeting: the console never sees client content.",
   "**Clients → Tailspin Partners**: the Knowledge map is switched off for this client only (a restriction), and it is at 14 of 15 people on Starter.",
   "**Support inbox**: four Northwind tickets and one from Tailspin, with replies, an internal note (only the team sees it) and one from the public website form. Reply to one and see it on the customer's Help & support page.",
@@ -61,7 +61,7 @@ ${row("Owner Console operator (the Sidekick team)", OPERATOR.name, OPERATOR.emai
 ${row("Org Owner (runs the whole organization)", p("orgOwner").name, p("orgOwner").email, passwords.orgOwner, `${NORTHWIND.org}: every group (${PROFILES.length})`, [
   "**Groups**: all ten engagements with Team Leads and health labels; Alpine Ski House shows **Ending**. Open Contoso and look at Overview, People, Teams chats (one with client guests) and Documents.",
   "**Guardrails**: only you can flip the company-wide switches. The Fabrikam Bank group has extra switches and a custom rule (\"Never quote card numbers…\").",
-  "**Usage & billing**: Business plan in test mode, the 80% AI credit notice, usage per group, Export CSV. You can change or cancel the plan.",
+  "**Usage & billing**: Business plan in test mode, usage per group (the 80% AI credit notice only after `seed:demo -- --credit-banner`), Export CSV. You can change or cancel the plan.",
   "**Settings → Two-step sign-in for everyone**: only you can switch it on (an Org Admin sees \"Only the Org Owner can change this\").",
   "**Memory & gaps** (Contoso): the runbook still says November 5 but the cutover moved to November 12 (an \"Out of date\" gap), and 48 vs 52 stores.",
 ])}

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtTime, Modal, Pill, Switch, useReportError, useToast } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
+import { aiFeatureLabel } from "@/lib/ai-features";
 
 type R = {
   build: { version: string; branch: string | null; commit: string | null; next: string; sdk: string; node: string; environment: string; startedAt: string };
@@ -14,7 +15,6 @@ type R = {
   flags: { key: string; label: string; help: string; enabled: boolean }[];
   log: { id: number; actor: string; action: string; created_at: string }[];
 };
-const FEATURE: Record<string, string> = { ask: "Answering questions", extract: "Meeting notes", insights: "Knowledge map", assist: "In-app assistant", guard: "Guardrail check", remind: "Reminders" };
 
 export default function ReleasesPage() {
   const toast = useToast();
@@ -84,7 +84,7 @@ export default function ReleasesPage() {
             <thead><tr><th>Feature</th><th>Model</th><th>Setting</th></tr></thead>
             <tbody>
               {Object.entries(r.models).map(([k, m]) => (
-                <tr key={k}><td>{FEATURE[k] ?? k}</td><td className="mono">{m}</td><td className="mono faint">SIDEKICK_MODEL_{k.toUpperCase()}</td></tr>
+                <tr key={k}><td>{aiFeatureLabel(k)}</td><td className="mono">{m}</td><td className="mono faint">SIDEKICK_MODEL_{k.toUpperCase()}</td></tr>
               ))}
             </tbody>
           </table>

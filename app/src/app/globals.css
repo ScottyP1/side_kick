@@ -125,6 +125,23 @@ a.btn{text-decoration:none}
 .tag{font-size:11.5px;border:1px solid var(--line);border-radius:5px;padding:0 6px;color:var(--muted);white-space:nowrap}
 
 .table-wrap{overflow-x:auto}
+/* A meeting's notes: prose stays readable (780px), the action items table uses the full width. */
+.notes-col{display:flex;flex-direction:column;gap:16px}
+.notes-col>:not(.notes-wide){max-width:780px}
+.ai-table td.ai-text{min-width:220px}
+/* Action items on phones: one stacked card per item (components/action-items.tsx). */
+@media (max-width:720px){
+  .ai-wrap{overflow:visible}
+  .ai-table,.ai-table tbody,.ai-table tr,.ai-table td{display:block;width:100%}
+  .ai-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+  .ai-table tr{display:grid;grid-template-columns:28px 1fr;gap:6px 8px;padding:12px 4px;border-bottom:1px solid var(--line)}
+  .ai-table td{border:0;padding:0;min-width:0}
+  .ai-table td.ai-done{grid-row:1;padding-top:2px}
+  .ai-table td.ai-text{grid-column:2;min-width:0}
+  .ai-table td[data-label]{grid-column:2;display:flex;align-items:center;gap:10px;flex-wrap:wrap;text-align:left}
+  .ai-table td[data-label]::before{content:attr(data-label);flex:0 0 64px;font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+  .ai-table td[data-label] .input{flex:1 1 140px;max-width:220px;width:auto!important}
+}
 table{width:100%;border-collapse:collapse;font-size:13.5px}
 th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:9px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--sunken)}
 td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -160,6 +177,9 @@ textarea.input{min-height:80px;resize:vertical}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex-wrap:wrap}
 .seg button{border:0;background:var(--surface);padding:6px 12px;cursor:pointer;border-right:1px solid var(--line)}
 .seg button:last-child{border-right:0}
+/* Knowledge & docs table (knowledge/view.tsx): short columns stay on one line; the document column takes the rest. */
+.doc-table td.nowrap{white-space:nowrap}
+.doc-table td.nowrap .seg{flex-wrap:nowrap}
 .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
 .switch{position:relative;width:36px;height:20px;flex:none;border-radius:99px;background:var(--line);border:0;cursor:pointer;transition:background .15s}
 .switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
@@ -315,6 +335,10 @@ pre.transcript-raw{white-space:pre-wrap;font-family:var(--f-body);font-size:13.5
 .spark > div{flex:1;min-width:4px;display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:2px}
 .spark .c{background:var(--accent);border-radius:3px 3px 0 0}
 .spark .e{background:var(--bad);border-radius:2px}
+.spark .spark-n{font-size:11px;color:var(--muted);text-align:center;line-height:1}
+.spark-x{display:flex;gap:3px;margin-top:6px}
+.spark-x span{flex:1;min-width:4px;text-align:center;font-size:11px;color:var(--muted);white-space:nowrap}
+@media (max-width:720px){.spark-x span:nth-child(even){visibility:hidden}}
 .kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;font-size:13.5px}
 .kv dt{color:var(--muted)} .kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 
@@ -385,6 +409,8 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .assist-card .actions{display:flex;gap:6px}
 .assist-secret{font-family:var(--f-mono,ui-monospace,monospace);background:var(--sunken);padding:4px 8px;border-radius:6px;user-select:all}
 .good-text{color:var(--good)}
+/* Wide screens: the ball beside the assistant, so Home's numbers and Needs attention stay on the first screen. */
+@media (min-width:1100px){.live-orb{display:grid;grid-template-columns:minmax(300px,38%) 1fr;grid-template-rows:auto 1fr}.live-orb>.panel-h{grid-column:1/-1}.orb-stage{height:270px}.orb-core{width:240px;height:240px;top:calc(50% + 18px)}.orb-greeting{font-size:22px}.orb-assist{border-top:0;border-left:1px solid var(--line);display:flex;flex-direction:column;justify-content:center}.orb-assist .assist{width:100%}.orb-assist .assist-thread{max-height:300px}}
 @media (max-width:720px){.orb-stage{height:280px}.orb-greeting{font-size:21px}.orb-core{width:220px;height:220px}.assist-bubble,.assist-card{max-width:100%}}
 @media (prefers-reduced-motion:reduce){.orb-fallback,.orb-greeting,.assist-thinking-label{animation:none}.assist-thinking-label{color:var(--muted);background:none}}
 
@@ -446,6 +472,7 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .check-list li{display:flex;gap:10px;align-items:center;padding:7px 0}
 .ck{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;border:2px solid var(--line);color:var(--surface)}
 .ck.ok{background:var(--good);border-color:var(--good)}
+.ck.skip{border-style:dashed;color:var(--muted);font-weight:700;font-size:13px;line-height:1}
 .ck .ico{width:12px;height:12px;stroke-width:3}
 @media (max-width:900px){.ng{grid-template-columns:minmax(0,1fr)}.ng-summary{position:static}.gstats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.ng-two{grid-template-columns:minmax(0,1fr)}.ng-sec{grid-template-columns:minmax(0,1fr);padding:18px}.ng-sec .n{display:none}}
@@ -464,6 +491,8 @@ tr.clickable{cursor:pointer} tr.clickable:hover td{background:var(--sunken)}
 .wiz-steps li.done:not(:last-child)::after{background:var(--accent)}
 .wiz-steps .n{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--muted);background:var(--surface);flex:none}
 .wiz-steps li.done .n{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.wiz-steps li.skipped .n{border-style:dashed;font-size:15px}
+.wiz-steps li.last:not(.done) .n .ico{width:14px;height:14px}
 .wiz-steps li.now .n{border-color:var(--accent);color:var(--accent)}
 .wiz-steps .n .ico{width:13px;height:13px;stroke-width:3}
 .wiz-steps button{all:unset;cursor:pointer;display:flex;flex-direction:column;padding-top:3px}

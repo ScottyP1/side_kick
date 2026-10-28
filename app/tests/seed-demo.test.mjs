@@ -86,6 +86,14 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.ok(count("SELECT COUNT(*) FROM usage_events WHERE created_at < ?", new Date(Date.now() - 20 * 86400_000).toISOString()) > 100, "usage history");
   assert.equal(count("SELECT COUNT(*) FROM subscriptions WHERE status = 'past_due'"), 1);
   assert.equal(count("SELECT COUNT(*) FROM platform_admins"), 1, "the Owner Console account");
+  // Capture-ready: AI credit under the 80% banner (only `--credit-banner` goes over), Teams posting to the fake Teams
+  // with no failed Teams step in the last hour (Home's health line), and the Team Lead's own waiting chat.
+  const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString();
+  assert.ok(count(`SELECT COALESCE(SUM(cost_usd), 0) FROM usage_events WHERE org_id = ${northwind} AND created_at >= ?`, monthStart) < 800 * 0.8, "Northwind under 80% of its AI credit");
+  assert.equal(count("SELECT COUNT(*) FROM teams_conversations WHERE service_url NOT LIKE ?", `http://127.0.0.1:${PORT + 1}/teams`), 0, "every chat posts to the fake Teams");
+  assert.equal(count("SELECT COUNT(*) FROM trace_spans s JOIN traces t ON t.id = s.trace_id WHERE s.kind = 'teams' AND s.status = 'error' AND t.started_at >= ?", new Date(Date.now() - 3600_000).toISOString()), 0, "no failed Teams step in the last hour");
+  assert.ok(count("SELECT COUNT(*) FROM trace_spans WHERE kind = 'teams' AND status = 'error'") >= 1, "the seeded failed post still shows on Activity");
+  assert.equal(count(`SELECT COUNT(*) FROM teams_conversations c JOIN users u ON u.entra_oid = c.added_by_oid WHERE c.name = 'Bid war room' AND c.workspace_id IS NULL AND u.email = 'priya.raman@northwind.example' AND u.role = 'Team Lead'`), 1, "the Team Lead can assign the chat she added");
   // The watchers ran once on the job queue and found something of every kind at Northwind.
   for (const kind of ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "misfiled_doc"]) {
     assert.ok(count(`SELECT COUNT(*) FROM findings WHERE org_id = ${northwind} AND kind = ? AND status = 'open'`, kind) >= 1, `a "${kind}" finding`);

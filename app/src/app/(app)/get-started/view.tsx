@@ -10,7 +10,9 @@
  * 4. Rules: a guardrails starting point, Standard or Strict (Org Owner; PUT /api/guardrails).
  * 5. First groups: name, client and Team Lead for each client team, picking a Team Lead from the
  *    organization or adding someone new (they get a temporary password, shown once).
- * Then Done. Any step can be skipped and come back to; progress is saved per organization (/api/setup).
+ * Then Done (not numbered on the rail: the five steps match their "Step N of 5"). Any step can be skipped with
+ * "Do this later" and come back to; skipped steps show a dash and "Skipped for now" on the rail and on Done.
+ * Progress is saved per organization (/api/setup).
  * Org Owners and Org Admins only.
  */
 
@@ -43,6 +45,16 @@ const STEPS: [Step | "done", string, string][] = [
   ["done", "Done", "What happens next"],
 ];
 const NEW = "__new__";
+
+/**
+ * How a just-created group is named in the "Created N groups" note: "Client – Name", or just the name when it
+ * already says the client (people often type "Contoso Retail – Cloud Migration" with the client "Contoso Retail").
+ */
+function groupLabel(name: string, client: string): string {
+  const n = name.trim();
+  const c = client.trim();
+  return !c || n.toLowerCase().includes(c.toLowerCase()) ? n : `${c} – ${n}`;
+}
 const emptyRow = (): GroupRow => ({ name: "", client: "", lead: "", newName: "", newEmail: "" });
 
 export default function SetupWizard() {
@@ -92,8 +104,9 @@ export default function SetupWizard() {
           {STEPS.map(([k, title, sub], i) => {
             const st = stateOf(k);
             return (
-              <li key={k} className={i === at ? "now" : st === "done" ? "done" : ""}>
-                <span className="n">{st === "done" ? <Icon n="check" /> : i + 1}</span>
+              <li key={k} className={[i === at && "now", st === "done" && "done", st === "skipped" && "skipped", k === "done" && "last"].filter(Boolean).join(" ")}>
+                {/* The five steps are numbered like their "Step N of 5"; Done is the end, not a sixth step. */}
+                <span className="n" aria-hidden="true">{st === "done" ? <Icon n="check" /> : k === "done" ? <Icon n="sparkle" /> : st === "skipped" ? "–" : i + 1}</span>
                 <button onClick={() => setAt(i)} aria-current={i === at ? "step" : undefined}>
                   <b>{title}</b>
                   <small>{st === "skipped" ? "Skipped for now" : sub}</small>
@@ -281,7 +294,7 @@ function Groups({ s, reload, onNext, onSkip, onBack }: { s: Setup; reload: () =>
           extra = { tempPassword: u.tempPassword, email: r.newEmail.trim() };
         }
         await api("/api/workspaces", { method: "POST", json: { name: r.name.trim(), client: r.client.trim(), lead: lead || undefined } });
-        done.push({ group: r.client.trim() ? `${r.client.trim()} – ${r.name.trim()}` : r.name.trim(), lead: lead === r.lead ? s.people.find((p) => p.id === lead)?.name ?? "" : r.newName.trim(), ...extra });
+        done.push({ group: groupLabel(r.name, r.client), lead: lead === r.lead ? s.people.find((p) => p.id === lead)?.name ?? "" : r.newName.trim(), ...extra });
         setRows((cur) => cur.filter((x) => x !== r));
       }
     } catch (e) {
@@ -345,17 +358,24 @@ function Groups({ s, reload, onNext, onSkip, onBack }: { s: Setup; reload: () =>
 
 function Done({ s, onFinish, onBack }: { s: Setup; onFinish: () => Promise<void>; onBack: () => void }) {
   const reportError = useReportError();
-  const rows: [string, boolean, string][] = [
-    ["Microsoft 365", s.facts.microsoftConnected, s.facts.microsoftConnected ? "Connected for work-account sign-in" : "Not connected yet (Settings → Microsoft sign-in)"],
-    ["Teams", s.steps.teams === "done", s.steps.teams === "done" ? `Your Teams admin made ${BRAND.name} available` : "Still to do with your Teams admin"],
-    ["Rules", s.steps.rules === "done", s.rules.current === "custom" ? "Your own mix (Guardrails page)" : `${s.rules.current === "strict" ? "Strict" : "Standard"} starting point`],
-    ["Groups", s.facts.groups > 0, s.facts.groups ? `${s.facts.groups} group${s.facts.groups === 1 ? "" : "s"}` : "None yet (Groups → New group)"],
+  // Each row: done (ticked), skipped with "Do this later" (a dash and "Skipped for now"), or not done yet (empty).
+  const state = (ok: boolean, step: Step): "done" | "skipped" | "todo" => (ok ? "done" : s.steps[step] === "skipped" ? "skipped" : "todo");
+  const rows: [string, "done" | "skipped" | "todo", string][] = [
+    ["Microsoft 365", state(s.facts.microsoftConnected, "microsoft"), s.facts.microsoftConnected ? "Connected for work-account sign-in" : "Not connected yet (Settings → Microsoft sign-in)"],
+    ["Teams", state(s.steps.teams === "done", "teams"), s.steps.teams === "done" ? `Your Teams admin made ${BRAND.name} available` : "Still to do with your Teams admin"],
+    ["Rules", state(s.steps.rules === "done", "rules"), s.rules.current === "custom" ? "Your own mix (Guardrails page)" : `${s.rules.current === "strict" ? "Strict" : "Standard"} starting point${s.steps.rules === "done" ? "" : " for now (Guardrails page)"}`],
+    ["Groups", state(s.facts.groups > 0, "groups"), s.facts.groups ? `${s.facts.groups} group${s.facts.groups === 1 ? "" : "s"}` : "None yet (Groups → New group)"],
   ];
   return (
     <>
       <header><span className="eyebrow">Done</span><h1>{s.completedAt ? "You're set up" : "Almost there"}</h1><p>Here&apos;s where things stand. Anything not done yet can be finished later from the pages named below.</p></header>
       <ul className="check-list">
-        {rows.map(([t, ok, d]) => <li key={t}><span className={`ck${ok ? " ok" : ""}`}>{ok && <Icon n="check" />}</span><span><b>{t}</b> <span className="muted">· {d}</span></span></li>)}
+        {rows.map(([t, st, d]) => (
+          <li key={t}>
+            <span className={`ck${st === "done" ? " ok" : st === "skipped" ? " skip" : ""}`} aria-hidden="true">{st === "done" ? <Icon n="check" /> : st === "skipped" ? "–" : null}</span>
+            <span><b>{t}</b>{st === "skipped" && <> <Pill>Skipped for now</Pill></>} <span className="muted">· {d}</span><span className="sr-only">{st === "done" ? " (done)" : st === "skipped" ? " (skipped)" : " (not done yet)"}</span></span>
+          </li>
+        ))}
       </ul>
       <div className="callout info"><Icon n="users" /><div><b>Next, your Team Leads</b> add their people, add {BRAND.name} to their team&apos;s Teams chats and assign those chats to their group, and upload the key documents. Each group&apos;s page shows its own checklist.</div></div>
       <div className="wiz-foot">

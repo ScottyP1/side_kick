@@ -14,6 +14,10 @@
  *   green "Healthy" dots is noise. The word is always shown next to the color. Admins see names; everyone
  *   else sees a count. The screen-reader summary still covers every connection.
  *
+ * Layout: the ball, health row and note sit above the assistant; on wide screens (1100px and up) they sit to the
+ * assistant's left instead (`.orb-side`, globals.css), so the panel stays short and Home's numbers and Needs attention
+ * show on the first screen.
+ *
  * Care taken: the core is React Bits' Crystalized Ball (WebGL 2 via the small `ogl` library); it pauses
  * when off-screen, holds still when the person prefers reduced motion, follows light/dark mode, falls back
  * to a CSS gradient without WebGL 2, and a text summary is provided for screen readers.
@@ -217,6 +221,7 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
         {admin && <Link className="btn small" href="/activity">Open Activity</Link>}
       </div>
       <p className="sr-only" aria-live="polite">{summary}</p>
+      <div className="orb-side">
       <div className="orb-stage">
         {greeting && <p className="orb-greeting">{greeting}</p>}
         <div className="orb-core" ref={coreRef}>
@@ -242,6 +247,7 @@ export function LiveOrb({ admin, greeting }: { admin: boolean; greeting?: string
       {shown.some((n) => n.state === "degraded" || n.state === "failing") && (
         <p className="orb-note muted">Something is slower than usual. {BRAND.name} retries on its own; if it keeps happening, contact support.</p>
       )}
+      </div>
       <div className="panel-b orb-assist">
         <Assistant onThinking={setThinking} />
       </div>

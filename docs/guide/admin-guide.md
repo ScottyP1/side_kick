@@ -136,7 +136,7 @@ Every 15 minutes Sidekick checks each group for things that need a person and li
 - **Security & audit**: who did what and when, including everything Sidekick did on its own.
 
 ## 10. See what Sidekick is doing (Activity)
-- **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, AI answers, search, database) with their health, and who's active.
+- **Home → Sidekick live:** a live picture of Sidekick and its connections (Teams, AI answers, search, database) with their health over the last hour, and who's active. On a wide screen the ball sits beside the assistant, so your numbers and **Needs attention** are on the first screen.
 - **Govern → Activity:** every request from the portal and Teams. **Traces** shows each one step by step (how long search, the AI and Teams delivery took, and why something failed, with its reference code). **Messages** lists what people asked and whether Sidekick found the answer. Background work (reminders, the Needs attention checks) shows as **Background** traces ("Job: …"). Kept for 30 days; no document text is stored. Other records are cleared on a schedule too: AI usage details and the audit log after 13 months, guardrail counts after 6 months, resolved Needs attention items after 90 days. Your documents, meetings, decisions and questions are never cleared this way; they stay until you delete the group. Teams steps after a meeting import only appear when there's a linked chat to post to, and a feature the Sidekick team paused or turned off counts as refused, not as a Sidekick or AI error.
 
 ## 11. Set your guardrails (Org Owner and Org Admins)
@@ -181,7 +181,7 @@ Payments are in **test mode** for now: no money moves, prices are made up, and S
 4. **Rules**: a guardrails starting point. **Standard** is the usual defaults; **Strict** turns every switch on, for regulated clients. Only the Org Owner can change it; it's the same as the Guardrails page.
 5. **First groups**: a name, client and Team Lead for each client team. Pick the Team Lead from your organization or choose **Someone new…** to add them (they become a Team Lead and you get their temporary password once, to share privately). On Starter (no Team Leads, section 16) it's just a name and client.
 
-Then **Done** shows what's set and what's left, and **Finish setup** ends it. Any step can be skipped (**Do this later**) and you can come back: until setup is finished, Org Owners and Org Admins see a **Finish setting up Sidekick** banner with a **Continue setup** link. Finishing is in the audit log. Organizations set up by the Sidekick team don't get the banner.
+Then **Done** shows what's set and what's left, and **Finish setup** ends it. Any step can be skipped (**Do this later**) and you can come back: a skipped step shows a dash and **Skipped for now** on the left and on Done, a finished one a tick. Until setup is finished, Org Owners and Org Admins see a **Finish setting up Sidekick** banner with a **Continue setup** link. Finishing is in the audit log. Organizations set up by the Sidekick team don't get the banner.
 
 **Plan on Usage & billing** (Org Owners and Org Admins see it; **only the Org Owner** can change it):
 - **Current plan** (with any extra groups, e.g. "Starter + 2 extra groups"), the **monthly price for the organization**, its status (Free trial, Active, Payment failed, Canceled) and dates, groups used (ending groups aren't counted), people, and a table of **every limit** with how much you use (see section 16). A person is anyone with an account, any role.

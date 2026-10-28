@@ -44,6 +44,7 @@ Each captured meeting's length counts toward your plan's **meeting hours** this 
 
 ### What you see on the Meetings page
 - Captured meetings have a **Teams** tag, and the meeting page says *captured from Microsoft Teams*.
+- A meeting's **action items** table uses the full page width, with owner, due date and status to change in place. On a phone each action item is a small card instead (the item, then Owner, Due and Status underneath), so nothing is cut off.
 - The panel lists recent Teams meetings with their status: **Writing notes**, **Notes written**, **Pick a group**, **Skipped** (with the reason) or **Failed** (with **Try again**). Members see the meetings of their own groups; Org Owners, Org Admins and Team Leads also see skipped ones and the ones waiting for a group, and, after a pick, the meeting's people who aren't in the group yet with **Add to group**.
 
 ## Getting a transcript every time

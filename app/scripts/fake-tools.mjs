@@ -35,6 +35,10 @@
  *   deleted items come back as `deleted` (no paths in delta, like the real one). `/content` answers 302 to a
  *   pre-authenticated `/m365-download/...` address (`counts.downloads`; `counts.downloadAuth` counts downloads that
  *   wrongly carried the token). Files are real Word, PDF and PowerPoint files built here (`office`).
+ * - **Microsoft Teams** (`/teams/v3/conversations/<id>/...`): the Bot Framework connector the demo world's chats
+ *   post to (their `service_url`), so posts from the demo copy succeed like in a working tenant and Home's Teams
+ *   health stays normal: posting or updating a card answers an id, the member list answers `world.teams.rosters[id]`
+ *   (else `world.teams.roster`) as made-up names. `state.teamsFailPosts` (chat ids) makes a chat answer 500.
  * - **Web pages** (`/ado-web/...`, `/jira-web/...`, `/gh-web/...`, `/confluence-web/...`, `/m365-web/...`): a plain
  *   page per item, so links in the demo open something.
  *
@@ -133,6 +137,15 @@ export function defaultWorld() {
   const f = (id, name, parent, modified, by, content, size) => ({ id, name, parent, modified, by, content, size, seq: ++seq });
   const dir = (id, name, parent) => ({ id, name, parent, folder: true, modified: iso(9 * day), by: "Ana Ruiz", seq: ++seq });
   return {
+    // Teams rosters (made-up people) for the demo world's chats: the two chats waiting to be assigned
+    // (scripts/seed-demo.mjs) have their own, every other chat answers the general one.
+    teams: {
+      roster: ["Sidekick", "Priya Raman", "Maria Chen", "Daniel Okafor", "Sofia Alvarez", "Tom Becker"],
+      rosters: {
+        "19:demo-waiting-0@thread.v2": ["Sidekick", "Priya Raman", "Marcus Lee", "Aisha Khan", "Ben Carter"],
+        "19:demo-waiting-1@thread.v2": ["Sidekick", "Marcus Lee", "Olivia Bennett", "Hannah Brooks"],
+      },
+    },
     ado: {
       orgs: {
         northwind: {
@@ -269,8 +282,8 @@ export function createFakeTools({
   },
   lenient = false,
 } = {}) {
-  const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false, graphSitePage: 100, graphDeltaPage: 200, graphDeltaGone: false, graphBatchStatus: null, m365Tenants: [] };
-  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, personal: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0 };
+  const state = { ttl: 3600, adoProjectPage: 100, jiraProjectPage: 50, jiraIssuePage: 50, githubPage: 100, confluenceSpacePage: 250, confluencePage: 25, githubEvilNext: false, graphSitePage: 100, graphDeltaPage: 200, graphDeltaGone: false, graphBatchStatus: null, m365Tenants: [], teamsFailPosts: new Set() };
+  const counts = { refresh: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, api: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, personal: { ado: 0, jira: 0, github: 0, confluence: 0, m365: 0 }, unauthorized: 0, limited: 0, evil: 0, downloads: 0, downloadAuth: 0, teams: 0 };
   let nextUser = null; // signInAs: the next sign-in's person (null = the shared account)
   const revokedUsers = new Set(); // `${kind}:${name}`
   const limits = new Map(); // kind → { times, retryAfter, status }
@@ -341,8 +354,21 @@ export function createFakeTools({
       const m365Member = (drive) => member(drive);
       const link = (next) => (next ? { link: `<${next}>; rel="next"` } : {});
 
-      // ---- sign-in pages (approve at once) ----
+      // ---- Microsoft Teams (the Bot Framework connector the demo's chats post to) ----
       let m;
+      if ((m = path.match(/^\/teams\/v3\/conversations\/([^/]+)(\/.*)?$/))) {
+        counts.teams++;
+        const [, conv, rest = ""] = m;
+        if (state.teamsFailPosts.has(conv)) return send(500, { error: { code: "ServiceError", message: "Teams is unavailable" } });
+        if (req.method === "GET" && /^\/(members|pagedmembers)$/.test(rest)) {
+          const roster = (world.teams?.rosters?.[conv] ?? world.teams?.roster ?? []).map((name, i) => ({ id: `29:demo-${i}`, name, aadObjectId: null, userRole: "user" }));
+          return send(200, rest === "/pagedmembers" ? { members: roster } : roster);
+        }
+        if (req.method === "GET") return send(200, { conversations: [] });
+        return send(200, { id: `fake-teams-${counts.teams}` });
+      }
+
+      // ---- sign-in pages (approve at once) ----
       const kindOfPath = (p) => (p.startsWith("/ado") ? "ado" : p.startsWith("/m365") ? "m365" : p.startsWith("/gh") ? "github" : p.startsWith("/confluence") ? "confluence" : "jira");
       if (req.method === "GET" && ((m = path.match(/^\/(ado|m365)-login\/[^/]+\/oauth2\/v2\.0\/authorize$/)) || path === "/jira-auth/authorize" || path === "/gh-login/login/oauth/authorize" || path === "/confluence-auth/authorize")) {
         const kind = kindOfPath(path);

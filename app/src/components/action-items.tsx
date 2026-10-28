@@ -4,6 +4,9 @@
  * The action-item table shared by Memory & gaps (every item in the workspace) and a meeting's own page (that
  * meeting's items): done checkbox, owner, due date and status, all editable by people who can edit content.
  * Changes go to `PATCH /api/action-items/:id` (validated and audited there).
+ *
+ * Layout: a full-width table on wide screens; on phones (under 720px, globals.css `.ai-table`) each item becomes a
+ * stacked card (checkbox and text on top, then Owner, Due and Status as labelled lines), so nothing is cut off.
  */
 
 import { api, fmtDate, useToast } from "@/components/ui";
@@ -38,11 +41,11 @@ export function useUpdateAction(onLocal: (id: string, patch: Partial<ActionItem>
  */
 export function ActionItemsTable({ items, canEdit, onChange, showMeeting }: { items: ActionItem[]; canEdit: boolean; onChange: (a: ActionItem, patch: ActionPatch) => void; showMeeting?: boolean }) {
   return (
-    <div className="table-wrap">
-      <table>
+    <div className="table-wrap ai-wrap">
+      <table className="ai-table">
         <thead>
           <tr>
-            <th style={{ width: 36 }} />
+            <th style={{ width: 36 }}><span className="sr-only">Done</span></th>
             <th>Action item</th>
             <th>Owner</th>
             <th>Due</th>
@@ -53,9 +56,9 @@ export function ActionItemsTable({ items, canEdit, onChange, showMeeting }: { it
         <tbody>
           {items.map((a) => (
             <tr key={a.id}>
-              <td><input type="checkbox" aria-label={`Done: ${a.text}`} disabled={!canEdit} checked={a.status === "Done"} onChange={(e) => onChange(a, { status: e.target.checked ? "Done" : "Open" })} /></td>
-              <td style={a.status === "Done" ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}><b>{a.text}</b></td>
-              <td>
+              <td className="ai-done"><input type="checkbox" aria-label={`Done: ${a.text}`} disabled={!canEdit} checked={a.status === "Done"} onChange={(e) => onChange(a, { status: e.target.checked ? "Done" : "Open" })} /></td>
+              <td className="ai-text" style={a.status === "Done" ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}><b>{a.text}</b></td>
+              <td data-label="Owner">
                 <input
                   key={a.owner ?? ""}
                   className="input"
@@ -68,7 +71,7 @@ export function ActionItemsTable({ items, canEdit, onChange, showMeeting }: { it
                   onBlur={(e) => e.target.value.trim() !== (a.owner ?? "") && onChange(a, { owner: e.target.value })}
                 />
               </td>
-              <td className="num">
+              <td className="num" data-label="Due">
                 {canEdit ? (
                   <input className="input" type="date" style={{ padding: "3px 6px", width: "auto" }} value={a.due_on ?? ""} aria-label={`Due date: ${a.text}`} onChange={(e) => onChange(a, { due: e.target.value })} />
                 ) : (
@@ -76,12 +79,12 @@ export function ActionItemsTable({ items, canEdit, onChange, showMeeting }: { it
                 )}
                 {a.due && !a.due_on && <div className="muted" style={{ fontSize: 12 }}>said: {a.due}</div>}
               </td>
-              <td>
+              <td data-label="Status">
                 <select className="input" style={{ width: "auto", padding: "3px 6px" }} value={a.status} disabled={!canEdit} aria-label={`Status: ${a.text}`} onChange={(e) => onChange(a, { status: e.target.value })}>
                   {["Open", "In progress", "Done"].map((s) => <option key={s}>{s}</option>)}
                 </select>
               </td>
-              {showMeeting && <td className="muted">{a.meeting ?? "—"}{a.held_at ? ` · ${fmtDate(a.held_at)}` : ""}</td>}
+              {showMeeting && <td className="muted" data-label="From meeting">{a.meeting ?? "—"}{a.held_at ? ` · ${fmtDate(a.held_at)}` : ""}</td>}
             </tr>
           ))}
         </tbody>

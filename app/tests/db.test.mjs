@@ -1724,3 +1724,20 @@ test(`[${engine}] org scope: a query with no org and no system reason fails loud
     globalThis.__sidekickDbFallback = saved;
   }
 });
+
+const aiFeatures = await import("../src/lib/ai-features.ts");
+
+test(`[${engine}] every AI feature has a plain name for the Owner Console (no raw ids like "remind" or "watch")`, async () => {
+  // The feature ids are MODELS' keys in lib/claude.ts (read from the source: claude.ts needs the Next runtime).
+  const src = (await import("node:fs")).readFileSync(new URL("../src/lib/claude.ts", import.meta.url), "utf8");
+  const block = src.slice(src.indexOf("export const MODELS = {"), src.indexOf("};", src.indexOf("export const MODELS = {")));
+  const ids = [...block.matchAll(/^\s{2}(\w+):/gm)].map((m) => m[1]);
+  assert.ok(ids.length >= 10 && ids.includes("watch"), `found the features: ${ids}`);
+  for (const k of ids) {
+    const label = aiFeatures.aiFeatureLabel(k);
+    assert.ok(label && label !== k, `${k} has a name`);
+  }
+  assert.equal(aiFeatures.aiFeatureLabel("remind"), "Reminders");
+  assert.equal(aiFeatures.aiFeatureLabel("watch"), "Document checks");
+  assert.equal(aiFeatures.aiFeatureLabel("old-feature"), "old-feature", "unknown ids are shown as they are");
+});

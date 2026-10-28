@@ -210,12 +210,12 @@ export type ServiceCounter = { usage: number; quota: number | null };
 /**
  * The search service's own usage and limits (`GET {endpoint}/servicestats`, api-version 2024-07-01): storage used of
  * the tier's storage, indexes used of the tier's index limit, documents and vector index size. Counts and sizes only,
- * never content. For lib/search-capacity.ts (through lib/search.ts `searchServiceStats`); only call it when
+ * never content, plus whether Sidekick's own index exists yet (`ownIndex`). For lib/search-capacity.ts (through lib/search.ts `searchServiceStats`); only call it when
  * `azureSearchConfigured()`. Throws with Azure's status when the call fails (wrong key, service gone, timeout).
  */
-export async function azureServiceStats(): Promise<{ storage: ServiceCounter; indexes: ServiceCounter; documents: ServiceCounter | null; vectorStorage: ServiceCounter | null }> {
-  const url = `${process.env.AZURE_SEARCH_ENDPOINT!.replace(/\/+$/, "")}/servicestats?api-version=2024-07-01`;
-  const res = await fetch(url, { headers: { "api-key": process.env.AZURE_SEARCH_API_KEY! }, signal: AbortSignal.timeout(15_000) });
+export async function azureServiceStats(): Promise<{ storage: ServiceCounter; indexes: ServiceCounter; documents: ServiceCounter | null; vectorStorage: ServiceCounter | null; ownIndex: boolean | null }> {
+  const base = process.env.AZURE_SEARCH_ENDPOINT!.replace(/\/+$/, "");
+  const res = await fetch(`${base}/servicestats?api-version=2024-07-01`, { headers: { "api-key": process.env.AZURE_SEARCH_API_KEY! }, signal: AbortSignal.timeout(15_000) });
   const json = (await res.json().catch(() => ({}))) as { counters?: Record<string, { usage?: unknown; quota?: unknown } | undefined>; error?: { message?: string } };
   if (!res.ok || !json.counters) throw new Error(`Azure AI Search service stats failed: ${json.error?.message ?? `HTTP ${res.status}`}`);
   const counter = (name: string): ServiceCounter | null => {
@@ -226,5 +226,21 @@ export async function azureServiceStats(): Promise<{ storage: ServiceCounter; in
   const storage = counter("storageSize");
   const indexes = counter("indexesCount");
   if (!storage || !indexes) throw new Error("Azure AI Search service stats came back without storage or index counts.");
-  return { storage, indexes, documents: counter("documentCount"), vectorStorage: counter("vectorIndexSize") };
+  return { storage, indexes, documents: counter("documentCount"), vectorStorage: counter("vectorIndexSize"), ownIndex: await ownIndexExists(base) };
+}
+
+/**
+ * Whether Sidekick's own index (`AZURE_SEARCH_INDEX`, default sidekick-passages) exists yet: when it doesn't, the
+ * next search or upload has to create one, which needs a free index slot (lib/search-capacity.ts). Lists index
+ * names only. Null when the answer is unclear (the capacity check then judges by the counts alone).
+ */
+async function ownIndexExists(base: string): Promise<boolean | null> {
+  try {
+    const res = await fetch(`${base}/indexes?api-version=2024-07-01&$select=name`, { headers: { "api-key": process.env.AZURE_SEARCH_API_KEY! }, signal: AbortSignal.timeout(15_000) });
+    const json = (await res.json().catch(() => ({}))) as { value?: { name?: unknown }[] };
+    if (!res.ok || !Array.isArray(json.value)) return null;
+    return json.value.some((i) => i?.name === INDEX);
+  } catch {
+    return null;
+  }
 }

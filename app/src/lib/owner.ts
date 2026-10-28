@@ -33,6 +33,11 @@
  * - **Temporary password**: `npm run reset-password -- --owner <email>` (scripts/reset-password.mjs, run by
  *   whoever has the database) gives an owner a one-time password (`must_change_password`). Until they pick
  *   their own, `requireOwner` refuses everything except the password change.
+ * - **Strict cookie after Microsoft sign-in**: `sk_owner` is `sameSite: "strict"`, so a browser doesn't send it on a
+ *   navigation whose redirect chain started on another site. Microsoft's reply starts at login.microsoftonline.com,
+ *   so a plain 302 from the callback to /owner arrived without the new cookie and bounced to /owner/login once.
+ *   The callback therefore answers with a tiny page on our own site (`sameSiteHandoff`) that then opens /owner: that
+ *   second navigation starts on Sidekick, so the strict cookie goes with it. The cookie itself stays strict.
  * - **Sign-in limit**: owner sign-in uses the same failure limit as the portal (lib/login-limit.ts), counted
  *   under `owner:<email>` so it never mixes with a portal account of the same email.
  */
@@ -208,6 +213,27 @@ export async function startOwnerSession(ownerId: string) {
   await run("INSERT INTO owner_sessions (token_hash, admin_id, expires_at) VALUES (?, ?, ?)", sha256(token), ownerId, expires.toISOString());
   await run("UPDATE platform_admins SET last_active = ? WHERE id = ?", now(), ownerId);
   (await cookies()).set(OWNER_COOKIE, token, { httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", path: "/", expires });
+}
+
+/**
+ * The answer to a sign-in that came back from another site (Microsoft): a tiny page on our own site that opens
+ * `path` straight away (script, with a meta refresh and a plain link as fallbacks). Use it instead of a redirect
+ * when the next page needs a `sameSite: "strict"` cookie just set (`sk_owner`): a redirect chain that began on
+ * login.microsoftonline.com counts as cross-site, so the browser would leave the strict cookie off; this second
+ * navigation starts on Sidekick and carries it. `path` must be one of our own fixed paths (starts with one "/");
+ * anything else falls back to /owner. Not cached, never framed, no referrer. Called by the Owner Console's Microsoft
+ * callback only.
+ */
+export function sameSiteHandoff(path: string): Response {
+  const target = /^\/(?!\/)[\w\-/?=&.]*$/.test(path) ? path : "/owner";
+  const attr = target.replace(/&/g, "&amp;");
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">` +
+    `<meta http-equiv="refresh" content="0;url=${attr}"><title>Signing you in…</title></head>` +
+    `<body><p>Signing you in… <a href="${attr}">Continue</a></p><script>location.replace(${JSON.stringify(target)})</script></body></html>`;
+  return new Response(html, {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-sidekick-handoff": target },
+  });
 }
 
 /** Signs the owner out on this browser. */

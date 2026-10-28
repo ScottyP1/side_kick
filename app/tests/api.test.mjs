@@ -156,7 +156,17 @@ async function microsoftSignIn(call, claims, { mode, cheat = {}, replay } = {}) 
   msCodes.set(code, { challenge: u.searchParams.get("code_challenge"), nonce: cheat.nonce ?? u.searchParams.get("nonce"), claims, key: cheat.key });
   const back = await (cheat.otherBrowser ?? call)("GET", `${base}/callback?code=${code}&state=${u.searchParams.get("state")}`);
   if (replay) await call("GET", `${base}/callback?code=${code}&state=${u.searchParams.get("state")}`);
-  return { start, back, to: back.location ? new URL(back.location) : null };
+  return { start, back, to: back.location ? new URL(back.location) : handoffTarget(back) };
+}
+
+/**
+ * Where a same-site handoff page (lib/owner.ts `sameSiteHandoff`, the Owner Console's answer after Microsoft) sends
+ * the browser: read from its meta refresh like a browser would, as a URL on this server. Null for anything else.
+ */
+function handoffTarget(res) {
+  if (res.status !== 200 || typeof res.body !== "string") return null;
+  const m = res.body.match(/<meta http-equiv="refresh" content="0;url=([^"]+)">/);
+  return m ? new URL(m[1].replace(/&amp;/g, "&"), BASE) : null;
 }
 
 /* ---------- fake Azure DevOps + Jira (connectors): sign-in, REST APIs, test controls ---------- */
@@ -2677,6 +2687,18 @@ test(`[${ENGINE}] Owner Console Microsoft sign-in: the allowed account gets an o
   const cody = client();
   const r = await ownerMs(cody, { tid: OWNER_TENANT, oid: OWNER_OID, email: "Cody@Labs.test", name: "Cody Operator" });
   assert.equal(r.to.pathname, "/owner", errorOf(r));
+  // Oct 28 live: a 302 straight to /owner bounced once to /owner/login. The browser had started the redirect chain on
+  // login.microsoftonline.com (cross-site), so it left the new strict cookie off. Now the callback answers with a
+  // page on our own site (no redirect), whose navigation to /owner starts here and so carries the cookie.
+  assert.equal(r.back.status, 200);
+  assert.equal(r.back.location, null, "no redirect continues Microsoft's cross-site chain");
+  assert.match(r.back.headers.get("content-type"), /^text\/html/);
+  assert.equal(r.back.headers.get("cache-control"), "no-store");
+  assert.equal(r.to.origin, new URL(BASE).origin, "the handoff stays on this site");
+  assert.match(r.back.body, /location\.replace\("\/owner"\)/);
+  const set = r.back.headers.getSetCookie().find((c) => c.startsWith("sk_owner="));
+  assert.match(set, /SameSite=strict/i, "the session cookie itself stays strict");
+  assert.match(set, /HttpOnly/i);
   const me = (await cody("GET", "/api/owner/me")).body;
   assert.equal(me.owner.email, "cody@labs.test", JSON.stringify(me));
   assert.equal(me.owner.name, "Cody Operator", "name and email come from the token");

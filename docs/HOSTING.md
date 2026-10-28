@@ -293,7 +293,7 @@ or the portal's estimate before buying.
 
 | Step | When | Change | Extra cost / month |
 |---|---|---|---|
-| 1. Search: Free → **Basic** | Before the first real customer, or when the Owner Console says "Search is almost full" (hourly check: 70% of storage or one index left, again at 90%). Free holds only 50 MB / 10,000 passages and 3 indexes; one busy group fills it | AI Search `Basic` (15 GB per partition) | ~$75 |
+| 1. Search: Free → **Basic** | Before the first real customer, or when the Owner Console says "Search is almost full" (hourly check: 70% of storage, again at 90%) or "no free index slots" (3 of 3 used). Free holds only 50 MB / 10,000 passages and 3 indexes; one busy group fills it | AI Search `Basic` (15 GB per partition) | ~$75 |
 | 2. Database: B1ms → **B2s** | ~10 companies or 1,000 groups, or CPU over 70% for an hour | Burstable B2s (2 vCores, 4 GiB, ~430 connections) | ~+$35 (≈$50 total) |
 | 3. App: **2–4 copies** with auto-scaling | When one copy's CPU is over 60% at busy hours, or before a launch | Container App min 2 / max 4 copies, scale rule "50 requests at once per copy"; 1 vCPU / 2 GiB each | ~+$30–100 (≈$35 per busy copy) |
 | 4. Database: **General Purpose D2ds_v5** | ~50 companies / 5,000 groups, or B2s CPU credits running out | 2 vCores, 8 GiB, ~860 connections, no CPU credits; zone-redundant HA optional (doubles it) | ≈$130 total (≈$78 with a 1-year reservation) |

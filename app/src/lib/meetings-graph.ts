@@ -27,7 +27,9 @@
  *      POSTs to /api/graph/notifications when a transcript is ready. Graph first checks the address with a **validation token** (echoed back as plain
  *      text), and every notification carries our random **client state**, compared before anything is done.
  *      Subscriptions last at most ~3 days, so a recurring job **renews** them a day ahead and recreates any Graph
- *      dropped (404 on renewal, or a `subscriptionRemoved` lifecycle event at /api/graph/lifecycle).
+ *      dropped (404 on renewal, or a `subscriptionRemoved` lifecycle event at /api/graph/lifecycle). Before making
+ *      one it deletes strays of ours that the database lost (`removeStrays`). Graph refusing a request (400 and
+ *      friends) is reported with Graph's own code and message and isn't retried within the hour.
  *   2. **Polling fallback** (safe): every 15 minutes, for each person in a group who signed in with Microsoft,
  *      Graph's `getAllTranscripts` lists transcripts of meetings they organized, and of ad hoc calls they
  *      started, since the last check (`graph_poll_cursors`; ad hoc calls keep their own cursor, `adhoc:<oid>`, so
@@ -58,7 +60,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { all, get, newId, now, run, tx } from "./db";
 import { audit, auditAsSidekick, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, requireManage, type Role, type User } from "./auth";
-import { ConsentNeededError, directoryPerson, findOrCreateMicrosoftUser, graphCall, linkByEmail, NOT_APPROVED } from "./directory";
+import { ConsentNeededError, directoryPerson, findOrCreateMicrosoftUser, graphCall, GraphRequestError, linkByEmail, NOT_APPROVED } from "./directory";
 import { entraConfigured } from "./entra";
 import { enqueue } from "./jobs";
 import { span } from "./trace";
@@ -472,18 +474,25 @@ export async function ensureSubscription(orgId: string, at = new Date()): Promis
   if (!on || !tenant || !base) return out;
   const expiry = new Date(at.getTime() + SUBSCRIPTION_MINUTES * 60_000).toISOString();
   let denied: string | null = null;
+  let failed: unknown = null;
   for (const { resource, denied: deniedMessage } of SUBSCRIBED) {
     try {
       const done = await keepSubscription(orgId, tenant, resource, deniedMessage(), subs.filter((s) => s.tenant_id === tenant && s.resource === resource), base, expiry, at);
       if (done === "renewed") out.renewed++;
       if (done === "created") out.created++;
     } catch (e) {
-      if (!(e instanceof ConsentNeededError)) throw e;
-      // The first refusal is the one to fix first (scheduled meetings come before ad hoc calls).
-      denied ??= e.message;
+      // One resource failing never stops the other (Oct 28: a 400 on one used to end the run before the second).
+      if (e instanceof ConsentNeededError) denied ??= e.message; // the first refusal is the one to fix first
+      else failed ??= e;
     }
   }
   if (denied) await noteCheck(orgId, denied);
+  if (failed) {
+    // Graph refused the request itself (400 and friends): the same request an hour from now gets the same answer,
+    // so the job stops now with Graph's reason instead of using every attempt. Throttling and outages still retry.
+    if (failed instanceof GraphRequestError && failed.graphStatus >= 400 && failed.graphStatus < 500) failed.permanent = true;
+    throw failed;
+  }
   return out;
 }
 
@@ -504,6 +513,7 @@ async function keepSubscription(
     // 404: Graph no longer has it (expired or removed). Make a new one below.
     await run("DELETE FROM graph_subscriptions WHERE id = ?", s.id);
   }
+  await removeStrays(tenant, resource, base);
   const clientState = crypto.randomBytes(32).toString("base64url");
   const made = await span("microsoft", "Create a Microsoft Graph subscription", () =>
     graphCall<{ id?: string; expirationDateTime?: string }>(tenant, "POST", "/v1.0/subscriptions", {
@@ -525,6 +535,25 @@ async function keepSubscription(
     made.id, orgId, tenant, resource, clientState, made.expirationDateTime ?? expiry, now(),
   );
   return "created";
+}
+
+/**
+ * Before making a subscription: deletes Graph subscriptions of this app, tenant and resource that point at this
+ * server but that Sidekick no longer knows (lost rows: a restored database, a crash between Graph's answer and our
+ * insert). Their client state is unknown, so their notifications would be ignored anyway, and leftovers must not
+ * stand in the way of the new one. Best effort: a failed list or delete is logged, never thrown.
+ */
+async function removeStrays(tenant: string, resource: string, base: string) {
+  try {
+    const listed = await graphCall<{ value?: { id?: string; resource?: string; notificationUrl?: string }[] }>(tenant, "GET", "/v1.0/subscriptions");
+    const known = new Set((await all<{ id: string }>("SELECT id FROM graph_subscriptions WHERE tenant_id = ?", tenant)).map((r) => r.id));
+    for (const s of listed?.value ?? []) {
+      if (!s.id || !isGraphId(s.id) || known.has(s.id) || s.resource !== resource || s.notificationUrl !== `${base}/api/graph/notifications`) continue;
+      await span("microsoft", "Remove a stray Microsoft Graph subscription", () => graphCall(tenant, "DELETE", `/v1.0/subscriptions/${encodeURIComponent(s.id!)}`));
+    }
+  } catch (e) {
+    console.error("Couldn't check for stray Graph subscriptions", e instanceof Error ? e.message : e);
+  }
 }
 
 /** The plain message when Microsoft refuses transcript access (consent or Teams' access policy missing). */

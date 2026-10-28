@@ -125,6 +125,7 @@ const pollCalls = [];
 const CALLS = []; // ad hoc calls (Meet now): { callId, transcriptId, organizer, createdDateTime, endDateTime, vtt }
 const callsApproved = new Set(); // tenants that approved CallTranscripts.Read.All
 const callPollCalls = [];
+const subRefusal = new Map(); // resource → the 400 Graph answers when a subscription on it is made (Oct 28 live bug)
 const transcriptsOff = new Set(); // tenants whose Teams "Transcript API access" switch is off (403 GraphAccessToTranscriptsDisabled)
 const throttle = { meeting: [] }; // queue of Retry-After values to answer the next meeting reads with (429)
 const CHAT_MSGS = new Map(); // chat id → its latest messages (call events for the transcription reminder)
@@ -195,12 +196,20 @@ const microsoft = http.createServer((req, res) => {
         subCalls.push({ op: "denied", body: b, tid });
         return send(403, { error: { code: "Forbidden", message: "API requires one of 'CallTranscripts.Read.All'." } });
       }
+      if (subRefusal.has(b.resource)) {
+        subCalls.push({ op: "refused", body: b, tid });
+        return send(400, subRefusal.get(b.resource));
+      }
       subCalls.push({ op: "create", body: b, tid });
       if (!["communications/onlineMeetings/getAllTranscripts", "communications/adhocCalls/getAllTranscripts"].includes(b.resource) || b.changeType !== "created" || !b.clientState) return send(400, { error: { code: "InvalidRequest" } });
       if (!(await validateWith(b.notificationUrl)) || !(await validateWith(b.lifecycleNotificationUrl))) return send(400, { error: { code: "ValidationError", message: "Subscription validation request failed" } });
       const id = crypto.randomUUID();
       SUBS.set(id, { ...b, id, tid });
       return send(201, { id, expirationDateTime: b.expirationDateTime, resource: b.resource });
+    }
+    if (p === "/v1.0/subscriptions" && req.method === "GET") {
+      subCalls.push({ op: "list", tid });
+      return send(200, { value: [...SUBS.values()].filter((x) => x.tid === tid).map(({ id, resource, notificationUrl, expirationDateTime }) => ({ id, resource, notificationUrl, expirationDateTime, clientState: null })) });
     }
     const sub = p.match(/^\/v1\.0\/subscriptions\/(.+)$/);
     if (sub) {
@@ -1053,6 +1062,43 @@ test(`[${ENGINE}] isolation: another organization sees none of Org A's Teams mee
   assert.equal((await bob("POST", "/api/meetings/auto", { action: "retry", id: tie.id })).status, 404);
   // Org A's subscription with Org B's own (unknown) meeting: recorded under Org A only if A's state matches.
   assert.equal(await scalar(`SELECT COUNT(*) FROM graph_meetings WHERE org_id <> (SELECT org_id FROM graph_subscriptions LIMIT 1)`), "0");
+});
+
+test(`[${ENGINE}] subscription upkeep: a stray subscription Sidekick lost track of is removed, and Graph's 400 is reported with its reason`, async () => {
+  // A row lost (e.g. a restored database) while Graph still has the subscription: the next upkeep makes a new one
+  // and deletes the stray at Graph, so leftovers never pile up or stand in the way.
+  const stray = await scalar(`SELECT id FROM ${MEET_SUB}`);
+  assert.ok(SUBS.has(stray));
+  await dbExec(`DELETE FROM ${MEET_SUB}`);
+  await drain({ sweep: true });
+  const fresh = await scalar(`SELECT id FROM ${MEET_SUB}`);
+  assert.ok(fresh && fresh !== stray && SUBS.has(fresh));
+  assert.equal(SUBS.has(stray), false, "the stray was deleted at Graph");
+  assert.ok(subCalls.some((c) => c.op === "list" && c.tid === TA), "Graph's list was read first");
+
+  // Oct 28 live: every hourly run failed with a bare "Microsoft Graph answered 400" and used all 4 attempts.
+  // Now the job stops at once with Graph's own code and message (nothing secret), and the other resource still runs.
+  subRefusal.set("communications/onlineMeetings/getAllTranscripts", {
+    error: { code: "ValidationError", message: "Subscription validation request failed. Notification endpoint must respond with 200 OK to validation request. clientState=abcdef Bearer eyJ0eXAiOiJKV1QiLCJhbGciOi" },
+  });
+  SUBS.delete(fresh);
+  await dbExec(`DELETE FROM ${MEET_SUB}`);
+  const before = Number(await scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'meetings.subscription' AND status = 'dead'"));
+  await drain({ sweep: true });
+  const dead = (col) => scalar(`SELECT ${col} FROM jobs WHERE kind = 'meetings.subscription' AND status = 'dead' ORDER BY updated_at DESC, id DESC LIMIT 1`);
+  const job = { attempts: await dead("attempts"), last_error: await dead("last_error") };
+  assert.equal(Number(await scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'meetings.subscription' AND status = 'dead'")), before + 1);
+  assert.equal(Number(job.attempts), 1, "a 400 isn't retried: the same request gets the same answer");
+  assert.match(job.last_error, /^GraphRequestError: Microsoft Graph answered 400 ValidationError: Subscription validation request failed/);
+  assert.doesNotMatch(job.last_error, /abcdef|eyJ0eX/, "nothing token-like is kept");
+  assert.equal(await scalar(`SELECT COUNT(*) FROM ${MEET_SUB}`), "0");
+  const adhocTried = subCalls.filter((c) => c.body?.resource === "communications/adhocCalls/getAllTranscripts").length;
+  assert.ok(adhocTried > 0, "the ad hoc resource is still handled after the first one fails");
+
+  // Fixed at Graph's end: the next upkeep makes it again.
+  subRefusal.clear();
+  await drain({ sweep: true });
+  assert.equal(await scalar(`SELECT COUNT(*) FROM ${MEET_SUB}`), "1");
 });
 
 test(`[${ENGINE}] subscription upkeep: renewed before it runs out, recreated when Graph forgot or removed it, removed when switched off`, async () => {

@@ -174,7 +174,8 @@ export function retryAfterMs(header: string | null, at = Date.now()): number {
  * otherwise throw `GraphThrottledError` with Graph's Retry-After, other failures 502. Returns the JSON body (null
  * when empty), or the body as text with `raw` (a transcript download). `body` is sent as JSON (POST/PATCH).
  * Any other refusal (400 and friends) throws `GraphRequestError` carrying Graph's own error code and message
- * (`graphErrorDetail`, cleaned of anything token-like), so a job's last error and the Owner Console say why.
+ * (`graphErrorDetail`, cleaned of anything token-like), so a job's last error and the Owner Console say why. So does a
+ * 403 that is Microsoft's subscription cap ("reached its limit"), which no permission fixes.
  * Used here for the directory, by lib/teams/install.ts to remove Sidekick from a chat or team, and by
  * lib/meetings-graph.ts for meeting transcripts and change-notification subscriptions.
  */
@@ -191,7 +192,10 @@ export async function graphCall<T>(
     if (!res) throw new HttpError(502, "Couldn't reach Microsoft Graph. Try again in a minute.");
     if (res.status === 401 || res.status === 403) {
       tokens.delete(tenantId);
-      const code = opts.deniedCodes ? await graphErrorCode(res) : null;
+      const detail = await graphErrorDetail(res);
+      // Not a permission problem: Microsoft's cap on subscriptions ("App has reached its limit of '1'…").
+      if (res.status === 403 && /reached its limit/i.test(detail.message ?? "")) throw new GraphRequestError(403, detail.code, detail.message);
+      const code = detail.innerCode ?? detail.outerCode;
       throw new ConsentNeededError((code && opts.deniedCodes?.[code]) || opts.deniedMessage);
     }
     if (res.status === 404) return null;
@@ -237,15 +241,15 @@ export class GraphRequestError extends HttpError {
  * Graph's error code (`innerError.code` when more specific, else `error.code`) and message from a failed
  * response, safe to log and show: one line, at most 200 characters, with anything that looks like a secret
  * removed (bearer tokens, `validationToken=`/`clientState`/`code=` values, long base64 runs such as tokens or
- * certificates). Graph's messages name resources and addresses, never our secrets, but this is belt and braces.
+ * certificates). `outerCode`/`innerCode` are the two raw codes (for `deniedCodes`). Graph's messages name resources and addresses, never our secrets, but this is belt and braces.
  */
-export async function graphErrorDetail(res: Response): Promise<{ code: string | null; message: string | null }> {
+export async function graphErrorDetail(res: Response): Promise<{ code: string | null; message: string | null; outerCode: string | null; innerCode: string | null }> {
   const body = (await res.json().catch(() => null)) as { error?: { code?: unknown; message?: unknown; innerError?: { code?: unknown } } } | null;
   const outer = typeof body?.error?.code === "string" ? body.error.code : null;
   const inner = typeof body?.error?.innerError?.code === "string" ? body.error.innerError.code : null;
   const code = (inner && outer && inner !== outer ? `${outer}/${inner}` : (inner ?? outer))?.slice(0, 80) || null;
   const raw = typeof body?.error?.message === "string" ? body.error.message : null;
-  return { code, message: raw ? cleanGraphMessage(raw) : null };
+  return { code, message: raw ? cleanGraphMessage(raw) : null, outerCode: outer, innerCode: inner };
 }
 
 /** One line of Graph's error message with token-like values blanked (see `graphErrorDetail`). */
@@ -257,13 +261,6 @@ export function cleanGraphMessage(text: string): string {
     .replace(/[A-Za-z0-9+/_-]{40,}={0,2}/g, "[hidden]")
     .trim()
     .slice(0, 200);
-}
-
-/** Graph's most specific error code from a failed response (`innerError.code`, else `error.code`), or null. */
-async function graphErrorCode(res: Response): Promise<string | null> {
-  const body = (await res.json().catch(() => null)) as { error?: { code?: unknown; innerError?: { code?: unknown } } } | null;
-  const code = body?.error?.innerError?.code ?? body?.error?.code;
-  return typeof code === "string" ? code : null;
 }
 
 const graphGet = <T>(tenantId: string, path: string, headers: Record<string, string> = {}) =>

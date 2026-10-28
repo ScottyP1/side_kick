@@ -512,10 +512,17 @@ automatic notes are on. Each group can switch it off: group → **Teams chats** 
   `node --env-file=app/.env.local app/scripts/probe-graph-subscriptions.mjs --tenant <tenant id> --base <live https address>`
   It lists the app's subscriptions (duplicates, leftovers), checks both notification addresses the way Graph does
   (200, plain text, token echoed, no redirect, under 10 s) and, with `--create`, makes one 45-minute test subscription
-  per resource and deletes it at once, printing Graph's answer. Common answers: *ValidationError / validation request
-  failed* = an address answers wrong (a redirect, a sign-in wall, a different `SIDEKICK_PUBLIC_URL`); *expiration*
-  = time too far ahead; *lifecycleNotificationUrl is required* = an old build. Sidekick also deletes stray
-  subscriptions of its own (pointing at this server but unknown to the database) before it makes a new one.
+  per resource and deletes it at once, printing Graph's answer. Known answers:
+  - *ValidationError / validation request failed*: an address answers wrong (a redirect, a sign-in wall, a different
+    `SIDEKICK_PUBLIC_URL`).
+  - *App has reached its limit of '1' subscription(s) on tenant* (403): Microsoft allows **one** subscription per app
+    and tenant on the meeting-transcript resource. Sidekick renews its own and never makes a second; a stray of its
+    own (pointing here, unknown to the database) is deleted first. One pointing at **another address** (another
+    Sidekick server on the same Microsoft app) is left alone, and the job says "SubscriptionLimit … another address
+    holds it": delete that subscription (or stop that server's automatic notes).
+  - *Subscription for resource 'communications/adhocCalls/getAllTranscripts' is not supported in 'V1' version*
+    (Oct 28, live): the cause of the hourly 400 until #101. Sidekick no longer subscribes to ad hoc calls; the
+    15-minute poll finds Meet now calls. `--create` still tries it, to show if Microsoft starts allowing it.
 - **A meeting shows Skipped**: the reason says why (not one group's meeting, meeting hours used up, AI credit, read-only
   plan). **Failed** = Graph kept refusing after 6 tries: **Try again** after fixing the cause.
 - **The tab says "Teams didn't sign you in"**: step 2 (Application ID URI must match the package's

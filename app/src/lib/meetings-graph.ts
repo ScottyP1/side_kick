@@ -22,12 +22,16 @@
  *   Meetings page asks the admin to approve the new call transcripts permission.
  * - **Two ways to hear about a meeting**, both ending in the same `recordTranscript` (one row per transcript in
  *   `graph_meetings`, so a meeting found both ways is captured once):
- *   1. **Change notifications** (fast): two Graph subscriptions per organization, on
- *      `communications/onlineMeetings/getAllTranscripts` and `communications/adhocCalls/getAllTranscripts`. Graph
+ *   1. **Change notifications** (fast, scheduled meetings only): one Graph subscription per organization, on
+ *      `communications/onlineMeetings/getAllTranscripts`. Graph
  *      POSTs to /api/graph/notifications when a transcript is ready. Graph first checks the address with a **validation token** (echoed back as plain
  *      text), and every notification carries our random **client state**, compared before anything is done.
  *      Subscriptions last at most ~3 days, so a recurring job **renews** them a day ahead and recreates any Graph
- *      dropped (404 on renewal, or a `subscriptionRemoved` lifecycle event at /api/graph/lifecycle).
+ *      dropped (404 on renewal, or a `subscriptionRemoved` lifecycle event at /api/graph/lifecycle). Microsoft allows
+ *      one per app and tenant, so it's always renewed, never doubled; before making one, strays of ours that the
+ *      database lost are deleted (`clearTheWay`). Ad hoc calls have no subscription (Graph v1.0 refuses that
+ *      resource): the poll finds them. Graph refusing a request (400 and
+ *      friends) is reported with Graph's own code and message and isn't retried within the hour.
  *   2. **Polling fallback** (safe): every 15 minutes, for each person in a group who signed in with Microsoft,
  *      Graph's `getAllTranscripts` lists transcripts of meetings they organized, and of ad hoc calls they
  *      started, since the last check (`graph_poll_cursors`; ad hoc calls keep their own cursor, `adhoc:<oid>`, so
@@ -58,7 +62,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { all, get, newId, now, run, tx } from "./db";
 import { audit, auditAsSidekick, HttpError, isAdmin, isLead, LEAD_ASSIGNABLE_ROLES, requireManage, type Role, type User } from "./auth";
-import { ConsentNeededError, directoryPerson, findOrCreateMicrosoftUser, graphCall, linkByEmail, NOT_APPROVED } from "./directory";
+import { ConsentNeededError, directoryPerson, findOrCreateMicrosoftUser, graphCall, GraphRequestError, linkByEmail, NOT_APPROVED } from "./directory";
 import { entraConfigured } from "./entra";
 import { enqueue } from "./jobs";
 import { span } from "./trace";
@@ -440,14 +444,19 @@ export function notificationBase(): string | null {
   return portalUrl("");
 }
 
-/** The transcript subscriptions Sidekick keeps per organization, and the refusal message for each. */
+/**
+ * The transcript subscriptions Sidekick keeps per organization, and the refusal message for each. Only scheduled
+ * meetings: Microsoft documents `communications/adhocCalls/getAllTranscripts` as a subscription resource, but live
+ * Graph answers 400 "Subscription for resource … is not supported in 'V1' version" (the probe, Oct 28), and the beta
+ * subscription docs don't list it either. Ad hoc calls (Meet now) are found by the 15-minute poll instead
+ * (`pollOrg`). An ad hoc subscription made by an older build is removed by the upkeep (resource no longer used).
+ */
 const SUBSCRIBED: { resource: string; denied: () => string }[] = [
   { resource: TRANSCRIPTS_RESOURCE, denied: () => TRANSCRIPT_DENIED },
-  { resource: ADHOC_TRANSCRIPTS_RESOURCE, denied: () => ADHOC_DENIED },
 ];
 
 /**
- * Keeps one live subscription per transcript resource (scheduled meetings, ad hoc calls) for the organization
+ * Keeps one live subscription per transcript resource (`SUBSCRIBED`: scheduled meetings) for the organization
  * while automatic notes are on: renews one when it has less than a day left (a 404 means Graph dropped it: a new
  * one is made), creates one when there's none, and deletes them when the switch is off. Each resource is handled
  * on its own, so a missing call transcripts permission never stops the scheduled-meeting subscription. Returns
@@ -472,18 +481,25 @@ export async function ensureSubscription(orgId: string, at = new Date()): Promis
   if (!on || !tenant || !base) return out;
   const expiry = new Date(at.getTime() + SUBSCRIPTION_MINUTES * 60_000).toISOString();
   let denied: string | null = null;
+  let failed: unknown = null;
   for (const { resource, denied: deniedMessage } of SUBSCRIBED) {
     try {
       const done = await keepSubscription(orgId, tenant, resource, deniedMessage(), subs.filter((s) => s.tenant_id === tenant && s.resource === resource), base, expiry, at);
       if (done === "renewed") out.renewed++;
       if (done === "created") out.created++;
     } catch (e) {
-      if (!(e instanceof ConsentNeededError)) throw e;
-      // The first refusal is the one to fix first (scheduled meetings come before ad hoc calls).
-      denied ??= e.message;
+      // One resource failing never stops another (Oct 28: a 400 on one used to end the run before the next).
+      if (e instanceof ConsentNeededError) denied ??= e.message; // the first refusal is the one to fix first
+      else failed ??= e;
     }
   }
   if (denied) await noteCheck(orgId, denied);
+  if (failed) {
+    // Graph refused the request itself (400 and friends): the same request an hour from now gets the same answer,
+    // so the job stops now with Graph's reason instead of using every attempt. Throttling and outages still retry.
+    if (failed instanceof GraphRequestError && failed.graphStatus >= 400 && failed.graphStatus < 500) failed.permanent = true;
+    throw failed;
+  }
   return out;
 }
 
@@ -504,6 +520,7 @@ async function keepSubscription(
     // 404: Graph no longer has it (expired or removed). Make a new one below.
     await run("DELETE FROM graph_subscriptions WHERE id = ?", s.id);
   }
+  await clearTheWay(tenant, resource, base);
   const clientState = crypto.randomBytes(32).toString("base64url");
   const made = await span("microsoft", "Create a Microsoft Graph subscription", () =>
     graphCall<{ id?: string; expirationDateTime?: string }>(tenant, "POST", "/v1.0/subscriptions", {
@@ -525,6 +542,38 @@ async function keepSubscription(
     made.id, orgId, tenant, resource, clientState, made.expirationDateTime ?? expiry, now(),
   );
   return "created";
+}
+
+/**
+ * Before making a subscription. Microsoft allows **one subscription per app per tenant** on a tenant-wide transcript
+ * resource (Graph answers 403 "App has reached its limit of '1'…" to a second), so Sidekick must renew the one it has
+ * and never make a second. This deletes subscriptions of this app, tenant and resource that point at this server but
+ * that Sidekick no longer knows (lost rows: a restored database, a crash between Graph's answer and our insert):
+ * their client state is unknown, so their notifications would be ignored anyway. A subscription on the resource that
+ * points at **another** address (another Sidekick server using the same Microsoft app) is left alone and reported:
+ * a `GraphRequestError` (403, permanent) naming the address, since creating would only hit the limit. A failed list
+ * is logged and ignored (the create then says what's wrong).
+ */
+async function clearTheWay(tenant: string, resource: string, base: string) {
+  let listed: { value?: { id?: string; resource?: string; notificationUrl?: string }[] } | null;
+  try {
+    listed = await graphCall(tenant, "GET", "/v1.0/subscriptions");
+  } catch (e) {
+    console.error("Couldn't list the Graph subscriptions", e instanceof Error ? e.message : e);
+    return;
+  }
+  const known = new Set((await all<{ id: string }>("SELECT id FROM graph_subscriptions WHERE tenant_id = ?", tenant)).map((r) => r.id));
+  for (const s of listed?.value ?? []) {
+    if (!s.id || !isGraphId(s.id) || known.has(s.id) || s.resource !== resource) continue;
+    if (s.notificationUrl === `${base}/api/graph/notifications`) {
+      await span("microsoft", "Remove a stray Microsoft Graph subscription", () => graphCall(tenant, "DELETE", `/v1.0/subscriptions/${encodeURIComponent(s.id!)}`))
+        .catch((e) => console.error("Couldn't remove a stray Graph subscription", e instanceof Error ? e.message : e));
+      continue;
+    }
+    const held = new GraphRequestError(403, "SubscriptionLimit", `Microsoft allows one subscription per app and tenant, and another address holds it (${String(s.notificationUrl ?? "unknown").slice(0, 120)}). Delete that subscription or point it here`);
+    held.permanent = true;
+    throw held;
+  }
 }
 
 /** The plain message when Microsoft refuses transcript access (consent or Teams' access policy missing). */

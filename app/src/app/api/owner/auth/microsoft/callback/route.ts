@@ -8,7 +8,9 @@
  * 4. Find, link or create the owner row (`ownerForMicrosoft`).
  * 5. With a passkey registered, ask for it first (the second-step cookie, then /owner/login?step=passkey);
  *    otherwise start the Owner Console session (`startOwnerSession`, never a portal session) and open /owner.
- * Problems never fail silently: the browser lands on /owner/login with the reason (a flash cookie, lib/flash.ts).
+ * Success answers with a same-site handoff page (lib/owner.ts `sameSiteHandoff`), not a redirect: the strict
+ * `sk_owner` cookie isn't sent on a redirect chain that started at Microsoft, which used to bounce the owner to
+ * /owner/login once. Problems never fail silently: the browser lands on /owner/login with the reason (a flash cookie, lib/flash.ts).
  * Logged in the operator log: sign-ins, links, new owner rows and every refusal.
  */
 import { cookies } from "next/headers";
@@ -19,7 +21,7 @@ import { FLASH_COOKIE, FLASH_SECONDS } from "@/lib/flash";
 import { finishMicrosoftSignIn, redirectUri } from "@/lib/entra";
 import { secondFactorMethods, startSecondStep } from "@/lib/mfa";
 import { setSecondStepCookie } from "@/lib/mfa-routes";
-import { OWNER_MS_REFUSED, OWNER_OIDC_COOKIE, ownerForMicrosoft, ownerMfaEvidence, ownerMicrosoftAllowed, ownerMicrosoftEnabled, platformLog, startOwnerSession } from "@/lib/owner";
+import { OWNER_MS_REFUSED, OWNER_OIDC_COOKIE, ownerForMicrosoft, ownerMfaEvidence, ownerMicrosoftAllowed, ownerMicrosoftEnabled, platformLog, sameSiteHandoff, startOwnerSession } from "@/lib/owner";
 
 export const GET = handle(async (req: Request) => {
   const jar = await cookies();
@@ -46,11 +48,11 @@ export const GET = handle(async (req: Request) => {
     if ((await secondFactorMethods("owner", owner.id)).includes("passkey")) {
       await setSecondStepCookie("owner", await startSecondStep("owner", owner.id));
       await platformLog(owner.name, `Owner Console sign-in with ${how}: waiting for their passkey`);
-      return go("/owner/login?step=passkey");
+      return sameSiteHandoff("/owner/login?step=passkey");
     }
     await startOwnerSession(owner.id);
     await platformLog(owner.name, `Signed in to the Owner Console (${how})`);
-    return go("/owner");
+    return sameSiteHandoff("/owner");
   } catch (e) {
     const message = await errorMessageFor(req, e);
     // The message travels in a short-lived cookie, not the address, so a link can't put its own words on the page.

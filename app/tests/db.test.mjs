@@ -1508,17 +1508,28 @@ test(`[${engine}] retention: old traces, usage, audit and expired rows go in bat
   assert.equal(again.traces, 0, "nothing left to do the second time");
 });
 
-test(`[${engine}] search capacity: a no-op on the local index; reads a fake servicestats, alerts at 70% / one index left and again at 90%`, async () => {
+test(`[${engine}] search capacity: a no-op on the local index; reads a fake servicestats, alerts at 70% and 90% of storage or when the index slots run out`, async () => {
   const http = await import("node:http");
   const cap = await import("../src/lib/search-capacity.ts");
   const saved = { endpoint: process.env.AZURE_SEARCH_ENDPOINT, key: process.env.AZURE_SEARCH_API_KEY };
   const logs = async () => Number((await db.get("SELECT COUNT(*) AS n FROM platform_log WHERE actor = 'Search capacity check'")).n);
   const MB = 1024 * 1024;
-  // Pure rules: storage share and indexes left.
-  const at = (storageMb, indexes, quota = 3) => cap.capacityLevel({ storage: { usage: storageMb * MB, quota: 50 * MB }, indexes: { usage: indexes, quota } });
-  assert.deepEqual([at(2, 1), at(2, 2), at(35, 1), at(45, 1), at(2, 3), at(34.9, 13, 15)], ["ok", "warn", "warn", "full", "full", "ok"]);
+  // Pure rules: storage share first, then index slots (and whether Sidekick's own index still has to be made).
+  const at = (storageMb, indexes, quota = 3, ownIndex = true) => {
+    const r = cap.capacityStatus({ storage: { usage: storageMb * MB, quota: 50 * MB }, indexes: { usage: indexes, quota }, ownIndex });
+    return `${r.level}${r.reason ? `/${r.reason}` : ""}`;
+  };
+  // Oct 28 live: 2 MB of 52 MB (4%) and 2 of 3 indexes used is fine (it used to warn "almost full").
+  assert.equal(at(2, 2), "ok", "two of three index slots used is fine");
+  assert.deepEqual(
+    [at(2, 1), at(35, 1), at(45, 1), at(2, 3), at(2, 3, 3, null), at(2, 2, 3, false), at(2, 3, 3, false), at(46, 3, 3, false), at(34.9, 15, 15)],
+    ["ok", "warn/storage", "full/storage", "warn/indexes", "warn/indexes", "ok", "full/new-index", "full/storage", "warn/indexes"],
+  );
+  assert.equal(cap.capacityLevel({ storage: { usage: 36 * MB, quota: 50 * MB }, indexes: { usage: 1, quota: 3 } }), "warn");
   assert.deepEqual([cap.tierFromLimits(3), cap.tierFromLimits(15), cap.tierFromLimits(7)], ["Free", "Basic", null]);
   assert.match(cap.capacityMessage("warn", "Free"), /upgrade to Basic \(about \$75\/month\) before uploads fail/);
+  assert.equal(cap.capacityMessage("warn", "Free", "indexes", { usage: 3, quota: 3 }), "Search has no free index slots (3 of 3 used). Sidekick's index is fine; delete an unused index or upgrade to Basic (about $75/month) before adding another");
+  assert.match(cap.capacityMessage("full", "Basic", "new-index", { usage: 15, quota: 15 }), /^Search can't create Sidekick's index: every index slot is taken \(15 of 15 used\)\. Delete an unused index or move to a bigger tier$/);
   assert.equal(cap.capacityMessage("ok", "Free"), null);
 
   // Not configured (local keyword index): nothing read, nothing saved, nothing shown.
@@ -1530,35 +1541,67 @@ test(`[${engine}] search capacity: a no-op on the local index; reads a fake serv
   assert.equal(await cap.searchCapacity(), null);
   assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM search_capacity")).n), 0);
 
-  // A fake Azure AI Search service: today's live numbers (2 MB of 50 MB, 2 of 3 indexes).
+  // A fake Azure AI Search service: today's live numbers (2 MB of 50 MB, 2 of 3 indexes, Sidekick's index exists).
   const seen = [];
   let answer = { storageSize: { usage: 2 * MB, quota: 50 * MB }, indexesCount: { usage: 2, quota: 3 }, documentCount: { usage: 812, quota: null }, vectorIndexSize: { usage: 0, quota: 26 * MB } };
+  let indexNames = ["sidekick-passages", "someone-elses-index"];
   let status = 200;
   const server = http.createServer((req, res) => {
     seen.push({ url: req.url, key: req.headers["api-key"] });
     res.writeHead(status, { "content-type": "application/json" });
-    res.end(JSON.stringify(status === 200 ? { counters: answer, limits: {} } : { error: { message: "Forbidden: wrong key" } }));
+    if (status !== 200) return res.end(JSON.stringify({ error: { message: "Forbidden: wrong key" } }));
+    res.end(JSON.stringify(req.url.startsWith("/indexes") ? { value: indexNames.map((name) => ({ name })) } : { counters: answer, limits: {} }));
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   process.env.AZURE_SEARCH_ENDPOINT = `http://127.0.0.1:${server.address().port}/`;
   process.env.AZURE_SEARCH_API_KEY = "fake-search-key-for-tests";
   try {
     assert.equal((await cap.searchCapacity()).checkedAt, null, "configured, not checked yet");
-    assert.deepEqual(await cap.checkSearchCapacity(), { searchChecked: 1, searchAlerts: 1, searchCheckFailed: 0 }, "all indexes but one used: warned");
+    // A row saved by the old rule (2 of 3 indexes = warn) shows no banner straight away: the view re-judges the numbers.
+    await db.run("INSERT INTO search_capacity (id, json, level, checked_at, error) VALUES ('azure', ?, 'warn', ?, NULL)", JSON.stringify({ storage: answer.storageSize, indexes: answer.indexesCount, documents: null, vectorStorage: null }), new Date().toISOString());
+    assert.deepEqual([(await cap.searchCapacity()).level, (await cap.searchCapacity()).message], ["ok", null], "no false alarm before the next check");
+    await db.run("DELETE FROM search_capacity");
+    assert.equal((await cap.searchCapacity()).checkedAt, null, "configured, not checked yet");
+    assert.deepEqual(await cap.checkSearchCapacity(), { searchChecked: 1, searchAlerts: 0, searchCheckFailed: 0 }, "4% of storage, 2 of 3 indexes: no alert");
     assert.deepEqual(seen[0], { url: "/servicestats?api-version=2024-07-01", key: "fake-search-key-for-tests" });
+    assert.equal(seen[1].url, "/indexes?api-version=2024-07-01&$select=name", "index names only");
     let v = await cap.searchCapacity();
-    assert.deepEqual([v.tier, v.level, v.storage.pct, v.indexes.used, v.indexes.quota, v.indexes.pct, v.documents, v.error], ["Free", "warn", 4, 2, 3, 66.7, 812, null]);
-    assert.match(v.message, /^Search is almost full: upgrade to Basic/);
+    assert.deepEqual([v.tier, v.level, v.message, v.storage.pct, v.indexes.used, v.indexes.quota, v.indexes.pct, v.documents, v.error], ["Free", "ok", null, 4, 2, 3, 66.7, 812, null]);
+    assert.equal(await logs(), logs0);
+
+    // Every slot taken (3 of 3), Sidekick's index among them: a warning about slots, not "almost full".
+    answer = { ...answer, indexesCount: { usage: 3, quota: 3 } };
+    assert.equal((await cap.checkSearchCapacity()).searchAlerts, 1);
+    v = await cap.searchCapacity();
+    assert.deepEqual([v.level, v.message], ["warn", "Search has no free index slots (3 of 3 used). Sidekick's index is fine; delete an unused index or upgrade to Basic (about $75/month) before adding another"]);
     assert.equal(await logs(), logs0 + 1);
-    assert.match((await db.get("SELECT action FROM platform_log WHERE actor = 'Search capacity check' ORDER BY id DESC LIMIT 1")).action, /indexes 2 of 3, tier Free/);
+    assert.match((await db.get("SELECT action FROM platform_log WHERE actor = 'Search capacity check' ORDER BY id DESC LIMIT 1")).action, /indexes 3 of 3, tier Free/);
     assert.equal((await cap.checkSearchCapacity()).searchAlerts, 0, "the same level isn't raised twice");
+
+    // Sidekick's own index is gone (renamed or deleted) while every slot is taken: it can't be made again. Raised.
+    indexNames = ["a", "b", "c"];
+    assert.equal((await cap.checkSearchCapacity()).searchAlerts, 1);
+    v = await cap.searchCapacity();
+    assert.equal(v.level, "full");
+    assert.match(v.message, /^Search can't create Sidekick's index: every index slot is taken \(3 of 3 used\)/);
+    indexNames = ["sidekick-passages"];
+    answer = { ...answer, indexesCount: { usage: 1, quota: 3 } };
+    assert.equal((await cap.checkSearchCapacity()).searchAlerts, 0);
+    assert.equal((await cap.searchCapacity()).level, "ok", "a slot freed: back to ok");
+
+    // 36 MB of 50 MB (72%): "almost full".
+    answer = { ...answer, storageSize: { usage: 36 * MB, quota: 50 * MB } };
+    assert.equal((await cap.checkSearchCapacity()).searchAlerts, 1);
+    v = await cap.searchCapacity();
+    assert.deepEqual([v.level, v.storage.pct], ["warn", 72]);
+    assert.match(v.message, /^Search is almost full: upgrade to Basic/);
 
     // 46 MB of 50 MB (92%): raised again.
     answer = { ...answer, storageSize: { usage: 46 * MB, quota: 50 * MB } };
     assert.equal((await cap.checkSearchCapacity()).searchAlerts, 1);
     v = await cap.searchCapacity();
     assert.deepEqual([v.level, v.storage.pct], ["full", 92]);
-    assert.equal(await logs(), logs0 + 2);
+    assert.equal(await logs(), logs0 + 4);
 
     // After an upgrade to Basic (15 GB, 15 indexes): back to ok, no message; a later rise would alert again.
     answer = { ...answer, storageSize: { usage: 46 * MB, quota: 15 * 1024 * MB }, indexesCount: { usage: 2, quota: 15 } };

@@ -173,6 +173,9 @@ export function retryAfterMs(header: string | null, at = Date.now()): number {
  * that need a different fix than approving a permission, like a tenant switch that is off), 404 returns null, 429/503 wait up to 5 s in place (twice at most) and
  * otherwise throw `GraphThrottledError` with Graph's Retry-After, other failures 502. Returns the JSON body (null
  * when empty), or the body as text with `raw` (a transcript download). `body` is sent as JSON (POST/PATCH).
+ * Any other refusal (400 and friends) throws `GraphRequestError` carrying Graph's own error code and message
+ * (`graphErrorDetail`, cleaned of anything token-like), so a job's last error and the Owner Console say why. So does a
+ * 403 that is Microsoft's subscription cap ("reached its limit"), which no permission fixes.
  * Used here for the directory, by lib/teams/install.ts to remove Sidekick from a chat or team, and by
  * lib/meetings-graph.ts for meeting transcripts and change-notification subscriptions.
  */
@@ -189,7 +192,10 @@ export async function graphCall<T>(
     if (!res) throw new HttpError(502, "Couldn't reach Microsoft Graph. Try again in a minute.");
     if (res.status === 401 || res.status === 403) {
       tokens.delete(tenantId);
-      const code = opts.deniedCodes ? await graphErrorCode(res) : null;
+      const detail = await graphErrorDetail(res);
+      // Not a permission problem: Microsoft's cap on subscriptions ("App has reached its limit of '1'…").
+      if (res.status === 403 && /reached its limit/i.test(detail.message ?? "")) throw new GraphRequestError(403, detail.code, detail.message);
+      const code = detail.innerCode ?? detail.outerCode;
       throw new ConsentNeededError((code && opts.deniedCodes?.[code]) || opts.deniedMessage);
     }
     if (res.status === 404) return null;
@@ -201,18 +207,60 @@ export async function graphCall<T>(
       }
       throw new GraphThrottledError(wait);
     }
-    if (!res.ok) throw new HttpError(502, `Microsoft Graph answered ${res.status}. Try again in a minute.`);
+    if (!res.ok) {
+      const { code, message } = await graphErrorDetail(res);
+      throw new GraphRequestError(res.status, code, message);
+    }
     const text = await res.text();
     if (opts.raw) return text as T;
     return (text ? JSON.parse(text) : null) as T | null;
   }
 }
 
-/** Graph's most specific error code from a failed response (`innerError.code`, else `error.code`), or null. */
-async function graphErrorCode(res: Response): Promise<string | null> {
-  const body = (await res.json().catch(() => null)) as { error?: { code?: unknown; innerError?: { code?: unknown } } } | null;
-  const code = body?.error?.innerError?.code ?? body?.error?.code;
-  return typeof code === "string" ? code : null;
+/**
+ * A Microsoft Graph refusal other than consent (401/403), not found (404) or throttling (429/503): Graph's HTTP
+ * status, its error code and its message (already cleaned by `graphErrorDetail`). Shown as "Microsoft Graph
+ * answered 400 ValidationError: Subscription validation request failed…" so the job's last error and the Owner
+ * Console say the real reason; the code comes first because job errors are cut short. Answered to callers as 502.
+ * `permanent` is set by callers (lib/jobs.ts `failJob`) when trying again can't help.
+ */
+export class GraphRequestError extends HttpError {
+  graphStatus: number;
+  code: string | null;
+  permanent = false;
+  constructor(graphStatus: number, code: string | null, detail: string | null) {
+    const said = [code, detail].filter(Boolean).join(": ");
+    super(502, `Microsoft Graph answered ${graphStatus}${said ? ` ${said}` : ""}.${graphStatus >= 500 ? " Try again in a minute." : ""}`);
+    this.name = "GraphRequestError";
+    this.graphStatus = graphStatus;
+    this.code = code;
+  }
+}
+
+/**
+ * Graph's error code (`innerError.code` when more specific, else `error.code`) and message from a failed
+ * response, safe to log and show: one line, at most 200 characters, with anything that looks like a secret
+ * removed (bearer tokens, `validationToken=`/`clientState`/`code=` values, long base64 runs such as tokens or
+ * certificates). `outerCode`/`innerCode` are the two raw codes (for `deniedCodes`). Graph's messages name resources and addresses, never our secrets, but this is belt and braces.
+ */
+export async function graphErrorDetail(res: Response): Promise<{ code: string | null; message: string | null; outerCode: string | null; innerCode: string | null }> {
+  const body = (await res.json().catch(() => null)) as { error?: { code?: unknown; message?: unknown; innerError?: { code?: unknown } } } | null;
+  const outer = typeof body?.error?.code === "string" ? body.error.code : null;
+  const inner = typeof body?.error?.innerError?.code === "string" ? body.error.innerError.code : null;
+  const code = (inner && outer && inner !== outer ? `${outer}/${inner}` : (inner ?? outer))?.slice(0, 80) || null;
+  const raw = typeof body?.error?.message === "string" ? body.error.message : null;
+  return { code, message: raw ? cleanGraphMessage(raw) : null, outerCode: outer, innerCode: inner };
+}
+
+/** One line of Graph's error message with token-like values blanked (see `graphErrorDetail`). */
+export function cleanGraphMessage(text: string): string {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/bearer\s+[\w.~+/=-]+/gi, "Bearer [hidden]")
+    .replace(/(validationToken|clientState|client_secret|code|token|sig)=([^&\s"']+)/gi, "$1=[hidden]")
+    .replace(/[A-Za-z0-9+/_-]{40,}={0,2}/g, "[hidden]")
+    .trim()
+    .slice(0, 200);
 }
 
 const graphGet = <T>(tenantId: string, path: string, headers: Record<string, string> = {}) =>

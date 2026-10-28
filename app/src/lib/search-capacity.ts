@@ -8,12 +8,18 @@
  *   stats don't name the tier, so it is worked out from the index limit (`tierFromLimits`: 3 = Free, 15 = Basic…).
  * - **Service stats**: `GET {endpoint}/servicestats` (lib/azure-search.ts `azureServiceStats`, read through
  *   lib/search.ts `searchServiceStats`): storage and indexes used, with the tier's limits. Counts and sizes only.
- * - **Level** (`capacityLevel`): `warn` at 70% of storage or when all indexes but one are used; `full` at 90% of
- *   storage or when every index is used; else `ok`.
+ * - **Level and reason** (`capacityStatus`): judged by storage first, then index slots.
+ *   - Storage: `warn` at 70%, `full` at 90% (reason `storage`).
+ *   - Index slots: Sidekick uses one index of its own. Every slot used (3 of 3 on Free) is `warn` (reason `indexes`):
+ *     nothing breaks today, but there's no room for another. When Sidekick's own index doesn't exist yet (the service
+ *     says so: `ownIndex` false) and the slots are full, it's `full` (reason `new-index`): the next search or upload
+ *     can't create it. Slots partly used (2 of 3) is fine: it used to warn, which on Oct 28 showed "almost full" for
+ *     a service at 4% of its storage.
+ *   - Otherwise `ok`.
  * - **Alert**: when the level rises since the last check (ok → warn, warn → full) the operator log (`platform_log`, Owner Console →
  *   Releases) gets one entry and the server log a warning, so each step is raised once: at 70% and again at 90%. While
- *   the level is warn or full, the Owner Console home and Business pages show "Search is almost full: upgrade to
- *   Basic (about $75/month) before uploads fail". When it drops again (after an upgrade or clean-up), a later rise
+ *   the level is warn or full, the Owner Console home and Business pages show the plain sentence for the reason
+ *   (`capacityMessage`), e.g. "Search is almost full: upgrade to Basic (about $75/month) before uploads fail". When it drops again (after an upgrade or clean-up), a later rise
  *   is raised again.
  * - **Schedule**: the job queue's `search.capacity` job, every hour (lib/job-kinds.ts). A no-op when Azure AI Search
  *   isn't configured (local keyword index: nothing to fill up). Upgrading the tier: docs/RUNBOOKS.md.
@@ -27,8 +33,10 @@ import { searchServiceStats } from "./search";
 import { span, spanAttrs } from "./trace";
 import { azureSearchConfigured, type ServiceCounter } from "./azure-search";
 
-/** How full the search service is: `warn` from 70% (or one index left), `full` from 90% (or no index left). */
+/** How full the search service is: `warn` (act soon) or `full` (act now); see the file comment. */
 export type CapacityLevel = "ok" | "warn" | "full";
+/** Why the level isn't `ok`: storage share, every index slot used, or Sidekick's own index can't be created. */
+export type CapacityReason = "storage" | "indexes" | "new-index";
 const RANK: Record<CapacityLevel, number> = { ok: 0, warn: 1, full: 2 };
 /** Storage share (percent) at which the operator is warned, and warned again. */
 export const WARN_PCT = 70;
@@ -36,31 +44,43 @@ export const FULL_PCT = 90;
 const ROW = "azure";
 
 /** What the hourly check saves: the service's counters (bytes for storage). */
-export type CapacityStats = { storage: ServiceCounter; indexes: ServiceCounter; documents: ServiceCounter | null; vectorStorage: ServiceCounter | null };
+export type CapacityStats = { storage: ServiceCounter; indexes: ServiceCounter; documents: ServiceCounter | null; vectorStorage: ServiceCounter | null; ownIndex?: boolean | null };
 
 /** Percent of `c`'s quota in use (0–100+, one decimal), or null when the tier sets no limit. */
 export const pctOf = (c: ServiceCounter | null | undefined): number | null => (c && c.quota ? Math.round((c.usage / c.quota) * 1000) / 10 : null);
 
 /**
- * The level for these counters (see the file comment). Pure, so tests call it directly: storage at or above 90% or
- * every index used is `full`; storage at or above 70% or all indexes but one used is `warn`.
+ * The level and its reason for these counters (see the file comment). Pure, so tests call it directly. Storage wins
+ * over index slots when both apply; `ownIndex` false means Sidekick's index still has to be created.
  */
-export function capacityLevel(s: Pick<CapacityStats, "storage" | "indexes">): CapacityLevel {
+export function capacityStatus(s: Pick<CapacityStats, "storage" | "indexes" | "ownIndex">): { level: CapacityLevel; reason: CapacityReason | null } {
   const storage = pctOf(s.storage) ?? 0;
-  const left = s.indexes.quota === null ? Infinity : s.indexes.quota - s.indexes.usage;
-  if (storage >= FULL_PCT || left <= 0) return "full";
-  if (storage >= WARN_PCT || left <= 1) return "warn";
-  return "ok";
+  const slotsFull = s.indexes.quota !== null && s.indexes.usage >= s.indexes.quota;
+  if (storage >= FULL_PCT) return { level: "full", reason: "storage" };
+  if (slotsFull && s.ownIndex === false) return { level: "full", reason: "new-index" };
+  if (storage >= WARN_PCT) return { level: "warn", reason: "storage" };
+  if (slotsFull) return { level: "warn", reason: "indexes" };
+  return { level: "ok", reason: null };
 }
+
+/** Just the level of `capacityStatus` (what the hourly check saves and compares). */
+export const capacityLevel = (s: Pick<CapacityStats, "storage" | "indexes" | "ownIndex">): CapacityLevel => capacityStatus(s).level;
 
 /** The tier, worked out from the index limit (Azure doesn't say it): Free 3, Basic 15, Standard S1 50, S2/S3 200. */
 export function tierFromLimits(indexQuota: number | null): string | null {
   return ({ 3: "Free", 15: "Basic", 50: "Standard S1", 200: "Standard S2 or S3", 1000: "Standard S3 (high density)" } as Record<number, string>)[indexQuota ?? -1] ?? null;
 }
 
-/** The alert sentence for a tier at this level (null when `ok`). From Free the next step is Basic; above it, a bigger tier. */
-export function capacityMessage(level: CapacityLevel, tier: string | null): string | null {
+/**
+ * The plain alert sentence for this level and reason on this tier (null when `ok`). From Free the next step is
+ * Basic; above it, a bigger tier. `indexes` is the slot count used, for the index sentences.
+ */
+export function capacityMessage(level: CapacityLevel, tier: string | null, reason: CapacityReason | null = "storage", indexes?: ServiceCounter): string | null {
   if (level === "ok") return null;
+  const upgrade = tier === "Free" ? "upgrade to Basic (about $75/month)" : "move to a bigger tier";
+  const slots = indexes ? ` (${indexes.usage} of ${indexes.quota ?? "?"} used)` : "";
+  if (reason === "new-index") return `Search can't create Sidekick's index: every index slot is taken${slots}. Delete an unused index or ${upgrade}`;
+  if (reason === "indexes") return `Search has no free index slots${slots}. Sidekick's index is fine; delete an unused index or ${upgrade} before adding another`;
   return tier === "Free"
     ? "Search is almost full: upgrade to Basic (about $75/month) before uploads fail"
     : "Search is almost full: move to a bigger tier or add a partition before uploads fail";
@@ -93,12 +113,12 @@ async function checkInner() {
     return { ...none, searchCheckFailed: 1 };
   }
   if (!stats) return none;
-  const level = capacityLevel(stats);
+  const { level, reason } = capacityStatus(stats);
   const before = (await get<{ level: CapacityLevel }>("SELECT level FROM search_capacity WHERE id = ?", ROW))?.level ?? "ok";
   let alerts = 0;
   if (RANK[level] > RANK[before]) {
     const tier = tierFromLimits(stats.indexes.quota);
-    const line = `${capacityMessage(level, tier)} (storage ${pctOf(stats.storage) ?? "?"}% used, indexes ${stats.indexes.usage} of ${stats.indexes.quota ?? "no limit"}, tier ${tier ?? "unknown"})`;
+    const line = `${capacityMessage(level, tier, reason, stats.indexes)} (storage ${pctOf(stats.storage) ?? "?"}% used, indexes ${stats.indexes.usage} of ${stats.indexes.quota ?? "no limit"}, tier ${tier ?? "unknown"})`;
     await run("INSERT INTO platform_log (actor, action, created_at) VALUES (?, ?, ?)", "Search capacity check", line, now());
     console.warn(`[search] ${line}`);
     alerts = 1;
@@ -135,14 +155,16 @@ export async function searchCapacity(): Promise<CapacityView | null> {
   if (!row) return { tier: null, storage: null, indexes: null, documents: null, level: "ok", message: null, checkedAt: null, error: null };
   const s = row.json ? (JSON.parse(row.json) as CapacityStats) : null;
   const tier = s ? tierFromLimits(s.indexes.quota) : null;
-  const level = s ? row.level : "ok";
+  // Level and reason are worked out again from the saved numbers (the same pure rule as the check), so a rule change
+  // shows at once instead of after the next hourly check. The saved level only drives "raise once per step".
+  const { level, reason } = s ? capacityStatus(s) : { level: "ok" as CapacityLevel, reason: null };
   return {
     tier,
     storage: s ? { usedBytes: s.storage.usage, quotaBytes: s.storage.quota, pct: pctOf(s.storage) } : null,
     indexes: s ? { used: s.indexes.usage, quota: s.indexes.quota, pct: pctOf(s.indexes) } : null,
     documents: s?.documents?.usage ?? null,
     level,
-    message: capacityMessage(level, tier),
+    message: capacityMessage(level, tier, reason, s?.indexes),
     checkedAt: row.checked_at,
     error: row.error,
   };

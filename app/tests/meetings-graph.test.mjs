@@ -125,6 +125,7 @@ const pollCalls = [];
 const CALLS = []; // ad hoc calls (Meet now): { callId, transcriptId, organizer, createdDateTime, endDateTime, vtt }
 const callsApproved = new Set(); // tenants that approved CallTranscripts.Read.All
 const callPollCalls = [];
+const subRefusal = new Map(); // resource → the 400 Graph answers when a subscription on it is made (Oct 28 live bug)
 const transcriptsOff = new Set(); // tenants whose Teams "Transcript API access" switch is off (403 GraphAccessToTranscriptsDisabled)
 const throttle = { meeting: [] }; // queue of Retry-After values to answer the next meeting reads with (429)
 const CHAT_MSGS = new Map(); // chat id → its latest messages (call events for the transcription reminder)
@@ -191,9 +192,19 @@ const microsoft = http.createServer((req, res) => {
     // Subscriptions.
     if (p === "/v1.0/subscriptions" && req.method === "POST") {
       const b = JSON.parse(body);
-      if (b.resource === "communications/adhocCalls/getAllTranscripts" && !callsApproved.has(tid)) {
-        subCalls.push({ op: "denied", body: b, tid });
-        return send(403, { error: { code: "Forbidden", message: "API requires one of 'CallTranscripts.Read.All'." } });
+      // Live Graph (probe, Oct 28): v1.0 refuses the ad hoc call resource outright.
+      if (b.resource === "communications/adhocCalls/getAllTranscripts") {
+        subCalls.push({ op: "unsupported", body: b, tid });
+        return send(400, { error: { code: "InvalidRequest", message: "Subscription for resource 'communications/adhocCalls/getAllTranscripts' is not supported in 'V1' version." } });
+      }
+      // And allows one subscription per app and tenant on a tenant-wide transcript resource.
+      if ([...SUBS.values()].some((x) => x.tid === tid && x.resource === b.resource)) {
+        subCalls.push({ op: "limit", body: b, tid });
+        return send(403, { error: { code: "ExtensionError", message: "Operation: Create; Exception: [Status Code: Forbidden; Reason: App has reached its limit of '1' subscription(s) on tenant]" } });
+      }
+      if (subRefusal.has(b.resource)) {
+        subCalls.push({ op: "refused", body: b, tid });
+        return send(400, subRefusal.get(b.resource));
       }
       subCalls.push({ op: "create", body: b, tid });
       if (!["communications/onlineMeetings/getAllTranscripts", "communications/adhocCalls/getAllTranscripts"].includes(b.resource) || b.changeType !== "created" || !b.clientState) return send(400, { error: { code: "InvalidRequest" } });
@@ -201,6 +212,10 @@ const microsoft = http.createServer((req, res) => {
       const id = crypto.randomUUID();
       SUBS.set(id, { ...b, id, tid });
       return send(201, { id, expirationDateTime: b.expirationDateTime, resource: b.resource });
+    }
+    if (p === "/v1.0/subscriptions" && req.method === "GET") {
+      subCalls.push({ op: "list", tid });
+      return send(200, { value: [...SUBS.values()].filter((x) => x.tid === tid).map(({ id, resource, notificationUrl, expirationDateTime }) => ({ id, resource, notificationUrl, expirationDateTime, clientState: null })) });
     }
     const sub = p.match(/^\/v1\.0\/subscriptions\/(.+)$/);
     if (sub) {
@@ -582,10 +597,10 @@ test(`[${ENGINE}] Graph subscription: created after consent with the validation 
   s.sub = [...SUBS.values()][0];
   const st = (await ann("GET", "/api/meetings/auto")).body;
   assert.equal(st.instant, true);
-  // Scheduled meetings work; calls started with Meet now still need the new permission, said plainly.
+  // Scheduled meetings work; calls started with Meet now still need the new permission, said plainly (by the poll).
   assert.match(st.lastError, /approve the new call transcripts permission/);
   assert.match(st.lastError, /Scheduled Teams meetings aren't affected/);
-  assert.ok(subCalls.some((c) => c.op === "denied" && c.body.resource === "communications/adhocCalls/getAllTranscripts"));
+  assert.ok(!subCalls.some((c) => c.body?.resource === "communications/adhocCalls/getAllTranscripts"), "no ad hoc call subscription is asked for (Graph v1.0 refuses it)");
   // A second upkeep run with plenty of time left changes nothing.
   await drain({ sweep: true });
   assert.equal(subCalls.filter((c) => c.op === "create").length, 1);
@@ -711,12 +726,12 @@ test(`[${ENGINE}] Meet now in a group chat (ad hoc call): needs the call permiss
   assert.ok(pollCalls.length > meetPolls, "scheduled meetings are still checked");
   assert.match((await ann("GET", "/api/meetings/auto")).body.lastError, /new call transcripts permission/);
 
-  // Approved: the call subscription is made, and the poll still finds the call held before approval.
+  // Approved: the poll finds the call held before approval.
   callsApproved.add(TA);
   const from = sent.length;
   await drain({ sweep: true });
-  const callSub = [...SUBS.values()].find((x) => x.resource === "communications/adhocCalls/getAllTranscripts");
-  assert.ok(callSub, "a subscription on ad hoc call transcripts");
+  // Approved or not, there's no ad hoc call subscription (Graph v1.0 refuses it): the poll finds calls.
+  assert.ok(![...SUBS.values()].some((x) => x.resource === "communications/adhocCalls/getAllTranscripts"));
   assert.ok(callPollCalls.some((c) => c.organizer === OID.lou && new Date(c.from) < new Date(Date.now() - 20 * 60_000)), JSON.stringify(callPollCalls.slice(-3)));
   assert.equal(await scalar(`SELECT kind FROM graph_meetings WHERE transcript_id = '${wave.transcriptId}'`), "adhoc");
   const w2 = (await pat("GET", `/api/meetings?ws=${s.w2}`)).body.meetings;
@@ -737,7 +752,9 @@ test(`[${ENGINE}] Meet now in a group chat (ad hoc call): needs the call permiss
   assert.equal(posts(), 1, "posted once");
   assert.equal((await pat("GET", `/api/meetings?ws=${s.w2}`)).body.meetings.filter((m) => m.title === got.title).length, 1);
 
-  // A notification for a call in a chat no group has: the people who spoke (Lou and Mo, both W1) decide.
+  // A notification for a call in a chat no group has: the people who spoke (Lou and Mo, both W1) decide. (Delivered
+  // under the org's one subscription: the handler reads the kind of call from the resource.)
+  const callSub = [...SUBS.values()].find((x) => x.tid === TA && x.resource === "communications/onlineMeetings/getAllTranscripts");
   const side = addCall("side", { organizer: OID.lou, chat: "19:unlinked-side@thread.v2" });
   const resource = `users/${OID.lou}/adhocCalls/${side.callId}/transcripts/${side.transcriptId}`;
   assert.equal((await notify([{ subscriptionId: callSub.id, clientState: "guess", resource }])).status, 202);
@@ -1055,11 +1072,64 @@ test(`[${ENGINE}] isolation: another organization sees none of Org A's Teams mee
   assert.equal(await scalar(`SELECT COUNT(*) FROM graph_meetings WHERE org_id <> (SELECT org_id FROM graph_subscriptions LIMIT 1)`), "0");
 });
 
-test(`[${ENGINE}] subscription upkeep: renewed before it runs out, recreated when Graph forgot or removed it, removed when switched off`, async () => {
-  // Less than a day left: renewed in place.
+test(`[${ENGINE}] subscription upkeep: a stray subscription Sidekick lost track of is removed, and Graph's 400 is reported with its reason`, async () => {
+  // Graph allows one per app and tenant: with the stray left in place the create would hit the limit.
+  // A row lost (e.g. a restored database) while Graph still has the subscription: the next upkeep makes a new one
+  // and deletes the stray at Graph, so leftovers never pile up or stand in the way.
+  const stray = await scalar(`SELECT id FROM ${MEET_SUB}`);
+  assert.ok(SUBS.has(stray));
+  await dbExec(`DELETE FROM ${MEET_SUB}`);
+  await drain({ sweep: true });
+  const fresh = await scalar(`SELECT id FROM ${MEET_SUB}`);
+  assert.ok(fresh && fresh !== stray && SUBS.has(fresh));
+  assert.equal(SUBS.has(stray), false, "the stray was deleted at Graph");
+  assert.ok(subCalls.some((c) => c.op === "list" && c.tid === TA), "Graph's list was read first");
+
+  // Oct 28 live: every hourly run failed with a bare "Microsoft Graph answered 400" and used all 4 attempts.
+  // Now the job stops at once with Graph's own code and message (nothing secret), and the other resource still runs.
+  subRefusal.set("communications/onlineMeetings/getAllTranscripts", {
+    error: { code: "ValidationError", message: "Subscription validation request failed. Notification endpoint must respond with 200 OK to validation request. clientState=abcdef Bearer eyJ0eXAiOiJKV1QiLCJhbGciOi" },
+  });
+  SUBS.delete(fresh);
+  await dbExec(`DELETE FROM ${MEET_SUB}`);
+  const before = Number(await scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'meetings.subscription' AND status = 'dead'"));
+  await drain({ sweep: true });
+  const dead = (col) => scalar(`SELECT ${col} FROM jobs WHERE kind = 'meetings.subscription' AND status = 'dead' ORDER BY updated_at DESC, id DESC LIMIT 1`);
+  const job = { attempts: await dead("attempts"), last_error: await dead("last_error") };
+  assert.equal(Number(await scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'meetings.subscription' AND status = 'dead'")), before + 1);
+  assert.equal(Number(job.attempts), 1, "a 400 isn't retried: the same request gets the same answer");
+  assert.match(job.last_error, /^GraphRequestError: Microsoft Graph answered 400 ValidationError: Subscription validation request failed/);
+  assert.doesNotMatch(job.last_error, /abcdef|eyJ0eX/, "nothing token-like is kept");
+  assert.equal(await scalar(`SELECT COUNT(*) FROM ${MEET_SUB}`), "0");
+  assert.ok(!subCalls.some((c) => c.op === "limit"), "never a second subscription past Microsoft's limit of one");
+
+  // Another server (same Microsoft app, another address) holds the tenant's one subscription: no create (it would
+  // only hit the limit), never deleted, and the job says plainly which address holds it.
+  subRefusal.clear();
+  SUBS.set("held-elsewhere", { id: "held-elsewhere", tid: TA, resource: "communications/onlineMeetings/getAllTranscripts", notificationUrl: "https://staging.example.test/api/graph/notifications" });
+  const creates = subCalls.filter((c) => c.op === "create" || c.op === "limit").length;
+  await drain({ sweep: true });
+  assert.equal(subCalls.filter((c) => c.op === "create" || c.op === "limit").length, creates, "no create attempted");
+  assert.ok(SUBS.has("held-elsewhere"), "someone else's subscription is left alone");
+  assert.match(await dead("last_error"), /answered 403 SubscriptionLimit: Microsoft allows one subscription per app and tenant/);
+
+  // Freed (and the 400 fixed at Graph's end): the next upkeep makes it again.
+  SUBS.delete("held-elsewhere");
+  await drain({ sweep: true });
+  assert.equal(await scalar(`SELECT COUNT(*) FROM ${MEET_SUB}`), "1");
+  // Renewed, never recreated, while it lives: the next runs make no new one.
+  const made = subCalls.filter((c) => c.op === "create").length;
   await dbExec(`UPDATE graph_subscriptions SET expires_at = '${new Date(Date.now() + 3600_000).toISOString()}' WHERE resource = 'communications/onlineMeetings/getAllTranscripts'`);
   await drain({ sweep: true });
-  assert.equal(subCalls.filter((c) => c.op === "renew").length, 1);
+  assert.equal(subCalls.filter((c) => c.op === "create").length, made, "renewed in place");
+});
+
+test(`[${ENGINE}] subscription upkeep: renewed before it runs out, recreated when Graph forgot or removed it, removed when switched off`, async () => {
+  // Less than a day left: renewed in place.
+  const renewsBefore = subCalls.filter((c) => c.op === "renew").length;
+  await dbExec(`UPDATE graph_subscriptions SET expires_at = '${new Date(Date.now() + 3600_000).toISOString()}' WHERE resource = 'communications/onlineMeetings/getAllTranscripts'`);
+  await drain({ sweep: true });
+  assert.equal(subCalls.filter((c) => c.op === "renew").length, renewsBefore + 1);
   assert.ok(new Date(await scalar(`SELECT expires_at FROM ${MEET_SUB}`)) > new Date(Date.now() + 2 * 86400_000));
   // Graph lost it (expired): the renewal gets 404 and a new one is made.
   const oldId = await scalar(`SELECT id FROM ${MEET_SUB}`);

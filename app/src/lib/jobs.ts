@@ -256,13 +256,14 @@ export async function completeJob(job: Pick<Job, "id">, workerId: string, result
 }
 
 /**
- * Records a failed attempt: back to the queue after `backoffMs`, or dead when it has used every attempt.
+ * Records a failed attempt: back to the queue after `backoffMs`, or dead when it has used every attempt or the
+ * error says trying again can't help (`permanent: true`, e.g. Microsoft Graph refusing a request as invalid).
  * `error` is stored as a short, data-free reason (`failureReason`). Returns the new status, or null if the lease
  * was no longer ours.
  */
 export async function failJob(job: Pick<Job, "id" | "attempts" | "max_attempts">, workerId: string, error: unknown, at = new Date()): Promise<"queued" | "dead" | null> {
   const t = at.toISOString();
-  const dead = job.attempts >= job.max_attempts;
+  const dead = job.attempts >= job.max_attempts || (error as { permanent?: unknown } | null)?.permanent === true;
   const res = await run(
     `UPDATE jobs SET status = ?, run_at = ?, locked_by = NULL, locked_until = NULL, last_error = ?, finished_at = ?, updated_at = ?
       WHERE id = ? AND status = 'running' AND locked_by = ?`,

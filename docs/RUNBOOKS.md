@@ -24,7 +24,7 @@ operations review is in `docs/security/`.
 | Setting up automatic meeting notes and the Teams tab, or they stopped working | [Automatic meeting notes](#automatic-meeting-notes-microsoft-setup) |
 | "Sidekick isn't allowed to remove itself from Teams chats" under Needs attention, or a Teams chat never shows as waiting | [Teams self-removal](#teams-sidekick-cant-remove-itself-from-chats) |
 | Pages show nothing or "not found" for data that exists, after the row-level security deploy | [Row-level security](#row-level-security) |
-| Owner Console says "Search is almost full" (Azure AI Search 70%+ full, or one index left) | [Upgrade the search tier](#search-almost-full-upgrade-the-search-tier) |
+| Owner Console says "Search is almost full" (Azure AI Search 70%+ full) or "no free index slots" | [Upgrade the search tier](#search-almost-full-upgrade-the-search-tier) |
 
 ## Roll back a bad deploy
 
@@ -505,7 +505,24 @@ automatic notes are on. Each group can switch it off: group → **Teams chats** 
   transcripts can only be listed for a few hours.
 - **Panel says "checked every 15 minutes" (no instant notifications)**: the subscription couldn't be made; the poll
   still works. Check that `SIDEKICK_PUBLIC_URL` is the live https address and `/api/graph/notifications` is reachable.
-  Owner Console → Job queue → `meetings.subscription` shows the last error.
+  Owner Console → Job queue → `meetings.subscription` shows the last error, with Microsoft's own code and message
+  (since Oct 28), e.g. "Microsoft Graph answered 400 ValidationError: Subscription validation request failed…". A
+  400 isn't retried within the hour (the same request gets the same answer); the next hourly run tries again.
+  To see why, run the probe as Sidekick's app:
+  `node --env-file=app/.env.local app/scripts/probe-graph-subscriptions.mjs --tenant <tenant id> --base <live https address>`
+  It lists the app's subscriptions (duplicates, leftovers), checks both notification addresses the way Graph does
+  (200, plain text, token echoed, no redirect, under 10 s) and, with `--create`, makes one 45-minute test subscription
+  per resource and deletes it at once, printing Graph's answer. Known answers:
+  - *ValidationError / validation request failed*: an address answers wrong (a redirect, a sign-in wall, a different
+    `SIDEKICK_PUBLIC_URL`).
+  - *App has reached its limit of '1' subscription(s) on tenant* (403): Microsoft allows **one** subscription per app
+    and tenant on the meeting-transcript resource. Sidekick renews its own and never makes a second; a stray of its
+    own (pointing here, unknown to the database) is deleted first. One pointing at **another address** (another
+    Sidekick server on the same Microsoft app) is left alone, and the job says "SubscriptionLimit … another address
+    holds it": delete that subscription (or stop that server's automatic notes).
+  - *Subscription for resource 'communications/adhocCalls/getAllTranscripts' is not supported in 'V1' version*
+    (Oct 28, live): the cause of the hourly 400 until #101. Sidekick no longer subscribes to ad hoc calls; the
+    15-minute poll finds Meet now calls. `--create` still tries it, to show if Microsoft starts allowing it.
 - **A meeting shows Skipped**: the reason says why (not one group's meeting, meeting hours used up, AI credit, read-only
   plan). **Failed** = Graph kept refusing after 6 tries: **Try again** after fixing the cause.
 - **The tab says "Teams didn't sign you in"**: step 2 (Application ID URI must match the package's
@@ -587,7 +604,10 @@ on the live site) with its own callback address.
 
 4. Open `/owner/login`, press **Sign in with Microsoft**, sign in as CodyScott@SidekickLabs334. The operator log
    shows "Created the owner account … from Microsoft sign-in" (or "Linked …" if a password owner with that
-   email existed) and "Signed in to the Owner Console (Microsoft …)".
+   email existed) and "Signed in to the Owner Console (Microsoft …)". After Microsoft, a blank "Signing you in…"
+   page flashes for a moment, then the console opens. That page is on purpose: the console cookie is `SameSite=Strict`,
+   and a browser won't send it on a redirect chain that started at login.microsoftonline.com. Until Oct 28 the
+   callback redirected straight to /owner and the first try bounced to the sign-in page (a reload fixed it).
 
 **MFA.** Microsoft security defaults make every admin of the Sidekick Labs tenant use MFA, so Microsoft does
 the strong check. If Microsoft's ID token lists the sign-in methods (`amr`), it must include MFA (`mfa`,
@@ -913,17 +933,24 @@ and watchers while no copy is up.
 Free only if the passages fit, which they won't after real use).
 
 ## Search almost full: upgrade the search tier
-**What you see.** The Owner Console home shows "Search is almost full: upgrade to Basic (about $75/month) before
-uploads fail", and Owner Console → Business → **Search capacity** shows storage and indexes against the tier's
-limits. The hourly `search.capacity` job (`app/src/lib/search-capacity.ts`) reads Azure's own counters
-(`GET {endpoint}/servicestats`); it warns at **70% of storage or when all indexes but one are used**, and again at
-**90% (or no index left)**. Each step is also written once to the operator log (Owner Console → Releases → log,
-actor "Search capacity check"). Customers see nothing.
+**What you see.** The Owner Console home shows one of these, and Owner Console → Business → **Search capacity**
+shows storage and indexes against the tier's limits:
+- "Search is almost full: upgrade to Basic (about $75/month) before uploads fail": storage at **70%** (warning) or
+  **90%** (urgent).
+- "Search has no free index slots (3 of 3 used)…": every index slot is taken. Sidekick's own index is fine; nothing
+  breaks today, but there's no room for another index.
+- "Search can't create Sidekick's index…" (urgent): every slot is taken **and** Sidekick's own index
+  (`AZURE_SEARCH_INDEX`) doesn't exist, so search and uploads can't create it. Delete an unused index in the Azure
+  portal, or upgrade.
+
+The hourly `search.capacity` job (`app/src/lib/search-capacity.ts`) reads Azure's own counters
+(`GET {endpoint}/servicestats`) and the index names (`GET {endpoint}/indexes?$select=name`). Some slots used (2 of 3)
+is fine: until Oct 28 that alone warned "almost full" with storage at 4%. Each rise is also written once to the
+operator log (Owner Console → Releases → log, actor "Search capacity check"). Customers see nothing.
 
 **Why it matters.** The live service `sidekick-labs-search` is on **Free**: 50 MB of storage (the portal shows
-52 MB), 3 indexes, no uptime guarantee. On Oct 25, 2026 it used about 2 MB and 2 of its 3 indexes, so
-the "one index left" warning shows from the start: that is expected and is the reminder to upgrade before the
-first paying customer. When storage is full, Azure refuses new passages: uploads and meeting notes still save
+52 MB), 3 indexes, no uptime guarantee. On Oct 28, 2026 it used about 2 MB (4%) and 2 of its 3 indexes: no
+warning. Upgrade before the first paying customer anyway. When storage is full, Azure refuses new passages: uploads and meeting notes still save
 (the local index is the source of truth and search falls back to it), but Azure search stops seeing new content.
 
 **Upgrade (Cody's go-ahead first: it costs about $75/month).** A Free service can't be changed to Basic in place, so

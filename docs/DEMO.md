@@ -78,3 +78,25 @@ back to when things happened, action item and gap states, sign-in times and usag
 so the app re-indexes the rewritten notes, sends two Teams reminders and sets one group to Ending.
 The world itself (people, profiles, texts) is in `app/scripts/demo-world.mjs`; the logins guide in
 `app/scripts/demo-logins.mjs`. `app/tests/seed-demo.test.mjs` (part of `npm test`) seeds a fresh SQLite copy twice.
+
+## Capture the walkthrough (pitch and website)
+
+`app/scripts/capture-walkthrough.mjs` drives the demo copy through every local shot of the pitch capture plan
+(`~/Desktop/Sidekick Pitch/3 - Walkthrough/CAPTURE-PLAN.md`): a made-up firm (Lakeside Advisory) signing up on the
+public site with test-mode checkout, the setup wizard and first group, adding people and roles, assigning a waiting
+Teams chat, Ask with sources, meeting notes and action items, Needs attention and gaps, the upload guard, Jira in
+"each person signs in" mode with "Connect your Jira", each role's Home and Groups, the phone view and the Owner Console.
+
+```bash
+npm --prefix app run seed:demo        # fresh seed first: the capture changes data
+# preview "sidekick-demo", then:
+node app/scripts/capture-walkthrough.mjs --draft            # red DRAFT tag, into the pitch folder's draft-capture-<date>/
+node app/scripts/capture-walkthrough.mjs --out <dir> --clips  # final: no tag, plus short .webm clips
+```
+
+It saves `desktop/NN-name.png` (1440×900 at 2x), `phone/NN-name.png` (390×844 at 3x), `clips/*.webm` and a
+`manifest.json` (captions, accounts, any failed flow). `--only signup,roles` runs some flows; `--base` points at another
+local copy. It turns on self-service sign-up through the Owner Console (the demo default is off). It only runs against
+localhost, never inside `npm test`, reads passwords from `app/.demo-logins.json` without printing them, and needs Google
+Chrome plus playwright-core (the pitch pack's `_build/node_modules`, or `PLAYWRIGHT_CORE=<folder>`). Shots that need live
+Teams or a Microsoft sign-in are in the capture plan's part T, done by hand.

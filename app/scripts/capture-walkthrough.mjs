@@ -20,6 +20,8 @@
  * Usage (from the repo folder, with the demo copy running):
  *   node app/scripts/capture-walkthrough.mjs --draft                 # DRAFT badge, into the pitch folder's draft-capture-<date>/
  *   node app/scripts/capture-walkthrough.mjs --out <dir> [--clips] [--only signup,roles] [--base http://localhost:3370]
+ * `--only` into a folder that already has a capture redoes just those flows: their files keep their names and are
+ * overwritten, and manifest.json keeps every other entry (plus `redone`: which flows, when).
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -87,6 +89,10 @@ fs.mkdirSync(OUT, { recursive: true });
 const manifest = [];
 const problems = [];
 let n = 0;
+// Re-running some flows (--only) into a folder that already holds a capture: each shot keeps its earlier file name
+// (number and all) and is overwritten in place, and the other flows' manifest entries are kept.
+const PREV = ONLY.length && fs.existsSync(path.join(OUT, "manifest.json")) ? JSON.parse(fs.readFileSync(path.join(OUT, "manifest.json"), "utf8")) : null;
+const prevFile = (dir, name) => PREV?.shots.find((s) => s.file.startsWith(`${dir}/`) && s.file.endsWith(`-${name}.png`))?.file.slice(dir.length + 1);
 let ip = 20;
 const log = (...a) => console.log(...a);
 
@@ -140,7 +146,7 @@ function snapper(page, flow, phone) {
   return async (name, caption, { full = false, wait = 500 } = {}) => {
     await page.waitForTimeout(wait);
     const dir = phone ? "phone" : "desktop";
-    const file = `${String(++n).padStart(2, "0")}-${name}.png`;
+    const file = prevFile(dir, name) ?? `${String(++n + (PREV?.shots.length ?? 0)).padStart(2, "0")}-${name}.png`;
     fs.mkdirSync(path.join(OUT, dir), { recursive: true });
     // One retry: a busy Mac sometimes times out a 2x/3x capture of the animated Home orb.
     const take = () => page.screenshot({ path: path.join(OUT, dir, file), fullPage: full, animations: "disabled" });
@@ -248,7 +254,7 @@ const FLOWS = [
       await page.waitForTimeout(1500);
       await page.getByRole("button", { name: "Ask", exact: true }).waitFor({ timeout: 120000 });
       await scrollToText(page, /^Ask /, 90);
-      await snap("ask-answer-sources", "Ask in the portal: the answer with its sources (fake Claude here: the final needs real answers).");
+      await snap("ask-answer-sources", "Ask in the portal: the answer with its sources.");
     },
   },
   {
@@ -444,7 +450,10 @@ async function runFlow(browser, flow, { video } = {}) {
     fs.rmSync(path.join(dir, "_raw"), { recursive: true, force: true });
   }
   await browser.close();
-  fs.writeFileSync(path.join(OUT, "manifest.json"), JSON.stringify({ base: BASE, draft: DRAFT, taken: new Date().toISOString(), shots: manifest, problems }, null, 1));
+  // With an earlier capture in the folder: its entries, with the re-run flows' entries replaced (same order).
+  const shots = PREV ? [...PREV.shots.filter((s) => !ONLY.includes(s.flow)).concat(manifest)].sort((a, b) => (PREV.shots.findIndex((s) => s.file === a.file) + 1 || 1e6) - (PREV.shots.findIndex((s) => s.file === b.file) + 1 || 1e6)) : manifest;
+  const allProblems = PREV ? [...(PREV.problems ?? []).filter((p) => !ONLY.some((f) => p.startsWith(`${f} (`))), ...problems] : problems;
+  fs.writeFileSync(path.join(OUT, "manifest.json"), JSON.stringify({ base: BASE, draft: DRAFT, taken: new Date().toISOString(), ...(PREV ? { redone: { flows: ONLY, at: new Date().toISOString() } } : {}), shots, problems: allProblems }, null, 1));
   if (DRAFT) fs.writeFileSync(path.join(OUT, "README - DRAFT.md"), `# DRAFT capture, ${today}\n\nNot for the pitch or website. A dry run of CAPTURE-PLAN.md on the local demo world (made-up data, fake Claude), taken with app/scripts/capture-walkthrough.mjs --draft. Every shot carries a red DRAFT tag. See manifest.json for captions.\n`);
   log(`\n${manifest.length} files in ${OUT}${problems.length ? `\n${problems.length} flow(s) failed:\n- ${problems.join("\n- ")}` : ""}`);
 })().catch((e) => { console.error(e); process.exit(1); });

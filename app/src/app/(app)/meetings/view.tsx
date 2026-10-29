@@ -207,14 +207,14 @@ export default function MeetingsPage() {
               </div>
               <div className="panel-b">
                 {tab === "Notes" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 780 }}>
+                  <div className="notes-col">
                     <div>
                       <h3>Summary</h3>
                       <p style={{ margin: "4px 0 0" }}>{m!.summary ?? "—"}</p>
                     </div>
                     <KeepSection title="Decisions" items={of("decision")} canEdit={canEdit} onSave={(i, v) => setSaved(i, v).catch(reportError)} label={(d) => `${d.text}${d.who ? ` (${d.who})` : ""}`} />
                     {of("pending").length > 0 && <Section title="Decisions still to make" items={of("pending").map((d) => `${d.text}${d.answered ? " (made)" : ""}`)} />}
-                    <div>
+                    <div className="notes-wide">
                       <h3>Action items</h3>
                       {detail.actions.length ? (
                         <ActionItemsTable items={detail.actions} canEdit={canEdit} onChange={updateAction} />

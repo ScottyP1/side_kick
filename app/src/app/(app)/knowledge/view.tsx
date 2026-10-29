@@ -219,7 +219,8 @@ export default function KnowledgePage() {
           <div className="empty">No documents yet. Upload an SOW, design doc or runbook to get started.</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            {/* Short columns never wrap ("Priya Raman", "Sep 24", "1008 bytes"), even with a held file's callout open. */}
+            <table className="doc-table">
               <thead>
                 <tr>
                   <th>Document</th>
@@ -242,10 +243,10 @@ export default function KnowledgePage() {
                         <HeldActions scope="document" id={d.id} match={d.match} question={d.question} held={d.status === "Held"} targets={targets} currentWs={ws} canReview={me.user.admin || Boolean(me.user.lead)} onDone={() => load().catch(reportError)} />
                       )}
                     </td>
-                    <td>
+                    <td className="nowrap">
                       <Pill kind={d.status === "Ready" ? (d.guard_status === "kept" ? "warn" : "good") : d.status === "Failed" ? "bad" : d.status === "Held" ? "warn" : "info"}>{d.status}</Pill>
                     </td>
-                    <td>
+                    <td className="nowrap">
                       <div className="seg" style={{ fontSize: 12 }}>
                         {["internal", "shareable"].map((a) => (
                           <button key={a} style={{ padding: "3px 8px" }} aria-pressed={d.audience === a} disabled={!canEdit} onClick={() => setDocAudience(d, a)}>
@@ -254,9 +255,9 @@ export default function KnowledgePage() {
                         ))}
                       </div>
                     </td>
-                    <td className="muted">{d.uploaded_by ?? "—"}</td>
-                    <td className="muted">{fmtDate(d.created_at)}</td>
-                    <td className="r num muted">{d.size < 1024 ? `${d.size} bytes` : fmtBytes(d.size)}</td>
+                    <td className="muted nowrap">{d.uploaded_by ?? "—"}</td>
+                    <td className="muted nowrap">{fmtDate(d.created_at)}</td>
+                    <td className="r num muted nowrap">{d.size < 1024 ? `${d.size} bytes` : fmtBytes(d.size)}</td>
                     <td className="r">{canEdit && <button className="btn small ghost" onClick={() => remove(d)}>Delete</button>}</td>
                   </tr>
                 ))}

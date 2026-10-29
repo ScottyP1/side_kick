@@ -21,6 +21,8 @@
  *      sign-in times and ~8 weeks of AI usage history (for Usage and the Owner Console business view) are filled in.
  *   C. Starts the copy again to re-index the rewritten notes (the app does that on its first question), sends a
  *      couple of Teams reminders, and sets one group to Ending (roll-off). Then stops it.
+ *   D. Points the Teams chats at the fake Teams in scripts/fake-tools.mjs (the demo copy's Teams posts succeed) and
+ *      moves the Teams posts that failed on purpose while seeding back two hours, so Home's health line reads normal.
  * Running it again rebuilds the same world from scratch (idempotent); the passwords stay the same.
  *
  * Passwords: generated here, written ONLY to the git-ignored secrets file (`app/.demo-logins.json`, chmod 600) and
@@ -34,6 +36,7 @@
  *                         the same fake there, so "Sync now" and the work item links keep working in the demo)
  *   --secrets <file>      where the passwords are kept between runs (default app/.demo-logins.json)
  *   --logins-out <file>   also write the logins guide here (e.g. "~/Desktop/Sidekick Pitch/demo-logins (LOCAL ONLY).md")
+ *   --credit-banner       Northwind at ~84% of its AI credit (the 80% banner shows); default ~68% (no banner)
  *   --with-real-claude    write notes, answers and knowledge maps with the real Claude (key from app/.env.local);
  *                         prints the expected cost and asks first (or pass --yes)
  *   --verbose             show the app's own output
@@ -76,6 +79,9 @@ const SECRETS = path.resolve(APP, opt("--secrets", ".demo-logins.json"));
 const LOGINS_OUT = opt("--logins-out", null);
 const REAL = flag("--with-real-claude");
 const VERBOSE = flag("--verbose");
+// Northwind's AI credit use this month: ~68% (no banner, so capture shots stay clean) or, with --credit-banner, ~84%
+// (the 80% notice shows for Org Owners and Org Admins: the dedicated Usage & billing shot).
+const CREDIT_BANNER = flag("--credit-banner");
 const BASE = `http://localhost:${PORT}`;
 const TENANT = "00000000-demo-4000-8000-000000000001";
 // The job heartbeat is off in the seeding copy; phase C runs the watchers once through its route with this secret.
@@ -664,8 +670,8 @@ async function phaseB() {
     if (org.status === "trialing") await run("UPDATE subscriptions SET trial_ends_at = ? WHERE org_id = ?", iso(nowMs + 4 * 86400_000), id);
     if (org.status === "past_due") await run("UPDATE subscriptions SET past_due_since = ? WHERE org_id = ?", iso(nowMs - 6 * 86400_000), id);
   }
-  // Usage: a working-day rhythm per org and feature. Northwind lands at ~84% of its $800 monthly AI credit this
-  // month (the 80% notice shows for the billing roles); the others stay small.
+  // Usage: a working-day rhythm per org and feature. Northwind lands at ~68% of its $800 monthly AI credit this
+  // month (with --credit-banner ~84%, so the 80% notice shows for the billing roles); the others stay small.
   const FEATURES = [
     { feature: "ask", model: "claude-opus-5-5", inT: 6200, outT: 380, share: 0.42 },
     { feature: "guard", model: "claude-opus-5-5", inT: 1300, outT: 60, share: 0.12 },
@@ -680,7 +686,7 @@ async function phaseB() {
   const dayMs = 86400_000;
   const workingDaysThisMonth = [...Array(Math.ceil((nowMs - monthStart) / dayMs)).keys()].map((i) => monthStart + i * dayMs).filter((t) => ![0, 6].includes(new Date(t).getUTCDay()) && t < nowMs - dayMs / 2).length || 1;
   const orgSpend = [
-    { org: world.orgs.northwind, perDay: (800 * 0.84) / workingDaysThisMonth, wss: PROFILES.map((p) => world.groups[p.key].id) },
+    { org: world.orgs.northwind, perDay: (800 * (CREDIT_BANNER ? 0.84 : 0.68)) / workingDaysThisMonth, wss: PROFILES.map((p) => world.groups[p.key].id) },
     ...OTHER_ORGS.map((o) => ({ org: world.orgs[o.key], perDay: o.plan === "starter" ? 0.9 : 2.4, wss: [world.groupsByOrg[o.key]] })),
   ];
   const orgUsers = Object.fromEntries(await Promise.all(orgSpend.map(async (s) => [s.org, (await all("SELECT id FROM users WHERE org_id = ?", s.org)).map((u) => u.id)])));
@@ -734,12 +740,17 @@ async function phaseB() {
   const northwind = world.orgs.northwind;
   // Northwind's Microsoft tenant is the demo tenant, so chats added there wait to be assigned (Groups page).
   await run("UPDATE orgs SET entra_tenant_id = ? WHERE id = ?", TENANT, northwind);
-  for (const [i, [name, by, days]] of [["Bid war room", byKey.teamLead.name, 2], ["Friday demo prep", byKey.orgAdmin.name, 5]].entries()) {
+  // A Team Lead only sees the chats they added themselves, matched by Microsoft account (GET /api/teams-links), so
+  // Contoso's Team Lead gets a made-up Microsoft account in the demo tenant and "Bid war room" is hers: she can
+  // assign it on her own (the Org Owner/Admins see both chats).
+  const leadOid = "00000000-0000-4000-8000-0000000000c1";
+  await run("UPDATE users SET entra_oid = ? WHERE org_id = ? AND lower(email) = lower(?)", leadOid, northwind, byKey.teamLead.email);
+  for (const [i, [name, by, oid, days]] of [["Bid war room", byKey.teamLead.name, leadOid, 2], ["Friday demo prep", byKey.orgAdmin.name, null, 5]].entries()) {
     const since = iso(nowMs - days * dayMs);
     await run(
-      `INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at, added_by, waiting_since) VALUES (?, ?, ?, 'groupChat', ?, ?, ?, ?, ?)
+      `INSERT INTO teams_conversations (id, service_url, tenant_id, kind, name, created_at, last_seen_at, added_by, added_by_oid, waiting_since) VALUES (?, ?, ?, 'groupChat', ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
-      `19:demo-waiting-${i}@thread.v2`, SERVICE_URL, TENANT, name, since, since, by, since,
+      `19:demo-waiting-${i}@thread.v2`, SERVICE_URL, TENANT, name, since, since, by, oid, since,
     );
   }
   // Connectors report their own health (lib/connector-health.ts): phase A left Litware's Azure DevOps project
@@ -858,6 +869,28 @@ async function phaseC() {
   await s.orgOwner("POST", `/api/workspaces/${world.groups.alpine.id}/rolloff`, { days: 21 });
 }
 
+/**
+ * Phase D (app stopped): hands the demo copy a working Teams. The chats point at the seed's own connector while
+ * seeding (it reads the link codes Sidekick posts); afterwards they point at the fake Teams in
+ * scripts/fake-tools.mjs, which the demo launch config runs on the tools port, so posts from the demo copy succeed
+ * like in a working tenant. Teams steps that failed on purpose while seeding (the failed-posts watcher's material)
+ * move back two hours with the rest of the seeded history, so Home's live health line ("last hour") reads normal;
+ * Activity and the findings still show them.
+ */
+async function phaseD() {
+  const db = await import("../src/lib/db.ts");
+  db.useSystemScopeForProcess("demo world seed");
+  const { run, all } = db;
+  log("• Teams chats now post to the demo's fake Teams; this seed's failed posts moved into the past");
+  await run("UPDATE teams_conversations SET service_url = ? WHERE service_url = ?", `http://127.0.0.1:${TOOLS_PORT}/teams`, SERVICE_URL);
+  const failed = await all("SELECT DISTINCT trace_id FROM trace_spans WHERE kind = 'teams' AND status = 'error'");
+  const earlier = (t) => new Date(Date.parse(t) - 2 * 3600_000).toISOString();
+  for (const { trace_id } of failed) {
+    const t = await db.get("SELECT started_at FROM traces WHERE id = ?", trace_id);
+    if (t && Date.now() - Date.parse(t.started_at) < 3600_000) await run("UPDATE traces SET started_at = ? WHERE id = ?", earlier(t.started_at), trace_id);
+  }
+}
+
 /* ================================================================== */
 
 async function main() {
@@ -878,6 +911,8 @@ async function main() {
     await phaseB();
     await startApp();
     await phaseC();
+    await stopApp();
+    await phaseD();
   } finally {
     await stopApp();
     connector.close();

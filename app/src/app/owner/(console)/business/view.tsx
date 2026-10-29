@@ -13,6 +13,9 @@ import { Fragment, useEffect, useState } from "react";
 import { api, fmtDate, fmtTime, Pill, usd, useReportError } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 
+/** "Oct 5" for a week that starts on 2026-10-05 (the API's Monday-based weeks, in UTC). */
+const weekLabel = (week: string) => new Date(`${week}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
 type Client = {
   id: string; name: string; paused: boolean; plan: string; status: string; people: number; revenue: number; aiCost: number; margin: number;
   creditPct: number; creditLevel: string; partner: string | null; near: string[]; over: string[];
@@ -150,13 +153,18 @@ export default function BusinessPage() {
       <div className="panel">
         <div className="panel-h"><h2>Sign-ups per week</h2><span className="muted">Last 12 weeks · darker = self-service</span></div>
         <div className="panel-b">
-          <div className="spark" role="img" aria-label={`Sign-ups per week: ${b.signups.map((s) => `${s.week}: ${s.all}`).join(", ")}`}>
+          <div className="spark" role="img" aria-label={`Sign-ups per week: ${b.signups.map((s) => `week of ${weekLabel(s.week)}: ${s.all}`).join(", ")}`}>
             {b.signups.map((s) => (
-              <div key={s.week} title={`Week of ${s.week}: ${s.all} new (${s.selfService} self-service)`}>
+              <div key={s.week} title={`Week of ${weekLabel(s.week)}: ${s.all} new (${s.selfService} self-service)`}>
+                {s.all > 0 && <span className="spark-n">{s.all}</span>}
                 <div className="c" style={{ height: `${((s.all - s.selfService) / maxSign) * 130}px`, opacity: 0.45 }} />
                 <div className="c" style={{ height: `${(s.selfService / maxSign) * 130}px`, borderRadius: s.all === s.selfService ? "3px 3px 0 0" : 0 }} />
               </div>
             ))}
+          </div>
+          {/* Week labels under the bars (the Monday each week starts); every other one on narrow screens. */}
+          <div className="spark-x" aria-hidden="true">
+            {b.signups.map((s) => <span key={s.week}>{weekLabel(s.week)}</span>)}
           </div>
         </div>
       </div>

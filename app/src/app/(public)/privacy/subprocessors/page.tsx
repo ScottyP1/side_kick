@@ -21,6 +21,7 @@ export default function SubprocessorsPage() {
         <div key={s.name} className="panel"><div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <h2 style={{ margin: 0 }}>{s.name}</h2>
           <p className="muted" style={{ margin: 0 }}>{s.company} · {s.location}</p>
+          {s.onlyWhen && <p style={{ margin: 0 }}><b>Only when</b>: {s.onlyWhen}</p>}
           <p style={{ margin: 0 }}><b>What for</b>: {s.purpose}</p>
           <p style={{ margin: 0 }}><b>Data it sees</b>: {s.data}</p>
           <p style={{ margin: 0 }}><a href={s.terms} target="_blank" rel="noreferrer">Their data protection terms</a></p>

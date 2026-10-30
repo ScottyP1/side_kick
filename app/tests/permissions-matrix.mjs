@@ -98,6 +98,7 @@ export const MATRIX = [
   { what: "See a group's Live in meetings panel (Enterprise)", method: "GET", url: (s) => `/api/workspaces/${s.wsA}/live`, allow: EVERYONE },
   { what: "Switch Live in meetings for a group (Team Leads: their own groups)", method: "PUT", url: (s) => `/api/workspaces/${s.wsA}/live`, body: {}, allow: MANAGERS },
   { what: "Stop Sidekick in a live meeting (Team Leads: their own groups)", method: "POST", url: (s) => `/api/workspaces/${s.wsA}/live`, body: { action: "stop", session: NOPE }, allow: MANAGERS },
+  { what: "Choose where the organization's meeting bot runs (live meetings)", method: "PUT", url: () => "/api/live/provider", body: {}, allow: ["owner"] },
   { what: "Send a test message to one of a group's chats (Team Leads: their own groups)", method: "POST", url: (s) => `/api/workspaces/${s.wsA}/notes-chats/test`, body: { chatId: NOPE }, allow: MANAGERS },
   { what: "See the audit log", method: "GET", url: () => "/api/audit", allow: ADMINS },
   { what: "See Activity (traces and performance)", method: "GET", url: () => "/api/activity?view=overview", allow: ADMINS },

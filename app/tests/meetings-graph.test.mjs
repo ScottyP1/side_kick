@@ -106,68 +106,144 @@ async function waitFor(conv, re, from = 0, ms = 20000) {
   throw new Error(`Timed out waiting for ${re} in ${conv}: ${sentTo(conv, from).slice(0, 400)}`);
 }
 
-/* ---------- fake meeting-bot provider: Recall.ai's API (lib/live-meetings/recall.ts) ---------- */
+/* ---------- fake meeting bots: our own Attendee (the default) and Recall.ai (opt-in), and Azure AI Speech ---------- */
+const ATTENDEE_KEY = "test-attendee-key";
+const ATTENDEE_SECRET = crypto.randomBytes(32).toString("base64");
 const RECALL_KEY = "test-recall-key";
 const LIVE_SECRET = `whsec_${crypto.randomBytes(24).toString("base64")}`;
-const BOTS = new Map(); // bot id → { url, name, webhook, left, chat: [messages posted in the meeting chat] }
-const recallFail = { join: null }; // a status to refuse the next join with
-const recall = http.createServer((req, res) => {
+// bot id → { provider, url, name, webhook, settings, left, chat: [messages], spoken: [texts], hand: [true/false], log: [everything in order] }
+const BOTS = new Map();
+const liveFail = { join: null }; // a status to refuse the next join with (either provider)
+/** One fake meeting-bot server; `routes` maps an action to the request path that means it. */
+function fakeBots(provider, key, paths) {
+  return http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const send = (status, json) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(json));
+      };
+      if (req.headers.authorization !== `Token ${key}`) return send(401, { detail: "Invalid token." });
+      const b = body ? JSON.parse(body) : {};
+      if (req.method === "POST" && req.url === paths.create) {
+        if (liveFail.join) {
+          const status = liveFail.join;
+          liveFail.join = null;
+          return send(status, { detail: "Meeting URL is not reachable." });
+        }
+        const id = `${provider}-bot-${BOTS.size + 1}`;
+        const webhook = provider === "attendee" ? b.webhooks?.[0]?.url : b.recording_config?.realtime_endpoints?.[0]?.url;
+        BOTS.set(id, { provider, url: b.meeting_url, name: b.bot_name, webhook, settings: b, left: false, chat: [], spoken: [], hand: [], log: [] });
+        return send(201, { id, meeting_url: b.meeting_url });
+      }
+      const m = paths.action.exec(req.url);
+      const bot = m && BOTS.get(m[1]);
+      if (!bot) return send(404, { detail: "Not found." });
+      const action = m[2];
+      if (action === "leave" || action === "leave_call") bot.left = true;
+      else if (action === "send_chat_message") {
+        // Attendee takes Teams HTML; kept as plain text here so tests read it easily.
+        const text = String(b.message).replace(/<br>/g, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+        bot.chat.push(text);
+        bot.log.push(`chat:${text}`);
+      } else if (action === "raise_hand") {
+        bot.hand.push(b.raised);
+        bot.log.push(`hand:${b.raised}`);
+      } else if (action === "output_audio") {
+        // The fake Azure AI Speech returns the text itself as the "audio", so tests can read what was said.
+        const said = Buffer.from(b.data ?? b.b64_data, "base64").toString("utf8");
+        bot.spoken.push(said);
+        bot.log.push(`speak:${said}`);
+      } else return send(404, { detail: "Not found." });
+      send(200, {});
+    });
+  });
+}
+const attendee = fakeBots("attendee", ATTENDEE_KEY, { create: "/api/v1/bots", action: /^\/api\/v1\/bots\/([^/]+)\/(leave|send_chat_message|raise_hand|output_audio)$/ });
+const recall = fakeBots("recall", RECALL_KEY, { create: "/api/v1/bot/", action: /^\/api\/v1\/bot\/([^/]+)\/(leave_call|send_chat_message|output_audio)\/$/ });
+// Azure AI Speech (text to speech): the "MP3" is the spoken text, so the bots above can record what was said.
+const ttsCalls = [];
+const tts = http.createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
-    const send = (status, json) => {
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify(json));
-    };
-    if (req.headers.authorization !== `Token ${RECALL_KEY}`) return send(401, { detail: "Invalid token." });
-    const b = body ? JSON.parse(body) : {};
-    if (req.method === "POST" && req.url === "/api/v1/bot/") {
-      if (recallFail.join) {
-        const status = recallFail.join;
-        recallFail.join = null;
-        return send(status, { detail: "Meeting URL is not reachable." });
-      }
-      const id = `bot-${BOTS.size + 1}`;
-      BOTS.set(id, { url: b.meeting_url, name: b.bot_name, webhook: b.recording_config?.realtime_endpoints?.[0]?.url, transcript: b.recording_config?.transcript, left: false, chat: [] });
-      return send(201, { id, meeting_url: b.meeting_url });
+    if (req.headers["ocp-apim-subscription-key"] !== "test-speech-key" || req.headers["content-type"] !== "application/ssml+xml") {
+      res.writeHead(401);
+      return res.end();
     }
-    const m = req.url.match(/^\/api\/v1\/bot\/([^/]+)\/(leave_call|send_chat_message)\/$/);
-    if (m && BOTS.has(m[1])) {
-      const bot = BOTS.get(m[1]);
-      if (m[2] === "leave_call") bot.left = true;
-      else bot.chat.push(b.message);
-      return send(200, {});
-    }
-    send(404, { detail: "Not found." });
+    const text = (body.match(/<voice[^>]*>([\s\S]*)<\/voice>/)?.[1] ?? "").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    ttsCalls.push({ format: req.headers["x-microsoft-outputformat"], text });
+    res.writeHead(200, { "content-type": "audio/mpeg" });
+    res.end(Buffer.from(text, "utf8"));
   });
 });
-/** Signs an event as Recall does (Standard Webhooks) and posts it to the app's webhook. */
-async function pushLive(event, { secret = LIVE_SECRET, at = Date.now(), sign = true } = {}) {
+
+/** Posts an event to the app's webhook for a bot, in its provider's format and signature. */
+async function pushLive(botId, event, { secret, at = Date.now(), sign = true } = {}) {
+  const provider = BOTS.get(botId)?.provider ?? "attendee";
+  if (provider === "attendee") {
+    const payload = { idempotency_key: crypto.randomUUID(), bot_id: botId, bot_metadata: {}, ...event };
+    const raw = JSON.stringify(payload);
+    const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(",")}}` : JSON.stringify(v));
+    const sig = crypto.createHmac("sha256", Buffer.from(secret ?? ATTENDEE_SECRET, "base64")).update(canon(payload)).digest("base64");
+    return fetch(`${BASE}/api/live/events/attendee`, { method: "POST", headers: { "content-type": "application/json", ...(sign ? { "x-webhook-signature": sig } : {}) }, body: raw });
+  }
   const raw = JSON.stringify(event);
   const id = `msg_${crypto.randomUUID()}`;
   const ts = String(Math.floor(at / 1000));
-  const sig = crypto.createHmac("sha256", Buffer.from(secret.slice("whsec_".length), "base64")).update(`${id}.${ts}.${raw}`).digest("base64");
-  const headers = { "content-type": "application/json", ...(sign ? { "webhook-id": id, "webhook-timestamp": ts, "webhook-signature": `v1,${sig}` } : {}) };
-  return fetch(`${BASE}/api/live/events`, { method: "POST", headers, body: raw });
+  const key = secret ?? LIVE_SECRET;
+  const sig = crypto.createHmac("sha256", Buffer.from(key.slice("whsec_".length), "base64")).update(`${id}.${ts}.${raw}`).digest("base64");
+  return fetch(`${BASE}/api/live/events/recall`, { method: "POST", headers: { "content-type": "application/json", ...(sign ? { "webhook-id": id, "webhook-timestamp": ts, "webhook-signature": `v1,${sig}` } : {}) }, body: raw });
 }
-const botStatus = (botId, code, sub_code = null) => pushLive({ event: `bot.${code}`, data: { data: { code, sub_code, updated_at: new Date().toISOString() }, bot: { id: botId, metadata: {} } } });
-/** Someone says `text` in the meeting (a finalized transcript line). */
-const say = (botId, name, text) => pushLive({ event: "transcript.data", data: { data: { words: text.split(" ").map((w) => ({ text: w })), participant: { id: 1, name } }, bot: { id: botId, metadata: {} } } });
+const isAttendee = (botId) => (BOTS.get(botId)?.provider ?? "attendee") === "attendee";
+/** The bot's status: "waiting", "in_call", "ended" (`remover` = who removed it), "failed". */
+function botStatus(botId, status, { remover } = {}) {
+  if (isAttendee(botId)) {
+    const state = { waiting: "waiting_room", in_call: "joined_recording", ended: "ended", failed: "fatal_error" }[status];
+    return pushLive(botId, { trigger: "bot.state_change", data: { new_state: state, old_state: "joining", created_at: new Date().toISOString(), event_type: status === "ended" ? "meeting_ended" : status, event_sub_type: null, ...(remover ? { event_metadata: { remover_name: remover } } : {}) } });
+  }
+  const code = { waiting: "in_waiting_room", in_call: "in_call_recording", ended: "call_ended", failed: "fatal" }[status];
+  return pushLive(botId, { event: `bot.${code}`, data: { data: { code, sub_code: null, updated_at: new Date().toISOString() }, bot: { id: botId, metadata: {} } } });
+}
+/** Someone says `text` in the meeting (a finished caption / transcript line). */
+const say = (botId, name, text) => isAttendee(botId)
+  ? pushLive(botId, { trigger: "transcript.update", data: { speaker_name: name, speaker_uuid: name, timestamp_ms: Date.now(), duration_ms: 1500, transcription: { transcript: text, words: null } } })
+  : pushLive(botId, { event: "transcript.data", data: { data: { words: text.split(" ").map((w) => ({ text: w })), participant: { id: 1, name } }, bot: { id: botId, metadata: {} } } });
 /** Someone types `text` in the meeting chat. */
-const typeIn = (botId, name, text) => pushLive({ event: "participant_events.chat_message", data: { data: { participant: { id: 2, name }, data: { text, to: "everyone" } }, bot: { id: botId, metadata: {} } } });
+const typeIn = (botId, name, text) => isAttendee(botId)
+  ? pushLive(botId, { trigger: "chat_messages.update", data: { id: crypto.randomUUID(), to: "everyone", text, sender_name: name, timestamp_ms: Date.now() } })
+  : pushLive(botId, { event: "participant_events.chat_message", data: { data: { participant: { id: 2, name }, data: { text, to: "everyone" } }, bot: { id: botId, metadata: {} } } });
 /** Someone joins the meeting. */
-const joinsMeeting = (botId, name, extra = {}) => pushLive({ event: "participant_events.join", data: { data: { participant: { id: 3, name, extra_data: extra } }, bot: { id: botId, metadata: {} } } });
-/** Waits until the bot posted a meeting chat message matching `re` (from message `from` on); returns them joined. */
+const joinsMeeting = (botId, name) => isAttendee(botId)
+  ? pushLive(botId, { trigger: "participant_events.join_leave", data: { participant_name: name, participant_uuid: name, event_type: "join", event_data: {}, timestamp_ms: Date.now() } })
+  : pushLive(botId, { event: "participant_events.join", data: { data: { participant: { id: 3, name, extra_data: {} } }, bot: { id: botId, metadata: {} } } });
+/** Someone starts (or stops) talking. */
+const speaking = (botId, name, on) => isAttendee(botId)
+  ? pushLive(botId, { trigger: "participant_events.speech_start_stop", data: { participant_name: name, participant_uuid: name, event_type: on ? "speech_start" : "speech_stop", event_data: {}, timestamp_ms: Date.now() } })
+  : pushLive(botId, { event: `participant_events.speech_${on ? "on" : "off"}`, data: { data: { participant: { id: 4, name } }, bot: { id: botId, metadata: {} } } });
+/** Waits until the bot's log (chat, hand, speech, in order) has an entry matching `re` from entry `from` on; returns them joined. */
+async function waitLog(botId, re, from = 0, ms = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    const text = (BOTS.get(botId)?.log ?? []).slice(from).join("\n");
+    if (re.test(text)) return text;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`Timed out waiting for ${re} in ${botId}: ${(BOTS.get(botId)?.log ?? []).slice(from).join(" | ").slice(0, 600)}`);
+}
+/** Waits for a meeting chat message from the bot matching `re` (from message `from` on). */
 async function waitChat(botId, re, from = 0, ms = 20000) {
   const start = Date.now();
   while (Date.now() - start < ms) {
     const text = (BOTS.get(botId)?.chat ?? []).slice(from).join("\n");
     if (re.test(text)) return text;
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`Timed out waiting for ${re} in ${botId}'s chat: ${(BOTS.get(botId)?.chat ?? []).slice(from).join(" | ").slice(0, 400)}`);
 }
 const lastBot = () => [...BOTS.keys()].at(-1);
+const logLen = (botId) => BOTS.get(botId).log.length;
 
 /* ---------- fake Microsoft: sign-in keys, app tokens and Graph ---------- */
 const MS_CLIENT_ID = "11111111-2222-4333-8444-555555555555";
@@ -527,7 +603,7 @@ before(async () => {
   SERVICE_URL = `http://127.0.0.1:${connector.address().port}`;
   await new Promise((r) => microsoft.listen(0, "127.0.0.1", r));
   MS_BASE = `http://127.0.0.1:${microsoft.address().port}`;
-  await new Promise((r) => recall.listen(0, "127.0.0.1", r));
+  for (const srv of [attendee, recall, tts]) await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   tsconfigBefore = fs.readFileSync(path.join(APP, "tsconfig.json"), "utf8");
   const env = {
     ...process.env,
@@ -554,11 +630,18 @@ before(async () => {
     GRAPH_BASE: MS_BASE,
     TEAMS_APP_ID: "sidekick-test-app",
     SIDEKICK_TICK_SECRET: TICK_SECRET,
-    // Live in meetings: the fake Recall server above, its webhook secret, and notes handed over at once.
-    SIDEKICK_LIVE_PROVIDER: "recall",
+    // Live in meetings: our own meeting bot (fake Attendee, with the raise-hand patch) by default, Recall.ai for an
+    // organization that opts in, Azure AI Speech for spoken answers, waits 20x shorter, notes handed over at once.
+    ATTENDEE_BASE_URL: `http://127.0.0.1:${attendee.address().port}`,
+    ATTENDEE_API_KEY: ATTENDEE_KEY,
+    ATTENDEE_WEBHOOK_SECRET: ATTENDEE_SECRET,
+    ATTENDEE_RAISE_HAND: "1",
     RECALL_API_KEY: RECALL_KEY,
     RECALL_BASE_URL: `http://127.0.0.1:${recall.address().port}`,
     SIDEKICK_LIVE_WEBHOOK_SECRET: LIVE_SECRET,
+    AZURE_SPEECH_KEY: "test-speech-key",
+    AZURE_SPEECH_TTS_URL: `http://127.0.0.1:${tts.address().port}/cognitiveservices/v1`,
+    SIDEKICK_LIVE_TIME_SCALE: "0.05",
     SIDEKICK_LIVE_HANDOFF_MIN: "0",
   };
   if (ENGINE === "postgres") {
@@ -591,7 +674,7 @@ after(async () => {
   }
   connector.close();
   microsoft.close();
-  recall.close();
+  for (const srv of [attendee, recall, tts]) srv.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
   fs.rmSync(path.join(APP, DIST), { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   if (tsconfigBefore) fs.writeFileSync(path.join(APP, "tsconfig.json"), tsconfigBefore);
@@ -1785,31 +1868,39 @@ test(`[${ENGINE}] live: @Sidekick join in a meeting chat joins as "Sidekick (not
   s.bot1 = bot;
   assert.equal(BOTS.get(bot).url, joinUrlFor("live1"), "the meeting's own link, from Graph");
   assert.equal(BOTS.get(bot).name, "Sidekick (notes)");
-  assert.equal(BOTS.get(bot).webhook, `${BASE}/api/live/events`);
-  assert.equal(BOTS.get(bot).transcript.provider.recallai_streaming.mode, "prioritize_low_latency");
+  assert.equal(BOTS.get(bot).provider, "attendee", "Sidekick's own meeting bot by default");
+  assert.equal(BOTS.get(bot).webhook, `${BASE}/api/live/events/attendee`);
+  assert.equal(BOTS.get(bot).settings.transcription_settings.meeting_closed_captions.teams_language, "en-us", "Teams' own captions: no other company hears the audio");
+  assert.equal(BOTS.get(bot).settings.recording_settings.format, "none", "nothing recorded");
   assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE '%sent to the Teams meeting%' ORDER BY id DESC LIMIT 1"), /invited by Lou Lead/);
   assert.match(await sayTo(LIVE1, "join"), /already in this meeting/, "never twice in one meeting");
   // Waiting in the lobby, then let in: the first message says it's listening and how to remove it (through the Teams bot).
   const from = sent.length;
-  assert.equal((await botStatus(bot, "in_waiting_room")).status, 202);
+  assert.equal((await botStatus(bot, "waiting")).status, 202);
   assert.equal(await sessionOf(bot, "status"), "joining");
-  assert.equal((await botStatus(bot, "in_call_recording")).status, 202);
+  assert.equal((await botStatus(bot, "in_call")).status, 202);
   const intro = await waitFor(LIVE1, /listening for W1/, from);
   assert.match(intro, /remove Sidekick \(notes\) from the participants/);
   assert.match(intro, /Sidekick, leave/);
   assert.doesNotMatch(intro, /Client guests are here/);
   assert.equal(BOTS.get(bot).chat.length, 0, "Sidekick's own Teams bot posts in this chat, not the provider");
   assert.equal(await sessionOf(bot, "status"), "live");
-  // Admitted twice (Recall repeats statuses): one hello.
-  await botStatus(bot, "in_call_recording");
+  // Admitted twice (statuses can repeat): one hello.
+  await botStatus(bot, "in_call");
   await new Promise((r) => setTimeout(r, 500));
   assert.equal((sentTo(LIVE1, from).match(/listening for W1/g) ?? []).length, 1);
-  // Someone asks out loud: the normal Ask pipeline answers in the meeting chat, with its sources.
+  // Someone asks out loud: hand up at once, a short spoken answer (Azure AI Speech, citations left out), then the
+  // normal Ask pipeline's full answer with its sources in the meeting chat, and the hand down.
   const asked = sent.length;
+  const log0 = logLen(bot);
   assert.equal((await say(bot, "Lou Lead", "Okay. Sidekick, what did we decide about the cutover?")).status, 202);
   const answer = await waitFor(LIVE1, /Test answer from/, asked);
   assert.match(answer, /what did we decide about the cutover/);
   assert.match(answer, /Sources/);
+  const acts = (await waitLog(bot, /hand:false/, log0)).split("\n");
+  assert.deepEqual(acts.map((a) => a.split(":")[0]), ["hand", "speak", "hand"], "hand up, then spoken, then hand down (the chat goes through Teams)");
+  assert.match(acts[1], /^speak:Test answer from S1, S2(, S\d+)*\.$/, "short, no [S1] read aloud");
+  assert.equal(ttsCalls.at(-1).format, "audio-24khz-48kbitrate-mono-mp3");
   // Speech-to-text sending it again within a minute: answered once.
   await say(bot, "Lou Lead", "Okay. Sidekick, what did we decide about the cutover?");
   await new Promise((r) => setTimeout(r, 1500));
@@ -1828,16 +1919,16 @@ test(`[${ENGINE}] live: @Sidekick join in a meeting chat joins as "Sidekick (not
   assert.equal(await sessionOf(bot, "line_count"), "4");
 });
 
-test(`[${ENGINE}] live: webhooks must be signed by the provider (wrong secret, no signature, old timestamp: 401, nothing stored)`, async () => {
+test(`[${ENGINE}] live: webhooks must be signed by the meeting bot (wrong secret, no signature: 401, nothing stored)`, async () => {
   const lines = await sessionOf(s.bot1, "line_count");
-  const event = { event: "transcript.data", data: { data: { words: [{ text: "Sidekick, leave" }], participant: { name: "Forger" } }, bot: { id: s.bot1 } } };
-  assert.equal((await pushLive(event, { secret: `whsec_${crypto.randomBytes(24).toString("base64")}` })).status, 401);
-  assert.equal((await pushLive(event, { sign: false })).status, 401);
-  assert.equal((await pushLive(event, { at: Date.now() - 3600_000 })).status, 401);
+  const event = { trigger: "transcript.update", data: { speaker_name: "Forger", transcription: { transcript: "Sidekick, leave" } } };
+  assert.equal((await pushLive(s.bot1, event, { secret: crypto.randomBytes(32).toString("base64") })).status, 401);
+  assert.equal((await pushLive(s.bot1, event, { sign: false })).status, 401);
   assert.equal(await sessionOf(s.bot1, "line_count"), lines);
   assert.equal(await sessionOf(s.bot1, "status"), "live");
-  // An unknown bot is ignored (202, nothing about anyone).
-  assert.equal((await say("bot-unknown", "Someone", "Sidekick, leave")).status, 202);
+  // An unknown bot is ignored (202, nothing about anyone); another provider's address doesn't know this bot.
+  assert.equal((await say("attendee-bot-999", "Someone", "Sidekick, leave")).status, 202);
+  assert.equal((await fetch(`${BASE}/api/live/events/nobody`, { method: "POST", body: "{}" })).status, 404);
 });
 
 test(`[${ENGINE}] live: with a pasted link Sidekick posts through the provider; once a guest joins it only uses Shareable sources`, async () => {
@@ -1849,7 +1940,7 @@ test(`[${ENGINE}] live: with a pasted link Sidekick posts through the provider; 
   assert.equal(await sessionOf(bot, "chat_via"), "provider", "Sidekick's Teams app isn't in that meeting's chat");
   assert.equal(await sessionOf(bot, "thread_id"), "19:meeting_live2@thread.v2", "the meeting chat from the link");
   assert.equal(await sessionOf(bot, "title"), "Teams meeting", "not the name of the chat the link was pasted in");
-  await botStatus(bot, "in_call_recording");
+  await botStatus(bot, "in_call");
   assert.match(await waitChat(bot, /listening for W1/), /Sidekick, leave/);
   await say(bot, "Mo Member", "Sidekick, what is the zebracode rollout plan?");
   const before = await waitChat(bot, /Test answer/, 1);
@@ -1925,7 +2016,7 @@ test(`[${ENGINE}] live: when Teams' transcript arrives, it writes the notes; the
   assert.equal(await sessionOf(bot, "handoff"), "graph", "the Teams transcript claimed the session");
   assert.equal((await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.filter((x) => x.title === "Meeting live1").length, 1);
   // The meeting ends (the provider says so): Sidekick stops; it isn't asked to leave a meeting that's over.
-  assert.equal((await botStatus(bot, "call_ended", "call_ended_by_host")).status, 202);
+  assert.equal((await botStatus(bot, "ended")).status, 202);
   await waitSession(bot, "status", "ended");
   assert.equal(await sessionOf(bot, "end_reason"), "The meeting ended.");
   assert.equal(BOTS.get(bot).left, false);
@@ -1935,8 +2026,163 @@ test(`[${ENGINE}] live: when Teams' transcript arrives, it writes the notes; the
   assert.equal(await scalar(`SELECT COUNT(*) FROM live_lines WHERE session_id = (SELECT id FROM live_sessions WHERE bot_id = '${bot}')`), "0");
   assert.equal((await mo("GET", liveUrl(s.w1))).body.sessions.find((x) => x.endReason === "The meeting ended.").notes, "From the Teams transcript");
   // Status events after the end change nothing.
-  await botStatus(bot, "in_call_recording");
+  await botStatus(bot, "in_call");
   assert.equal(await sessionOf(bot, "status"), "ended");
+});
+
+test(`[${ENGINE}] live: a question to the room nobody answers: hand up, called on → short spoken answer, then the full answer in the chat; quiet otherwise`, async () => {
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("room1")}`), /Joining now/);
+  const bot = lastBot();
+  s.bot3 = bot;
+  await botStatus(bot, "in_call");
+  await waitChat(bot, /listening for W1/);
+  const quietFor = async (n, ms = 1200) => {
+    await new Promise((r) => setTimeout(r, ms));
+    return BOTS.get(bot).log.slice(n);
+  };
+  // Someone in the meeting answers it: Sidekick stays out of it.
+  let n = logLen(bot);
+  await say(bot, "Lou Lead", "When is the zebracode rollout happening?");
+  await say(bot, "Mo Member", "It starts with the first wave next month.");
+  assert.deepEqual(await quietFor(n), [], "someone answered");
+  // A question to a person by name isn't for Sidekick.
+  n = logLen(bot);
+  await say(bot, "Lou Lead", "Mo, what does the zebracode rollout plan cover?");
+  assert.deepEqual(await quietFor(n), []);
+  // Nobody knows: the hand goes up (well within 2 seconds of the pause here), nothing is said until it's called on.
+  n = logLen(bot);
+  await say(bot, "Lou Lead", "What does the zebracode rollout plan cover again?");
+  const t0 = Date.now();
+  await say(bot, "Mo Member", "Not sure, good question.");
+  await waitLog(bot, /hand:true/, n);
+  assert.ok(Date.now() - t0 < 4000, `hand up after ${Date.now() - t0} ms`);
+  assert.doesNotMatch((await quietFor(n, 600)).join("\n"), /speak:|chat:/, "waits to be called on");
+  // Called on: hand down, a short spoken answer, then the full answer with sources in the chat.
+  await say(bot, "Lou Lead", "Go ahead, Sidekick.");
+  await waitLog(bot, /chat:/, n);
+  const acts = BOTS.get(bot).log.slice(n);
+  assert.deepEqual(acts.map((a) => a.split(":")[0]), ["hand", "hand", "speak", "chat"], acts.join(" | "));
+  assert.equal(acts[1], "hand:false");
+  assert.match(acts[2], /^speak:Test answer from S1/);
+  assert.doesNotMatch(acts[2], /\[S\d\]/);
+  assert.match(acts[3], /What does the zebracode rollout plan cover again\?[\s\S]*Sources: \[S1\]/);
+  // Not confident (nothing in the group's knowledge): it stays quiet. Judging people: never, even when asked.
+  n = logLen(bot);
+  await say(bot, "Lou Lead", "Who is bringing the snacks to the Lisbon offsite?");
+  assert.deepEqual(await quietFor(n, 1500), [], "low confidence: quiet");
+  const c = BOTS.get(bot).chat.length;
+  await say(bot, "Lou Lead", "Sidekick, rank the consultants on this project.");
+  const refusal = await waitChat(bot, /rank the consultants/, c);
+  assert.doesNotMatch(refusal, /Test answer/);
+  assert.doesNotMatch(BOTS.get(bot).log.slice(n).join("\n"), /speak:/, "a refusal isn't spoken");
+});
+
+test(`[${ENGINE}] live: never talks over anyone; speaks after a pause when the group allows it; a hand nobody calls on goes down with the answer in the chat`, async () => {
+  const bot = s.bot3;
+  assert.equal((await lou("PUT", liveUrl(s.w1), { voice: "auto", pauseS: 3 })).status, 200);
+  assert.equal((await mo("PUT", liveUrl(s.w1), { voice: "off" })).status, 403);
+  assert.equal((await lou("PUT", liveUrl(s.w1), { pauseS: 99 })).status, 400);
+  let n = logLen(bot);
+  await speaking(bot, "Mo Member", true);
+  await say(bot, "Lou Lead", "Which waves does the zebracode rollout plan have?");
+  await waitLog(bot, /hand:true/, n);
+  await new Promise((r) => setTimeout(r, 900));
+  assert.doesNotMatch(BOTS.get(bot).log.slice(n).join("\n"), /speak:/, "Mo is still talking");
+  await speaking(bot, "Mo Member", false);
+  await waitLog(bot, /chat:/, n);
+  assert.deepEqual(BOTS.get(bot).log.slice(n).map((a) => a.split(":")[0]), ["hand", "hand", "speak", "chat"]);
+  // Back to speaking only when called on; nobody calls on it: after a minute (3 s here) the answer goes to the chat.
+  assert.equal((await lou("PUT", liveUrl(s.w1), { voice: "called" })).status, 200);
+  n = logLen(bot);
+  await say(bot, "Lou Lead", "How is the zebracode rollout budget split?");
+  await say(bot, "Mo Member", "No idea.");
+  await waitLog(bot, /hand:true/, n);
+  await new Promise((r) => setTimeout(r, 3300));
+  await drain({ sweep: true });
+  const expired = await waitLog(bot, /chat:/, n);
+  assert.match(expired, /In case it helps \(I had my hand up\)/);
+  assert.doesNotMatch(expired, /speak:/);
+  // Spoken answers off: the answer goes straight to the chat, no hand (the chat interrupts nobody).
+  assert.equal((await lou("PUT", liveUrl(s.w1), { voice: "off" })).status, 200);
+  n = logLen(bot);
+  await say(bot, "Lou Lead", "Where is the zebracode rollout summary kept?");
+  await say(bot, "Mo Member", "Hmm, not sure.");
+  await waitLog(bot, /chat:/, n);
+  assert.deepEqual(BOTS.get(bot).log.slice(n).map((a) => a.split(":")[0]), ["chat"]);
+  assert.equal((await lou("PUT", liveUrl(s.w1), { voice: "called" })).status, 200);
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Changed Sidekick''s live meeting settings%' ORDER BY id DESC LIMIT 1"), /voice "called"/);
+});
+
+test(`[${ENGINE}] live: quiet mode for one meeting; Sidekick asks its own question when an action item has no date; only its name then the question`, async () => {
+  const bot = s.bot3;
+  let c = BOTS.get(bot).chat.length;
+  await say(bot, "Lou Lead", "Sidekick, quiet.");
+  await waitChat(bot, /I'll stay quiet/, c);
+  assert.equal(await sessionOf(bot, "quiet"), "1");
+  let n = logLen(bot);
+  await say(bot, "Lou Lead", "What does the zebracode summary say about wave two?");
+  await say(bot, "Mo Member", "Not sure.");
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.deepEqual(BOTS.get(bot).log.slice(n), [], "quiet: nothing volunteered");
+  await say(bot, "Mo Member", "Sidekick, what is the zebracode rollout plan about?");
+  await waitLog(bot, /chat:/, n);
+  assert.deepEqual(BOTS.get(bot).log.slice(n).map((a) => a.split(":")[0]), ["chat"], "asked: answered in the chat, no hand, no voice");
+  c = BOTS.get(bot).chat.length;
+  await say(bot, "Lou Lead", "Sidekick, you can speak up.");
+  await waitChat(bot, /raise my hand when I can help/, c);
+  assert.equal(await sessionOf(bot, "quiet"), "0");
+  // Only its name, then the question in the next line.
+  n = logLen(bot);
+  await say(bot, "Mo Member", "Sidekick?");
+  await say(bot, "Mo Member", "what is in the zebracode summary for the client");
+  await waitLog(bot, /chat:[\s\S]*zebracode summary for the client/, n);
+  // Its own question: an action item with no date, asked once, with its hand up, spoken when called on.
+  await say(bot, "Lou Lead", "I'll update the runbook.");
+  for (let i = 0; i < 12; i++) await say(bot, "Mo Member", `Detail ${i} about the rollout environment.`);
+  n = logLen(bot);
+  await drain();
+  await waitLog(bot, /hand:true/, n);
+  await say(bot, "Lou Lead", "Yes, Sidekick?");
+  const asked = await waitLog(bot, /chat:Quick check/, n);
+  assert.match(asked, /speak:Quick check: by when should Lou Lead do “update the runbook”\?/);
+  await drain();
+  assert.equal((BOTS.get(bot).log.join("\n").match(/Quick check: by when should Lou Lead/g) ?? []).length, 2, "asked once (spoken + chat)");
+  await say(bot, "Lou Lead", "Sidekick, leave.");
+  await waitSession(bot, "status", "ended");
+});
+
+test(`[${ENGINE}] live: the hosted meeting bot (Recall.ai) only when the Org Owner chooses it; it can't raise a hand, so ✋ goes in the chat`, async () => {
+  assert.equal((await lou("GET", liveUrl(s.w1))).body.provider.id, "attendee");
+  assert.equal((await lou("PUT", "/api/live/provider", { provider: "recall" })).status, 403, "Org Owner only");
+  assert.equal((await ann("PUT", "/api/live/provider", { provider: "nobody" })).status, 400);
+  assert.equal((await ann("PUT", "/api/live/provider", { provider: "recall" })).status, 200);
+  const st = (await lou("GET", liveUrl(s.w1))).body;
+  assert.equal(st.provider.id, "recall");
+  assert.equal(st.provider.hosted, true);
+  assert.match(st.provider.where, /receives the meeting's audio/);
+  assert.equal(st.can.raiseHand, false);
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Chose Recall.ai%' ORDER BY id DESC LIMIT 1"), /live in meetings/);
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("hosted1")}`), /Joining now/);
+  const bot = lastBot();
+  assert.equal(BOTS.get(bot).provider, "recall");
+  assert.equal(BOTS.get(bot).webhook, `${BASE}/api/live/events/recall`);
+  await botStatus(bot, "in_call");
+  await waitChat(bot, /listening for W1/);
+  // Its webhooks are checked with Recall's own signature (an old timestamp is refused).
+  assert.equal((await pushLive(bot, { event: "transcript.data", data: { data: { words: [{ text: "Sidekick, leave" }], participant: { name: "X" } }, bot: { id: bot } } }, { at: Date.now() - 3600_000 })).status, 401);
+  const n = logLen(bot);
+  await say(bot, "Lou Lead", "What does the zebracode rollout plan cover in wave three?");
+  await say(bot, "Mo Member", "Don't know.");
+  await waitLog(bot, /chat:✋ I can help with that/, n);
+  await say(bot, "Lou Lead", "Sidekick, go ahead.");
+  await waitLog(bot, /speak:[\s\S]*chat:[\s\S]*Sources/, n);
+  await say(bot, "Lou Lead", "Sidekick, leave.");
+  await waitSession(bot, "status", "ended");
+  assert.equal((await ann("PUT", "/api/live/provider", { provider: "attendee" })).status, 200);
+  // The sub-processor page says Recall.ai only applies to organizations that choose it.
+  const subs = (await client()("GET", "/privacy/subprocessors")).body;
+  assert.match(subs, /Recall\.ai \(hosted meeting bot\)/);
+  assert.match(subs, /Only for organizations whose Org Owner chose the hosted meeting bot/);
 });
 
 test(`[${ENGINE}] live: hours count against the plan; joining is refused when they're used up and a running session leaves`, async () => {
@@ -1951,7 +2197,7 @@ test(`[${ENGINE}] live: hours count against the plan; joining is refused when th
   assert.equal((await owner("PATCH", `/api/owner/tenants/${s.orgA}/terms`, { limits: { liveMeetingHours: 2 } })).status, 200);
   assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("live3")}`), /Joining now/);
   const bot = lastBot();
-  await botStatus(bot, "in_call_recording");
+  await botStatus(bot, "in_call");
   await waitChat(bot, /listening for W1/);
   await dbExec(`UPDATE live_sessions SET joined_at = '${new Date(Date.now() - 61 * 60_000).toISOString()}' WHERE bot_id = '${bot}'`);
   const n = BOTS.get(bot).chat.length;
@@ -1962,7 +2208,7 @@ test(`[${ENGINE}] live: hours count against the plan; joining is refused when th
   assert.match(BOTS.get(bot).chat.slice(n).join("\n"), /hours are used up, so I'm leaving/);
   assert.equal((await owner("PATCH", `/api/owner/tenants/${s.orgA}/terms`, { limits: null })).status, 200);
   // A provider refusing the join: the session shows failed with the reason, and the chat is told.
-  recallFail.join = 400;
+  liveFail.join = 400;
   assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("live4")}`), /couldn't join the meeting.*not reachable/);
   const failed = (await lou("GET", liveUrl(s.w1))).body.sessions.find((x) => x.status === "failed");
   assert.match(failed.error, /not reachable/);
@@ -1996,7 +2242,7 @@ test(`[${ENGINE}] live: Owner Console report; Stop from the portal; isolation (a
   assert.equal((await mo("GET", "/api/owner/live")).status, 401);
   const r = (await owner("GET", "/api/owner/live")).body;
   assert.equal(r.configured, true);
-  assert.equal(r.provider, "recall");
+  assert.equal(r.provider, "attendee, recall", "both meeting bots are set up here; Sidekick's own first");
   const a = r.orgs.find((o) => o.org === "Org A");
   assert.ok(a.sessions >= 5 && a.failures >= 2 && a.hours >= 1 && a.answers >= 3, JSON.stringify(a));
   assert.ok(r.failures.some((f) => /lobby/.test(f.endReason ?? "")), JSON.stringify(r.failures));
@@ -2004,7 +2250,7 @@ test(`[${ENGINE}] live: Owner Console report; Stop from the portal; isolation (a
   // A running session: Org B can't stop it or see it; a Member can't; the Team Lead can.
   assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("live5")}`), /Joining now/);
   const bot = lastBot();
-  await botStatus(bot, "in_call_recording");
+  await botStatus(bot, "in_call");
   await waitChat(bot, /listening/);
   const id = await sessionOf(bot, "id");
   assert.equal((await bob("POST", liveUrl(s.bw), { action: "stop", session: id })).status, 404);

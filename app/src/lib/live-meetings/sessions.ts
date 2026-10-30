@@ -39,7 +39,7 @@ import { all, asSystem, get, newId, now, run, withOrg } from "../db";
 import { audit, auditAsSidekick, HttpError, requireManage, requireWorkspace, isAdmin, type User } from "../auth";
 import { graphCall } from "../directory";
 import { enqueue } from "../jobs";
-import { span, traceFailed, withTrace } from "../trace";
+import { span, spanAttrs, traceFailed, withTrace } from "../trace";
 import { tenantOfOrg, portalUrl } from "../tenants";
 import { NOT_ENDING, orgAccess } from "../billing";
 import { assertCanAdd, assertFeature, hasFeature, orgPlan, usageCounts } from "../limits";
@@ -53,10 +53,12 @@ import { notificationBase } from "../meetings-graph";
 import { joinKey } from "../auto-record";
 import { answerCard, noticeCard } from "../teams/cards";
 import { BRAND } from "../brand";
-import { liveProvider, type LiveEvent } from "./provider";
+import { configuredProviders, PROVIDER_IDS, PROVIDER_INFO, providerById, type LiveEvent, type LiveProvider, type ProviderId } from "./provider";
+import { speechConfigured, synthesize } from "./speech";
 import {
-  answerText, BOT_NAME, GUEST_NOTICE, introText, isTeamsMeetingUrl, liveMinutes, LIVE_MODES, LOBBY_TIMEOUT_MS, looksExternal,
-  MAX_ANSWERS, MAX_SESSION_MS, meetingThreadFromUrl, parseTrigger, recapText, type ListItem, type LiveMode,
+  answerText, BOT_NAME, confident, GUEST_NOTICE, HAND_NOTE, introText, isNonAnswer, isRoomQuestion, isTeamsMeetingUrl, liveMinutes, LIVE_MODES,
+  LOBBY_TIMEOUT_MS, looksExternal, MAX_ANSWERS, MAX_SESSION_MS, meetingThreadFromUrl, ownQuestion, parseSettings, parseTrigger, recapText, spokenText,
+  type ListItem, type LiveMode, type LiveSettings, type Trigger,
 } from "./rules";
 
 /** A row of `live_sessions` (see db/schema.postgres.sql). */
@@ -67,7 +69,20 @@ export type LiveSession = {
   decisions: string | null; action_items: string | null; line_count: number; extracted_lines: number; extracted_at: string | null;
   answers: number; last_question: string | null; last_question_at: string | null; intro_posted_at: string | null; handoff: string | null;
   notes_meeting_id: string | null; created_at: string; updated_at: string;
+  /** 1 = quiet mode for this meeting ("Sidekick, quiet"): only questions to it, in the chat, nothing volunteered. */
+  quiet: number;
+  /** JSON list of who is speaking right now (speech start/stop events), and when anyone was last heard. */
+  speaking: string | null; last_heard_at: string | null;
+  /** JSON `Pending`: what Sidekick has its hand up for (an answer for the room, or its own question). */
+  hand: string | null;
+  /** Someone said only "Sidekick": their next line until then is a question to it. */
+  addressed_until: string | null; addressed_by: string | null;
+  /** JSON list of action items Sidekick already asked about (never twice). */
+  asked: string | null;
 };
+
+/** What Sidekick has its hand up for: the chat text (full answer with sources), the short spoken version, the card. */
+type Pending = { kind: "answer" | "own"; question: string; chat: string; spoken: string; card?: unknown; raisedAt: string };
 
 /** Said when this copy of Sidekick has no meeting-bot provider configured. */
 export const NOT_SET_UP = `Live meetings aren't set up on this ${BRAND.name} yet (the meeting-bot service). The ${BRAND.name} team turns them on.`;
@@ -91,7 +106,52 @@ const parseList = (json: string | null): ListItem[] => {
 const groupName = async (orgId: string, workspaceId: string) => (await get<{ name: string }>("SELECT name FROM workspaces WHERE id = ? AND org_id = ?", workspaceId, orgId))?.name ?? "this group";
 
 /** Whether this copy of Sidekick can send a meeting bot at all (a provider and a public address). */
-export const liveConfigured = () => Boolean(liveProvider() && notificationBase());
+export const liveConfigured = () => configuredProviders().length > 0 && Boolean(notificationBase());
+
+/**
+ * Test speed-up only: every wait (room question, pause before speaking, silence) is multiplied by
+ * `SIDEKICK_LIVE_TIME_SCALE` outside production (the tests use 0.05). Always 1 in production.
+ */
+const scale = () => (process.env.NODE_ENV === "production" ? 1 : Math.min(1, Math.max(0.001, Number(process.env.SIDEKICK_LIVE_TIME_SCALE) || 1)));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms * scale()));
+/** How long a question to the room waits for someone in the meeting to answer it first. */
+const ROOM_WAIT_MS = 5000;
+/** How long Sidekick keeps its hand up before it lowers it and puts the answer in the chat instead. */
+const HAND_MS = 60_000;
+/** How long a lone "Sidekick" makes the speaker's next line a question to it. */
+const ADDRESSED_MS = 20_000;
+
+/**
+ * The organization's meeting bot: the self-hosted one (`attendee`) unless its Org Owner opted in to a hosted one
+ * (`orgs.live_provider`). Never falls back to a hosted provider by itself.
+ */
+export async function orgProviderId(orgId: string): Promise<ProviderId> {
+  const v = (await get<{ live_provider: string | null }>("SELECT live_provider FROM orgs WHERE id = ?", orgId))?.live_provider;
+  return (PROVIDER_IDS as readonly string[]).includes(v ?? "") ? (v as ProviderId) : "attendee";
+}
+const providerFor = async (orgId: string) => providerById(await orgProviderId(orgId));
+const sessionProvider = (s: Pick<LiveSession, "provider">) => providerById(s.provider);
+
+/**
+ * The Org Owner chooses where the organization's meeting bot runs: Sidekick's own (`attendee`, the default) or the
+ * hosted Recall.ai (`recall`, then listed as a sub-processor). Org Owner only (403); the provider must be set up on
+ * this copy (503). Audited ("Policy change"). Running meetings keep the bot they joined with.
+ */
+export async function setOrgProvider(user: User, id: unknown) {
+  if (user.role !== "Org Owner") throw new HttpError(403, "Only the Org Owner chooses where the meeting bot runs.");
+  if (typeof id !== "string" || !(PROVIDER_IDS as readonly string[]).includes(id)) throw new HttpError(400, "Choose Sidekick's own meeting bot or Recall.ai.");
+  if (!providerById(id)) throw new HttpError(503, `${PROVIDER_INFO[id as ProviderId].label} isn't set up on this ${BRAND.name}.`);
+  if ((await orgProviderId(user.org_id)) !== id) {
+    await run("UPDATE orgs SET live_provider = ? WHERE id = ?", id, user.org_id);
+    await audit(user, `Chose ${PROVIDER_INFO[id as ProviderId].label} for ${BRAND.name} live in meetings`, "Policy change");
+  }
+  return { provider: id };
+}
+
+/** The group's live-meeting settings (answer mode, spoken answers, pause, its own questions), over the defaults. */
+export async function groupSettings(orgId: string, workspaceId: string): Promise<LiveSettings> {
+  return parseSettings((await get<{ live_settings: string | null }>("SELECT live_settings FROM workspaces WHERE id = ? AND org_id = ?", workspaceId, orgId))?.live_settings);
+}
 
 /* ------------------------------------------------------------------ */
 /* The group's switch                                                  */
@@ -104,16 +164,30 @@ export async function groupMode(orgId: string, workspaceId: string): Promise<Liv
 }
 
 /**
- * Sets the group's live-meeting mode. Only the group's Team Lead or an Org Owner/Admin (`requireManage`); turning it on
- * needs the plan's `liveMeetings` feature (Enterprise, 402 otherwise) and a configured provider (503). Audited
- * ("Policy change"). Returns the new status for the group page.
+ * Changes the group's live-meeting switch and settings. `body.mode` (off / ask / auto) and any of `answer`, `voice`,
+ * `pauseS`, `ask` (lib/live-meetings/rules.ts `LiveSettings`). Only the group's Team Lead or an Org Owner/Admin
+ * (`requireManage`); turning it on needs the plan's `liveMeetings` feature (Enterprise, 402 otherwise) and a
+ * configured provider (503); a bad value is 400. Audited ("Policy change"). Returns the new status for the group page.
  */
-export async function setLiveMode(user: User, workspaceId: unknown, mode: unknown) {
+export async function setLiveMode(user: User, workspaceId: unknown, body: Record<string, unknown> | null) {
   const ws = await requireManage(user, typeof workspaceId === "string" ? workspaceId : null);
+  const { mode, ...rest } = body ?? {};
+  const settingKeys = ["answer", "voice", "pauseS", "ask"].filter((k) => k in rest);
+  if (mode === undefined && !settingKeys.length) throw new HttpError(400, "Choose off, when someone asks, or every group meeting.");
+  if (settingKeys.length) {
+    const cur = await groupSettings(user.org_id, ws);
+    const next = parseSettings(JSON.stringify({ ...cur, ...Object.fromEntries(settingKeys.map((k) => [k, rest[k]])) }));
+    if (settingKeys.some((k) => JSON.stringify(next[k as keyof LiveSettings]) !== JSON.stringify(rest[k]))) throw new HttpError(400, "One of the live meeting settings isn't valid.");
+    if (JSON.stringify(next) !== JSON.stringify(cur)) {
+      await run("UPDATE workspaces SET live_settings = ? WHERE id = ? AND org_id = ?", JSON.stringify(next), ws, user.org_id);
+      await audit(user, `Changed ${BRAND.name}'s live meeting settings: ${settingKeys.map((k) => `${k} ${JSON.stringify(next[k as keyof LiveSettings])}`).join(", ")}`, "Policy change", ws);
+    }
+  }
+  if (mode === undefined) return liveStatus(user, ws);
   if (typeof mode !== "string" || !(LIVE_MODES as readonly string[]).includes(mode)) throw new HttpError(400, "Choose off, when someone asks, or every group meeting.");
   if (mode !== "off") {
     await assertFeature(user.org_id, "liveMeetings");
-    if (!liveConfigured()) throw new HttpError(503, NOT_SET_UP);
+    if (!(await providerFor(user.org_id)) || !notificationBase()) throw new HttpError(503, NOT_SET_UP);
   }
   const before = await groupMode(user.org_id, ws);
   if (before !== mode) {
@@ -136,18 +210,23 @@ export async function liveStatus(user: User, workspaceId: unknown) {
   const [included, { limits }, used] = await Promise.all([hasFeature(user.org_id, "liveMeetings"), orgPlan(user.org_id), usageCounts(user.org_id)]);
   const sessions = await all<LiveSession>("SELECT * FROM live_sessions WHERE org_id = ? AND workspace_id = ? ORDER BY created_at DESC LIMIT 10", user.org_id, ws);
   const lead = await get("SELECT 1 AS ok FROM workspace_members wm JOIN users u ON u.id = wm.user_id WHERE wm.workspace_id = ? AND wm.user_id = ? AND u.role = 'Team Lead'", ws, user.id);
+  const providerId = await orgProviderId(user.org_id);
+  const provider = providerById(providerId);
   return {
     mode: await groupMode(user.org_id, ws),
+    settings: await groupSettings(user.org_id, ws),
+    provider: { id: providerId, ...PROVIDER_INFO[providerId], ready: Boolean(provider), canChoose: user.role === "Org Owner", choices: configuredProviders().map((id) => ({ id, label: PROVIDER_INFO[id].label, hosted: PROVIDER_INFO[id].hosted })) },
+    can: { raiseHand: Boolean(provider?.can.raiseHand), speak: Boolean(provider?.can.speak && speechConfigured()) },
     changedBy: row?.live_mode_by ?? null,
     changedAt: row?.live_mode_at ?? null,
     included,
-    configured: liveConfigured(),
+    configured: Boolean(provider && notificationBase()),
     hours: { used: Math.round(used.liveMeetingHours * 10) / 10, limit: limits.liveMeetingHours },
     canManage: isAdmin(user) || Boolean(lead),
     sessions: sessions.map((s) => ({
       id: s.id, title: s.title ?? "Teams meeting", status: s.status, invitedBy: s.invited_by, guests: s.guests === 1,
       createdAt: s.created_at, joinedAt: s.joined_at, endedAt: s.ended_at, minutes: Math.round(liveMinutes(s.joined_at, s.ended_at)),
-      endReason: s.end_reason, error: s.error, answers: s.answers,
+      endReason: s.end_reason, error: s.error, answers: s.answers, quiet: s.quiet === 1,
       notes: s.handoff === "graph" ? "From the Teams transcript" : s.handoff === "live" ? "From the live transcript" : null,
       decisions: s.status === "live" ? parseList(s.decisions) : [], actions: s.status === "live" ? parseList(s.action_items) : [],
     })),
@@ -179,7 +258,7 @@ export async function startLive(o: {
   guests: boolean; startsAt?: string; joinKey?: string;
 }): Promise<string | null> {
   const { orgId, workspaceId } = o;
-  const provider = liveProvider();
+  const provider = await providerFor(orgId);
   const base = notificationBase();
   if (!provider || !base) throw new HttpError(503, NOT_SET_UP);
   await assertFeature(orgId, "liveMeetings");
@@ -204,7 +283,7 @@ export async function startLive(o: {
   );
   if (!inserted.changes) return null;
   try {
-    const { botId } = await span("live", "Send Sidekick to a Teams meeting", () => provider.join({ meetingUrl: o.meetingUrl, botName: BOT_NAME, webhookUrl: `${base}/api/live/events`, sessionId: id }), { provider: provider.id, via: conv ? "teams" : "provider" });
+    const { botId } = await span("live", "Send Sidekick to a Teams meeting", () => provider.join({ meetingUrl: o.meetingUrl, botName: BOT_NAME, webhookUrl: `${base}/api/live/events/${provider.id}`, sessionId: id }), { provider: provider.id, via: conv ? "teams" : "provider" });
     await run("UPDATE live_sessions SET bot_id = ?, updated_at = ? WHERE id = ? AND org_id = ?", botId, now(), id, orgId);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -291,7 +370,9 @@ export async function stopSession(orgId: string, id: string, reason: string, opt
   );
   if (!claim.changes) return false;
   if (opts.say && s.status === "live") await postToMeeting(s, opts.say).catch((e) => noteError(orgId, id, e));
-  const provider = liveProvider();
+  const provider = sessionProvider(s);
+  if (s.hand && provider?.can.raiseHand && s.bot_id) await provider.raiseHand(s.bot_id, false).catch(() => {});
+  await run("UPDATE live_sessions SET hand = NULL WHERE id = ? AND org_id = ?", id, orgId);
   if (opts.callProvider !== false && s.bot_id && provider) {
     await span("live", "Make Sidekick leave a Teams meeting", () => provider.stop(s.bot_id!)).catch((e) => noteError(orgId, id, e));
   }
@@ -337,7 +418,7 @@ async function postToMeeting(s: LiveSession, text: string, card?: ReturnType<typ
     await postCard(conv, card ?? noticeCard(BOT_NAME, text), conv.id, "a live meeting message");
     return;
   }
-  const provider = liveProvider();
+  const provider = sessionProvider(s);
   if (!provider || !s.bot_id) throw new Error("The meeting-bot service isn't available to post in the chat.");
   await span("live", "Post in the meeting chat", () => provider.sendChatMessage(s.bot_id!, text));
 }
@@ -355,8 +436,8 @@ export type LiveWork = () => Promise<void>;
  * happens here; answers and chat posts are returned as `work` for the route to run after replying (providers want a
  * quick 2xx). Returns counts for the trace.
  */
-export async function handleLiveWebhook(headers: Headers, raw: string): Promise<{ accepted: number; ignored: number; work: LiveWork[] }> {
-  const provider = liveProvider();
+export async function handleLiveWebhook(providerId: string, headers: Headers, raw: string): Promise<{ accepted: number; ignored: number; work: LiveWork[] }> {
+  const provider = providerById(providerId);
   if (!provider) throw new HttpError(404, "Live meetings aren't set up.");
   if (!provider.verify(headers, raw)) throw new HttpError(401, "Signature check failed.");
   let body: unknown;
@@ -370,7 +451,7 @@ export async function handleLiveWebhook(headers: Headers, raw: string): Promise<
   let accepted = 0;
   let ignored = 0;
   for (const e of events) {
-    const found = await asSystem("live meeting webhook: find the session by its bot", () => get<{ id: string; org_id: string }>("SELECT id, org_id FROM live_sessions WHERE bot_id = ?", e.botId));
+    const found = await asSystem("live meeting webhook: find the session by its bot", () => get<{ id: string; org_id: string }>("SELECT id, org_id FROM live_sessions WHERE bot_id = ? AND provider = ?", e.botId, provider.id));
     if (!found) {
       ignored++;
       continue;
@@ -426,15 +507,39 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
     }
     return true;
   }
+  // Who is speaking right now: Sidekick never starts talking over anyone.
+  if (e.kind === "speech") {
+    const speaking = new Set(parseNames(s.speaking));
+    if (e.speaking) speaking.add(e.name ?? "Someone");
+    else speaking.delete(e.name ?? "Someone");
+    await run("UPDATE live_sessions SET speaking = ?, last_heard_at = ? WHERE id = ? AND org_id = ?", JSON.stringify([...speaking].slice(0, 50)), now(), id, orgId);
+    return true;
+  }
   // A line said or typed in the meeting. Sidekick's own chat messages (the meeting bot's, or its Teams bot's answer
   // cards) come back as chat lines: skip them.
   if (e.source === "chat" && (e.speaker === BOT_NAME || e.speaker === BRAND.name)) return false;
   const t = now();
+  const heardAt = Date.now();
   await run("INSERT INTO live_lines (id, org_id, session_id, speaker, text, said_at, source) VALUES (?, ?, ?, ?, ?, ?, ?)", newId(), orgId, id, e.speaker, e.text, t, e.source);
-  await run("UPDATE live_sessions SET line_count = line_count + 1, status = 'live', joined_at = COALESCE(joined_at, ?), updated_at = ? WHERE id = ? AND org_id = ?", t, t, id, orgId);
+  await run("UPDATE live_sessions SET line_count = line_count + 1, status = 'live', joined_at = COALESCE(joined_at, ?), last_heard_at = ?, updated_at = ? WHERE id = ? AND org_id = ?", t, t, t, id, orgId);
   const lines = s.line_count + 1;
   // Typed "Sidekick, …" in a meeting chat where Sidekick's Teams bot is: the bot answers it already (lib/teams/bot.ts).
-  const trigger = e.source === "chat" && s.chat_via === "teams" ? null : parseTrigger(e.text);
+  let trigger: Trigger | null = e.source === "chat" && s.chat_via === "teams" ? null : parseTrigger(e.text);
+  // Only its name ("Sidekick?"): being called on when its hand is up, else the speaker's next line is a question to it.
+  if (trigger?.kind === "name") {
+    if (s.hand) trigger = { kind: "called" };
+    else {
+      await run("UPDATE live_sessions SET addressed_until = ?, addressed_by = ? WHERE id = ? AND org_id = ?", new Date(heardAt + ADDRESSED_MS).toISOString(), e.speaker, id, orgId);
+      trigger = null;
+    }
+  } else if (!trigger && s.addressed_until && s.addressed_until > t && (!s.addressed_by || s.addressed_by === e.speaker)) {
+    trigger = { kind: "question", question: e.text.slice(0, 1000) };
+    await run("UPDATE live_sessions SET addressed_until = NULL, addressed_by = NULL WHERE id = ? AND org_id = ?", id, orgId);
+  }
+  const say = (name: string, text: string) => later(name, async () => {
+    const fresh = (await sessionById(orgId, id))!;
+    await postToMeeting(fresh, text).catch((err) => noteError(orgId, id, err));
+  });
   if (trigger?.kind === "leave") {
     later("Live meeting: leave", async () => {
       await stopSession(orgId, id, `${e.speaker ?? "Someone"} asked ${BRAND.name} to leave.`, { say: "Okay, leaving now. The notes will follow in the group's chat." });
@@ -445,9 +550,24 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
       const settings = await getGuardSettings(orgId);
       await span("live", "Read back the decisions so far", () => postToMeeting(fresh, cleanOutput(recapText(parseList(fresh.decisions), parseList(fresh.action_items)), settings).text)).catch((err) => noteError(orgId, id, err));
     });
+  } else if (trigger?.kind === "quiet") {
+    await run("UPDATE live_sessions SET quiet = 1, updated_at = ? WHERE id = ? AND org_id = ?", t, id, orgId);
+    if (s.hand) later("Live meeting: lower hand", () => dropHand(orgId, id));
+    say("Live meeting: quiet mode", `Okay, I'll stay quiet: I'll only answer when you ask me, in the chat. Say “${BRAND.name}, you can speak up” to change that.`);
+  } else if (trigger?.kind === "unquiet") {
+    await run("UPDATE live_sessions SET quiet = 0, updated_at = ? WHERE id = ? AND org_id = ?", t, id, orgId);
+    say("Live meeting: speak up", "Okay, I'll raise my hand when I can help.");
+  } else if (trigger?.kind === "called") {
+    if (s.hand) later("Live meeting: called on", () => deliverPending(orgId, id, "called"));
   } else if (trigger?.kind === "question") {
     const question = trigger.question;
-    later("Live meeting answer", () => answerLive(orgId, id, e.speaker, question));
+    later("Live meeting answer", () => answerLive(orgId, id, e.speaker, question, heardAt));
+  } else if (!s.quiet && !s.hand) {
+    // A question to the room: Sidekick waits to see whether someone answers it first (`roomQuestion`).
+    const settings = await groupSettings(orgId, s.workspace_id);
+    if (settings.answer === "room" && isRoomQuestion(e.text, await meetingPeople(orgId, id))) {
+      later("Live meeting: question to the room", () => roomQuestion(orgId, id, e.speaker, e.text.slice(0, 1000), t));
+    }
   }
   if (lines - s.extracted_lines >= EXTRACT_EVERY) {
     await enqueue("live.extract", { orgId, workspaceId: s.workspace_id, payload: { sessionId: id }, key: `live-extract:${id}:${s.extracted_lines}` });
@@ -455,45 +575,221 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
   return true;
 }
 
+/** Names in a JSON list column (who is speaking, items already asked about). */
+const parseNames = (json: string | null): string[] => {
+  try {
+    const v = JSON.parse(json ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
+/** The people heard so far in this meeting (to tell a question to the room from one to a person by name). */
+async function meetingPeople(orgId: string, id: string): Promise<string[]> {
+  return (await all<{ speaker: string }>("SELECT DISTINCT speaker FROM live_lines WHERE org_id = ? AND session_id = ? AND speaker IS NOT NULL LIMIT 50", orgId, id)).map((r) => r.speaker);
+}
+
 /* ------------------------------------------------------------------ */
 /* Answering in the meeting                                            */
 /* ------------------------------------------------------------------ */
 
-/**
- * Answers "Sidekick, …" said or typed in the meeting with the normal Ask pipeline (guardrails before and after,
- * grounded, cited; Shareable sources only when guests are there) and posts it in the meeting chat. The same question
- * within a minute is answered once (speech can arrive twice), and at most `MAX_ANSWERS` per meeting. Failures are
- * posted as a short apology (refusals as their own message), traced and saved on the session. Runs after the webhook
- * reply, in the session's org.
- */
-export async function answerLive(orgId: string, id: string, speaker: string | null, question: string): Promise<void> {
-  const s = await sessionById(orgId, id);
-  if (!s || s.status !== "live") return;
+/** This meeting so far (its latest lines) as a source for answers, so "what did Ana just say?" works. */
+async function meetingSoFar(orgId: string, s: LiveSession) {
+  const lines = await all<{ speaker: string | null; text: string; said_at: string; source: string }>(
+    "SELECT speaker, text, said_at, source FROM live_lines WHERE org_id = ? AND session_id = ? ORDER BY said_at DESC, id DESC LIMIT 80", orgId, s.id,
+  );
+  if (!lines.length) return [];
+  const text = lines.reverse().map((l) => `[${l.said_at.slice(11, 19)}] ${l.speaker ?? "Someone"}${l.source === "chat" ? " (chat)" : ""}: ${l.text}`).join("\n");
+  return [{ title: `This meeting so far (${s.title ?? "Teams meeting"})`, loc: "live", text: text.slice(-12_000), sourceType: "meeting", sourceId: `live:${s.id}`, date: (s.joined_at ?? s.created_at).slice(0, 10) }];
+}
+
+/** Asks the group's knowledge (the normal Ask pipeline: guardrails before and after, guest wall, never judging people). */
+async function askInMeeting(s: LiveSession, speaker: string | null, question: string) {
+  const asker: User = { id: `live:${s.id}`, org_id: s.org_id, name: `${(speaker ?? "Someone").slice(0, 80)} (Teams meeting)`, email: "", role: "Member", must_change_password: 0 };
+  return ask(asker, s.workspace_id, question, s.guests === 1, "teams", {
+    teamsScope: { key: `live:${s.id}`, idleMinutes: 10 },
+    // Everyone in the meeting reads the answer, and Sidekick can't check who they are: no personal connector items.
+    readers: { kind: "chat", userIds: [], unmatched: 1 },
+    extraSources: await meetingSoFar(s.org_id, s),
+    forceSwitches: ["judging_people"],
+  });
+}
+
+/** Claims one more answer for this meeting: the same question within a minute once (speech can arrive twice), at most MAX_ANSWERS. */
+async function claimAnswer(orgId: string, id: string, question: string): Promise<boolean> {
   const t = now();
-  const minuteAgo = new Date(Date.now() - 60_000).toISOString();
   const claim = await run(
     `UPDATE live_sessions SET last_question = ?, last_question_at = ?, answers = answers + 1, updated_at = ?
       WHERE id = ? AND org_id = ? AND answers < ? AND (last_question IS NULL OR last_question <> ? OR last_question_at < ?)`,
-    question, t, t, id, orgId, MAX_ANSWERS, question, minuteAgo,
+    question, t, t, id, orgId, MAX_ANSWERS, question, new Date(Date.now() - 60_000).toISOString(),
   );
-  if (!claim.changes) return;
-  // Who's asking: a meeting participant Sidekick can't vouch for, acting as a Member of the group (as in Teams chats).
-  const asker: User = { id: `live:${id}`, org_id: orgId, name: `${(speaker ?? "Someone").slice(0, 80)} (Teams meeting)`, email: "", role: "Member", must_change_password: 0 };
-  const group = await groupName(orgId, s.workspace_id);
+  return claim.changes > 0;
+}
+
+/** Whether Sidekick may speak in this meeting now: the group allows it, not in quiet mode, the bot can, speech is set up. */
+const canSpeak = (s: LiveSession, settings: LiveSettings, provider: LiveProvider | null) =>
+  settings.voice !== "off" && s.quiet !== 1 && Boolean(provider?.can.speak) && speechConfigured();
+
+/** Raises (or lowers) the bot's hand in Teams when it can. Never throws (saved on the session). */
+async function hand(s: LiveSession, up: boolean) {
+  const provider = sessionProvider(s);
+  if (!provider?.can.raiseHand || !s.bot_id) return false;
+  await span("live", up ? "Raise Sidekick's hand" : "Lower Sidekick's hand", () => provider.raiseHand(s.bot_id!, up)).catch((e) => noteError(s.org_id, s.id, e));
+  return true;
+}
+
+/**
+ * Waits until nobody is speaking and nothing was heard for `quietMs`, at most `maxMs` (both scaled in tests). True when
+ * it's quiet; false when the time ran out or the session ended. Sidekick never starts talking over anyone.
+ */
+async function waitForSilence(orgId: string, id: string, quietMs: number, maxMs: number): Promise<boolean> {
+  const start = Date.now();
+  for (;;) {
+    const s = await sessionById(orgId, id);
+    if (!s || s.status !== "live") return false;
+    const heard = s.last_heard_at ? Date.parse(s.last_heard_at) : 0;
+    if (!parseNames(s.speaking).length && Date.now() - heard >= quietMs * scale()) return true;
+    if (Date.now() - start >= maxMs * scale()) return false;
+    await sleep(200);
+  }
+}
+
+/** Says `text` aloud in the meeting (Azure AI Speech → the bot's microphone) once it's quiet. False when it didn't. */
+async function speakNow(s: LiveSession, text: string): Promise<boolean> {
+  const provider = sessionProvider(s);
+  if (!provider || !s.bot_id || !text) return false;
+  if (!(await waitForSilence(s.org_id, s.id, 800, 8000))) return false;
   try {
-    const result = await ask(asker, s.workspace_id, question, s.guests === 1, "teams", {
-      teamsScope: { key: `live:${id}`, idleMinutes: 10 },
-      // Everyone in the meeting reads the answer, and Sidekick can't check who they are: no personal connector items.
-      readers: { kind: "chat", userIds: [], unmatched: 1 },
-    });
-    const card = answerCard(question, { ...result, signInUrl: portalUrl(`/knowledge?ws=${encodeURIComponent(s.workspace_id)}#signins`) }, group);
-    await span("live", "Post the answer in the meeting", () => postToMeeting(s, answerText(question, result.answer, result.sources), card), { sources: result.sources.length, found: result.found });
+    const mp3 = await synthesize(text);
+    await span("live", "Speak in the meeting", () => provider.speak(s.bot_id!, mp3), { words: text.split(" ").length });
+    return true;
+  } catch (e) {
+    await noteError(s.org_id, s.id, e);
+    return false;
+  }
+}
+
+/** The answer as the meeting chat gets it: an answer card through our Teams bot, plain text with sources otherwise. */
+function chatAnswer(s: LiveSession, question: string, result: Awaited<ReturnType<typeof ask>>, group: string, intro = "") {
+  const text = `${intro}${answerText(question, result.answer, result.sources)}`;
+  const card = answerCard(question, { ...result, signInUrl: portalUrl(`/knowledge?ws=${encodeURIComponent(s.workspace_id)}#signins`) }, group);
+  return { text, card };
+}
+
+/**
+ * Answers a question addressed to Sidekick ("Sidekick, …", typed or said, or a line right after its name), the
+ * normal Ask pipeline with the meeting so far as a source. Order (docs/LIVE-MEETINGS.md → "The live flow"): hand up at
+ * once (when the bot can), then a short spoken answer when the group allows speaking and nobody is talking, then the
+ * full answer with sources in the chat, then the hand down. A refusal goes to the chat only. Failures are posted as a
+ * short apology, traced and saved on the session. Timings (heard → hand, → spoken, → chat) are trace attributes.
+ */
+export async function answerLive(orgId: string, id: string, speaker: string | null, question: string, heardAt = Date.now()): Promise<void> {
+  const s = await sessionById(orgId, id);
+  if (!s || s.status !== "live") return;
+  if (!(await claimAnswer(orgId, id, question))) return;
+  const provider = sessionProvider(s);
+  const settings = await groupSettings(orgId, s.workspace_id);
+  const group = await groupName(orgId, s.workspace_id);
+  const timing: Record<string, number> = {};
+  try {
+    // Quiet mode ("Sidekick, quiet"): it still answers when asked, in the chat, without raising its hand or speaking.
+    if (s.quiet !== 1 && (await hand(s, true))) timing.handMs = Date.now() - heardAt;
+    const result = await askInMeeting(s, speaker, question);
+    if (!result.blocked && result.found && canSpeak(s, settings, provider) && (await speakNow(s, spokenText(result.answer)))) timing.spokenMs = Date.now() - heardAt;
+    const { text, card } = chatAnswer(s, question, result, group);
+    await span("live", "Post the answer in the meeting", () => postToMeeting(s, text, card), { sources: result.sources.length, found: result.found });
+    timing.chatMs = Date.now() - heardAt;
   } catch (e) {
     console.error("Live meeting answer failed", e);
     traceFailed(e instanceof HttpError ? e.status : 500, e instanceof Error ? e.message : String(e), undefined, { refusal: e instanceof FeatureOffError });
     await noteError(orgId, id, e);
     await postToMeeting(s, e instanceof HttpError ? e.message : "Sorry, I couldn't answer that just now. Please ask again in a minute.").catch(() => {});
+  } finally {
+    if (timing.handMs !== undefined) await hand(s, false);
+    spanAttrs({ addressed: true, ...timing });
   }
+}
+
+/**
+ * A question put to the room ("when's the cutover again?"): Sidekick waits a few seconds; if someone answers it, it
+ * stays out of it. If nobody does (silence, "not sure", "good question"), it asks the group's knowledge, and only when
+ * the answer is confident (found, cited, no conflict, not refused) does it volunteer: with spoken answers off it puts
+ * the answer in the chat (that interrupts nobody); otherwise it raises its hand and waits to be called on ("go ahead,
+ * Sidekick"), or, when the group allows it, speaks after a pause of silence. Hands left up for a minute are lowered by
+ * `live.watch` and the answer goes to the chat instead. Low confidence: it stays quiet.
+ */
+export async function roomQuestion(orgId: string, id: string, speaker: string | null, question: string, saidAt: string): Promise<void> {
+  await sleep(ROOM_WAIT_MS);
+  const s = await sessionById(orgId, id);
+  if (!s || s.status !== "live" || s.quiet === 1 || s.hand) return;
+  const after = await all<{ speaker: string | null; text: string }>("SELECT speaker, text FROM live_lines WHERE org_id = ? AND session_id = ? AND said_at > ? ORDER BY said_at", orgId, id, saidAt);
+  // Someone else answered (a statement of a few words that isn't "not sure" or another question): stay out of it.
+  if (after.some((l) => l.speaker !== speaker && !isNonAnswer(l.text) && !parseTrigger(l.text) && !isRoomQuestion(l.text) && l.text.split(" ").length >= 3)) {
+    spanAttrs({ room: "answered by someone" });
+    return;
+  }
+  if (!(await claimAnswer(orgId, id, question))) return;
+  const result = await askInMeeting(s, speaker, question);
+  // Volunteering needs the group's own knowledge: an answer that only repeats this meeting back isn't worth a hand.
+  if (!confident(result) || !result.sources.some((x) => !x.sourceId.startsWith("live:"))) {
+    spanAttrs({ room: "not confident, stayed quiet" });
+    return;
+  }
+  const settings = await groupSettings(orgId, s.workspace_id);
+  const group = await groupName(orgId, s.workspace_id);
+  const { text, card } = chatAnswer(s, question, result, group);
+  if (settings.voice === "off") {
+    await postToMeeting(s, text, card).catch((e) => noteError(orgId, id, e));
+    spanAttrs({ room: "answered in the chat" });
+    return;
+  }
+  const pending: Pending = { kind: "answer", question, chat: text, spoken: spokenText(result.answer), card, raisedAt: now() };
+  if (!(await putHandUp(s, pending))) return;
+  spanAttrs({ room: "hand raised" });
+  if (settings.voice === "auto" && (await waitForSilence(orgId, id, settings.pauseS * 1000, HAND_MS))) await deliverPending(orgId, id, "pause");
+}
+
+/** Puts Sidekick's hand up for `pending` (compare-and-set: one thing at a time), in Teams or as "✋" in the chat. */
+async function putHandUp(s: LiveSession, pending: Pending): Promise<boolean> {
+  const claim = await run("UPDATE live_sessions SET hand = ?, updated_at = ? WHERE id = ? AND org_id = ? AND hand IS NULL AND status = 'live'", JSON.stringify(pending), now(), s.id, s.org_id);
+  if (!claim.changes) return false;
+  if (!(await hand(s, true))) await postToMeeting(s, HAND_NOTE).catch((e) => noteError(s.org_id, s.id, e));
+  return true;
+}
+
+/**
+ * Gives what Sidekick had its hand up for: called on or after the pause, the short spoken version (when allowed) and
+ * then the full text in the chat; when the hand was up too long (`expired`), only the chat, saying so. Claimed with a
+ * compare-and-set, so it's given once. The hand goes down.
+ */
+export async function deliverPending(orgId: string, id: string, how: "called" | "pause" | "expired"): Promise<void> {
+  const s = await sessionById(orgId, id);
+  if (!s?.hand) return;
+  const claim = await run("UPDATE live_sessions SET hand = NULL, updated_at = ? WHERE id = ? AND org_id = ? AND hand = ?", now(), id, orgId, s.hand);
+  if (!claim.changes) return;
+  let p: Pending;
+  try {
+    p = JSON.parse(s.hand);
+  } catch {
+    return;
+  }
+  await hand(s, false);
+  if (s.status !== "live") return;
+  const settings = await groupSettings(orgId, s.workspace_id);
+  if (how !== "expired" && canSpeak(s, settings, sessionProvider(s))) await speakNow(s, p.spoken);
+  const intro = how === "expired" ? (p.kind === "own" ? "" : "In case it helps (I had my hand up):\n") : "";
+  const card = p.kind === "answer" && how !== "expired" ? (p.card as ReturnType<typeof noticeCard>) : undefined;
+  await span("live", p.kind === "own" ? "Ask in the meeting" : "Post the answer in the meeting", () => postToMeeting(s, `${intro}${p.chat}`, card)).catch((e) => noteError(orgId, id, e));
+  spanAttrs({ delivered: how, kind: p.kind });
+}
+
+/** Takes Sidekick's hand down without giving anything (quiet mode, leaving). */
+async function dropHand(orgId: string, id: string) {
+  const s = await sessionById(orgId, id);
+  if (!s?.hand) return;
+  await run("UPDATE live_sessions SET hand = NULL WHERE id = ? AND org_id = ?", id, orgId);
+  await hand(s, false);
 }
 
 /* ------------------------------------------------------------------ */
@@ -538,7 +834,31 @@ export async function extractLive(orgId: string, id: string): Promise<{ decision
     "UPDATE live_sessions SET decisions = ?, action_items = ?, extracted_lines = ?, extracted_at = ?, updated_at = ? WHERE id = ? AND org_id = ?",
     JSON.stringify(decisions), JSON.stringify(actions), lines.length, now(), now(), id, orgId,
   );
+  await askOwnQuestion(orgId, id, actions);
   return { decisions: decisions.length, actions: actions.length };
+}
+
+/**
+ * Sidekick as a participant, not only a note-taker: when an action item on the running list has no owner or no date,
+ * it asks (once per item, the first such item each update), with the same etiquette as answers: hand up, spoken when
+ * called on (or after the pause when the group allows it, `live.watch`), else in the chat after a minute. Not in quiet
+ * mode, not when the group switched its own questions off, and not while its hand is already up.
+ */
+async function askOwnQuestion(orgId: string, id: string, actions: ListItem[]) {
+  const s = await sessionById(orgId, id);
+  if (!s || s.status !== "live" || s.quiet === 1 || s.hand) return;
+  const settings = await groupSettings(orgId, s.workspace_id);
+  if (!settings.ask) return;
+  const asked = new Set(parseNames(s.asked));
+  const item = actions.find((a) => !asked.has(a.text) && ownQuestion(a));
+  if (!item) return;
+  const question = ownQuestion(item)!;
+  await run("UPDATE live_sessions SET asked = ? WHERE id = ? AND org_id = ?", JSON.stringify([...asked, item.text].slice(-100)), id, orgId);
+  if (settings.voice === "off") {
+    await postToMeeting(s, question).catch((e) => noteError(orgId, id, e));
+    return;
+  }
+  await putHandUp(s, { kind: "own", question, chat: question, spoken: question, raisedAt: now() });
 }
 
 /* ------------------------------------------------------------------ */
@@ -627,6 +947,15 @@ export async function watchLive(at = Date.now()): Promise<{ liveChecked: number;
       if (s.status === "live" && s.joined_at && at - Date.parse(s.joined_at) > MAX_SESSION_MS) {
         return stopSession(r.org_id, r.id, "It was in the meeting for 4 hours, the most for one meeting.", { say: "I've been here 4 hours, the most I stay in one meeting, so I'm leaving. The notes will follow in the group's chat." });
       }
+      // A hand that's up: given after the pause of silence (when the group allows speaking by itself), or put in the
+      // chat after a minute.
+      if (s.hand) {
+        const raisedAt = Date.parse((JSON.parse(s.hand) as Pending).raisedAt ?? "") || 0;
+        const settings = await groupSettings(r.org_id, s.workspace_id);
+        const quietFor = Date.now() - (s.last_heard_at ? Date.parse(s.last_heard_at) : 0);
+        if (at - raisedAt >= HAND_MS * scale()) await deliverPending(r.org_id, r.id, "expired");
+        else if (settings.voice === "auto" && !parseNames(s.speaking).length && quietFor >= settings.pauseS * 1000 * scale()) await deliverPending(r.org_id, r.id, "pause");
+      }
       const { limits } = await orgPlan(r.org_id);
       if (s.status === "live" && limits.liveMeetingHours !== null && (await usageCounts(r.org_id)).liveMeetingHours >= limits.liveMeetingHours) {
         return stopSession(r.org_id, r.id, "This month's live meeting hours are used up.", { say: "This month's live meeting hours are used up, so I'm leaving. The notes will follow in the group's chat." });
@@ -694,7 +1023,7 @@ export async function autoJoinDue(at = Date.now()): Promise<{ liveAutoJoined: nu
           await run(
             `INSERT INTO live_sessions (id, org_id, workspace_id, provider, join_key, starts_at, title, status, invited_by, error, end_reason, ended_at, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', 'auto', ?, ?, ?, ?, ?) ON CONFLICT (org_id, join_key, starts_at) DO NOTHING`,
-            newId(), orgId, m.workspace_id, liveProvider()?.id ?? "none", m.join_key, m.starts_at, m.title ?? "Teams meeting",
+            newId(), orgId, m.workspace_id, await orgProviderId(orgId), m.join_key, m.starts_at, m.title ?? "Teams meeting",
             (e instanceof Error ? e.message : String(e)).slice(0, 400), "Couldn't join automatically.", t, t, t,
           );
         }
@@ -744,7 +1073,7 @@ export async function ownerLiveReport() {
     });
     return {
       configured: liveConfigured(),
-      provider: liveProvider()?.id ?? null,
+      provider: configuredProviders().join(", ") || null,
       orgs: orgs.sort((a, b) => b.minutes - a.minutes),
       running: rows.filter((r) => r.status === "joining" || r.status === "live").map(pick),
       failures: rows.filter((r) => r.status === "failed" || r.error).slice(0, 50).map(pick),

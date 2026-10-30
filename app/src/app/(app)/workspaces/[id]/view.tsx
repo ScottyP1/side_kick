@@ -39,7 +39,7 @@ import { api, fmtDate, Icon, Modal, Pill, Spinner, Switch, useReportError, useTo
 import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
 import { Avatar, groupHealth, PeoplePicker, type Group, type OrgPerson } from "@/components/groups";
 import { BRAND } from "@/lib/brand";
-import { BOT_NAME, LIVE_MODE_LABEL, LIVE_MODES, type LiveMode } from "@/lib/live-meetings/rules";
+import { ANSWER_LABEL, BOT_NAME, LIVE_MODE_LABEL, LIVE_MODES, VOICE_LABEL, type LiveMode, type LiveSettings } from "@/lib/live-meetings/rules";
 import { FindingRows, useFindings } from "@/components/findings";
 
 type Member = { id: string; name: string; email?: string; role: string; microsoft: number };
@@ -527,10 +527,13 @@ function CallReminders({ group }: { group: Group }) {
 type LiveItem = { text: string; who: string | null; due?: string | null };
 type LivePanel = {
   mode: LiveMode; changedBy: string | null; changedAt: string | null; included: boolean; configured: boolean; canManage: boolean;
+  settings: LiveSettings;
+  provider: { id: string; label: string; hosted: boolean; where: string; ready: boolean; canChoose: boolean; choices: { id: string; label: string; hosted: boolean }[] };
+  can: { raiseHand: boolean; speak: boolean };
   hours: { used: number; limit: number | null };
   sessions: {
     id: string; title: string; status: "joining" | "live" | "ended" | "failed"; invitedBy: string; guests: boolean; createdAt: string; minutes: number;
-    endReason: string | null; error: string | null; answers: number; notes: string | null; decisions: LiveItem[]; actions: LiveItem[];
+    endReason: string | null; error: string | null; answers: number; quiet: boolean; notes: string | null; decisions: LiveItem[]; actions: LiveItem[];
   }[];
 };
 
@@ -550,6 +553,26 @@ function LiveMeetings({ group }: { group: Group }) {
     api<LivePanel>(url).then(setSt).catch(reportError);
   }, [url, reportError]);
   if (!st) return null;
+  const save = async (json: Record<string, unknown>, done: string) => {
+    setBusy(true);
+    try {
+      setSt(await api<LivePanel>(url, { method: "PUT", json }));
+      toast(done);
+    } catch (e) {
+      reportError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const chooseProvider = async (provider: string) => {
+    try {
+      await api("/api/live/provider", { method: "PUT", json: { provider } });
+      setSt(await api<LivePanel>(url));
+      toast("Meeting bot changed for your organization.");
+    } catch (e) {
+      reportError(e);
+    }
+  };
   const change = async (mode: LiveMode) => {
     setBusy(true);
     try {
@@ -576,7 +599,7 @@ function LiveMeetings({ group }: { group: Group }) {
         <div>
           <h2>Live in meetings</h2>
           <span className="muted" style={{ fontSize: 12.5 }}>
-            {BRAND.name} joins the group&apos;s Teams meetings as “{BOT_NAME}”, answers when someone says or types “{BRAND.name}, …” (with sources), keeps a list of decisions and action items, and the notes follow afterwards. With client guests present it only uses Shareable sources.
+            {BRAND.name} joins the group&apos;s Teams meetings as “{BOT_NAME}”, a member of the meeting: it answers when someone says or types “{BRAND.name}, …”, raises its hand when it can answer a question nobody else does, asks when an action item has no owner or date, keeps a list of decisions and action items, and the notes follow afterwards. It never talks over anyone, and with client guests present it only uses Shareable sources.
             {st.changedBy ? ` Set by ${st.changedBy}${st.changedAt ? ` on ${fmtDate(st.changedAt)}` : ""}.` : ""}
             {!st.canManage && " The group's Team Lead chooses this."}
           </span>
@@ -597,6 +620,45 @@ function LiveMeetings({ group }: { group: Group }) {
             {st.mode === "auto" ? `${BRAND.name} joins every scheduled meeting that is clearly this group's (automatic notes must be on), and ` : ""}anyone in the group can type <b>@{BRAND.name} join</b> in a meeting&apos;s chat (or paste the meeting link after it). Someone may need to admit it from the lobby. Live hours this month: {st.hours.used}{st.hours.limit !== null ? ` of ${st.hours.limit}` : ""}.
           </p>
         )}
+        {st.included && st.mode !== "off" && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 10, fontSize: 13 }}>
+            <label>Answers{" "}
+              <select className="input" style={{ width: "auto" }} disabled={!st.canManage || busy} value={st.settings.answer} onChange={(e) => save({ answer: e.target.value }, "Saved.")} aria-label="Which questions Sidekick answers">
+                {(Object.keys(ANSWER_LABEL) as LiveSettings["answer"][]).map((k) => <option key={k} value={k}>{ANSWER_LABEL[k]}</option>)}
+              </select>
+            </label>
+            <label>Speaking{" "}
+              <select className="input" style={{ width: "auto" }} disabled={!st.canManage || busy} value={st.settings.voice} onChange={(e) => save({ voice: e.target.value }, "Saved.")} aria-label="When Sidekick speaks">
+                {(Object.keys(VOICE_LABEL) as LiveSettings["voice"][]).map((k) => <option key={k} value={k}>{VOICE_LABEL[k]}</option>)}
+              </select>
+            </label>
+            {st.settings.voice === "auto" && (
+              <label>Pause{" "}
+                <select className="input" style={{ width: "auto" }} disabled={!st.canManage || busy} value={st.settings.pauseS} onChange={(e) => save({ pauseS: Number(e.target.value) }, "Saved.")} aria-label="Seconds of silence before speaking">
+                  {[3, 5, 6, 8, 10, 15].map((n) => <option key={n} value={n}>{n} s of silence</option>)}
+                </select>
+              </label>
+            )}
+            <label><input type="checkbox" disabled={!st.canManage || busy} checked={st.settings.ask} onChange={(e) => save({ ask: e.target.checked }, "Saved.")} /> Asks its own questions (owners and dates)</label>
+          </div>
+        )}
+        {st.included && st.mode !== "off" && (
+          <p className="muted" style={{ margin: "8px 0 0", fontSize: 12.5 }}>
+            Meeting bot: <b>{st.provider.label}</b>. {st.provider.where}
+            {!st.can.speak && st.settings.voice !== "off" && " Spoken answers aren't set up yet, so it answers in the chat."}
+            {!st.can.raiseHand && " It can't raise its hand in Teams yet, so it puts ✋ in the chat instead."}
+            {" In a meeting, “"}{BRAND.name}{", quiet” keeps it to the chat until someone asks it."}
+          </p>
+        )}
+        {st.provider.canChoose && st.provider.choices.length > 1 && (
+          <p style={{ margin: "8px 0 0", fontSize: 12.5 }}>
+            <label>Your organization&apos;s meeting bot (Org Owner){" "}
+              <select className="input" style={{ width: "auto" }} value={st.provider.id} onChange={(e) => chooseProvider(e.target.value)} aria-label="Meeting bot for your organization">
+                {st.provider.choices.map((c) => <option key={c.id} value={c.id}>{c.label}{c.hosted ? " (another company hosts it)" : " (default)"}</option>)}
+              </select>
+            </label>
+          </p>
+        )}
         {st.sessions.length > 0 && (
           <div className="table-wrap" style={{ marginTop: 12 }}>
             <table>
@@ -605,7 +667,7 @@ function LiveMeetings({ group }: { group: Group }) {
                 {st.sessions.map((x) => (
                   <tr key={x.id}>
                     <td>
-                      {x.title}<div className="muted" style={{ fontSize: 12.5 }}>{fmtDate(x.createdAt)}{x.guests ? " · client guests" : ""}{x.answers ? ` · ${x.answers} answer${x.answers === 1 ? "" : "s"}` : ""}{x.notes ? ` · notes: ${x.notes.toLowerCase()}` : ""}</div>
+                      {x.title}<div className="muted" style={{ fontSize: 12.5 }}>{fmtDate(x.createdAt)}{x.guests ? " · client guests" : ""}{x.quiet ? " · quiet" : ""}{x.answers ? ` · ${x.answers} answer${x.answers === 1 ? "" : "s"}` : ""}{x.notes ? ` · notes: ${x.notes.toLowerCase()}` : ""}</div>
                       {x.status === "live" && (x.decisions.length > 0 || x.actions.length > 0) && (
                         <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12.5 }}>
                           {x.decisions.map((d, i) => <li key={`d${i}`}>Decided: {d.text}{d.who ? ` (${d.who})` : ""}</li>)}

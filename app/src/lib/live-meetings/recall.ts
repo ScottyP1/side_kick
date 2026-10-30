@@ -1,5 +1,6 @@
 /**
- * @file Recall.ai as the live-meeting provider (lib/live-meetings/provider.ts; why Recall.ai: docs/LIVE-MEETINGS.md).
+ * @file Recall.ai as a **hosted** live-meeting provider, used only for organizations whose Org Owner opted in
+ * (lib/live-meetings/provider.ts; the self-hosted bot is the default; comparison: docs/LIVE-MEETINGS.md).
  * Written from Recall's public API docs (read Oct 29, 2026) and exercised against the tests' fake Recall server; **not
  * yet tried against the real service** (nothing is signed up). Things to confirm on the first real trial are marked
  * "Trial:" below.
@@ -18,8 +19,11 @@
  * - **Chat** (`POST /api/v1/bot/:id/send_chat_message/`): to everyone, at most 4,096 characters. Teams channel meetings
  *   can't receive bot chat messages (Recall's limitation), so Sidekick prefers its own Teams bot when it's in the chat.
  * - **Stop** (`POST /api/v1/bot/:id/leave_call/`).
+ * - **Speaking** (`POST /api/v1/bot/:id/output_audio/`, MP3 from Azure AI Speech, lib/live-meetings/speech.ts). Trial:
+ *   Recall says the bot must be created with `automatic_audio_output` for this endpoint to work.
+ * - **Raising its hand**: Recall has no API for it (checked Oct 29, 2026), so Sidekick puts "✋" in the chat instead.
  *
- * Who may call: lib/live-meetings/provider.ts `liveProvider()` only.
+ * Who may call: lib/live-meetings/provider.ts `providerById("recall")` only.
  */
 import "server-only";
 import type { LiveEvent, LiveProvider, LiveStatus } from "./provider";
@@ -84,6 +88,7 @@ export function recallProvider(): LiveProvider | null {
   };
   return {
     id: "recall",
+    can: { raiseHand: false, speak: true },
     async join({ meetingUrl, botName, webhookUrl, sessionId }) {
       const out = await call("/api/v1/bot/", {
         meeting_url: meetingUrl,
@@ -91,7 +96,7 @@ export function recallProvider(): LiveProvider | null {
         metadata: { sidekick_session: sessionId },
         recording_config: {
           transcript: { provider: { recallai_streaming: { mode: "prioritize_low_latency", language_code: "en" } }, diarization: { use_separate_streams_when_available: true } },
-          realtime_endpoints: [{ type: "webhook", url: webhookUrl, events: ["transcript.data", "participant_events.chat_message", "participant_events.join"] }],
+          realtime_endpoints: [{ type: "webhook", url: webhookUrl, events: ["transcript.data", "participant_events.chat_message", "participant_events.join", "participant_events.speech_on", "participant_events.speech_off"] }],
           // Trial: the shortest retention Recall accepts; Sidekick never downloads media.
           retention: { type: "timed", hours: 24 },
         },
@@ -111,6 +116,12 @@ export function recallProvider(): LiveProvider | null {
     },
     async sendChatMessage(botId, text) {
       await call(`/api/v1/bot/${encodeURIComponent(botId)}/send_chat_message/`, { to: "everyone", message: text.slice(0, 4000) }, "post in the meeting chat");
+    },
+    async raiseHand() {
+      throw new Error("Recall.ai can't raise a hand.");
+    },
+    async speak(botId, mp3Base64) {
+      await call(`/api/v1/bot/${encodeURIComponent(botId)}/output_audio/`, { kind: "mp3", b64_data: mp3Base64 }, "speak in the meeting");
     },
     verify(headers, rawBody) {
       return verifyStandardWebhook(process.env.SIDEKICK_LIVE_WEBHOOK_SECRET?.trim(), headers, rawBody);
@@ -140,6 +151,8 @@ export function recallProvider(): LiveProvider | null {
           const tenantId = typeof teams.tenant_id === "string" ? teams.tenant_id : typeof teams.tenantId === "string" ? teams.tenantId : null;
           const guest = teams.is_guest === true || teams.anonymous === true || teams.is_anonymous === true;
           out.push({ kind: "participant", botId, name, tenantId, guest });
+        } else if (event === "participant_events.speech_on" || event === "participant_events.speech_off") {
+          out.push({ kind: "speech", botId, name, speaking: event === "participant_events.speech_on" });
         } else if (event.startsWith("bot.")) {
           const code = typeof inner.code === "string" ? inner.code : event.slice(4);
           const status = STATUS[code];

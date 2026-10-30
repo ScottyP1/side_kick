@@ -713,13 +713,16 @@ CREATE TABLE IF NOT EXISTS index_versions (
 -- status joining | live | ended | failed; invited_by 'auto' or the person's name; guests 1 = client guests seen (answers
 -- use Shareable sources only); chat_via 'teams' (our Teams bot is in the meeting chat) | 'provider'; decisions and
 -- action_items = the running list (JSON); handoff = who writes the notes afterwards: 'graph' (Teams transcript),
--- 'live' (this session's transcript, notes_meeting_id) or 'none' (nothing was said).
+-- 'live' (this session's transcript, notes_meeting_id) or 'none' (nothing was said); quiet = "Sidekick, quiet" for this
+-- meeting; speaking/last_heard_at = who is talking (never talk over anyone); hand = what its hand is up for (JSON);
+-- addressed_until/by = a lone "Sidekick" makes that person's next line a question; asked = action items it asked about.
 CREATE TABLE IF NOT EXISTS live_sessions (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT NOT NULL, provider TEXT NOT NULL, bot_id TEXT,
   join_key TEXT NOT NULL, starts_at TEXT NOT NULL, thread_id TEXT, title TEXT, status TEXT NOT NULL, invited_by TEXT NOT NULL,
   guests INTEGER NOT NULL DEFAULT 0, chat_via TEXT, joined_at TEXT, ended_at TEXT, end_reason TEXT, error TEXT,
   decisions TEXT, action_items TEXT, line_count INTEGER NOT NULL DEFAULT 0, extracted_lines INTEGER NOT NULL DEFAULT 0, extracted_at TEXT,
   answers INTEGER NOT NULL DEFAULT 0, last_question TEXT, last_question_at TEXT, intro_posted_at TEXT, handoff TEXT, notes_meeting_id TEXT,
+  quiet INTEGER NOT NULL DEFAULT 0, speaking TEXT, last_heard_at TEXT, hand TEXT, addressed_until TEXT, addressed_by TEXT, asked TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS live_sessions_occurrence ON live_sessions(org_id, join_key, starts_at);
@@ -735,6 +738,8 @@ CREATE INDEX IF NOT EXISTS live_lines_session ON live_lines(org_id, session_id, 
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS live_mode TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS live_mode_by TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS live_mode_at TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS live_settings TEXT;
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS live_provider TEXT;
 -- ---------------------------------------------------------------------------------------------------------
 -- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
 -- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and

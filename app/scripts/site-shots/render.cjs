@@ -4,7 +4,8 @@
 // Sidekick's own fonts, a generic chat-app frame (never Microsoft's artwork), plus dark and phone variants.
 // Needs Google Chrome, the pitch pack's _build/node_modules (playwright-core) and Python with Pillow.
 // Usage: node app/scripts/site-shots/render.cjs   → writes 2x PNGs to a temp folder, then WebP into app/public/site/.
-// The portal shots (portal-*.webp, phone-meeting*.webp) come from the pitch pack's screenshots or from demo-shots.cjs here (the demo world).
+// The portal shots (portal-*.webp, phone-meeting*.webp) come from demo-shots.cjs here (the demo world); portal-ask.webp (light
+// only, a real answer) is the final pitch capture's desktop/19-ask-answer-sources.png resized to 1600x1000.
 const path = require("path"); const fs = require("fs"); const os = require("os"); const { execFileSync } = require("child_process");
 const PITCH = path.join(os.homedir(), "Desktop/Sidekick Pitch/_build");
 const { chromium } = require(path.join(PITCH, "node_modules/playwright-core"));

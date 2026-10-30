@@ -1,6 +1,6 @@
-// Captures the website's product shots that come from the seeded demo world (docs/DEMO.md): meeting notes with
-// Save to knowledge, the Meetings page with automatic notes on, Needs attention on Home, Connectors, and meeting
-// notes on a phone, each in light and dark, as 2x WebP files in app/public/site/ (sizes as in
+// Captures the website's product shots that come from the seeded demo world (docs/DEMO.md): the Groups overview,
+// meeting notes with Save to knowledge, the Meetings page with automatic notes on, Needs attention on Home,
+// Connectors, and meeting notes on a phone, each in light and dark, as 2x WebP files in app/public/site/ (sizes as in
 // components/product-shot.tsx SHOTS). Made-up data only, from the local demo copy (preview "sidekick-demo",
 // http://localhost:3330, fake Claude); never the live site.
 // Needs: the demo world seeded and its copy running, Google Chrome, the pitch pack's _build/node_modules
@@ -18,6 +18,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "site-demo-shots-"));
 const ONLY = process.argv.slice(2);
 
 const ALL_SHOTS = [
+  { name: "portal-groups", role: "orgOwner", url: "/workspaces" },
   { name: "portal-meeting", role: "teamLead", url: "/meetings", open: "Contoso – Sprint 14 planning" },
   { name: "portal-meetings-auto", role: "teamLead", url: "/meetings" },
   { name: "portal-attention", role: "teamLead", url: "/home", scrollTo: /Needs attention/ },

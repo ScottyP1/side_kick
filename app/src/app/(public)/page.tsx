@@ -117,7 +117,7 @@ export default function HomePage() {
             </ul>
           </div>
           <div>
-            <ProductShot name="portal-groups" frame="laptop" alt={`The ${BRAND.name} portal's Groups page: one card per client team (Contoso Retail, Fabrikam, Northwind Bank, Tailspin Toys) with its Team Lead, people, chats, documents, meetings and a health label.`} />
+            <ProductShot name="portal-groups" frame="laptop" alt={`The ${BRAND.name} portal's Groups page: one card per client team (Adatum Health, Alpine Ski House, Woodgrove Bank, Coho Winery, Contoso Retail, Fabrikam Bank) with its Team Lead, people, chats, documents, meetings and a health label.`} />
             <p style={{ margin: "14px 0 0", textAlign: "center" }}>Up and running in five steps. <Link href="/how-it-works">How it works →</Link></p>
           </div>
         </div>

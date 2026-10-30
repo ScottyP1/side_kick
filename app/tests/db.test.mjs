@@ -7,6 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 
 const db = await import("../src/lib/db.ts");
 const engine = db.DIALECT;
@@ -1802,4 +1803,64 @@ test(`[${engine}] failed Teams posts read as a plain sentence, never a library e
     assert.match(text, want, String(raw));
     assert.ok(!/Axios|Error:|status code|\b\d{3}\b|ECONN/.test(text), `no raw error in "${text}"`);
   }
+});
+
+const liveRules = await import("../src/lib/live-meetings/rules.ts");
+const liveSig = await import("../src/lib/live-meetings/signature.ts");
+
+test(`[${engine}] live meetings: what counts as talking to Sidekick, the chat commands and Teams meeting links`, () => {
+  const q = (t) => liveRules.parseTrigger(t);
+  assert.deepEqual(q("Sidekick, what did the client say about the cutover?"), { kind: "question", question: "what did the client say about the cutover?" });
+  assert.deepEqual(q("Okay. Sidekick what's the go-live date"), { kind: "question", question: "what's the go-live date" });
+  assert.deepEqual(q("Hey side kick: who owns rollback?"), { kind: "question", question: "who owns rollback?" });
+  for (const t of ["Sidekick, leave.", "sidekick stop", "Sidekick, you can go", "Sidekick, leave the meeting"]) assert.deepEqual(q(t), { kind: "leave" }, t);
+  for (const t of ["Sidekick, recap", "Sidekick, what have we decided?", "Sidekick what did we agree so far", "Sidekick, action items"]) assert.deepEqual(q(t), { kind: "recap" }, t);
+  for (const t of ["Let's ask the sidekick team later", "We talked about Sidekick yesterday", "Sidekick", "Sidekick, ok", ""]) assert.equal(q(t), null, `not addressed: ${t}`);
+  assert.equal(q("Sidekick, what did we decide about the cutover?").kind, "question", "a question about decisions is still a question");
+  assert.deepEqual(liveRules.parseLiveCommand("join"), { kind: "join", url: null });
+  assert.deepEqual(liveRules.parseLiveCommand("join this meeting"), { kind: "join", url: null });
+  assert.deepEqual(liveRules.parseLiveCommand("join https://teams.microsoft.com/l/meetup-join/x/0"), { kind: "join", url: "https://teams.microsoft.com/l/meetup-join/x/0" });
+  assert.deepEqual(liveRules.parseLiveCommand("leave"), { kind: "leave" });
+  for (const t of ["join the dots on the cutover plan please", "should we leave the old runbook?"]) assert.equal(liveRules.parseLiveCommand(t), null, t);
+  const link = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc123%40thread.v2/0?context=%7b%7d";
+  assert.equal(liveRules.isTeamsMeetingUrl(link), true);
+  assert.equal(liveRules.isTeamsMeetingUrl("https://teams.microsoft.com/meet/2441?p=x"), true);
+  for (const bad of ["http://teams.microsoft.com/l/meetup-join/x", "https://evil.example/l/meetup-join/x", "https://teams.microsoft.com/_#/calendar", "not a link"]) assert.equal(liveRules.isTeamsMeetingUrl(bad), false, bad);
+  assert.equal(liveRules.meetingThreadFromUrl(link), "19:meeting_abc123@thread.v2");
+  assert.equal(liveRules.meetingThreadFromUrl("https://teams.microsoft.com/meet/2441?p=x"), null);
+  assert.equal(liveRules.looksExternal("Gus Client (Guest)"), true);
+  assert.equal(liveRules.looksExternal("Ana (External)"), true);
+  assert.equal(liveRules.looksExternal("Lou Lead"), false);
+});
+
+test(`[${engine}] live meetings: minutes, the messages in the meeting chat, and webhook signatures`, () => {
+  const t0 = "2026-10-29T10:00:00.000Z";
+  assert.equal(liveRules.liveMinutes(t0, "2026-10-29T10:45:00.000Z"), 45);
+  assert.equal(liveRules.liveMinutes(null, null), 0, "never admitted: nothing counted");
+  assert.equal(liveRules.liveMinutes(t0, null, Date.parse("2026-10-29T10:30:00.000Z")), 30, "still running: up to now");
+  const intro = liveRules.introText("Contoso", true);
+  assert.match(intro, /Sidekick \(notes\), listening for Contoso/);
+  assert.match(intro, /remove Sidekick \(notes\) from the participants/);
+  assert.match(intro, /only use sources marked Shareable/);
+  assert.doesNotMatch(liveRules.introText("Contoso", false), /Shareable/);
+  assert.match(liveRules.recapText([], []), /Nothing decided/);
+  assert.equal(liveRules.recapText([{ text: "Move the cutover", who: "Lou" }], [{ text: "Send the report", who: "Mo", due: "Friday" }]), "Decisions so far:\n1. Move the cutover (Lou)\nAction items so far:\n1. Send the report: Mo, by Friday");
+  const text = liveRules.answerText("q".repeat(300), "a".repeat(5000), [{ id: "S1", title: "Plan.pdf", loc: "p. 2" }]);
+  assert.ok(text.length <= 4000 && text.includes("…"), "fits a meeting chat message");
+  assert.match(liveRules.answerText("When?", "Friday [S1].", [{ id: "S1", title: "Plan.pdf", loc: "p. 2" }]), /Sources: \[S1\] Plan\.pdf \(p\. 2\)$/);
+  // Standard Webhooks (Recall.ai): the right secret and a fresh timestamp only.
+  const secret = `whsec_${Buffer.from("a secret of thirty-two bytes!!!!").toString("base64")}`;
+  const body = JSON.stringify({ event: "bot.done" });
+  const now = Date.now();
+  const sign = (s, id, ts, raw) => crypto.createHmac("sha256", Buffer.from(s.slice(6), "base64")).update(`${id}.${ts}.${raw}`).digest("base64");
+  const ts = String(Math.floor(now / 1000));
+  const h = (sig, t = ts, id = "msg_1") => new Headers({ "webhook-id": id, "webhook-timestamp": t, "webhook-signature": sig });
+  assert.equal(liveSig.verifyStandardWebhook(secret, h(`v1,${sign(secret, "msg_1", ts, body)}`), body, now), true);
+  assert.equal(liveSig.verifyStandardWebhook(secret, h(`v1,bad v1,${sign(secret, "msg_1", ts, body)}`), body, now), true, "one of several signatures");
+  assert.equal(liveSig.verifyStandardWebhook(secret, h(`v1,${sign(secret, "msg_1", ts, body)}`), `${body} `, now), false, "body changed");
+  assert.equal(liveSig.verifyStandardWebhook(secret, h(`v1,${sign(secret, "msg_2", ts, body)}`), body, now), false, "another message's signature");
+  const old = String(Math.floor(now / 1000) - 600);
+  assert.equal(liveSig.verifyStandardWebhook(secret, h(`v1,${sign(secret, "msg_1", old, body)}`, old), body, now), false, "too old");
+  assert.equal(liveSig.verifyStandardWebhook(undefined, h(`v1,${sign(secret, "msg_1", ts, body)}`), body, now), false, "no secret configured");
+  assert.equal(liveSig.verifyStandardWebhook(secret, new Headers(), body, now), false, "no headers");
 });

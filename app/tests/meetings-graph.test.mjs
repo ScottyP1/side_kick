@@ -31,6 +31,14 @@
  *   group's notes chat naming the meeting; nothing when transcribing (call event or a listed transcript), when the
  *   group switched reminders off, when the meeting records by itself, for ties or meetings not started yet; a refused
  *   calendar read is shown on the Teams chats tab;
+ * - the day a meeting was held: the transcript's own start, not the meeting's first schedule (live case, Oct 29);
+ * - live in Teams meetings (lib/live-meetings/, a **fake Recall.ai** server): the group switch (Enterprise only, Team
+ *   Lead or admin, audited); `@Sidekick join` in a meeting chat (link from Graph) or with a pasted link; the first chat
+ *   message; "Sidekick, …" said → a grounded answer with sources (once, guardrails applied); signed webhooks only; the
+ *   guest wall (Shareable sources only once a guest joins); the running list of decisions and "recap"; "Sidekick,
+ *   leave"; the meeting ending; notes afterwards written once (live transcript, or the Teams transcript when it came,
+ *   never both); live hours counted against the plan (join refused, a running session leaving); every group meeting
+ *   joined automatically once; the lobby timeout; the Owner Console report; per-organization isolation;
  * - isolation: another organization sees none of it.
  *
  * Nothing real is touched: its own data folder or the TEST_DATABASE_URL database (wiped first), fake Claude, Teams in
@@ -98,6 +106,69 @@ async function waitFor(conv, re, from = 0, ms = 20000) {
   throw new Error(`Timed out waiting for ${re} in ${conv}: ${sentTo(conv, from).slice(0, 400)}`);
 }
 
+/* ---------- fake meeting-bot provider: Recall.ai's API (lib/live-meetings/recall.ts) ---------- */
+const RECALL_KEY = "test-recall-key";
+const LIVE_SECRET = `whsec_${crypto.randomBytes(24).toString("base64")}`;
+const BOTS = new Map(); // bot id → { url, name, webhook, left, chat: [messages posted in the meeting chat] }
+const recallFail = { join: null }; // a status to refuse the next join with
+const recall = http.createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    const send = (status, json) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(json));
+    };
+    if (req.headers.authorization !== `Token ${RECALL_KEY}`) return send(401, { detail: "Invalid token." });
+    const b = body ? JSON.parse(body) : {};
+    if (req.method === "POST" && req.url === "/api/v1/bot/") {
+      if (recallFail.join) {
+        const status = recallFail.join;
+        recallFail.join = null;
+        return send(status, { detail: "Meeting URL is not reachable." });
+      }
+      const id = `bot-${BOTS.size + 1}`;
+      BOTS.set(id, { url: b.meeting_url, name: b.bot_name, webhook: b.recording_config?.realtime_endpoints?.[0]?.url, transcript: b.recording_config?.transcript, left: false, chat: [] });
+      return send(201, { id, meeting_url: b.meeting_url });
+    }
+    const m = req.url.match(/^\/api\/v1\/bot\/([^/]+)\/(leave_call|send_chat_message)\/$/);
+    if (m && BOTS.has(m[1])) {
+      const bot = BOTS.get(m[1]);
+      if (m[2] === "leave_call") bot.left = true;
+      else bot.chat.push(b.message);
+      return send(200, {});
+    }
+    send(404, { detail: "Not found." });
+  });
+});
+/** Signs an event as Recall does (Standard Webhooks) and posts it to the app's webhook. */
+async function pushLive(event, { secret = LIVE_SECRET, at = Date.now(), sign = true } = {}) {
+  const raw = JSON.stringify(event);
+  const id = `msg_${crypto.randomUUID()}`;
+  const ts = String(Math.floor(at / 1000));
+  const sig = crypto.createHmac("sha256", Buffer.from(secret.slice("whsec_".length), "base64")).update(`${id}.${ts}.${raw}`).digest("base64");
+  const headers = { "content-type": "application/json", ...(sign ? { "webhook-id": id, "webhook-timestamp": ts, "webhook-signature": `v1,${sig}` } : {}) };
+  return fetch(`${BASE}/api/live/events`, { method: "POST", headers, body: raw });
+}
+const botStatus = (botId, code, sub_code = null) => pushLive({ event: `bot.${code}`, data: { data: { code, sub_code, updated_at: new Date().toISOString() }, bot: { id: botId, metadata: {} } } });
+/** Someone says `text` in the meeting (a finalized transcript line). */
+const say = (botId, name, text) => pushLive({ event: "transcript.data", data: { data: { words: text.split(" ").map((w) => ({ text: w })), participant: { id: 1, name } }, bot: { id: botId, metadata: {} } } });
+/** Someone types `text` in the meeting chat. */
+const typeIn = (botId, name, text) => pushLive({ event: "participant_events.chat_message", data: { data: { participant: { id: 2, name }, data: { text, to: "everyone" } }, bot: { id: botId, metadata: {} } } });
+/** Someone joins the meeting. */
+const joinsMeeting = (botId, name, extra = {}) => pushLive({ event: "participant_events.join", data: { data: { participant: { id: 3, name, extra_data: extra } }, bot: { id: botId, metadata: {} } } });
+/** Waits until the bot posted a meeting chat message matching `re` (from message `from` on); returns them joined. */
+async function waitChat(botId, re, from = 0, ms = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    const text = (BOTS.get(botId)?.chat ?? []).slice(from).join("\n");
+    if (re.test(text)) return text;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw new Error(`Timed out waiting for ${re} in ${botId}'s chat: ${(BOTS.get(botId)?.chat ?? []).slice(from).join(" | ").slice(0, 400)}`);
+}
+const lastBot = () => [...BOTS.keys()].at(-1);
+
 /* ---------- fake Microsoft: sign-in keys, app tokens and Graph ---------- */
 const MS_CLIENT_ID = "11111111-2222-4333-8444-555555555555";
 const { publicKey: msPublic, privateKey: msPrivate } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -138,6 +209,7 @@ const directoryDenied = new Set(); // tenants whose directory permission isn't a
 const EVENTS = []; // calendar events: { organizer, event } (lib/auto-record.ts reads calendarView)
 const recordApproved = new Set(); // tenants that approved Calendars.ReadBasic.All + OnlineMeetings.ReadWrite.All
 const patches = []; // every PATCH of an online meeting: { organizer, id, body }
+const MEETING_CHAT_LINKS = new Map(); // meeting chat id → its meeting's join link (GET /chats/{id})
 const lookups = []; // every online meeting lookup by join link: { organizer, url }
 const calendarReads = []; // every calendarView read: { organizer, start, end, select }
 const patchRefused = new Set(); // online meeting ids whose PATCH Graph answers 400
@@ -180,6 +252,12 @@ const microsoft = http.createServer((req, res) => {
     if (!consented.has(tid)) return send(403, { error: { code: "Forbidden" } });
     if (transcriptsOff.has(tid) && (p === "/v1.0/subscriptions" || p.includes("/onlineMeetings/") || p.includes("/adhocCalls/"))) {
       return send(403, { error: { code: "Forbidden", message: "Graph API access to transcripts is disabled for this tenant.", innerError: { code: "GraphAccessToTranscriptsDisabled" } } });
+    }
+    // A meeting chat's own meeting (lib/live-meetings/sessions.ts reads its join link for "@Sidekick join").
+    const chatInfo = p.match(/^\/v1\.0\/chats\/([^/]+)$/);
+    if (chatInfo && req.method === "GET") {
+      const link = MEETING_CHAT_LINKS.get(chatInfo[1]);
+      return link ? send(200, { id: chatInfo[1], chatType: "meeting", onlineMeetingInfo: { joinWebUrl: link } }) : send(404, { error: { code: "NotFound" } });
     }
     // A chat's latest messages (lib/call-nudge.ts reads call events); newest first, at most $top.
     const chatMsgs = p.match(/^\/v1\.0\/chats\/([^/]+)\/messages$/);
@@ -263,6 +341,13 @@ const microsoft = http.createServer((req, res) => {
       res.writeHead(200, { "content-type": "text/vtt" });
       return void res.end(c.vtt);
     }
+    // One transcript's details: its own times (when this occurrence was really held, lib/meetings-graph.ts heldTimes).
+    const tmeta = p.match(/^\/v1\.0\/users\/([^/]+)\/onlineMeetings\/([^/]+)\/transcripts\/([^/]+)$/);
+    if (tmeta && req.method === "GET") {
+      const t = TRANSCRIPTS.find((x) => x.id === tmeta[3] && x.meetingId === tmeta[2] && x.organizer === tmeta[1]);
+      if (!t) return send(404, { error: { code: "NotFound" } });
+      return send(200, { id: t.id, meetingId: t.meetingId, createdDateTime: t.heldStart, endDateTime: t.heldEnd });
+    }
     const content = p.match(/^\/v1\.0\/users\/([^/]+)\/onlineMeetings\/([^/]+)\/transcripts\/([^/]+)\/content$/);
     if (content) {
       const t = TRANSCRIPTS.find((x) => x.id === content[3] && x.meetingId === content[2]);
@@ -318,7 +403,7 @@ const microsoft = http.createServer((req, res) => {
 });
 
 /** Adds a Teams meeting (and its transcript) to the fake Graph. Returns the ids. */
-function addMeeting(name, { organizer, attendees = [], guests = [], others = [], subject = `Meeting ${name}`, lines, chat = `19:meeting_${name}@thread.v2`, minutes = 30, transcript = true, start = new Date(Date.now() - (minutes + 5) * 60_000) } = {}) {
+function addMeeting(name, { organizer, attendees = [], guests = [], others = [], subject = `Meeting ${name}`, lines, chat = `19:meeting_${name}@thread.v2`, minutes = 30, transcript = true, start = new Date(Date.now() - (minutes + 5) * 60_000), held = start } = {}) {
   const meetingId = meetingIdFor(organizer, chat);
   const end = new Date(start.getTime() + minutes * 60_000);
   MEETINGS.set(meetingId, {
@@ -332,7 +417,10 @@ function addMeeting(name, { organizer, attendees = [], guests = [], others = [],
     },
   });
   const transcriptId = `MSMj${crypto.createHash("sha1").update(name).digest("hex").slice(0, 20)}`;
-  if (transcript) TRANSCRIPTS.push({ id: transcriptId, meetingId, organizer, createdDateTime: new Date(end.getTime() + 60_000).toISOString(), vtt: vtt(lines ?? [["Lou Lead", `In ${name} we decided to move the cutover.`], ["Mo Member", "I'll send the test report by Friday."]]) });
+  // `held`: the day this occurrence really took place (a series or a meeting held again later keeps its first schedule).
+  const heldStart = held.toISOString();
+  const heldEnd = new Date(held.getTime() + minutes * 60_000).toISOString();
+  if (transcript) TRANSCRIPTS.push({ id: transcriptId, meetingId, organizer, heldStart, heldEnd, createdDateTime: new Date(Math.max(end.getTime(), Date.parse(heldEnd)) + 60_000).toISOString(), vtt: vtt(lines ?? [["Lou Lead", `In ${name} we decided to move the cutover.`], ["Mo Member", "I'll send the test report by Friday."]]) });
   return { meetingId, transcriptId, chat };
 }
 
@@ -365,8 +453,9 @@ function client() {
   const jar = new Map();
   return async function call(method, url, body, headers = {}) {
     const h = { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "), ...headers };
-    if (body !== undefined) h["content-type"] = "application/json";
-    const res = await fetch(BASE + url, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual" });
+    const form = body instanceof FormData;
+    if (body !== undefined && !form) h["content-type"] = "application/json";
+    const res = await fetch(BASE + url, { method, headers: h, body: body === undefined ? undefined : form ? body : JSON.stringify(body), redirect: "manual" });
     for (const c of res.headers.getSetCookie?.() ?? []) {
       const [pair] = c.split(";");
       const [k, v] = pair.split("=");
@@ -438,6 +527,7 @@ before(async () => {
   SERVICE_URL = `http://127.0.0.1:${connector.address().port}`;
   await new Promise((r) => microsoft.listen(0, "127.0.0.1", r));
   MS_BASE = `http://127.0.0.1:${microsoft.address().port}`;
+  await new Promise((r) => recall.listen(0, "127.0.0.1", r));
   tsconfigBefore = fs.readFileSync(path.join(APP, "tsconfig.json"), "utf8");
   const env = {
     ...process.env,
@@ -464,6 +554,12 @@ before(async () => {
     GRAPH_BASE: MS_BASE,
     TEAMS_APP_ID: "sidekick-test-app",
     SIDEKICK_TICK_SECRET: TICK_SECRET,
+    // Live in meetings: the fake Recall server above, its webhook secret, and notes handed over at once.
+    SIDEKICK_LIVE_PROVIDER: "recall",
+    RECALL_API_KEY: RECALL_KEY,
+    RECALL_BASE_URL: `http://127.0.0.1:${recall.address().port}`,
+    SIDEKICK_LIVE_WEBHOOK_SECRET: LIVE_SECRET,
+    SIDEKICK_LIVE_HANDOFF_MIN: "0",
   };
   if (ENGINE === "postgres") {
     const dbName = new URL(PG_URL.replace("postgres:///", "postgres://localhost/")).pathname.slice(1);
@@ -495,6 +591,7 @@ after(async () => {
   }
   connector.close();
   microsoft.close();
+  recall.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
   fs.rmSync(path.join(APP, DIST), { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   if (tsconfigBefore) fs.writeFileSync(path.join(APP, "tsconfig.json"), tsconfigBefore);
@@ -663,6 +760,27 @@ test(`[${ENGINE}] polling fallback: a meeting Graph never notified about is foun
   await drain({ sweep: true });
   const again = pollCalls.slice(before).find((c) => c.organizer === OID.pat);
   assert.ok(again && new Date(again.from) > new Date(Date.now() - 3600_000), JSON.stringify(again));
+});
+
+test(`[${ENGINE}] held date: a meeting held again on a later day shows the day it was held on the notes card, not its first schedule (live case, Oct 29)`, async () => {
+  // "Wave 2 cutover sync" was scheduled three days ago and held again today on the same link: Graph's meeting still
+  // says three days ago; only the transcript knows the day it was really held.
+  const scheduled = new Date(Date.now() - 3 * 86400_000);
+  const held = new Date(Date.now() - 40 * 60_000);
+  const w = addMeeting("wave2", { organizer: OID.lou, attendees: [OID.mo], subject: "Wave 2 cutover sync", start: scheduled, held, minutes: 25 });
+  const from = sent.length;
+  const resource = `communications/onlineMeetings('${w.meetingId}')/transcripts('${w.transcriptId}')`;
+  assert.equal((await notify([{ subscriptionId: s.sub.id, clientState: s.sub.clientState, changeType: "created", resource, tenantId: TA }])).status, 202);
+  await drain();
+  const heldDay = held.toISOString().slice(0, 10);
+  const scheduledDay = scheduled.toISOString().slice(0, 10);
+  const card = await waitFor(CHAT_W1, /Wave 2 cutover sync/, from);
+  assert.ok(card.includes(heldDay), "the card shows the day it was held");
+  assert.ok(!card.includes(scheduledDay), "not the first scheduled day");
+  const got = (await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.find((m) => m.title === "Wave 2 cutover sync");
+  const detail = (await mo("GET", `/api/meetings/${got.id}`)).body.meeting;
+  assert.equal(detail.held_at, heldDay);
+  assert.equal(detail.duration_min, 25, "the length comes from the transcript's own times");
 });
 
 test(`[${ENGINE}] which group: a tie waits for a lead to pick one of their groups; nobody's meeting is skipped without its title`, async () => {
@@ -1595,4 +1713,309 @@ test(`[${ENGINE}] scheduled meetings: a refused calendar read is shown on the Te
   assert.equal(b.last, null);
   assert.equal(b.scheduledProblem, null);
   assert.ok(calendarReads.every((c) => c.organizer !== OID.bob), "never another organization's calendars");
+});
+
+
+/* ---------- Live in Teams meetings (lib/live-meetings/, fake Recall.ai) ---------- */
+
+/** Uploads a text document to a group as `call` (`audience` internal or shareable). */
+async function uploadDoc(call, ws, name, text, audience = "internal") {
+  const form = new FormData();
+  form.append("ws", ws);
+  form.append("audience", audience);
+  form.append("files", new File([text], name, { type: "text/markdown" }));
+  const r = await call("POST", "/api/docs", form);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+}
+const LIVE1 = "19:meeting_live1@thread.v2";
+/** Graph tells the app a meeting's transcript is ready, through Org A's current subscription (recreated by the upkeep tests). */
+function transcriptReady(m) {
+  const sub = [...SUBS.values()].find((x) => x.tid === TA && x.resource === "communications/onlineMeetings/getAllTranscripts");
+  assert.ok(sub, "Org A's transcript subscription");
+  return notify([{ subscriptionId: sub.id, clientState: sub.clientState, changeType: "created", resource: `communications/onlineMeetings('${m.meetingId}')/transcripts('${m.transcriptId}')`, tenantId: TA }]);
+}
+const liveUrl = (ws) => `/api/workspaces/${ws}/live`;
+const sessionOf = (botId, col) => scalar(`SELECT ${col} FROM live_sessions WHERE bot_id = '${botId}'`);
+/** Waits until a session's column has the expected value (the webhook's follow-ups run after its reply). */
+async function waitSession(botId, col, want, ms = 20000) {
+  const start = Date.now();
+  let got;
+  while (Date.now() - start < ms) {
+    got = await sessionOf(botId, col);
+    if (got === want) return;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  assert.equal(got, want, `${botId} ${col}`);
+}
+
+test(`[${ENGINE}] live: the group switch is Enterprise only, for the Team Lead or an admin, audited; another organization can't see it`, async () => {
+  const st = (await mo("GET", liveUrl(s.w1))).body;
+  assert.equal(st.mode, "off", "off by default");
+  assert.equal(st.canManage, false);
+  assert.equal(st.configured, true);
+  s.orgA = (await owner("GET", "/api/owner/tenants")).body.tenants.find((t) => t.name === "Org A").id;
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${s.orgA}/billing`, { plan: "business", status: "active" })).status, 200);
+  assert.equal((await lou("GET", liveUrl(s.w1))).body.included, false);
+  const refused = await lou("PUT", liveUrl(s.w1), { mode: "ask" });
+  assert.equal(refused.status, 402, "not in the Business plan");
+  assert.match(refused.body.error, /Live in meetings/);
+  assert.equal((await mo("PUT", liveUrl(s.w1), { mode: "ask" })).status, 403, "a Member can't switch it");
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${s.orgA}/billing`, { plan: "enterprise" })).status, 200);
+  assert.equal((await lou("PUT", liveUrl(s.w1), { mode: "sometimes" })).status, 400);
+  const on = await lou("PUT", liveUrl(s.w1), { mode: "ask" });
+  assert.equal(on.status, 200, JSON.stringify(on.body));
+  assert.equal(on.body.mode, "ask");
+  assert.equal(on.body.changedBy, "Lou Lead");
+  assert.equal(on.body.hours.limit, 100, "Enterprise includes 100 live hours a month");
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Turned Sidekick live in meetings%' ORDER BY id DESC LIMIT 1"), /on when someone asks/);
+  assert.equal((await bob("GET", liveUrl(s.w1))).status, 404, "another organization's group is not found");
+  assert.equal((await bob("PUT", liveUrl(s.w1), { mode: "off" })).status, 404);
+});
+
+test(`[${ENGINE}] live: @Sidekick join in a meeting chat joins as "Sidekick (notes)", says how to remove it, and answers "Sidekick, …" with sources once`, async () => {
+  // A meeting chat Sidekick's Teams app is in, assigned to W1; Graph knows its meeting's join link.
+  MEETING_CHAT_LINKS.set(LIVE1, joinUrlFor("live1"));
+  await toBot(activity(LIVE1, { type: "installationUpdate", action: "add" }));
+  await waitFor(LIVE1, /not set up/);
+  assert.equal((await lou("POST", "/api/teams-links", { id: LIVE1, ws: s.w1 })).status, 200);
+  assert.match(await sayTo(LIVE1, "join", { id: "29:vic", name: "Vic Viewer", aadObjectId: OID.vic }), /Viewers can't bring/);
+  assert.equal(BOTS.size, 0);
+  assert.match(await sayTo(LIVE1, "join"), /Joining now as “Sidekick \(notes\)”.*lobby/);
+  const bot = lastBot();
+  s.bot1 = bot;
+  assert.equal(BOTS.get(bot).url, joinUrlFor("live1"), "the meeting's own link, from Graph");
+  assert.equal(BOTS.get(bot).name, "Sidekick (notes)");
+  assert.equal(BOTS.get(bot).webhook, `${BASE}/api/live/events`);
+  assert.equal(BOTS.get(bot).transcript.provider.recallai_streaming.mode, "prioritize_low_latency");
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE '%sent to the Teams meeting%' ORDER BY id DESC LIMIT 1"), /invited by Lou Lead/);
+  assert.match(await sayTo(LIVE1, "join"), /already in this meeting/, "never twice in one meeting");
+  // Waiting in the lobby, then let in: the first message says it's listening and how to remove it (through the Teams bot).
+  const from = sent.length;
+  assert.equal((await botStatus(bot, "in_waiting_room")).status, 202);
+  assert.equal(await sessionOf(bot, "status"), "joining");
+  assert.equal((await botStatus(bot, "in_call_recording")).status, 202);
+  const intro = await waitFor(LIVE1, /listening for W1/, from);
+  assert.match(intro, /remove Sidekick \(notes\) from the participants/);
+  assert.match(intro, /Sidekick, leave/);
+  assert.doesNotMatch(intro, /Client guests are here/);
+  assert.equal(BOTS.get(bot).chat.length, 0, "Sidekick's own Teams bot posts in this chat, not the provider");
+  assert.equal(await sessionOf(bot, "status"), "live");
+  // Admitted twice (Recall repeats statuses): one hello.
+  await botStatus(bot, "in_call_recording");
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal((sentTo(LIVE1, from).match(/listening for W1/g) ?? []).length, 1);
+  // Someone asks out loud: the normal Ask pipeline answers in the meeting chat, with its sources.
+  const asked = sent.length;
+  assert.equal((await say(bot, "Lou Lead", "Okay. Sidekick, what did we decide about the cutover?")).status, 202);
+  const answer = await waitFor(LIVE1, /Test answer from/, asked);
+  assert.match(answer, /what did we decide about the cutover/);
+  assert.match(answer, /Sources/);
+  // Speech-to-text sending it again within a minute: answered once.
+  await say(bot, "Lou Lead", "Okay. Sidekick, what did we decide about the cutover?");
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal((sentTo(LIVE1, asked).match(/Test answer from/g) ?? []).length, 1);
+  assert.equal(await sessionOf(bot, "answers"), "1");
+  // The answer's grounding check applies: an answer citing nothing real becomes "I don't know".
+  const ungrounded = sent.length;
+  await say(bot, "Mo Member", "Sidekick, __UNGROUNDED__ when is the cutover?");
+  await waitFor(LIVE1, /I don't know/, ungrounded);
+  assert.doesNotMatch(sentTo(LIVE1, ungrounded), /definitely on Friday/);
+  // Lines that don't call Sidekick are only listened to.
+  const quiet = sent.length;
+  await say(bot, "Mo Member", "Let's look at the test plan next.");
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(sentTo(LIVE1, quiet), "");
+  assert.equal(await sessionOf(bot, "line_count"), "4");
+});
+
+test(`[${ENGINE}] live: webhooks must be signed by the provider (wrong secret, no signature, old timestamp: 401, nothing stored)`, async () => {
+  const lines = await sessionOf(s.bot1, "line_count");
+  const event = { event: "transcript.data", data: { data: { words: [{ text: "Sidekick, leave" }], participant: { name: "Forger" } }, bot: { id: s.bot1 } } };
+  assert.equal((await pushLive(event, { secret: `whsec_${crypto.randomBytes(24).toString("base64")}` })).status, 401);
+  assert.equal((await pushLive(event, { sign: false })).status, 401);
+  assert.equal((await pushLive(event, { at: Date.now() - 3600_000 })).status, 401);
+  assert.equal(await sessionOf(s.bot1, "line_count"), lines);
+  assert.equal(await sessionOf(s.bot1, "status"), "live");
+  // An unknown bot is ignored (202, nothing about anyone).
+  assert.equal((await say("bot-unknown", "Someone", "Sidekick, leave")).status, 202);
+});
+
+test(`[${ENGINE}] live: with a pasted link Sidekick posts through the provider; once a guest joins it only uses Shareable sources`, async () => {
+  await uploadDoc(lou, s.w1, "zebra-internal.md", "Zebracode rollout plan. The zebracode rollout plan is internal: zebracode waves, zebracode budget, zebracode risks.");
+  await uploadDoc(lou, s.w1, "zebra-shareable.md", "Zebracode summary for the client.", "shareable");
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("live2")}`), /Joining now/);
+  const bot = lastBot();
+  s.bot2 = bot;
+  assert.equal(await sessionOf(bot, "chat_via"), "provider", "Sidekick's Teams app isn't in that meeting's chat");
+  assert.equal(await sessionOf(bot, "thread_id"), "19:meeting_live2@thread.v2", "the meeting chat from the link");
+  assert.equal(await sessionOf(bot, "title"), "Teams meeting", "not the name of the chat the link was pasted in");
+  await botStatus(bot, "in_call_recording");
+  assert.match(await waitChat(bot, /listening for W1/), /Sidekick, leave/);
+  await say(bot, "Mo Member", "Sidekick, what is the zebracode rollout plan?");
+  const before = await waitChat(bot, /Test answer/, 1);
+  assert.match(before, /Sources: \[S1\] zebra-internal\.md/);
+  // A client guest joins: Sidekick says so once, and from then on answers only from Shareable sources.
+  const n = BOTS.get(bot).chat.length;
+  await joinsMeeting(bot, "Gus Client (Guest)");
+  assert.match(await waitChat(bot, /only use sources marked Shareable/, n), /outside your organization/);
+  assert.equal((await lou("GET", liveUrl(s.w1))).body.sessions.find((x) => x.status === "live" && x.guests)?.title, "Teams meeting");
+  const m = BOTS.get(bot).chat.length;
+  await say(bot, "Mo Member", "Sidekick, what is the zebracode rollout plan now?");
+  const after = await waitChat(bot, /Test answer/, m);
+  assert.match(after, /zebra-shareable\.md/);
+  assert.doesNotMatch(after, /zebra-internal/);
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'A guest joined%' ORDER BY id DESC LIMIT 1"), /Shareable sources only/);
+  // Typed in the meeting chat (no Teams bot there): the same. Sidekick's own messages coming back are ignored.
+  const k = BOTS.get(bot).chat.length;
+  await typeIn(bot, "Sidekick (notes)", "Sidekick, recap");
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(BOTS.get(bot).chat.length, k);
+  await typeIn(bot, "Mo Member", "Sidekick, recap");
+  assert.match(await waitChat(bot, /Nothing decided or assigned yet/, k), /every few minutes/);
+});
+
+test(`[${ENGINE}] live: a running list of decisions and action items; "Sidekick, leave"; the notes come from the live transcript once`, async () => {
+  const bot = s.bot2;
+  await say(bot, "Lou Lead", "In the review we decided to move the cutover to Saturday.");
+  await say(bot, "Mo Member", "I'll send the load test report by Friday.");
+  for (let i = 0; i < 8; i++) await say(bot, i % 2 ? "Lou Lead" : "Mo Member", `Point ${i} about the test environment.`);
+  await drain();
+  const live = (await mo("GET", liveUrl(s.w1))).body.sessions.find((x) => x.status === "live" && x.title === "Teams meeting");
+  assert.ok(live.decisions.some((d) => /move the cutover to Saturday/.test(d.text) && d.who === "Lou Lead"), JSON.stringify(live));
+  assert.ok(live.actions.some((a) => /send the load test report/.test(a.text) && a.who === "Mo Member" && a.due === "Friday"), JSON.stringify(live));
+  const n = BOTS.get(bot).chat.length;
+  await say(bot, "Lou Lead", "Sidekick, what have we decided?");
+  const recap = await waitChat(bot, /Decisions so far/, n);
+  assert.match(recap, /move the cutover to Saturday \(Lou Lead\)/);
+  assert.match(recap, /send the load test report.*Mo Member, by Friday/);
+  // "Sidekick, leave": it says goodbye and leaves; the reason is kept and audited.
+  const k = BOTS.get(bot).chat.length;
+  await say(bot, "Mo Member", "Sidekick, leave.");
+  await waitChat(bot, /Okay, leaving now/, k);
+  await waitSession(bot, "status", "ended");
+  assert.equal(BOTS.get(bot).left, true);
+  assert.equal(await sessionOf(bot, "end_reason"), "Mo Member asked Sidekick to leave.");
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Sidekick (notes) left%' ORDER BY id DESC LIMIT 1"), /asked Sidekick to leave/);
+  // No Teams transcript came: the live transcript becomes the meeting, and the usual notes are written and posted once.
+  const from = sent.length;
+  await drain();
+  assert.equal(await sessionOf(bot, "handoff"), "live");
+  await waitFor(CHAT_W1, /MEETING NOTES · W1/, from);
+  const notes = (await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.filter((x) => x.source === "teams-live");
+  assert.equal(notes.length, 1, JSON.stringify(notes));
+  assert.equal(notes[0].status, "Ready");
+  const detail = (await mo("GET", `/api/meetings/${notes[0].id}`)).body.meeting;
+  assert.match(detail.transcript, /Lou Lead: In the review we decided to move the cutover to Saturday\./);
+  assert.equal(await scalar(`SELECT COUNT(*) FROM live_lines WHERE session_id = (SELECT id FROM live_sessions WHERE bot_id = '${bot}')`), "0", "the live lines are gone");
+  // Teams' own transcript of the same meeting turns up later: skipped, so there's never a second set of notes.
+  const late = addMeeting("live2", { organizer: OID.lou, attendees: [OID.mo] });
+  const posted = sent.length;
+  assert.equal((await transcriptReady(late)).status, 202);
+  await drain();
+  assert.equal(await scalar(`SELECT status || '|' || reason FROM graph_meetings WHERE transcript_id = '${late.transcriptId}'`), "skipped|Notes for this meeting were already written from Sidekick's live session.");
+  assert.equal((await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.filter((x) => x.title === "Meeting live2").length, 0);
+  assert.equal(sentTo(CHAT_W1, posted).includes("MEETING NOTES"), false);
+});
+
+test(`[${ENGINE}] live: when Teams' transcript arrives, it writes the notes; the meeting ending stops Sidekick without a second set`, async () => {
+  const bot = s.bot1;
+  const t = addMeeting("live1", { organizer: OID.lou, attendees: [OID.mo], chat: LIVE1 });
+  assert.equal((await transcriptReady(t)).status, 202);
+  await drain();
+  assert.equal(await sessionOf(bot, "handoff"), "graph", "the Teams transcript claimed the session");
+  assert.equal((await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.filter((x) => x.title === "Meeting live1").length, 1);
+  // The meeting ends (the provider says so): Sidekick stops; it isn't asked to leave a meeting that's over.
+  assert.equal((await botStatus(bot, "call_ended", "call_ended_by_host")).status, 202);
+  await waitSession(bot, "status", "ended");
+  assert.equal(await sessionOf(bot, "end_reason"), "The meeting ended.");
+  assert.equal(BOTS.get(bot).left, false);
+  await drain();
+  const live = (await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.filter((x) => x.source === "teams-live");
+  assert.equal(live.length, 1, "still only the first live meeting's notes");
+  assert.equal(await scalar(`SELECT COUNT(*) FROM live_lines WHERE session_id = (SELECT id FROM live_sessions WHERE bot_id = '${bot}')`), "0");
+  assert.equal((await mo("GET", liveUrl(s.w1))).body.sessions.find((x) => x.endReason === "The meeting ended.").notes, "From the Teams transcript");
+  // Status events after the end change nothing.
+  await botStatus(bot, "in_call_recording");
+  assert.equal(await sessionOf(bot, "status"), "ended");
+});
+
+test(`[${ENGINE}] live: hours count against the plan; joining is refused when they're used up and a running session leaves`, async () => {
+  // The second session lasted an hour.
+  await dbExec(`UPDATE live_sessions SET joined_at = '${new Date(Date.now() - 90 * 60_000).toISOString()}', ended_at = '${new Date(Date.now() - 30 * 60_000).toISOString()}' WHERE bot_id = '${s.bot2}'`);
+  const used = (await lou("GET", liveUrl(s.w1))).body.hours.used;
+  assert.ok(used >= 1 && used < 1.2, String(used));
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${s.orgA}/terms`, { limits: { liveMeetingHours: 1 } })).status, 200);
+  const bots = BOTS.size;
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("live3")}`), /allows 1 live meeting hour/);
+  assert.equal(BOTS.size, bots, "no bot was sent");
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${s.orgA}/terms`, { limits: { liveMeetingHours: 2 } })).status, 200);
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("live3")}`), /Joining now/);
+  const bot = lastBot();
+  await botStatus(bot, "in_call_recording");
+  await waitChat(bot, /listening for W1/);
+  await dbExec(`UPDATE live_sessions SET joined_at = '${new Date(Date.now() - 61 * 60_000).toISOString()}' WHERE bot_id = '${bot}'`);
+  const n = BOTS.get(bot).chat.length;
+  await drain({ sweep: true });
+  await waitSession(bot, "status", "ended");
+  assert.equal(await sessionOf(bot, "end_reason"), "This month's live meeting hours are used up.");
+  assert.equal(BOTS.get(bot).left, true);
+  assert.match(BOTS.get(bot).chat.slice(n).join("\n"), /hours are used up, so I'm leaving/);
+  assert.equal((await owner("PATCH", `/api/owner/tenants/${s.orgA}/terms`, { limits: null })).status, 200);
+  // A provider refusing the join: the session shows failed with the reason, and the chat is told.
+  recallFail.join = 400;
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("live4")}`), /couldn't join the meeting.*not reachable/);
+  const failed = (await lou("GET", liveUrl(s.w1))).body.sessions.find((x) => x.status === "failed");
+  assert.match(failed.error, /not reachable/);
+});
+
+test(`[${ENGINE}] live: "Every group meeting" joins a group's scheduled meeting once as it starts; nobody letting it in gives up after 15 minutes`, async () => {
+  // Only this test's meeting: the reminder tests' meetings that started a few minutes ago are set aside.
+  await dbExec("UPDATE meeting_nudges SET status = 'gone'");
+  assert.equal((await lou("PUT", liveUrl(s.w1), { mode: "auto" })).status, 200);
+  schedule("liveauto", { organizer: OID.lou, attendees: [OID.mo], guests: [OID.guest], emails: ["mo@a.test"], inDays: minutes(-1) });
+  await drain({ sweep: true });
+  await drain({ sweep: true });
+  const auto = [...BOTS.entries()].filter(([, b]) => b.url === joinUrlFor("liveauto"));
+  assert.equal(auto.length, 1, "joined once");
+  const [bot] = auto[0];
+  assert.equal(await sessionOf(bot, "invited_by"), "auto");
+  assert.equal(await sessionOf(bot, "guests"), "1", "a guest from another organization is invited");
+  assert.equal(await sessionOf(bot, "title"), "Planned liveauto");
+  await drain({ sweep: true });
+  assert.equal([...BOTS.values()].filter((b) => b.url === joinUrlFor("liveauto")).length, 1, "not again");
+  // Still in the lobby 15 minutes later: Sidekick gives up and says why.
+  await dbExec(`UPDATE live_sessions SET created_at = '${new Date(Date.now() - 16 * 60_000).toISOString()}' WHERE bot_id = '${bot}'`);
+  await drain({ sweep: true });
+  await waitSession(bot, "status", "failed");
+  assert.match(await sessionOf(bot, "end_reason"), /Nobody let Sidekick \(notes\) in from the lobby/);
+  assert.equal(BOTS.get(bot).left, true);
+  assert.equal((await lou("PUT", liveUrl(s.w1), { mode: "ask" })).status, 200);
+});
+
+test(`[${ENGINE}] live: Owner Console report; Stop from the portal; isolation (another organization sees and stops nothing)`, async () => {
+  assert.equal((await mo("GET", "/api/owner/live")).status, 401);
+  const r = (await owner("GET", "/api/owner/live")).body;
+  assert.equal(r.configured, true);
+  assert.equal(r.provider, "recall");
+  const a = r.orgs.find((o) => o.org === "Org A");
+  assert.ok(a.sessions >= 5 && a.failures >= 2 && a.hours >= 1 && a.answers >= 3, JSON.stringify(a));
+  assert.ok(r.failures.some((f) => /lobby/.test(f.endReason ?? "")), JSON.stringify(r.failures));
+  assert.doesNotMatch(JSON.stringify(r), /zebracode|cutover to Saturday/, "nothing said in a meeting");
+  // A running session: Org B can't stop it or see it; a Member can't; the Team Lead can.
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("live5")}`), /Joining now/);
+  const bot = lastBot();
+  await botStatus(bot, "in_call_recording");
+  await waitChat(bot, /listening/);
+  const id = await sessionOf(bot, "id");
+  assert.equal((await bob("POST", liveUrl(s.bw), { action: "stop", session: id })).status, 404);
+  assert.equal((await mo("POST", liveUrl(s.w1), { action: "stop", session: id })).status, 403);
+  assert.deepEqual((await bob("GET", liveUrl(s.bw))).body.sessions, []);
+  assert.equal(await scalar(`SELECT COUNT(*) FROM live_sessions WHERE org_id <> '${s.orgA}'`), "0");
+  const stopped = await lou("POST", liveUrl(s.w1), { action: "stop", session: id });
+  assert.equal(stopped.status, 200, JSON.stringify(stopped.body));
+  assert.equal(BOTS.get(bot).left, true);
+  assert.match(BOTS.get(bot).chat.join("\n"), /stopped from the portal/);
+  assert.equal((await lou("POST", liveUrl(s.w1), { action: "stop", session: id })).status, 409);
+  // "@Sidekick leave" with nothing running.
+  assert.match(await sayTo(CHAT_W1, "leave"), /not in a meeting for this group/);
 });

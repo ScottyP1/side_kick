@@ -34,8 +34,8 @@ export type PlanId = (typeof PLAN_IDS)[number];
 /**
  * What a plan allows. `null` means no limit. `connectors`: 0 = none, 1 = one tool, null = all of them.
  * `meetingHours`, `liveMeetingHours` and `aiCreditUsd` are per calendar month (UTC); the others are totals
- * at any moment. `liveMeetingHours` is Sidekick joining calls live (product step 3, not built yet): only
- * Enterprise includes it.
+ * at any moment. `liveMeetingHours` is Sidekick in Teams meetings live (lib/live-meetings/, docs/LIVE-MEETINGS.md):
+ * only Enterprise includes it.
  */
 export type PlanLimits = {
   seats: number | null;
@@ -72,8 +72,8 @@ export const LIMIT_LABEL: Record<LimitKey, { one: string; many: string }> = {
  * - `customRules`: adding custom guardrail rules (the built-in switches are in every plan).
  * - `requireMicrosoft`: "Require Microsoft sign-in" (passwords off for everyone).
  * - `prioritySupport`: the organization's support tickets are marked priority in the Owner Console inbox.
- * - `liveMeetings`, `dedicatedDatabase`: Enterprise only; Sidekick joining calls live (not built yet, also
- *   the `liveMeetingHours` limit) and a database of the organization's own (set up by the Sidekick team).
+ * - `liveMeetings`, `dedicatedDatabase`: Enterprise only; Sidekick in Teams meetings live (lib/live-meetings/,
+ *   also the `liveMeetingHours` limit) and a database of the organization's own (set up by the Sidekick team).
  * Connectors aren't a feature: the `connectors` limit already says none, one or all.
  */
 export const FEATURE_KEYS = ["answers", "notes", "guardrails", "audit", "reminders", "teamLeads", "customRules", "requireMicrosoft", "prioritySupport", "liveMeetings", "dedicatedDatabase"] as const;

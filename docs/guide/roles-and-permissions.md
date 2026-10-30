@@ -109,6 +109,8 @@ use (Usage & billing, Guardrails, Connectors, Activity, Security & audit) show t
 | Add people to their groups or take them off, change which of them a person is in | ✓ | ✓ | ✓ (Members and Viewers, own groups; not themselves) | | |
 | Change roles, remove people from the organization | ✓ | ✓ | | | |
 | Link, change or unlink Teams channels and chats (turning reminders on: Team plan and up) | ✓ | ✓ | ✓ (own workspaces) | | |
+| Live in meetings for a group: switch it, Stop a running meeting (Enterprise) | ✓ | ✓ | ✓ (own workspaces) | | |
+| Bring Sidekick into a meeting (`@Sidekick join` / `leave`, when the group's switch is on) | ✓ | ✓ | ✓ | ✓ | |
 | Choose which chats get a group's meeting notes ("Meeting notes go to" in the portal, or "@Sidekick post meeting notes here" in the chat; everyone in the group sees it) | ✓ | ✓ | ✓ (own groups) | | |
 | Send a test message to one of a group's chats (to see where notes will land; once per chat per minute) | ✓ | ✓ | ✓ (own groups) | | |
 | Add Sidekick to a Teams chat (anyone else: Sidekick leaves) | ✓ | ✓ | ✓ | | |

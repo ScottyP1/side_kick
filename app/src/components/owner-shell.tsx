@@ -22,6 +22,7 @@ const NAV: [string, string, string][] = [
   ["/owner/articles", "Support articles", "doc"],
   ["/owner/helpbot", "Help bot", "shield"],
   ["/owner/rolloffs", "Roll-offs", "folder"],
+  ["/owner/live", "Live meetings", "video"],
   ["/owner/queue", "Job queue", "cpu"],
   ["/owner/performance", "Performance & errors", "chart"],
   ["/owner/releases", "Releases & switches", "gear"],

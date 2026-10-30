@@ -77,6 +77,7 @@ import { processMeeting } from "./sidekick";
 import { postMeetingNotes } from "./teams/bot";
 import { remindAfterMeeting } from "./reminders";
 import { BRAND } from "./brand";
+import { claimForGraph } from "./live-meetings/claims";
 import { isOid, knownPeople, matchGroup, noteDirectory, sameTenant, type DirectoryCache, type Participant } from "./meeting-group";
 
 /** The Graph resource for every scheduled-meeting transcript in a tenant (one subscription per organization). */
@@ -781,7 +782,7 @@ async function setStatus(id: string, from: GraphMeeting["status"][], to: GraphMe
 const cleanTitle = (s: string | null | undefined, fallback = "Teams meeting") => (s ?? "").replace(/\s+/g, " ").trim().slice(0, 200) || fallback;
 
 /** An ad hoc call's transcript as Graph describes it (its times; the call itself has no subject or invitees). */
-type GraphCallTranscript = { createdDateTime?: string | null; endDateTime?: string | null };
+export type GraphCallTranscript = { createdDateTime?: string | null; endDateTime?: string | null };
 
 /** What `fetchTranscript` needs to know about a meeting or call, whichever kind it is. */
 type CallInfo = {
@@ -824,9 +825,14 @@ async function readCall(orgId: string, tenant: string, row: GraphMeeting): Promi
   const meeting = await span("microsoft", "Read the Teams meeting", () => graphCall<GraphOnlineMeeting>(tenant, "GET", base, { deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }));
   if (!meeting) return null;
   const attendees = meeting.participants?.attendees ?? [];
+  const transcriptPath = `${base}/transcripts/${encodeURIComponent(row.transcript_id)}`;
+  // When it was really held: the meeting's own times are the schedule (for a recurring series or a meeting held again
+  // on a later day, the first one's), so the transcript's times come first (Oct 29, 2026: "Wave 2 cutover sync" held
+  // on the 29th showed the 26th).
+  const t = await span("microsoft", "Read the meeting transcript's times", () => graphCall<GraphCallTranscript>(tenant, "GET", transcriptPath, { deniedMessage: TRANSCRIPT_DENIED, deniedCodes: TRANSCRIPT_DENIED_CODES }));
   return {
     title: cleanTitle(meeting.subject),
-    startedAt: meeting.startDateTime ?? null, endedAt: meeting.endDateTime ?? null,
+    ...heldTimes({ startedAt: meeting.startDateTime ?? null, endedAt: meeting.endDateTime ?? null }, t),
     chatId: meeting.chatInfo?.threadId ?? decodeMeetingId(row.online_meeting_id).threadId,
     organizer: { oid: row.organizer_oid, tenantId: meeting.participants?.organizer?.identity?.user?.tenantId ?? null },
     attendees: attendees.map((a) => ({ oid: a.identity?.user?.id ?? "", tenantId: a.identity?.user?.tenantId ?? null, guest: Boolean(a.identity?.guest || a.identity?.phone) })),
@@ -835,8 +841,21 @@ async function readCall(orgId: string, tenant: string, row: GraphMeeting): Promi
       const u = a.identity?.user;
       return Boolean(a.identity?.guest || a.identity?.phone || (u?.tenantId && u.tenantId.toLowerCase() !== tenant.toLowerCase()));
     }),
-    transcriptPath: `${base}/transcripts/${encodeURIComponent(row.transcript_id)}`,
+    transcriptPath,
   };
+}
+
+/**
+ * When a meeting was really held: the transcript's own start (`createdDateTime`, when transcription started) and end,
+ * else the meeting's scheduled times. The end is kept only when it comes after the start it's paired with (a
+ * transcript still running has none; the scheduled end of an earlier day would be before it), so the duration falls
+ * back to the transcript's length. Pure; exported for the tests.
+ */
+export function heldTimes(scheduled: { startedAt: string | null; endedAt: string | null }, transcript: GraphCallTranscript | null): { startedAt: string | null; endedAt: string | null } {
+  const start = transcript?.createdDateTime && !Number.isNaN(Date.parse(transcript.createdDateTime)) ? transcript.createdDateTime : null;
+  if (!start) return scheduled;
+  const end = transcript?.endDateTime ?? null;
+  return { startedAt: start, endedAt: end && Date.parse(end) > Date.parse(start) ? end : null };
 }
 
 /**
@@ -997,6 +1016,8 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
     throw e;
   }
 
+  // Sidekick was in this meeting live (lib/live-meetings/claims.ts): only one of the two transcripts writes the notes.
+  if ((await claimForGraph(orgId, call.chatId, call.startedAt)) === "live") return skip("Notes for this meeting were already written from Sidekick's live session.", withGroup);
   // A second transcript of the same meeting (transcription stopped and started again) is a part of its own.
   const earlier = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM graph_meetings WHERE org_id = ? AND online_meeting_id = ? AND kind = ? AND meeting_id IS NOT NULL", orgId, row.online_meeting_id, row.kind))?.n ?? 0);
   const meetingTitle = earlier ? `${title} (part ${earlier + 1})` : title;

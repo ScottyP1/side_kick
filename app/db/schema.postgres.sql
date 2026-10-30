@@ -707,6 +707,34 @@ CREATE TABLE IF NOT EXISTS index_versions (
   org_id TEXT NOT NULL REFERENCES orgs(id), name TEXT NOT NULL, version INTEGER NOT NULL, done_at TEXT NOT NULL,
   PRIMARY KEY (org_id, name)
 );
+-- Live in Teams meetings (lib/live-meetings/, docs/LIVE-MEETINGS.md, Enterprise): one row per time Sidekick joined (or
+-- tried to join) a meeting through the hosted meeting-bot provider. join_key = hash of the join link (the link itself is
+-- never stored), starts_at = the occurrence (calendar start for automatic joins, the moment of asking for @Sidekick join);
+-- status joining | live | ended | failed; invited_by 'auto' or the person's name; guests 1 = client guests seen (answers
+-- use Shareable sources only); chat_via 'teams' (our Teams bot is in the meeting chat) | 'provider'; decisions and
+-- action_items = the running list (JSON); handoff = who writes the notes afterwards: 'graph' (Teams transcript),
+-- 'live' (this session's transcript, notes_meeting_id) or 'none' (nothing was said).
+CREATE TABLE IF NOT EXISTS live_sessions (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), workspace_id TEXT NOT NULL, provider TEXT NOT NULL, bot_id TEXT,
+  join_key TEXT NOT NULL, starts_at TEXT NOT NULL, thread_id TEXT, title TEXT, status TEXT NOT NULL, invited_by TEXT NOT NULL,
+  guests INTEGER NOT NULL DEFAULT 0, chat_via TEXT, joined_at TEXT, ended_at TEXT, end_reason TEXT, error TEXT,
+  decisions TEXT, action_items TEXT, line_count INTEGER NOT NULL DEFAULT 0, extracted_lines INTEGER NOT NULL DEFAULT 0, extracted_at TEXT,
+  answers INTEGER NOT NULL DEFAULT 0, last_question TEXT, last_question_at TEXT, intro_posted_at TEXT, handoff TEXT, notes_meeting_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS live_sessions_occurrence ON live_sessions(org_id, join_key, starts_at);
+CREATE INDEX IF NOT EXISTS live_sessions_bot ON live_sessions(bot_id);
+CREATE INDEX IF NOT EXISTS live_sessions_ws ON live_sessions(org_id, workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS live_sessions_status ON live_sessions(status, updated_at);
+-- What was said (speech) or typed (chat) while Sidekick was in the meeting; deleted once the notes are handed off.
+CREATE TABLE IF NOT EXISTS live_lines (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), session_id TEXT NOT NULL, speaker TEXT, text TEXT NOT NULL,
+  said_at TEXT NOT NULL, source TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS live_lines_session ON live_lines(org_id, session_id, said_at);
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS live_mode TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS live_mode_by TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS live_mode_at TEXT;
 -- ---------------------------------------------------------------------------------------------------------
 -- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
 -- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and

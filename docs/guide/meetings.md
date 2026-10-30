@@ -8,6 +8,10 @@ There are two ways meetings get to Sidekick:
 - **Automatic notes after Teams meetings**: when a Teams meeting of a group's people ends, Sidekick reads its transcript and writes the notes by itself. That includes scheduled meetings and calls started with **Meet now** inside a group chat. No bot joins the call.
 - **Add a past or outside meeting**: upload a transcript yourself, for meetings held before automatic notes were on, or outside Teams.
 
+On the Enterprise plan Sidekick can also **join a meeting live** and answer questions while it runs: see [Sidekick live in meetings](#sidekick-live-in-meetings-enterprise).
+
+The date on the notes is the day the meeting was **held** (when transcription started), not the day it was first scheduled: a recurring meeting, or one held again on a later day with the same link, shows the right day.
+
 ## Automatic notes after Teams meetings
 
 ### Turning it on (Org Owners and Org Admins)
@@ -135,6 +139,28 @@ Decisions, requirements, risks, facts and terms from a meeting can be **saved to
 - in the portal, on the meeting's page or in the Teams tab, with **Save to knowledge** next to each one.
 
 A saved item becomes lasting knowledge: answers find it first, long after the meeting, and it's marked *Saved* with who saved it. **Remove from knowledge** undoes it. Members, Team Leads and admins can save; Viewers can't. Open questions and decisions still to make can't be saved (they're temporary).
+
+## Sidekick live in meetings (Enterprise)
+Sidekick can sit in a Teams meeting as a participant called **Sidekick (notes)**, listen, and help while the meeting runs:
+- **Ask it out loud or in the meeting chat**: start with "Sidekick, …" ("Sidekick, what did the client say about the cutover?"). It answers in the meeting chat with its sources, the same way it answers in Teams chats and the portal: from the group's documents, meetings and chats and the firm library, with your organization's guardrails, and "I don't know" when it can't back an answer up.
+- **Keeps a running list** of decisions and action items. "Sidekick, recap" (or "what have we decided?") reads it back; the group's page shows it while the meeting runs.
+- **Notes afterwards, once**: when the meeting ends, the notes are written and posted to the group's notes chat as usual. If Teams made a transcript, that one is used; if not, Sidekick's own live transcript is. You never get two sets.
+- **Client guests**: when someone from outside your organization is in the meeting (the chat is marked as having client guests, guests were invited, or a guest joins), Sidekick says so once and from then on only uses sources marked **Shareable**.
+
+**Bringing it in.** On the group's **Teams chats** tab, the Team Lead (or an Org Owner/Admin) sets **Live in meetings**:
+- **Off** (the default).
+- **When someone asks**: anyone in the group (not Viewers) types **@Sidekick join** in the meeting's chat (or `@Sidekick join <meeting link>` in one of the group's chats).
+- **Every group meeting**: Sidekick also joins every scheduled meeting that is clearly the group's as it starts (this needs automatic notes on, like the transcription reminders).
+
+If the meeting has a lobby, someone lets **Sidekick (notes)** in. Its first message in the chat says it's listening and how to remove it.
+
+**Removing it.** Say "Sidekick, leave", type **@Sidekick leave**, remove **Sidekick (notes)** from the participants, or press **Stop** on the group's page. It also leaves by itself when the meeting ends, after 4 hours, when this month's live meeting hours run out, or if nobody lets it in within 15 minutes. The group's page lists each meeting it was in, for how long, and why it left.
+
+**Plan.** Live in meetings is part of the Enterprise plan, which includes 100 live meeting hours a month (Usage & billing shows how many are used). Everything is recorded in the audit log.
+
+<!-- help-center:skip -->
+For developers: lib/live-meetings/ (sessions.ts, provider.ts, recall.ts, rules.ts, claims.ts), routes /api/live/events, /api/workspaces/:id/live, /api/owner/live; research, design and what Cody must sign up for: docs/LIVE-MEETINGS.md; tests in app/tests/meetings-graph.test.mjs (fake Recall.ai) and app/tests/db.test.mjs (rules).
+<!-- /help-center:skip -->
 
 ## Sidekick in the Teams app bar and as a tab
 Sidekick also works as a Teams app with a **Meetings** tab:

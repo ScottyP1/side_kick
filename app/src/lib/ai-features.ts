@@ -19,6 +19,7 @@ export const AI_FEATURE_LABEL: Record<Feature, string> = {
   helpbot: "Public help bot",
   followup: "Follow-up rewrite",
   watch: "Document checks",
+  live: "Live meetings",
 };
 
 /** The plain name for a feature id; an unknown id (e.g. an old row) is shown as it is. */

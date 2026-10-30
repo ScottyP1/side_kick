@@ -74,8 +74,8 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_ok_at IS NOT NULL"), 5, "five linked projects, spaces and folders, synced");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'page' AND title LIKE 'SharePoint file:%'") >= 5, "the SharePoint folder's files are searchable like documents");
   assert.equal(count("SELECT COUNT(*) FROM connector_items WHERE state = 'Skipped'"), 1, "one file too large to read, kept as a note");
-  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_error LIKE '%refused access%'"), 1, "one lost access since (for the broken-connector watcher)");
-  assert.equal(count("SELECT COUNT(*) FROM connector_health WHERE status = 'broken' AND connector = 'azure-devops' AND workspace_id != ''"), 1);
+  assert.equal(count("SELECT COUNT(*) FROM connector_links WHERE last_error IS NOT NULL"), 0, "every connection syncs cleanly (no broken tools in the demo)");
+  assert.equal(count("SELECT COUNT(*) FROM connector_health WHERE status = 'broken'"), 0);
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'workitem'") >= 10, "their work items are searchable");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_type = 'page'") >= 3, "the Confluence space's pages are searchable like documents");
   assert.ok(count("SELECT COUNT(*) FROM support_tickets") >= 5 && count("SELECT COUNT(*) FROM support_messages WHERE author_kind = 'staff'") >= 3, "tickets with replies");
@@ -92,11 +92,14 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.ok(count(`SELECT COALESCE(SUM(cost_usd), 0) FROM usage_events WHERE org_id = ${northwind} AND created_at >= ?`, monthStart) < 800 * 0.8, "Northwind under 80% of its AI credit");
   assert.equal(count("SELECT COUNT(*) FROM teams_conversations WHERE service_url NOT LIKE ?", `http://127.0.0.1:${PORT + 1}/teams`), 0, "every chat posts to the fake Teams");
   assert.equal(count("SELECT COUNT(*) FROM trace_spans s JOIN traces t ON t.id = s.trace_id WHERE s.kind = 'teams' AND s.status = 'error' AND t.started_at >= ?", new Date(Date.now() - 3600_000).toISOString()), 0, "no failed Teams step in the last hour");
-  assert.ok(count("SELECT COUNT(*) FROM trace_spans WHERE kind = 'teams' AND status = 'error'") >= 1, "the seeded failed post still shows on Activity");
+  assert.equal(count("SELECT COUNT(*) FROM teams_post_failures"), 0, "no failed Teams posts in the demo");
   assert.equal(count(`SELECT COUNT(*) FROM teams_conversations c JOIN users u ON u.entra_oid = c.added_by_oid WHERE c.name = 'Bid war room' AND c.workspace_id IS NULL AND u.email = 'priya.raman@northwind.example' AND u.role = 'Team Lead'`), 1, "the Team Lead can assign the chat she added");
   // The watchers ran once on the job queue and found something of every kind at Northwind.
-  for (const kind of ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "misfiled_doc"]) {
+  for (const kind of ["unanswered", "chat_waiting", "chat_removed", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "connector_request", "misfiled_doc"]) {
     assert.ok(count(`SELECT COUNT(*) FROM findings WHERE org_id = ${northwind} AND kind = ? AND status = 'open'`, kind) >= 1, `a "${kind}" finding`);
+  }
+  for (const kind of ["failed_replies", "broken_connector"]) {
+    assert.equal(count(`SELECT COUNT(*) FROM findings WHERE kind = ? AND status = 'open'`, kind), 0, `no "${kind}" finding: the demo shows working Teams and tools`);
   }
   assert.equal(count("SELECT COUNT(*) FROM jobs WHERE status = 'dead'"), 0, "no job gave up");
   // "Meeting notes go to": Contoso's two chats, notes to the internal one only; Litware's two chats, no choice yet.
@@ -121,7 +124,7 @@ test("the demo seed builds the whole world on a fresh SQLite copy", () => {
   assert.equal(count("SELECT COUNT(*) FROM graph_meetings WHERE status = 'skipped'"), 1);
   assert.equal(count("SELECT COUNT(*) FROM items WHERE pinned = 1 AND saved_by IS NOT NULL"), 2, "two decisions saved to knowledge");
   assert.ok(count("SELECT COUNT(*) FROM passages WHERE source_id LIKE 'saved:%'") >= 2, "and searchable");
-  assert.match(out, /findings for Northwind's Org Owner \(12 kinds/);
+  assert.match(out, /findings for Northwind's Org Owner \(10 kinds/);
   // Starter is 15 people: Tailspin sits one below.
   assert.equal(count("SELECT COUNT(*) FROM users WHERE org_id = (SELECT id FROM orgs WHERE name = 'Tailspin Partners')"), 14);
   // The private files exist, are only readable by this user, and hold every login.

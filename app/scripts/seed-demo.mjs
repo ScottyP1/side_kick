@@ -146,13 +146,7 @@ async function confirmRealClaude() {
 
 /* ---------- fake services: Teams connector, breached-password list ---------- */
 const sent = [];
-// Chats whose posts the fake Teams refuses (500): phase C uses one for the failed-posts watcher.
-const failPosts = new Set();
 const connector = http.createServer((req, res) => {
-  if ([...failPosts].some((c) => decodeURIComponent(req.url).includes(c))) {
-    res.writeHead(500, { "content-type": "application/json" });
-    return void res.end(JSON.stringify({ error: { code: "ServiceError", message: "Teams is unavailable" } }));
-  }
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
@@ -429,13 +423,8 @@ async function phaseA() {
     const r = await world.groups[key].lead("POST", "/api/connectors/links", { connector: toolId(kind, key), ws: world.groups[key].id, project });
     if (r.link.problem) throw new Error(`Linking ${project} didn't sync: ${r.link.problem}`);
   }
-  // One real problem for the broken-connector watcher: the account loses access to Litware's project, and the next
-  // sync says so (Connectors shows it, the group's managers get a finding). "Sync now" in the demo fixes it.
-  tools.deny("ado", "Data Platform");
-  const litwareLink = (await owner("GET", "/api/connectors")).connectors.find((t) => t.kind === "ado" && t.workspaceId === litware.id).links.find((l) => l.projectName === "Data Platform");
-  const broken = await litware.lead("POST", `/api/connectors/links/${litwareLink.id}/sync`);
-  if (!broken.link.problem) throw new Error("The demo's broken connector didn't break.");
-  tools.allow("ado", "Data Platform");
+  // Every connection syncs cleanly: the demo world shows working tools, not broken ones (the broken-connector watcher
+  // is covered by tests/api.test.mjs).
 
   log("• Firm library (policies, standards, templates)");
   const firmIds = {};
@@ -736,7 +725,7 @@ async function phaseB() {
     if (pending && p.key === "litware") await run("INSERT INTO reminder_state (workspace_id, item_key, status, until_at, updated_by, updated_at) VALUES (?, ?, 'dismissed', NULL, ?, ?) ON CONFLICT (workspace_id, item_key) DO NOTHING", ws, `item:${pending.id}`, lead, iso(nowMs - dayMs));
   }
 
-  log("• Watcher material: chats waiting in Northwind's Microsoft tenant, broken connectors, a decision that changes a runbook");
+  log("• Watcher material: chats waiting in Northwind's Microsoft tenant, a decision that changes a runbook");
   const northwind = world.orgs.northwind;
   // Northwind's Microsoft tenant is the demo tenant, so chats added there wait to be assigned (Groups page).
   await run("UPDATE orgs SET entra_tenant_id = ? WHERE id = ?", TENANT, northwind);
@@ -753,20 +742,9 @@ async function phaseB() {
       `19:demo-waiting-${i}@thread.v2`, SERVICE_URL, TENANT, name, since, since, by, oid, since,
     );
   }
-  // Connectors report their own health (lib/connector-health.ts): phase A left Litware's Azure DevOps project
-  // refusing access, which the broken-connector watcher turns into a finding.
-  // Teams posts that failed in one chat nothing posts to later (phase C's reminders go to Contoso and Fabrikam, and a
-  // successful post clears the finding); phase C adds a real failed post in another chat too.
-  const quietChat = world.chats.find((c) => !["contoso", "fabrikam", "litware", "tailwind"].includes(c.key) && !c.guests);
-  if (quietChat) {
-    await run("UPDATE teams_conversations SET last_post_ok_at = ? WHERE id = ?", iso(nowMs - 3 * dayMs), quietChat.id);
-    for (const [what, hours] of [["a reminder", 30], ["meeting notes", 5]]) {
-      await run(
-        "INSERT INTO teams_post_failures (id, org_id, workspace_id, conversation_id, what, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        newId(), northwind, quietChat.ws, quietChat.id, what, "Error: Request failed with status code 403", iso(nowMs - hours * 3600_000),
-      );
-    }
-  }
+  // No failed Teams posts and no broken connectors in the demo world: Needs attention shows the everyday kind of
+  // finding (questions, action items, chats to assign, a notes chat to pick), not system failures. The failed-posts
+  // and broken-connector watchers are covered by tests/api.test.mjs.
   // Automatic notes after Teams meetings (lib/meetings-graph.ts): on for Northwind since last week; the latest two
   // meetings of three groups were captured from Teams (with their notes posted), one meeting several groups were in
   // waits for a group, and one was skipped. No Microsoft is called: the demo has no Entra app, so nothing polls.
@@ -851,12 +829,8 @@ async function phaseC() {
     const chat = world.chats.find((c) => c.key === key && !c.guests);
     await admin("POST", "/api/reminders", { id: chat.id, action: "send" });
   }
-  log("• Watchers: a Teams chat whose posts fail, one Sidekick was removed from, a new group with no lead");
-  const failing = world.chats.find((c) => c.key === "litware" && !c.guests) ?? world.chats[world.chats.length - 1];
-  failPosts.add(failing.id);
-  await admin("POST", "/api/reminders", { id: failing.id, action: "send" }, { ok: false });
-  failPosts.delete(failing.id);
-  const removed = world.chats.find((c) => c.key === "tailwind" && !c.guests) ?? world.chats.find((c) => c !== failing && c.key !== "contoso");
+  log("• Watchers: a Teams chat Sidekick was removed from, a new group with no lead");
+  const removed = world.chats.find((c) => c.key === "tailwind" && !c.guests) ?? world.chats.find((c) => c.key !== "contoso");
   await toBot(activity({ id: removed.id }, { type: "installationUpdate", action: "remove", from: { id: "29:demo-remover", name: "Jordan Lee", aadObjectId: "00000000-0000-4000-8000-0000000000bb" } }));
   await s.orgOwner("POST", "/api/workspaces", { name: "Bid team – Woodgrove RFP", client: "Woodgrove Bank" });
   const tick = await fetch(`${BASE}/api/jobs/tick`, { method: "POST", headers: { "x-sidekick-tick": TICK_SECRET, "content-type": "application/json" }, body: JSON.stringify({ sweep: true, kinds: ["watch.all", "watch.org"] }) }).then((r) => r.json());

@@ -1784,3 +1784,22 @@ test(`[${engine}] every AI feature has a plain name for the Owner Console (no ra
   assert.equal(aiFeatures.aiFeatureLabel("watch"), "Document checks");
   assert.equal(aiFeatures.aiFeatureLabel("old-feature"), "old-feature", "unknown ids are shown as they are");
 });
+
+const postErrors = await import("../src/lib/teams/post-errors.ts");
+
+test(`[${engine}] failed Teams posts read as a plain sentence, never a library error or status code`, () => {
+  const cases = [
+    ["AxiosError: Request failed with status code 403", /refused the post/],
+    ["Error: Request failed with status code 500", /unavailable/],
+    ["AxiosError: Request failed with status code 404", /couldn't find the chat/],
+    ["AxiosError: Request failed with status code 429", /slow down/],
+    ["Error: connect ECONNREFUSED 127.0.0.1:1234", /couldn't be reached/],
+    ["Something odd", /didn't accept the post/],
+    [null, /didn't accept the post/],
+  ];
+  for (const [raw, want] of cases) {
+    const text = postErrors.teamsErrorText(raw);
+    assert.match(text, want, String(raw));
+    assert.ok(!/Axios|Error:|status code|\b\d{3}\b|ECONN/.test(text), `no raw error in "${text}"`);
+  }
+});

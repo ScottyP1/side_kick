@@ -16,6 +16,7 @@ import { get } from "@/lib/db";
 import { linkedChat } from "@/lib/notes-chats";
 import { takeHit } from "@/lib/rate-limit";
 import { sendNotesTestMessage } from "@/lib/teams/bot";
+import { teamsErrorText } from "@/lib/teams/post-errors";
 import { failureReason } from "@/lib/trace";
 import { BRAND } from "@/lib/brand";
 
@@ -32,7 +33,7 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
     await sendNotesTestMessage(chat, group, user.name);
   } catch (e) {
     if (e instanceof HttpError) throw e;
-    throw new HttpError(409, `Couldn't post in ${label} (Teams said ${failureReason(e)}). Check that ${BRAND.name} is still in that chat in Teams.`);
+    throw new HttpError(409, `Couldn't post in ${label}: ${teamsErrorText(failureReason(e))}. Check that ${BRAND.name} is still in that chat in Teams.`);
   }
   await audit(user, `Sent a test message to Teams chat ${label} (where meeting notes go)`, "Agent action", ws);
   return { ok: true, chat: chat.name };

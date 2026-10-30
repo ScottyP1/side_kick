@@ -45,6 +45,7 @@ import { versionKey } from "./rank";
 import { tagSafe } from "./security";
 import { BRAND } from "./brand";
 import { KIND_LABEL as TOOL_LABEL, PROJECT_WORD, type ConnectorKind } from "./connector-text";
+import { teamsErrorText } from "./teams/post-errors";
 
 /** The kinds of finding, one per watcher (chats have two: waiting to be assigned, and removed in Teams). */
 export const FINDING_KINDS = ["unanswered", "failed_replies", "chat_waiting", "chat_removed", "self_removal", "overdue_items", "unowned_items", "stale_doc", "no_lead", "no_notes_chat", "broken_connector", "connector_request", "connector_signins", "role_changed", "misfiled_doc"] as const;
@@ -160,7 +161,7 @@ const failedReplies: Watcher = {
       out.push({
         kind: "failed_replies", workspaceId: r.workspace_id, subject: r.id, audience: "managers", severity: "bad",
         title: `${BRAND.name}'s posts aren't reaching ${quote(chatName(r), 60)}`,
-        detail: `${plural(r.n, "post")} failed since ${fmtDay(r.last)}${latest ? ` (latest: ${latest.what}; Teams said: ${latest.error})` : ""}.`,
+        detail: `${plural(r.n, "post")} failed since ${fmtDay(r.last)}${latest ? ` (latest: ${latest.what}; ${teamsErrorText(latest.error)})` : ""}.`,
         nextStep: `Check ${BRAND.name} is still in that chat and the chat still exists in Teams. Removing ${BRAND.name} and adding it again usually fixes it; the next post that gets through clears this.`,
         actionHref: `/workspaces/${r.workspace_id}`, actionLabel: "Open group", data: { failures: r.n, conversationId: r.id },
       });

@@ -44,17 +44,16 @@ connect GitHub for Contoso (the fake GitHub sign-in approves at once) and link `
 SharePoint folder "Store Operations › Documents › Wave 2 Cutover" (a Word cutover plan, a PDF go-live checklist, a
 PowerPoint steering deck and a text file; an 80 MB photo PDF shows as "1 not read") feed the Contoso group ("What's
 blocking the payment gateway cutover?", "How do we roll a store back?", "What budget did the steering committee
-approve?"), "Data Platform" feeds Litware
-and shows a problem ("refused access", also a "Connector not working" finding for Litware's managers): press **Sync now**
-to fix it.
+approve?"), "Data Platform" feeds Litware. Every connection syncs cleanly (the demo shows working tools; broken ones
+are covered by the automated tests).
 **Sync now**, Reconnect and the work item links work against the fake; the demo copy and the seed share a made-up
 encryption key so the sealed sign-ins open. `--tools-port <n>` moves the fake when seeding.
 
 With fake Claude, new questions get short "Test answer…" replies; the seeded history, notes and maps are realistic.
 Start the copy without `SIDEKICK_FAKE_CLAUDE=1` to use the real Claude (costs money). **Teams** is a fake too: the seeded
 chats post to the fake tools server (`/teams`, port 3331), so notes, reminders and answers "post" like in a working
-tenant and Home's Teams health reads normal. The failed posts the watchers show were made while seeding and sit in the
-past; a post that really fails in the demo copy still turns the health line amber.
+tenant and Home's Teams health reads normal. The demo has no failed posts; a post that really fails in the demo copy
+still turns the health line amber and raises a "Teams posts failing" finding in plain words.
 
 ## What's in it
 
@@ -66,7 +65,7 @@ past; a post that really fails in the demo copy still turns the health line ambe
 | **Firm library** | Expense policy v3 (replaces v2), travel, rate card, data handling, information security, RAID-log standard, status-report template; a **data residency standard for the two banking groups only** (Applies to: Fabrikam Bank, Woodgrove Bank) |
 | **Upload guard** | Maria Chen (Contoso and Litware) put a **Litware file into Contoso** by mistake: it's **Held** on Contoso's Knowledge page ("Keep it here, or move it?"). A **Contoso store checklist uploaded to the firm library** is held there too ("Put it in the Contoso group instead?"). Both show under Needs attention (Contoso's Team Lead; the firm one for Org Owner/Admins) |
 | **Edge cases** | Alpine Ski House **Ending** (roll-off, deleted in 21 days); Fabrikam Bank with stricter guardrails and a custom rule; a Contoso chat with **client guests** (Shareable-only answers); overdue and unowned action items; a document that contradicts a later meeting in every group (runbook date vs. moved milestone) and a scope conflict; AI credit at ~68% (seed with `-- --credit-banner` for ~84% and the 80% notice, for a Usage & billing shot) |
-| **Needs attention** (watchers) | The seed runs the job queue once, so Home and the groups' Overview tabs show findings of every kind: unanswered questions, a Teams chat whose posts fail, one Sidekick was removed from, two chats waiting in Northwind's Microsoft tenant ("Bid war room" added by Contoso's Team Lead, so she can assign it herself; "Friday demo prep" by an Org Admin), overdue and unowned action items, the Contoso runbook a later decision changed, a new "Bid team – Woodgrove RFP" group with no Team Lead and no notes chat, Azure DevOps and Jira connectors that stopped working. Sign in as different roles to see who sees what. The demo copy runs with its job heartbeat off; findings stay as seeded |
+| **Needs attention** (watchers) | The seed runs the job queue once, so Home and the groups' Overview tabs show findings of every kind: unanswered questions, a Teams chat Sidekick was removed from, two chats waiting in Northwind's Microsoft tenant ("Bid war room" added by Contoso's Team Lead, so she can assign it herself; "Friday demo prep" by an Org Admin), overdue and unowned action items, the Contoso runbook a later decision changed, a new "Bid team – Woodgrove RFP" group with no Team Lead and no notes chat, and the GitHub request waiting for the Org Owner (no failed Teams posts or broken connectors: the demo shows a working setup). Sign in as different roles to see who sees what. The demo copy runs with its job heartbeat off; findings stay as seeded |
 | **Support** | Tickets from four roles with the Sidekick team's replies, an internal note, a resolved one, and one from the public form |
 | **Other clients** | Tailspin Partners (Starter, 14 of 15 people, 1 of 1 group, knowledge map turned off by the Sidekick team), Trey Research Group (trial ending in 4 days), Lucerne Partners (payment failed) |
 | **Owner Console** | An operator account; ~8 weeks of AI usage history per client for Business, Clients and Performance |

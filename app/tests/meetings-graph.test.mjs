@@ -345,6 +345,11 @@ async function until(check, what = "the condition", ms = 15000) {
   }
   assert.fail(`Timed out waiting for ${what}`);
 }
+/**
+ * Runs job-queue sweeps until `check()` is true. One sweep may not reach a recurring job (live.watch, live.auto) among
+ * the others queued with it, especially on the slower Postgres run, so a test waits for the effect, not one sweep.
+ */
+const sweepUntil = (check, what) => until(async () => (await check()) || (await drain({ sweep: true }), await check()), what, 30000);
 const logLen = (botId) => BOTS.get(botId).log.length;
 
 /* ---------- fake Microsoft: sign-in keys, app tokens and Graph ---------- */
@@ -2211,7 +2216,7 @@ test(`[${ENGINE}] live: never talks over anyone; speaks after a pause when the g
   await say(bot, "Mo Member", "No idea.");
   await waitLog(bot, /hand:true/, n);
   await new Promise((r) => setTimeout(r, 3300));
-  await drain({ sweep: true });
+  await sweepUntil(() => BOTS.get(bot).log.slice(n).some((x) => x.startsWith("chat:")), "the expired hand's answer in the chat");
   const expired = await waitLog(bot, /chat:/, n);
   assert.match(expired, /In case it helps \(I had my hand up\)/);
   assert.doesNotMatch(expired, /speak:/);
@@ -2314,8 +2319,7 @@ test(`[${ENGINE}] live: hours count against the plan; joining is refused when th
   await waitChat(bot, /listening for W1/);
   await dbExec(`UPDATE live_sessions SET joined_at = '${new Date(Date.now() - 61 * 60_000).toISOString()}' WHERE bot_id = '${bot}'`);
   const n = BOTS.get(bot).chat.length;
-  await drain({ sweep: true });
-  await waitSession(bot, "status", "ended");
+  await sweepUntil(async () => (await sessionOf(bot, "status")) === "ended", "the session leaving when the hours are used up");
   assert.equal(await sessionOf(bot, "end_reason"), "This month's live meeting hours are used up.");
   await until(() => BOTS.get(bot).left, `${bot} left`);
   assert.match(BOTS.get(bot).chat.slice(n).join("\n"), /hours are used up, so I'm leaving/);
@@ -2332,8 +2336,8 @@ test(`[${ENGINE}] live: "Every group meeting" joins a group's scheduled meeting 
   await dbExec("UPDATE meeting_nudges SET status = 'gone'");
   assert.equal((await lou("PUT", liveUrl(s.w1), { mode: "auto" })).status, 200);
   schedule("liveauto", { organizer: OID.lou, attendees: [OID.mo], guests: [OID.guest], emails: ["mo@a.test"], inDays: minutes(-1) });
-  await drain({ sweep: true });
-  await drain({ sweep: true });
+  // The calendar read plans the meeting, then live.auto joins it (sweeps until both have run).
+  await sweepUntil(() => [...BOTS.values()].some((b) => b.url === joinUrlFor("liveauto")), "the automatic join");
   const auto = [...BOTS.entries()].filter(([, b]) => b.url === joinUrlFor("liveauto"));
   assert.equal(auto.length, 1, "joined once");
   const [bot] = auto[0];
@@ -2344,8 +2348,7 @@ test(`[${ENGINE}] live: "Every group meeting" joins a group's scheduled meeting 
   assert.equal([...BOTS.values()].filter((b) => b.url === joinUrlFor("liveauto")).length, 1, "not again");
   // Still in the lobby 15 minutes later: Sidekick gives up and says why.
   await dbExec(`UPDATE live_sessions SET created_at = '${new Date(Date.now() - 16 * 60_000).toISOString()}' WHERE bot_id = '${bot}'`);
-  await drain({ sweep: true });
-  await waitSession(bot, "status", "failed");
+  await sweepUntil(async () => (await sessionOf(bot, "status")) === "failed", "giving up in the lobby");
   assert.match(await sessionOf(bot, "end_reason"), /Nobody let Sidekick \(notes\) in from the lobby/);
   await until(() => BOTS.get(bot).left, `${bot} left`);
   assert.equal((await lou("PUT", liveUrl(s.w1), { mode: "ask" })).status, 200);
@@ -2404,9 +2407,8 @@ test(`[${ENGINE}] live: the bot's container exits when it leaves; one that doesn
   assert.equal((await lou("POST", liveUrl(s.w1), { action: "stop", session: id })).status, 200);
   assert.equal(await sessionOf(stuck, "exited_at"), "");
   await dbExec(`UPDATE live_sessions SET ended_at = '${new Date(Date.now() - 10 * 60_000).toISOString()}' WHERE bot_id = '${stuck}'`);
-  await drain({ sweep: true });
-  assert.ok(armCalls.some((c) => c.op === "stop" && c.execution === BOTS.get(stuck).execution), "stopped in Azure");
-  assert.notEqual(await sessionOf(stuck, "exited_at"), "");
+  const stopped = () => armCalls.some((c) => c.op === "stop" && c.execution === BOTS.get(stuck).execution);
+  await sweepUntil(async () => stopped() && (await sessionOf(stuck, "exited_at")) !== "", "the stuck container stopped in Azure and marked exited");
 });
 
 test(`[${ENGINE}] live: the Owner Console's cost meter, and the platform cap: warning at 80%, paused at 100% (running meetings finish)`, async () => {
@@ -2433,8 +2435,7 @@ test(`[${ENGINE}] live: the Owner Console's cost meter, and the platform cap: wa
   const warn = await owner("PUT", "/api/owner/live/cap", { kind: "usd", amount: Math.round((spent / 0.9) * 100) / 100 });
   assert.equal(warn.status, 200, JSON.stringify(warn.body));
   assert.equal(warn.body.level, "warn");
-  await drain({ sweep: true });
-  assert.match(await scalar("SELECT action FROM platform_log WHERE action LIKE 'Live meeting bots are at%' ORDER BY id DESC LIMIT 1"), /of this month's cap/);
+  await sweepUntil(async () => /of this month's cap/.test(await scalar("SELECT action FROM platform_log WHERE action LIKE 'Live meeting bots are at%' ORDER BY id DESC LIMIT 1")), "the 80% warning in the operator log");
   assert.ok((await owner("GET", "/api/owner/overview")).body.alerts.some((a) => a.href === "/owner/live" && a.kind === "warn"));
   assert.match(await scalar("SELECT action FROM platform_log WHERE action LIKE 'Set the live meeting bot cap%' ORDER BY id DESC LIMIT 1"), /\$/);
   // Reached: no new meetings, said plainly; the running one isn't stopped.
@@ -2442,9 +2443,9 @@ test(`[${ENGINE}] live: the Owner Console's cost meter, and the platform cap: wa
   const starts = armCalls.filter((c) => c.op === "start").length;
   assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("cap2")}`), /Live help is paused[\s\S]*notes after meetings still work/);
   assert.equal(armCalls.filter((c) => c.op === "start").length, starts, "no container started");
-  await drain({ sweep: true });
+  // Sweep until live.watch has raised the 100% alert; by then it has also looked at the running meeting.
+  await sweepUntil(async () => /joins no new meetings/.test(await scalar("SELECT action FROM platform_log WHERE action LIKE 'Live meeting bots reached%' ORDER BY id DESC LIMIT 1")), "the 100% alert in the operator log");
   assert.equal(await sessionOf(running, "status"), "live", "the meeting already running finishes");
-  assert.match(await scalar("SELECT action FROM platform_log WHERE action LIKE 'Live meeting bots reached%' ORDER BY id DESC LIMIT 1"), /joins no new meetings/);
   assert.ok((await owner("GET", "/api/owner/overview")).body.alerts.some((a) => a.href === "/owner/live" && a.kind === "bad"));
   // In meeting hours instead: plenty left, so it joins again. Back to the default afterwards.
   assert.equal((await owner("PUT", "/api/owner/live/cap", { kind: "hours", amount: 1000 })).body.level, "ok");

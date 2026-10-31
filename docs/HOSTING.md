@@ -16,6 +16,7 @@ signed in as CodyScott@SidekickLabs334.onmicrosoft.com. Set up October 16, 2026.
 | Search | AI Search `sidekick-labs-search` (Free: 50 MB, 3 indexes; how full it is is checked hourly, Owner Console → Business → Search capacity), index `sidekick-cloud` (local copies use `sidekick-passages`) | Central US | $0 |
 | Embeddings / Claude via Foundry | `codyscott-9578-resource` | East US 2 | pay per use |
 | Budget freeze | Logic App `sidekick-freeze` + action group `sidekick-freeze-ag` | East US | ~$0 (runs only on alert) |
+| Live meeting bot (only during meetings, not created yet) | Container Apps job `sidekick-meetbot` in `sidekick-env` (2 vCPU / 4 GiB per meeting) + Azure AI Speech `sidekick-speech` (S0); budget `sidekick-meetbot-monthly` on tag `sidekick-meetbot=1`; set up by `infra/azure/meetbot-setup.sh` (docs/LIVE-MEETINGS.md) | East US | $0 fixed; ≈ $0.32–1.32 per meeting hour |
 | Teams bot registration | Azure Bot `sidekick-bot-dev` (F0, single tenant), endpoint = the live address + `/api/messages` | global | $0 |
 | Secrets | Key Vault `sidekick-kv` (Standard, RBAC, soft-delete 90 days + purge protection) | East US | ~$0.03/month |
 

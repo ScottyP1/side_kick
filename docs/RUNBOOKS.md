@@ -987,3 +987,42 @@ Scaling up, step 5. The same alert says "move to a bigger tier or add a partitio
    the Anthropic Console's usage page before raising the setting.
 4. Job queue behind (Owner Console → Job queue, oldest wait over 15 minutes): add copies (step 3) or raise
    `SIDEKICK_JOB_CONCURRENCY` to 8.
+
+## Meeting bot (live in meetings)
+Sidekick's own meeting bot runs as **one Azure Container Apps job execution per meeting** (`sidekick-meetbot` in
+`sidekick-env`); nothing runs between meetings. Design and costs: docs/LIVE-MEETINGS.md → "Runs only during meetings";
+the image: `meetbot/README.md`.
+
+**Set up / update** (only after Cody approves the Azure resources; idempotent, safe to re-run, also rolls the job to the
+latest image):
+```bash
+CONFIRM=yes BUDGET_EMAIL=<who gets the budget emails> infra/azure/meetbot-setup.sh
+```
+
+**See what's running and what it costs:**
+- Owner Console → **Live meetings**: sessions running, failures, this month's estimate and "on pace for", and the cap.
+- In Azure, executions and their status:
+  ```bash
+  az containerapp job execution list -g sidekick-rg -n sidekick-meetbot -o table
+  ```
+- One execution's logs (the shim's lines start with `[meetbot]`):
+  ```bash
+  az containerapp job logs show -g sidekick-rg -n sidekick-meetbot --execution <name> --container meetbot
+  ```
+
+**Stop spending now:**
+- Owner Console → Live meetings → set the cap to 0. No new meetings; running ones finish.
+- Or Releases & switches → **Live in meetings** off. Running ones leave within a minute.
+- A stuck execution is stopped by Sidekick 3 minutes after its meeting ends. To stop one by hand:
+  ```bash
+  az containerapp job stop -g sidekick-rg -n sidekick-meetbot --job-execution-name <name>
+  ```
+
+**Common problems:**
+- "Nobody let Sidekick (notes) in from the lobby": the meeting's lobby setting. Someone admits it, or the organizer
+  lets people bypass the lobby.
+- The session shows "Azure speech-to-text" a lot: Teams captions are off or stalling in those meetings (live captions
+  are a Teams meeting policy). The cost meter shows the speech-to-text minutes.
+- Joins fail with "Azure couldn't start the meeting bot (403…)": the app's identity lost its role on the job. Re-run
+  the setup script.
+- The image build fails on a patch: Attendee changed. Re-check `meetbot/patches/` against the new tag.

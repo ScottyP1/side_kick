@@ -1,0 +1,12 @@
+--- a/bots/serializers.py
++++ b/bots/serializers.py
+@@ -1597,7 +1597,8 @@
+             if audio_type in value and value.get(audio_type):
+                 audio_url = value.get(audio_type, {}).get("url")
+                 if audio_url:
+-                    if not audio_url.lower().startswith("wss://"):
++                    # Sidekick: the shim in the same container listens on ws://127.0.0.1 (meetbot/patches/README.md).
++                    if not audio_url.lower().startswith("wss://") and not audio_url.lower().startswith("ws://127.0.0.1:"):
+                         raise serializers.ValidationError({audio_type: {"url": "URL must start with wss://"}})
+ 
+         # Make sure we haven't hit the case where both webcam and screenshare are disabled

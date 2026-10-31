@@ -1,12 +1,13 @@
 /**
  * GET /api/owner/overview: platform-wide AI spend, clients, error rate and response times for the Owner Console home,
- * plus `alerts`: things the operator must act on (today: "Search is almost full" from lib/search-capacity.ts, while
- * the Azure AI Search service is 70%+ full). Who: platform operators only.
+ * plus `alerts`: things the operator must act on ("Search is almost full" from lib/search-capacity.ts, while the
+ * Azure AI Search service is 70%+ full; live meeting bots at 80%+ of the monthly cap, lib/live-meetings/spend.ts). Who: platform operators only.
  */
 import { handle } from "@/lib/api";
 import { all, get } from "@/lib/db";
 import { requireOwner } from "@/lib/owner";
 import { searchCapacity } from "@/lib/search-capacity";
+import { capState } from "@/lib/live-meetings/spend";
 
 export const GET = handle(async () => {
   await requireOwner();
@@ -25,8 +26,12 @@ export const GET = handle(async () => {
     day,
   ))!;
   const search = await searchCapacity();
+  const cap = await capState();
   return {
-    alerts: search?.message ? [{ kind: search.level === "full" ? "bad" : "warn", text: search.message, href: "/owner/business#search-capacity" }] : [],
+    alerts: [
+      ...(search?.message ? [{ kind: search.level === "full" ? "bad" : "warn", text: search.message, href: "/owner/business#search-capacity" }] : []),
+      ...(cap.message ? [{ kind: cap.level === "reached" ? "bad" : "warn", text: cap.message, href: "/owner/live" }] : []),
+    ],
     kpis: {
       tenants: await n("SELECT COUNT(*) n FROM orgs"),
       activeTenants: await n("SELECT COUNT(DISTINCT org_id) n FROM usage_events WHERE created_at >= ?", since7),

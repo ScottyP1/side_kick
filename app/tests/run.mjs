@@ -7,6 +7,8 @@
  *   2c. Meetings wave (tests/meetings-graph.test.mjs: automatic notes from a fake Microsoft Graph, Save to knowledge,
  *       the Teams tab; its own app copy on TEST_MEET_PORT, else TEST_MT_PORT) on SQLite, then Postgres.
  *   2d. Demo world seed (tests/seed-demo.test.mjs: `npm run seed:demo` on a fresh SQLite copy, twice) on SQLite.
+ *   2e. Meeting-bot shim (../meetbot/shim/core.test.mjs: the shim inside the live meeting bot's container, against a
+ *       fake Attendee and a fake Sidekick; no database).
  *   3. Production build (`next build`), the same step the Docker image and the Azure deploy run. The tests
  *      above use `next dev`, which lets through some errors only a production build reports (for example a
  *      page that needs a <Suspense> boundary under cacheComponents), so this catches them before a deploy does.
@@ -68,6 +70,7 @@ if (pgOk) step("Multi-tenant Teams · Postgres", ["--test", "--test-timeout=3000
 step("Meetings wave (Graph, tab) · SQLite", ["--test", "--test-timeout=300000", "tests/meetings-graph.test.mjs"], { TEST_DB: "sqlite" });
 if (pgOk) step("Meetings wave (Graph, tab) · Postgres", ["--test", "--test-timeout=300000", "tests/meetings-graph.test.mjs"], { TEST_DB: "postgres", TEST_DATABASE_URL: PG_URL });
 step("Demo world seed · SQLite", ["--test", "--test-timeout=600000", "tests/seed-demo.test.mjs"], {});
+step("Meeting-bot shim", ["--test", "--test-timeout=60000", "../meetbot/shim/core.test.mjs"], {});
 
 /**
  * Runs `next build` like the Docker image does, in a throwaway build folder (NEXT_DIST_DIR) so it never

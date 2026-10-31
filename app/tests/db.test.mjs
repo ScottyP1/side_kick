@@ -1900,3 +1900,33 @@ test(`[${engine}] live meetings: a member of the meeting: questions to the room,
   assert.equal(liveSig.verifyAttendeeWebhook(undefined, new Headers({ "x-webhook-signature": sig }), JSON.stringify(body)), false);
   assert.equal(liveSig.verifyAttendeeWebhook(secret, new Headers(), JSON.stringify(body)), false);
 });
+
+test(`[${engine}] live meetings: how Sidekick's own bot hears (captions first, Azure speech-to-text when they stall), and its signatures`, () => {
+  const t0 = Date.parse("2026-10-31T10:00:00.000Z");
+  const h = (o) => ({ source: "captions", since: t0, captionsAt: t0, speechAt: null, captionsUnavailable: false, ...o });
+  assert.equal(liveRules.hearingNext(h({}), t0 + 60_000), null, "nobody talking: no reason to switch");
+  assert.equal(liveRules.hearingNext(h({ speechAt: t0 + 5000 }), t0 + 10_000), null, "talking, but not 20 s without a caption yet");
+  assert.deepEqual(liveRules.hearingNext(h({ speechAt: t0 + 5000 }), t0 + 21_000), { source: "stt", reason: "Teams captions stopped while people were talking." });
+  assert.equal(liveRules.hearingNext(h({ speechAt: t0 + 5000, captionsAt: t0 + 6000 }), t0 + 21_000), null, "a caption after the talking: fine");
+  assert.equal(liveRules.hearingNext(h({ captionsUnavailable: true }), t0).source, "stt", "captions can't be turned on");
+  const stt = (o) => h({ source: "stt", since: t0, captionsAt: null, ...o });
+  assert.equal(liveRules.hearingNext(stt({ captionsAt: t0 + 130_000 }), t0 + 60_000), null, "at least 2 minutes on speech-to-text");
+  assert.deepEqual(liveRules.hearingNext(stt({ captionsAt: t0 + 125_000 }), t0 + 130_000), { source: "captions", reason: "Teams captions are working again." });
+  assert.equal(liveRules.hearingNext(stt({ captionsAt: t0 + 100_000 }), t0 + 130_000), null, "a caption too long ago");
+  assert.equal(liveRules.hearingNext(stt({ captionsAt: t0 + 125_000, captionsUnavailable: true }), t0 + 130_000), null);
+  assert.equal(liveRules.minuteOf(t0 + 61_000), "2026-10-31T10:01");
+  // Events from the bot's container: the session's key over timestamp and body, and only for its own session.
+  const key = (session) => `key-${session}`;
+  const body = JSON.stringify([{ bot_id: "sess-1", trigger: "transcript.update", data: {} }]);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const sig = (k, b = body, t = ts) => `v1,${crypto.createHmac("sha256", k).update(`${t}.${b}`).digest("base64")}`;
+  const hdr = (session, s, t = ts) => new Headers({ "x-sidekick-bot-session": session, "x-sidekick-bot-timestamp": t, "x-sidekick-bot-signature": s });
+  assert.equal(liveSig.verifyBotEvent(key, hdr("sess-1", sig("key-sess-1")), body), true);
+  assert.equal(liveSig.verifyBotEvent(key, hdr("sess-1", sig("key-sess-2")), body), false, "another session's key");
+  assert.equal(liveSig.verifyBotEvent(key, hdr("sess-2", sig("key-sess-2")), body), false, "a container speaking for another meeting");
+  const old = String(Math.floor(Date.now() / 1000) - 600);
+  assert.equal(liveSig.verifyBotEvent(key, hdr("sess-1", sig("key-sess-1", body, old), old), body), false, "too old");
+  assert.equal(liveSig.sameKey("abc", "abc"), true);
+  assert.equal(liveSig.sameKey("abd", "abc"), false);
+  assert.equal(liveSig.sameKey(null, "abc"), false);
+});

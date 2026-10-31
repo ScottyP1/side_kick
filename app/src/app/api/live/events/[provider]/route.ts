@@ -2,8 +2,9 @@
  * POST /api/live/events/:provider (`attendee` = Sidekick's own meeting bot, `recall` = Recall.ai): the live-meeting
  * provider's webhooks (lib/live-meetings/sessions.ts `handleLiveWebhook`):
  * transcript lines, meeting chat messages, participants joining, and the bot's status (in the lobby, admitted, meeting
- * ended, failed). Every request must carry that provider's signature over the raw body (Attendee: `X-Webhook-Signature`,
- * `ATTENDEE_WEBHOOK_SECRET`; Recall.ai: Standard Webhooks, `SIDEKICK_LIVE_WEBHOOK_SECRET`) or it's refused with 401
+ * ended, failed). Every request must carry that provider's signature over the raw body (Sidekick's own bot: the session's key over
+ * timestamp and body, `x-sidekick-bot-*`, lib/live-meetings/signature.ts `verifyBotEvent`; Recall.ai: Standard Webhooks,
+ * `SIDEKICK_LIVE_WEBHOOK_SECRET`) or it's refused with 401
  * before anything is read; only that provider's bots are looked up. The reply is 202 at once; answers
  * and chat posts run right after it (`after`), each in its session's organization.
  *

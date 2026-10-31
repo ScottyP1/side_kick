@@ -107,8 +107,9 @@ async function waitFor(conv, re, from = 0, ms = 20000) {
 }
 
 /* ---------- fake meeting bots: our own Attendee (the default) and Recall.ai (opt-in), and Azure AI Speech ---------- */
-const ATTENDEE_KEY = "test-attendee-key";
-const ATTENDEE_SECRET = crypto.randomBytes(32).toString("base64");
+const MEETBOT_SECRET = crypto.randomBytes(32).toString("base64");
+/** A session's own key, as Sidekick derives it (lib/live-meetings/launcher.ts botKey). */
+const botKeyOf = (session) => crypto.createHmac("sha256", MEETBOT_SECRET).update(`meetbot:${session}`).digest("base64url");
 const RECALL_KEY = "test-recall-key";
 const LIVE_SECRET = `whsec_${crypto.randomBytes(24).toString("base64")}`;
 // bot id → { provider, url, name, webhook, settings, left, chat: [messages], spoken: [texts], hand: [true/false], log: [everything in order] }
@@ -160,7 +161,97 @@ function fakeBots(provider, key, paths) {
     });
   });
 }
-const attendee = fakeBots("attendee", ATTENDEE_KEY, { create: "/api/v1/bots", action: /^\/api\/v1\/bots\/([^/]+)\/(leave|send_chat_message|raise_hand|output_audio)$/ });
+/*
+ * Sidekick's own meeting bot: a fake Azure Resource Manager (and managed identity) that "starts a Container Apps job
+ * execution", and a fake container that behaves like meetbot/shim: it long-polls Sidekick for its commands and records
+ * them (chat, speak, hand, hearing, leave), and exits (sidekick.exit) when told to leave.
+ */
+const armCalls = []; // { op: "start" | "stop", path, body, auth }
+const ARM_JOB = "/subscriptions/sub-test/resourceGroups/sidekick-rg/providers/Microsoft.App/jobs/sidekick-meetbot";
+const arm = http.createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", async () => {
+    const send = (status, json) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(json));
+    };
+    const url = new URL(req.url, "http://x");
+    if (url.pathname === "/identity") {
+      if (req.headers["x-identity-header"] !== "test-identity" || url.searchParams.get("resource") !== "https://management.azure.com/") return send(400, {});
+      return send(200, { access_token: "arm-token", expires_on: String(Math.floor(Date.now() / 1000) + 3600) });
+    }
+    if (req.headers.authorization !== "Bearer arm-token" || url.searchParams.get("api-version") !== "2024-03-01") return send(401, { error: { message: "No." } });
+    const b = body ? JSON.parse(body) : {};
+    if (req.method === "POST" && url.pathname === `${ARM_JOB}/start`) {
+      armCalls.push({ op: "start", body: b });
+      if (liveFail.join) {
+        const status = liveFail.join;
+        liveFail.join = null;
+        return send(status, { error: { code: "BadRequest", message: "Meeting URL is not reachable." } });
+      }
+      const c = b.containers[0];
+      const env = Object.fromEntries(c.env.filter((e) => "value" in e).map((e) => [e.name, e.value]));
+      const execution = `sidekick-meetbot-${armCalls.length}`;
+      BOTS.set(env.SIDEKICK_SESSION, { provider: "attendee", url: env.MEETING_URL, name: env.BOT_NAME, env, container: c, execution, left: false, gone: false, deaf: false, hearing: "captions", chat: [], spoken: [], hand: [], log: [] });
+      fakeContainer(env.SIDEKICK_SESSION);
+      return send(200, { name: execution, id: `${ARM_JOB}/executions/${execution}` });
+    }
+    const stop = url.pathname.match(new RegExp(`^${ARM_JOB}/executions/([^/]+)/stop$`));
+    if (req.method === "POST" && stop) {
+      armCalls.push({ op: "stop", execution: stop[1] });
+      const bot = [...BOTS.values()].find((x) => x.execution === stop[1]);
+      if (bot) bot.gone = true;
+      return send(200, {});
+    }
+    send(404, { error: { message: "Not found." } });
+  });
+});
+/** The fake container's shim: polls commands until it leaves; `deaf` bots ignore everything (a stuck container). */
+async function fakeContainer(session) {
+  const bot = BOTS.get(session);
+  while (!bot.gone) {
+    if (bot.deaf) {
+      await new Promise((r) => setTimeout(r, 100));
+      continue;
+    }
+    let out;
+    try {
+      const res = await fetch(`${bot.env.SIDEKICK_URL}/api/live/bot/commands?wait=1`, { headers: { "x-sidekick-bot-session": session, Authorization: `Bearer ${bot.env.SIDEKICK_BOT_KEY}` } });
+      if (res.status === 401) return void (bot.gone = true);
+      out = await res.json();
+    } catch {
+      await new Promise((r) => setTimeout(r, 100));
+      continue;
+    }
+    for (const c of out.commands ?? []) {
+      if (c.kind === "chat") {
+        bot.chat.push(c.data.text);
+        bot.log.push(`chat:${c.data.text}`);
+      } else if (c.kind === "hand") {
+        bot.hand.push(c.data.raised);
+        bot.log.push(`hand:${c.data.raised}`);
+      } else if (c.kind === "speak") {
+        const said = Buffer.from(c.data.mp3, "base64").toString("utf8");
+        bot.spoken.push(said);
+        bot.log.push(`speak:${said}`);
+      } else if (c.kind === "hearing") {
+        bot.hearing = c.data.source;
+        bot.log.push(`hearing:${c.data.source}`);
+        await pushLive(session, { trigger: "sidekick.hearing", data: { source: c.data.source } });
+      } else if (c.kind === "leave") {
+        bot.left = true;
+        await pushLive(session, { trigger: "bot.state_change", data: { new_state: "ended", event_type: "bot_left" } });
+        await pushLive(session, { trigger: "sidekick.exit", data: { reason: "left" } });
+        bot.gone = true;
+      }
+    }
+    if (out.stop && !bot.gone) {
+      await pushLive(session, { trigger: "sidekick.exit", data: { reason: "Sidekick ended the session" } });
+      bot.gone = true;
+    }
+  }
+}
 const recall = fakeBots("recall", RECALL_KEY, { create: "/api/v1/bot/", action: /^\/api\/v1\/bot\/([^/]+)\/(leave_call|send_chat_message|output_audio)\/$/ });
 // Azure AI Speech (text to speech): the "MP3" is the spoken text, so the bots above can record what was said.
 const ttsCalls = [];
@@ -183,11 +274,11 @@ const tts = http.createServer((req, res) => {
 async function pushLive(botId, event, { secret, at = Date.now(), sign = true } = {}) {
   const provider = BOTS.get(botId)?.provider ?? "attendee";
   if (provider === "attendee") {
-    const payload = { idempotency_key: crypto.randomUUID(), bot_id: botId, bot_metadata: {}, ...event };
-    const raw = JSON.stringify(payload);
-    const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(",")}}` : JSON.stringify(v));
-    const sig = crypto.createHmac("sha256", Buffer.from(secret ?? ATTENDEE_SECRET, "base64")).update(canon(payload)).digest("base64");
-    return fetch(`${BASE}/api/live/events/attendee`, { method: "POST", headers: { "content-type": "application/json", ...(sign ? { "x-webhook-signature": sig } : {}) }, body: raw });
+    // What the shim in the bot's container sends: the session's events, signed with its own key over time and body.
+    const raw = JSON.stringify([{ bot_id: botId, ...event }]);
+    const ts = String(Math.floor(at / 1000));
+    const sig = crypto.createHmac("sha256", secret ?? botKeyOf(botId)).update(`${ts}.${raw}`).digest("base64");
+    return fetch(`${BASE}/api/live/events/attendee`, { method: "POST", headers: { "content-type": "application/json", ...(sign ? { "x-sidekick-bot-session": botId, "x-sidekick-bot-timestamp": ts, "x-sidekick-bot-signature": `v1,${sig}` } : {}) }, body: raw });
   }
   const raw = JSON.stringify(event);
   const id = `msg_${crypto.randomUUID()}`;
@@ -243,6 +334,15 @@ async function waitChat(botId, re, from = 0, ms = 20000) {
   throw new Error(`Timed out waiting for ${re} in ${botId}'s chat: ${(BOTS.get(botId)?.chat ?? []).slice(from).join(" | ").slice(0, 400)}`);
 }
 const lastBot = () => [...BOTS.keys()].at(-1);
+/** Waits until `check()` is true (the bot's container acts on its commands within a second or so). */
+async function until(check, what = "the condition", ms = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (await check()) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.fail(`Timed out waiting for ${what}`);
+}
 const logLen = (botId) => BOTS.get(botId).log.length;
 
 /* ---------- fake Microsoft: sign-in keys, app tokens and Graph ---------- */
@@ -603,7 +703,7 @@ before(async () => {
   SERVICE_URL = `http://127.0.0.1:${connector.address().port}`;
   await new Promise((r) => microsoft.listen(0, "127.0.0.1", r));
   MS_BASE = `http://127.0.0.1:${microsoft.address().port}`;
-  for (const srv of [attendee, recall, tts]) await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  for (const srv of [arm, recall, tts]) await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   tsconfigBefore = fs.readFileSync(path.join(APP, "tsconfig.json"), "utf8");
   const env = {
     ...process.env,
@@ -632,9 +732,13 @@ before(async () => {
     SIDEKICK_TICK_SECRET: TICK_SECRET,
     // Live in meetings: our own meeting bot (fake Attendee, with the raise-hand patch) by default, Recall.ai for an
     // organization that opts in, Azure AI Speech for spoken answers, waits 20x shorter, notes handed over at once.
-    ATTENDEE_BASE_URL: `http://127.0.0.1:${attendee.address().port}`,
-    ATTENDEE_API_KEY: ATTENDEE_KEY,
-    ATTENDEE_WEBHOOK_SECRET: ATTENDEE_SECRET,
+    SIDEKICK_MEETBOT_JOB: "sidekick-meetbot",
+    AZURE_SUBSCRIPTION_ID: "sub-test",
+    SIDEKICK_MEETBOT_IMAGE: "sidekicklabsacr.azurecr.io/meetbot:v1.89.2-test",
+    SIDEKICK_MEETBOT_SECRET: MEETBOT_SECRET,
+    SIDEKICK_ARM_BASE: `http://127.0.0.1:${arm.address().port}`,
+    IDENTITY_ENDPOINT: `http://127.0.0.1:${arm.address().port}/identity`,
+    IDENTITY_HEADER: "test-identity",
     ATTENDEE_RAISE_HAND: "1",
     RECALL_API_KEY: RECALL_KEY,
     RECALL_BASE_URL: `http://127.0.0.1:${recall.address().port}`,
@@ -674,7 +778,8 @@ after(async () => {
   }
   connector.close();
   microsoft.close();
-  for (const srv of [attendee, recall, tts]) srv.close();
+  for (const b of BOTS.values()) b.gone = true;
+  for (const srv of [arm, recall, tts]) srv.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
   fs.rmSync(path.join(APP, DIST), { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   if (tsconfigBefore) fs.writeFileSync(path.join(APP, "tsconfig.json"), tsconfigBefore);
@@ -1869,9 +1974,15 @@ test(`[${ENGINE}] live: @Sidekick join in a meeting chat joins as "Sidekick (not
   assert.equal(BOTS.get(bot).url, joinUrlFor("live1"), "the meeting's own link, from Graph");
   assert.equal(BOTS.get(bot).name, "Sidekick (notes)");
   assert.equal(BOTS.get(bot).provider, "attendee", "Sidekick's own meeting bot by default");
-  assert.equal(BOTS.get(bot).webhook, `${BASE}/api/live/events/attendee`);
-  assert.equal(BOTS.get(bot).settings.transcription_settings.meeting_closed_captions.teams_language, "en-us", "Teams' own captions: no other company hears the audio");
-  assert.equal(BOTS.get(bot).settings.recording_settings.format, "none", "nothing recorded");
+  // One Container Apps job execution for this meeting: its size, the meeting's settings, the job's secrets by name only.
+  const started = armCalls.filter((c) => c.op === "start").at(-1).body.containers[0];
+  assert.equal(started.image, "sidekicklabsacr.azurecr.io/meetbot:v1.89.2-test");
+  assert.deepEqual(started.resources, { cpu: 2, memory: "4Gi" });
+  assert.equal(BOTS.get(bot).env.SIDEKICK_URL, BASE, "the container calls out to Sidekick");
+  assert.equal(BOTS.get(bot).env.SIDEKICK_BOT_KEY, botKeyOf(bot), "its own key, for this meeting only");
+  assert.equal(BOTS.get(bot).env.RAISE_HAND, "1");
+  assert.ok(started.env.some((e) => e.name === "AZURE_SPEECH_KEY" && e.secretRef === "speech-key" && !("value" in e)), "secrets by reference, never their values");
+  assert.ok(await sessionOf(bot, "launched_at"), "its container time counts from now");
   assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE '%sent to the Teams meeting%' ORDER BY id DESC LIMIT 1"), /invited by Lou Lead/);
   assert.match(await sayTo(LIVE1, "join"), /already in this meeting/, "never twice in one meeting");
   // Waiting in the lobby, then let in: the first message says it's listening and how to remove it (through the Teams bot).
@@ -1984,7 +2095,7 @@ test(`[${ENGINE}] live: a running list of decisions and action items; "Sidekick,
   await say(bot, "Mo Member", "Sidekick, leave.");
   await waitChat(bot, /Okay, leaving now/, k);
   await waitSession(bot, "status", "ended");
-  assert.equal(BOTS.get(bot).left, true);
+  await until(() => BOTS.get(bot).left, `${bot} left`);
   assert.equal(await sessionOf(bot, "end_reason"), "Mo Member asked Sidekick to leave.");
   assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Sidekick (notes) left%' ORDER BY id DESC LIMIT 1"), /asked Sidekick to leave/);
   // No Teams transcript came: the live transcript becomes the meeting, and the usual notes are written and posted once.
@@ -2204,7 +2315,7 @@ test(`[${ENGINE}] live: hours count against the plan; joining is refused when th
   await drain({ sweep: true });
   await waitSession(bot, "status", "ended");
   assert.equal(await sessionOf(bot, "end_reason"), "This month's live meeting hours are used up.");
-  assert.equal(BOTS.get(bot).left, true);
+  await until(() => BOTS.get(bot).left, `${bot} left`);
   assert.match(BOTS.get(bot).chat.slice(n).join("\n"), /hours are used up, so I'm leaving/);
   assert.equal((await owner("PATCH", `/api/owner/tenants/${s.orgA}/terms`, { limits: null })).status, 200);
   // A provider refusing the join: the session shows failed with the reason, and the chat is told.
@@ -2234,8 +2345,110 @@ test(`[${ENGINE}] live: "Every group meeting" joins a group's scheduled meeting 
   await drain({ sweep: true });
   await waitSession(bot, "status", "failed");
   assert.match(await sessionOf(bot, "end_reason"), /Nobody let Sidekick \(notes\) in from the lobby/);
-  assert.equal(BOTS.get(bot).left, true);
+  await until(() => BOTS.get(bot).left, `${bot} left`);
   assert.equal((await lou("PUT", liveUrl(s.w1), { mode: "ask" })).status, 200);
+});
+
+/** A line heard by Azure speech-to-text in the bot's container (the shim marks it). */
+const sttLine = (botId, name, text) => pushLive(botId, { trigger: "transcript.update", data: { speaker_name: name, transcription: { transcript: text }, source: "azure_stt" } });
+const sessionSql = (bot) => `(SELECT id FROM live_sessions WHERE bot_id = '${bot}')`;
+
+test(`[${ENGINE}] live: our own bot hears with Teams captions first; stalled or unavailable captions switch it to Azure speech-to-text, minute by minute`, async () => {
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("hear1")}`), /Joining now/);
+  const bot = lastBot();
+  s.hearBot = bot;
+  await botStatus(bot, "in_call");
+  await waitChat(bot, /listening for W1/);
+  assert.equal(await sessionOf(bot, "hearing"), "captions", "captions first: free, and Microsoft transcribes inside Teams");
+  await say(bot, "Lou Lead", "Captions work at the start.");
+  // Mo talks, but no caption comes (20 s here 1 s): Sidekick tells the bot to hear with Azure speech-to-text.
+  await speaking(bot, "Mo Member", true);
+  await new Promise((r) => setTimeout(r, 1300));
+  await speaking(bot, "Mo Member", false);
+  await until(() => BOTS.get(bot).hearing === "stt", "the switch to speech-to-text");
+  await waitSession(bot, "hearing", "stt");
+  const lines = Number(await sessionOf(bot, "line_count"));
+  await sttLine(bot, "Mo Member", "We moved the zebracode review to Thursday.");
+  await waitSession(bot, "line_count", String(lines + 1));
+  // A caption arriving while on speech-to-text isn't a second copy of the line; it only says captions work again.
+  await say(bot, "Mo Member", "We moved the zebracode review to Thursday.");
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await sessionOf(bot, "line_count"), String(lines + 1));
+  assert.ok(await sessionOf(bot, "captions_at"));
+  assert.ok(Number(await scalar(`SELECT COUNT(*) FROM live_hearing WHERE session_id = ${sessionSql(bot)} AND source IN ('stt', 'both')`)) >= 1, "speech-to-text minutes are counted");
+  assert.match((await lou("GET", liveUrl(s.w1))).body.sessions.find((x) => x.status === "live").hearing, /Azure speech-to-text/);
+  // Another meeting where Teams captions can't be turned on: straight to speech-to-text.
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("hear2")}`), /Joining now/);
+  const other = lastBot();
+  await botStatus(other, "in_call");
+  await waitChat(other, /listening for W1/);
+  await pushLive(other, { trigger: "sidekick.captions_unavailable", data: { reason: "Teams captions couldn't be turned on" } });
+  await until(() => BOTS.get(other).hearing === "stt", "speech-to-text when captions are unavailable");
+  s.hearBot2 = other;
+});
+
+test(`[${ENGINE}] live: the bot's container exits when it leaves; one that doesn't is stopped in Azure`, async () => {
+  const bot = s.hearBot;
+  // It hears with speech-to-text now: a caption would only say captions work again.
+  await sttLine(bot, "Lou Lead", "Sidekick, leave.");
+  await waitSession(bot, "status", "ended");
+  await until(() => BOTS.get(bot).gone, "the container exiting");
+  await until(async () => (await sessionOf(bot, "exited_at")) !== "", "exited_at");
+  assert.equal(armCalls.filter((c) => c.op === "stop" && c.execution === BOTS.get(bot).execution).length, 0, "it left by itself: nothing to stop");
+  // A stuck container: it takes no commands. Stopped from the portal, it doesn't exit; a few minutes later Azure stops it.
+  const stuck = s.hearBot2;
+  BOTS.get(stuck).deaf = true;
+  const id = await sessionOf(stuck, "id");
+  assert.equal((await lou("POST", liveUrl(s.w1), { action: "stop", session: id })).status, 200);
+  assert.equal(await sessionOf(stuck, "exited_at"), "");
+  await dbExec(`UPDATE live_sessions SET ended_at = '${new Date(Date.now() - 10 * 60_000).toISOString()}' WHERE bot_id = '${stuck}'`);
+  await drain({ sweep: true });
+  assert.ok(armCalls.some((c) => c.op === "stop" && c.execution === BOTS.get(stuck).execution), "stopped in Azure");
+  assert.notEqual(await sessionOf(stuck, "exited_at"), "");
+});
+
+test(`[${ENGINE}] live: the Owner Console's cost meter, and the platform cap: warning at 80%, paused at 100% (running meetings finish)`, async () => {
+  assert.equal((await mo("PUT", "/api/owner/live/cap", { kind: "usd", amount: 1 })).status, 401, "operators only");
+  let r = (await owner("GET", "/api/owner/live")).body;
+  assert.deepEqual(r.cap.cap, { kind: "usd", amount: 50 }, "$50 a month until set");
+  assert.equal(r.cap.level, "ok");
+  // One meeting's container ran an hour: 2 vCPU × $0.000024 + 4 GiB × $0.000003 per second = $0.216.
+  await dbExec(`UPDATE live_sessions SET launched_at = '${new Date(Date.now() - 2 * 3600_000).toISOString()}', exited_at = '${new Date(Date.now() - 3600_000).toISOString()}' WHERE bot_id = '${s.hearBot}'`);
+  r = (await owner("GET", "/api/owner/live")).body;
+  assert.ok(r.spend.containerUsd >= 0.21 && r.spend.containerUsd < 0.3, JSON.stringify(r.spend));
+  assert.ok(r.spend.sttMinutes >= 1, "speech-to-text minutes");
+  assert.ok(r.spend.ttsChars > 0 && r.spend.ttsUsd >= 0, "spoken characters");
+  assert.ok(r.spend.onPaceUsd >= r.spend.totalUsd);
+  assert.deepEqual(r.spend.size, { cpu: 2, memoryGib: 4 });
+  // A meeting running when the cap is reached finishes.
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("cap1")}`), /Joining now/);
+  const running = lastBot();
+  await botStatus(running, "in_call");
+  await waitChat(running, /listening for W1/);
+  // Warning at 80%: the cap set so this month is at about 90%.
+  const spent = (await owner("GET", "/api/owner/live")).body.spend.totalUsd;
+  assert.equal((await owner("PUT", "/api/owner/live/cap", { kind: "euros", amount: 5 })).status, 400);
+  const warn = await owner("PUT", "/api/owner/live/cap", { kind: "usd", amount: Math.round((spent / 0.9) * 100) / 100 });
+  assert.equal(warn.status, 200, JSON.stringify(warn.body));
+  assert.equal(warn.body.level, "warn");
+  await drain({ sweep: true });
+  assert.match(await scalar("SELECT action FROM platform_log WHERE action LIKE 'Live meeting bots are at%' ORDER BY id DESC LIMIT 1"), /of this month's cap/);
+  assert.ok((await owner("GET", "/api/owner/overview")).body.alerts.some((a) => a.href === "/owner/live" && a.kind === "warn"));
+  assert.match(await scalar("SELECT action FROM platform_log WHERE action LIKE 'Set the live meeting bot cap%' ORDER BY id DESC LIMIT 1"), /\$/);
+  // Reached: no new meetings, said plainly; the running one isn't stopped.
+  assert.equal((await owner("PUT", "/api/owner/live/cap", { kind: "usd", amount: Math.round(spent * 50) / 100 })).body.level, "reached");
+  const starts = armCalls.filter((c) => c.op === "start").length;
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("cap2")}`), /Live help is paused[\s\S]*notes after meetings still work/);
+  assert.equal(armCalls.filter((c) => c.op === "start").length, starts, "no container started");
+  await drain({ sweep: true });
+  assert.equal(await sessionOf(running, "status"), "live", "the meeting already running finishes");
+  assert.match(await scalar("SELECT action FROM platform_log WHERE action LIKE 'Live meeting bots reached%' ORDER BY id DESC LIMIT 1"), /joins no new meetings/);
+  assert.ok((await owner("GET", "/api/owner/overview")).body.alerts.some((a) => a.href === "/owner/live" && a.kind === "bad"));
+  // In meeting hours instead: plenty left, so it joins again. Back to the default afterwards.
+  assert.equal((await owner("PUT", "/api/owner/live/cap", { kind: "hours", amount: 1000 })).body.level, "ok");
+  assert.equal((await owner("PUT", "/api/owner/live/cap", { kind: "usd", amount: 50 })).status, 200);
+  await say(running, "Lou Lead", "Sidekick, leave.");
+  await waitSession(running, "status", "ended");
 });
 
 test(`[${ENGINE}] live: Owner Console report; Stop from the portal; isolation (another organization sees and stops nothing)`, async () => {
@@ -2259,7 +2472,7 @@ test(`[${ENGINE}] live: Owner Console report; Stop from the portal; isolation (a
   assert.equal(await scalar(`SELECT COUNT(*) FROM live_sessions WHERE org_id <> '${s.orgA}'`), "0");
   const stopped = await lou("POST", liveUrl(s.w1), { action: "stop", session: id });
   assert.equal(stopped.status, 200, JSON.stringify(stopped.body));
-  assert.equal(BOTS.get(bot).left, true);
+  await until(() => BOTS.get(bot).left, `${bot} left`);
   assert.match(BOTS.get(bot).chat.join("\n"), /stopped from the portal/);
   assert.equal((await lou("POST", liveUrl(s.w1), { action: "stop", session: id })).status, 409);
   // "@Sidekick leave" with nothing running.

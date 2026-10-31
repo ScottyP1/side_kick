@@ -5,9 +5,9 @@
  * its hand and play speech. This file is the provider-agnostic contract and the list of providers.
  *
  * Concepts
- * - **Self-hosted first** (`attendee`): the open-source Attendee bot running in Sidekick's own Azure subscription
- *   (`ATTENDEE_BASE_URL`, `ATTENDEE_API_KEY`, `ATTENDEE_WEBHOOK_SECRET`). Meeting audio stays in Microsoft Teams and
- *   our Azure; no new company receives it. It's every organization's provider unless it opts in to a hosted one.
+ * - **Self-hosted first** (`attendee`): the open-source Attendee bot in Sidekick's own Azure, one Container Apps job
+ *   execution per meeting (lib/live-meetings/attendee.ts, launcher.ts). Meeting audio stays in Microsoft Teams and our
+ *   Azure; no new company receives it. It's every organization's provider unless it opts in to a hosted one.
  * - **Hosted, per-organization opt-in** (`recall`): Recall.ai (`RECALL_API_KEY`, …). Only used for an organization whose
  *   Org Owner chose it (`orgs.live_provider`), and listed as a sub-processor for those organizations only
  *   (lib/subprocessors.ts). Never used as a silent fallback.
@@ -34,7 +34,7 @@ export const PROVIDER_INFO: Record<ProviderId, { label: string; hosted: boolean;
   attendee: {
     label: "Sidekick's own meeting bot",
     hosted: false,
-    where: "Meeting audio stays in Microsoft Teams and Sidekick's own Azure subscription (Teams captions, Azure AI Speech for the spoken answers). No other company receives it.",
+    where: "Runs in Sidekick's own Azure only while a meeting is on. It hears through Teams' own captions (or Azure AI Speech in Sidekick's Azure when captions aren't available), and speaks with Azure AI Speech. No other company receives the meeting's audio.",
   },
   recall: {
     label: "Recall.ai (hosted meeting bot)",
@@ -49,9 +49,15 @@ export type LiveStatus = "joining" | "waiting" | "in_call" | "ended" | "failed";
 /** One thing a provider tells Sidekick about a bot (see the file header). `botId` is the provider's id for the bot. */
 export type LiveEvent =
   | { kind: "status"; botId: string; status: LiveStatus; detail: string | null }
-  | { kind: "line"; botId: string; speaker: string | null; text: string; source: "speech" | "chat" }
+  | { kind: "line"; botId: string; speaker: string | null; text: string; source: "speech" | "chat"; heardBy?: "captions" | "stt" }
   | { kind: "participant"; botId: string; name: string | null; tenantId: string | null; guest: boolean }
-  | { kind: "speech"; botId: string; name: string | null; speaking: boolean };
+  | { kind: "speech"; botId: string; name: string | null; speaking: boolean }
+  /** Sidekick's own bot: it switched how it hears (Teams captions or Azure speech-to-text). */
+  | { kind: "hearing"; botId: string; source: "captions" | "stt"; detail: string | null }
+  /** Sidekick's own bot: Teams captions can't be turned on in this meeting (switch to speech-to-text). */
+  | { kind: "captions_unavailable"; botId: string; detail: string | null }
+  /** Sidekick's own bot: its container is exiting (the meeting is over for it). */
+  | { kind: "exit"; botId: string; detail: string | null };
 
 /** What Sidekick asks a provider to do. Each call throws on failure (a plain message, no secrets). */
 export interface LiveProvider {
@@ -69,6 +75,8 @@ export interface LiveProvider {
   raiseHand(botId: string, up: boolean): Promise<void>;
   /** Plays speech (MP3, base64) through the bot's microphone. Only when `can.speak`. */
   speak(botId: string, mp3Base64: string): Promise<void>;
+  /** How the bot hears: Teams captions or Azure speech-to-text (Sidekick's own bot only; others ignore it). */
+  setHearing?(botId: string, source: "captions" | "stt"): Promise<void>;
   /** Whether a webhook request really came from the provider (signature over the raw body). */
   verify(headers: Headers, rawBody: string): boolean;
   /** The events in one webhook body; anything Sidekick doesn't use is dropped. */

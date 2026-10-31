@@ -1,0 +1,10 @@
+{
+  "name": "sidekick-meetbot-shim",
+  "private": true,
+  "type": "module",
+  "description": "Sidekick's meeting-bot shim: between Attendee in the container and Sidekick (meetbot/README.md).",
+  "dependencies": {
+    "microsoft-cognitiveservices-speech-sdk": "1.47.0",
+    "ws": "8.18.3"
+  }
+}

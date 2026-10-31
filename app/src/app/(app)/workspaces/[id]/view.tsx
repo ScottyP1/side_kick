@@ -13,7 +13,9 @@
  *   group's Team Lead and Org Owners/Admins choose, everyone else sees it read-only; GET/PUT
  *   /api/workspaces/:id/notes-chats, lib/notes-chats.ts; "Send test message" per chat: POST …/notes-chats/test), then
  *   **Transcription reminders** (on/off for "Turn on transcription?" in the group's calls: GET/PUT
- *   /api/workspaces/:id/call-nudge, lib/call-nudge.ts), then
+ *   /api/workspaces/:id/call-nudge, lib/call-nudge.ts), **Live in meetings** (Enterprise: Sidekick joins the group's
+ *   Teams meetings live; off / when asked / every group meeting, latest sessions, Stop: /api/workspaces/:id/live,
+ *   lib/live-meetings/), then
  *   the chats assigned to the group with their settings (reminders, tracking, client guests;
  *   components/chat-settings.tsx), unassign, and **Assign a chat**: in an organization tied to its Microsoft
  *   tenant, the chats waiting to be assigned (name, who added Sidekick and when, who's in it; GET
@@ -37,6 +39,7 @@ import { api, fmtDate, Icon, Modal, Pill, Spinner, Switch, useReportError, useTo
 import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
 import { Avatar, groupHealth, PeoplePicker, type Group, type OrgPerson } from "@/components/groups";
 import { BRAND } from "@/lib/brand";
+import { ANSWER_LABEL, BOT_NAME, LIVE_MODE_LABEL, LIVE_MODES, VOICE_LABEL, type LiveMode, type LiveSettings } from "@/lib/live-meetings/rules";
 import { FindingRows, useFindings } from "@/components/findings";
 
 type Member = { id: string; name: string; email?: string; role: string; microsoft: number };
@@ -520,6 +523,177 @@ function CallReminders({ group }: { group: Group }) {
   );
 }
 
+/** The group's "Live in meetings" panel, as GET /api/workspaces/:id/live returns it (lib/live-meetings/sessions.ts). */
+type LiveItem = { text: string; who: string | null; due?: string | null };
+type LivePanel = {
+  mode: LiveMode; changedBy: string | null; changedAt: string | null; included: boolean; configured: boolean; canManage: boolean;
+  settings: LiveSettings;
+  provider: { id: string; label: string; hosted: boolean; where: string; ready: boolean; canChoose: boolean; choices: { id: string; label: string; hosted: boolean }[] };
+  can: { raiseHand: boolean; speak: boolean };
+  hours: { used: number; limit: number | null };
+  sessions: {
+    id: string; title: string; status: "joining" | "live" | "ended" | "failed"; invitedBy: string; guests: boolean; createdAt: string; minutes: number;
+    endReason: string | null; error: string | null; answers: number; quiet: boolean; notes: string | null; decisions: LiveItem[]; actions: LiveItem[];
+  }[];
+};
+
+/**
+ * "Live in meetings" (Enterprise): whether Sidekick joins this group's Teams meetings live as "Sidekick (notes)" (off,
+ * when someone types @Sidekick join, or every group meeting), this month's live hours, and the latest sessions with
+ * their running list of decisions and action items while live, how each ended, and **Stop** for a running one. The
+ * group's Team Lead and Org Owners/Admins change it (PUT /api/workspaces/:id/live, audited); everyone else sees it.
+ */
+function LiveMeetings({ group }: { group: Group }) {
+  const toast = useToast();
+  const reportError = useReportError();
+  const [st, setSt] = useState<LivePanel | null>(null);
+  const [busy, setBusy] = useState(false);
+  const url = `/api/workspaces/${encodeURIComponent(group.id)}/live`;
+  useEffect(() => {
+    api<LivePanel>(url).then(setSt).catch(reportError);
+  }, [url, reportError]);
+  if (!st) return null;
+  const save = async (json: Record<string, unknown>, done: string) => {
+    setBusy(true);
+    try {
+      setSt(await api<LivePanel>(url, { method: "PUT", json }));
+      toast(done);
+    } catch (e) {
+      reportError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const chooseProvider = async (provider: string) => {
+    try {
+      await api("/api/live/provider", { method: "PUT", json: { provider } });
+      setSt(await api<LivePanel>(url));
+      toast("Meeting bot changed for your organization.");
+    } catch (e) {
+      reportError(e);
+    }
+  };
+  const change = async (mode: LiveMode) => {
+    setBusy(true);
+    try {
+      setSt(await api<LivePanel>(url, { method: "PUT", json: { mode } }));
+      toast(mode === "off" ? "Live in meetings is off." : `Live in meetings: ${LIVE_MODE_LABEL[mode].toLowerCase()}.`);
+    } catch (e) {
+      reportError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const stop = async (session: string) => {
+    try {
+      setSt(await api<LivePanel>(url, { method: "POST", json: { action: "stop", session } }));
+      toast(`${BOT_NAME} is leaving the meeting.`);
+    } catch (e) {
+      reportError(e);
+    }
+  };
+  const PILL: Record<LivePanel["sessions"][number]["status"], string> = { joining: "info", live: "good", ended: "", failed: "bad" };
+  return (
+    <div className="panel" style={{ marginBottom: 16 }}>
+      <div className="panel-h">
+        <div>
+          <h2>Live in meetings</h2>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            {BRAND.name} joins the group&apos;s Teams meetings as “{BOT_NAME}”, a member of the meeting: it answers when someone says or types “{BRAND.name}, …”, raises its hand when it can answer a question nobody else does, asks when an action item has no owner or date, keeps a list of decisions and action items, and the notes follow afterwards. It never talks over anyone, and with client guests present it only uses Shareable sources.
+            {st.changedBy ? ` Set by ${st.changedBy}${st.changedAt ? ` on ${fmtDate(st.changedAt)}` : ""}.` : ""}
+            {!st.canManage && " The group's Team Lead chooses this."}
+          </span>
+        </div>
+        {st.canManage && st.included && st.configured ? (
+          busy ? <Spinner /> : (
+            <select className="input" style={{ width: "auto" }} value={st.mode} onChange={(e) => change(e.target.value as LiveMode)} aria-label="Live in meetings">
+              {LIVE_MODES.map((m) => <option key={m} value={m}>{LIVE_MODE_LABEL[m]}</option>)}
+            </select>
+          )
+        ) : <Pill nodot>{LIVE_MODE_LABEL[st.mode]}</Pill>}
+      </div>
+      <div className="panel-b">
+        {!st.included && <p className="muted" style={{ margin: 0 }}>Live in meetings is part of the Enterprise plan. Contact the {BRAND.name} team to add it.</p>}
+        {st.included && !st.configured && <p className="muted" style={{ margin: 0 }}>Live in meetings isn&apos;t set up on this {BRAND.name} yet. The {BRAND.name} team turns it on.</p>}
+        {st.included && st.mode !== "off" && (
+          <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+            {st.mode === "auto" ? `${BRAND.name} joins every scheduled meeting that is clearly this group's (automatic notes must be on), and ` : ""}anyone in the group can type <b>@{BRAND.name} join</b> in a meeting&apos;s chat (or paste the meeting link after it). Someone may need to admit it from the lobby. Live hours this month: {st.hours.used}{st.hours.limit !== null ? ` of ${st.hours.limit}` : ""}.
+          </p>
+        )}
+        {st.included && st.mode !== "off" && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 10, fontSize: 13 }}>
+            <label>Answers{" "}
+              <select className="input" style={{ width: "auto" }} disabled={!st.canManage || busy} value={st.settings.answer} onChange={(e) => save({ answer: e.target.value }, "Saved.")} aria-label="Which questions Sidekick answers">
+                {(Object.keys(ANSWER_LABEL) as LiveSettings["answer"][]).map((k) => <option key={k} value={k}>{ANSWER_LABEL[k]}</option>)}
+              </select>
+            </label>
+            <label>Speaking{" "}
+              <select className="input" style={{ width: "auto" }} disabled={!st.canManage || busy} value={st.settings.voice} onChange={(e) => save({ voice: e.target.value }, "Saved.")} aria-label="When Sidekick speaks">
+                {(Object.keys(VOICE_LABEL) as LiveSettings["voice"][]).map((k) => <option key={k} value={k}>{VOICE_LABEL[k]}</option>)}
+              </select>
+            </label>
+            {st.settings.voice === "auto" && (
+              <label>Pause{" "}
+                <select className="input" style={{ width: "auto" }} disabled={!st.canManage || busy} value={st.settings.pauseS} onChange={(e) => save({ pauseS: Number(e.target.value) }, "Saved.")} aria-label="Seconds of silence before speaking">
+                  {[3, 5, 6, 8, 10, 15].map((n) => <option key={n} value={n}>{n} s of silence</option>)}
+                </select>
+              </label>
+            )}
+            <label><input type="checkbox" disabled={!st.canManage || busy} checked={st.settings.ask} onChange={(e) => save({ ask: e.target.checked }, "Saved.")} /> Asks its own questions (owners and dates)</label>
+          </div>
+        )}
+        {st.included && st.mode !== "off" && (
+          <p className="muted" style={{ margin: "8px 0 0", fontSize: 12.5 }}>
+            Meeting bot: <b>{st.provider.label}</b>. {st.provider.where}
+            {!st.can.speak && st.settings.voice !== "off" && " Spoken answers aren't set up yet, so it answers in the chat."}
+            {!st.can.raiseHand && " It can't raise its hand in Teams yet, so it puts ✋ in the chat instead."}
+            {" In a meeting, “"}{BRAND.name}{", quiet” keeps it to the chat until someone asks it."}
+          </p>
+        )}
+        {st.provider.canChoose && st.provider.choices.length > 1 && (
+          <p style={{ margin: "8px 0 0", fontSize: 12.5 }}>
+            <label>Your organization&apos;s meeting bot (Org Owner){" "}
+              <select className="input" style={{ width: "auto" }} value={st.provider.id} onChange={(e) => chooseProvider(e.target.value)} aria-label="Meeting bot for your organization">
+                {st.provider.choices.map((c) => <option key={c.id} value={c.id}>{c.label}{c.hosted ? " (another company hosts it)" : " (default)"}</option>)}
+              </select>
+            </label>
+          </p>
+        )}
+        {st.sessions.length > 0 && (
+          <div className="table-wrap" style={{ marginTop: 12 }}>
+            <table>
+              <thead><tr><th>Meeting</th><th>Invited</th><th className="r">Min</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {st.sessions.map((x) => (
+                  <tr key={x.id}>
+                    <td>
+                      {x.title}<div className="muted" style={{ fontSize: 12.5 }}>{fmtDate(x.createdAt)}{x.guests ? " · client guests" : ""}{x.quiet ? " · quiet" : ""}{x.answers ? ` · ${x.answers} answer${x.answers === 1 ? "" : "s"}` : ""}{x.notes ? ` · notes: ${x.notes.toLowerCase()}` : ""}</div>
+                      {x.status === "live" && (x.decisions.length > 0 || x.actions.length > 0) && (
+                        <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12.5 }}>
+                          {x.decisions.map((d, i) => <li key={`d${i}`}>Decided: {d.text}{d.who ? ` (${d.who})` : ""}</li>)}
+                          {x.actions.map((a, i) => <li key={`a${i}`}>To do: {a.text}{a.who ? `: ${a.who}` : ""}{a.due ? `, by ${a.due}` : ""}</li>)}
+                        </ul>
+                      )}
+                    </td>
+                    <td>{x.invitedBy === "auto" ? "Every group meeting" : x.invitedBy}</td>
+                    <td className="r num">{x.minutes}</td>
+                    <td>
+                      <Pill kind={PILL[x.status]}>{x.status === "joining" ? "Joining" : x.status === "live" ? "Live" : x.status === "ended" ? "Ended" : "Failed"}</Pill>
+                      {x.endReason && <div className="muted" style={{ fontSize: 12.5 }}>{x.endReason}</div>}
+                      {x.error && <div className="err" style={{ fontSize: 12.5 }}>{x.error}</div>}
+                    </td>
+                    <td>{st.canManage && (x.status === "joining" || x.status === "live") && <button className="btn small danger" onClick={() => stop(x.id)}>Stop</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * "Meeting notes go to", then the Teams chats assigned to this group, their settings, and assigning one: from the
  * chats waiting to be assigned when `picker` (the organization is tied to its Microsoft tenant, so Sidekick hands
@@ -590,6 +764,7 @@ function Chats({ group, links, notes, canManage, picker, reload }: { group: Grou
     <>
       {notes && notes.chats.length > 0 && <NotesGoTo key={`${notes.mode}:${notes.targets.join()}:${notes.chats.map((c) => c.id).join()}`} group={group} plan={notes} canManage={canManage} reload={reload} />}
       {notes && notes.chats.length > 0 && <CallReminders group={group} />}
+      <LiveMeetings group={group} />
       <div className="panel">
         <div className="panel-h">
           <div>

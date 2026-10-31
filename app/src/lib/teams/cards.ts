@@ -272,6 +272,8 @@ export function helpCard(workspace: string | null, installer?: Installer): IAdap
         { title: `@${BRAND.name} post meeting notes here`, value: "Send this group's meeting notes to this chat (Team Lead or admin)" },
         { title: `@${BRAND.name} stop posting notes here`, value: "Stop sending meeting notes to this chat (Team Lead or admin)" },
         { title: `@${BRAND.name} stop transcription reminders`, value: "No more “turn on transcription” reminders in this group's calls (Team Lead or admin)" },
+        { title: `@${BRAND.name} join`, value: "Join this chat's meeting live as Sidekick (notes) (Enterprise; `join <meeting link>` from another chat)" },
+        { title: `@${BRAND.name} leave`, value: "Leave the meeting; the notes follow in the group's chat" },
         { title: `@${BRAND.name} help`, value: "Show this card" },
       ],
     },

@@ -53,6 +53,16 @@
  * - `meetings.remind.check` (1 min): checks the group meetings that started 2+ minutes ago and posts one reminder per
  *   meeting when nothing shows transcription. Counts: `meetingsChecked`, `meetingsNudged`.
  *
+ * Live in Teams meetings (lib/live-meetings/sessions.ts, Enterprise):
+ * - `live.auto` (1 min): sends the meeting bot to group meetings starting now, for groups set to "Every group meeting"
+ *   (the meetings lib/meeting-nudge.ts planned). Counts: `liveAutoJoined`, `liveAutoFailed`.
+ * - `live.watch` (1 min): ends running sessions that must stop (paused, no longer in the plan, hours used up, 4 hours,
+ *   15 minutes in the lobby). Counts: `liveChecked`, `liveStopped`.
+ * - `live.extract` (payload `{ sessionId }`; key per session and line count): updates the running list of decisions
+ *   and action items. Counts: `decisions`, `actions`.
+ * - `live.handoff` (payload `{ sessionId }`; key per session; 30 min after the end): the live transcript becomes the
+ *   meeting's notes unless a Teams transcript claimed it. Counts: `captured`.
+ *
  * Adding one (e.g. item 4's meeting transcripts from Microsoft Graph): `defineJob("meetings.fetch", { label, run })`
  * here, then `enqueue("meetings.fetch", { orgId, payload: { meetingId }, key: \`meeting:${id}\` })` where it starts.
  * Keep payloads to ids, make `run` safe to repeat, and return a few counts.
@@ -73,6 +83,7 @@ import { watchCalls } from "./call-nudge";
 import { autoRecordOrgs, scanOrg } from "./auto-record";
 import { checkOrg, checkScheduledMeetings, meetingNudgeOrgs, planOrg } from "./meeting-nudge";
 import { span } from "./trace";
+import { autoJoinDue, extractLive, handoffLive, watchLive } from "./live-meetings/sessions";
 import { checkSearchCapacity } from "./search-capacity";
 
 const MIN = 60_000;
@@ -111,7 +122,9 @@ defineJob("jobs.prune", {
     const calls = await run("DELETE FROM call_nudges WHERE created_at < ?", monthAgo);
     // Scheduled meetings looked at for the same reminder (lib/meeting-nudge.ts): only needed around the meeting.
     const meetings = await run("DELETE FROM meeting_nudges WHERE starts_at < ?", monthAgo);
-    return { pruned: (await pruneJobs()) + failures.changes + calls.changes + meetings.changes };
+    // Live meeting lines left behind (a handoff that never ran): only needed until the notes are written.
+    const lines = await run("DELETE FROM live_lines WHERE said_at < ?", new Date(Date.now() - 2 * 86400_000).toISOString());
+    return { pruned: (await pruneJobs()) + failures.changes + calls.changes + meetings.changes + lines.changes };
   },
 });
 defineJob("data.retention", {
@@ -201,6 +214,30 @@ defineJob("meetings.fetch", {
       throw e;
     }
   },
+});
+defineJob("live.auto", {
+  label: "Send Sidekick to group meetings starting now (live in meetings)",
+  everyMs: MIN,
+  maxAttempts: 1,
+  leaseMs: 5 * MIN,
+  run: async () => span("job", "Join group meetings live", () => autoJoinDue()),
+});
+defineJob("live.watch", {
+  label: "Check Sidekick's running live meetings",
+  everyMs: MIN,
+  maxAttempts: 1,
+  leaseMs: 5 * MIN,
+  run: async () => span("job", "Check running live meetings", () => watchLive()),
+});
+defineJob("live.extract", {
+  label: "Update a live meeting's decisions and action items",
+  maxAttempts: 2,
+  run: async ({ job, payload }) => (job.org_id ? extractLive(job.org_id, String(payload.sessionId ?? "")) : undefined),
+});
+defineJob("live.handoff", {
+  label: "Hand a live meeting over to the notes",
+  maxAttempts: 4,
+  run: async ({ job, payload }) => (job.org_id ? handoffLive(job.org_id, String(payload.sessionId ?? "")) : undefined),
 });
 defineJob("meetings.notes", {
   label: "Write and post meeting notes",

@@ -37,6 +37,9 @@
  * - **Transcription reminders**: lib/call-nudge.ts posts "Turn on transcription?" in a linked group chat when a call
  *   runs without a transcript (through `postCard`); "@Sidekick stop/start transcription reminders" switches that for
  *   the chat's group (Team Lead or admin, `callNudgeFromTeams`).
+ * - **Live in meetings** (lib/live-meetings/, Enterprise): `@Sidekick join` in a meeting chat (or `join <meeting link>`
+ *   in any linked chat) sends the "Sidekick (notes)" meeting bot; `@Sidekick leave` sends it away. Its answers in a
+ *   meeting chat where this bot is come back through `postCard`. Viewers can't do either.
  * - **Adaptive Cards**: the formatted messages with buttons (see cards.ts). Button clicks come back as
  *   `card.action` activities and update the card in place.
  * - **Authentication**: in production every request carries a token signed by Microsoft for Sidekick's
@@ -65,6 +68,7 @@ import { homeTenantId, orgForTenant, portalUrl, tenantMode, type TenantOrg } fro
 import { olderOpenFor, recordChatMessage, reminderAction } from "../reminders";
 import { notesHereFromTeams, notesTargetsFor, parseNotesCommand, parsePosted, postedToLine, recordNotesPosted, type NotesChat, type PostedChat } from "../notes-chats";
 import { callNudgeFromTeams, parseNudgeCommand } from "../call-nudge";
+import { parseLiveCommand } from "../live-meetings/rules";
 import { BRAND } from "../brand";
 import { cleanOutput, getGuardPolicy } from "../guardrails";
 import { SAVABLE_KINDS, setItemSaved } from "../saved-items";
@@ -661,6 +665,18 @@ function registerHandlers(app: App) {
       const group = (await workspaceName(conv)) ?? "this group";
       const text = await span("teams", "Switch transcription reminders from Teams", () => callNudgeFromTeams(asker, conv.workspace_id!, group, nudgeCommand));
       return void (await send(cardMessage(noticeCard("Transcription reminders", text))));
+    }
+    // "@Sidekick join [meeting link]" / "@Sidekick leave": live in Teams meetings (lib/live-meetings/sessions.ts, Enterprise).
+    const liveCommand = parseLiveCommand(question);
+    if (liveCommand) {
+      if (!canEdit(asker)) return void (await send(cardMessage(noticeCard("Live in meetings", `Viewers can't bring ${BRAND.name} into meetings or send it away. Ask someone in the group.`))));
+      const chat = { id: conv.id, org_id: conv.org_id!, workspace_id: conv.workspace_id, name: conv.name, guests: conv.guests };
+      // Loaded when needed (it imports lib/meetings-graph.ts, which imports this file).
+      const { joinFromTeams, leaveFromTeams } = await import("../live-meetings/sessions");
+      const text = liveCommand.kind === "join"
+        ? await span("live", "Ask Sidekick to join a meeting", () => joinFromTeams(chat, asker, liveCommand.url))
+        : await span("live", "Ask Sidekick to leave a meeting", () => leaveFromTeams(chat, asker));
+      return void (await send(cardMessage(noticeCard("Live in meetings", text))));
     }
     traceScope({ actor: asker.name });
     // Follow-ups: in a channel the reply thread is the conversation (its id carries ";messageid=<first post>"); in a

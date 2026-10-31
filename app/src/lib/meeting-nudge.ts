@@ -113,13 +113,14 @@ export type MeetingNudgeStatus =
 
 /**
  * Organizations the reminder runs for: automatic notes on (lib/meetings-graph.ts `autoNotesOrgs`, none without a
- * Microsoft app) and at least one group that isn't ending with transcription reminders on.
+ * Microsoft app) and at least one group that isn't ending with transcription reminders on, or set to join every group
+ * meeting live (lib/live-meetings/sessions.ts `autoJoinDue` reads the meetings planned here).
  */
 export async function meetingNudgeOrgs(): Promise<string[]> {
   if (!entraConfigured()) return [];
   const out: string[] = [];
   for (const orgId of await autoNotesOrgs()) {
-    const any = await withOrg(orgId, () => get(`SELECT 1 AS ok FROM workspaces w WHERE w.org_id = ? AND (w.call_nudge IS NULL OR w.call_nudge <> 0) AND ${NOT_ENDING} LIMIT 1`, orgId));
+    const any = await withOrg(orgId, () => get(`SELECT 1 AS ok FROM workspaces w WHERE w.org_id = ? AND (w.call_nudge IS NULL OR w.call_nudge <> 0 OR w.live_mode = 'auto') AND ${NOT_ENDING} LIMIT 1`, orgId));
     if (any) out.push(orgId);
   }
   return out;

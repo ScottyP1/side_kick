@@ -83,6 +83,9 @@ export const MODELS = {
   // Watchers (lib/watchers.ts): only called when a cheap check already found a likely problem, e.g. "does this
   // newer decision change what this document says?". A short judgement, so a mid-size model by default.
   watch: process.env.SIDEKICK_MODEL_WATCH || process.env.SIDEKICK_MODEL || "claude-sonnet-5-5",
+  // Live in Teams meetings (lib/live-meetings/): the running list of decisions and action items, updated every few
+  // minutes of talk. SIDEKICK_MODEL_LIVE=claude-haiku-5-5 cuts its cost a lot (docs/LIVE-MEETINGS.md).
+  live: process.env.SIDEKICK_MODEL_LIVE || process.env.SIDEKICK_MODEL || "claude-opus-5-5",
 };
 export type Feature = keyof typeof MODELS;
 
@@ -139,6 +142,7 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
   if (!ctx.payer) addSpend(ctx.orgId, cost);
   if (content.includes("__FAIL__")) throw new HttpError(502, "Claude API error (test): fake failure for testing.");
   if (feature === "guard") return fakeGuard(content);
+  if (feature === "live") return fakeLive(content);
   if (feature === "followup") return fakeFollowUp(content);
   if (feature === "helpbot" || feature === "support") return fakeSupport(feature, content);
   if (feature === "watch") {
@@ -245,6 +249,19 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
       ]
     : [];
   return { topics: [{ name: "Test topic", summary: "About the test", coverage: 150, key_facts: [], document_titles: [], meeting_titles: [] }], gaps };
+}
+
+/**
+ * Test-mode running list for a live meeting (lib/live-meetings/sessions.ts `extractLive`): every line saying "we
+ * decided …" is a decision and every "I'll …" an action item owned by its speaker, so tests can check the list grows
+ * with the talk without a real model.
+ */
+function fakeLive(content: string) {
+  const lines = [...content.matchAll(/^\[[^\]]*\] ([^:\n]+): (.+)$/gm)].map((m) => ({ who: m[1].trim(), text: m[2].trim() }));
+  return {
+    decisions: lines.filter((l) => /\bwe decided\b/i.test(l.text)).map((l) => ({ text: l.text.replace(/^.*?\bwe decided (to )?/i, "").replace(/[.!]$/, ""), made_by: l.who })),
+    action_items: lines.filter((l) => /\bI'll\b/i.test(l.text)).map((l) => ({ text: l.text.replace(/^.*?\bI'll /i, "").replace(/[.!]$/, ""), owner: l.who, due: /\bby (\w+)/i.exec(l.text)?.[1] ?? null })),
+  };
 }
 
 /**
@@ -507,7 +524,7 @@ export type Ctx = { orgId: string | null; workspaceId: string | null; role?: str
 const SPAN_NAMES: Record<Feature, string> = {
   ask: "AI: write the answer", extract: "AI: write meeting notes", insights: "AI: build the knowledge map", assist: "AI: in-app assistant", guard: "AI: guardrail check",
   remind: "AI: word the reminders", support: "AI: support assistant", helpbot: "AI: public help bot", followup: "AI: rewrite the follow-up",
-  watch: "AI: check a document against a newer decision",
+  watch: "AI: check a document against a newer decision", live: "AI: update the live meeting's decisions",
 };
 export async function structured<S extends z.ZodType>(
   feature: Feature,
@@ -543,7 +560,7 @@ export const AI_LIMITS = (globalThis.__sidekickAiLimits ??= new FairLimiter({
   maxWaitMs: Math.max(1000, Number(process.env.SIDEKICK_CLAUDE_WAIT_MS || 45_000)),
 }));
 /** Features nobody is waiting on right now: they wait behind calls a person is waiting for. */
-const BACKGROUND_FEATURES = new Set<Feature>(["watch", "remind"]);
+const BACKGROUND_FEATURES = new Set<Feature>(["watch", "remind", "live"]);
 
 /**
  * The checks before any Claude work, live or batched: the kill switches and per-client restrictions

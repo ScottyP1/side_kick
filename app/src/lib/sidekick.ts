@@ -30,7 +30,7 @@ import { assertEnabled } from "./owner";
 import { takeQuestion } from "./rate-limit";
 import { creditStatus } from "./credit";
 import { excerptFor } from "./excerpt";
-import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenTurn, tidyCitations, type GuardPlace, type RuleId } from "./guardrails";
+import { answerRules, checkGrounding, cleanOutput, getGuardPolicy, recordGuard, refusalFor, screenTurn, tidyCitations, type GuardPlace, type RuleId, type SwitchKey } from "./guardrails";
 import { tagSafe } from "./security";
 import { BRAND } from "./brand";
 import { openWorkItemLines, workItemLinks } from "./connectors";
@@ -84,6 +84,13 @@ export type CitedSource = {
 
 /** Where Ask was used and what it should keep: filters, and the conversation for follow-ups. */
 export type AskOptions = {
+  /**
+   * Live meetings (lib/live-meetings/): passages to consider besides the search results, after them ("This meeting so
+   * far"), so an answer can use what was just said. Same walls: only ever this group's own meeting.
+   */
+  extraSources?: { title: string; loc: string; text: string; sourceType: string; sourceId: string; date: string | null }[];
+  /** Guardrail switches forced on for this question whatever the organization chose (live meetings: judging people). */
+  forceSwitches?: SwitchKey[];
   /** Portal: the conversation id the page holds (from the previous answer), or nothing for a first question. */
   conversation?: unknown;
   /** Teams: the thread (channel) or chat this question was asked in; chats also pass how long a follow-up stays open. */
@@ -162,7 +169,8 @@ export async function ask(user: User, workspaceId: string, question: string, gue
       : await openConversation(kind, owner, opts.conversation);
   const standalone = await standaloneQuestion(ctx, conv.turns, question);
   // The group's guardrails: org switches plus any it turned on itself, and org-wide + group custom rules.
-  const policy = await getGuardPolicy(user.org_id, workspaceId);
+  const stored = await getGuardPolicy(user.org_id, workspaceId);
+  const policy = opts.forceSwitches?.length ? { ...stored, switches: { ...stored.switches, ...Object.fromEntries(opts.forceSwitches.map((k) => [k, true])) } } : stored;
   const settings = policy.switches;
   const types = opts.types?.length ? [...new Set(opts.types.flatMap((t) => FILTER_TYPES[t] ?? []))] : undefined;
   // "Each person signs in" connections: only items the readers can open in the tool (checked with their own sign-in).
@@ -184,7 +192,12 @@ export async function ask(user: User, workspaceId: string, question: string, gue
     await addExchange(conv, { text: question, question: standalone.question, refused: true }, { text: reply, meta: { followUp: standalone.on } });
     return { ...base, access: [] as AccessNote[], found: false, answer: reply, sources: [] as CitedSource[], blocked: blocked as RuleId | null, conflict: false, questionId: null as string | null };
   }
-  const sources = found.map((p, i) => ({ id: `S${i + 1}`, ...p }));
+  const extra = (opts.extraSources ?? []).map((x, i) => ({
+    rowid: -1 - i, text: x.text, title: x.title, loc: x.loc, source_type: x.sourceType, source_id: x.sourceId, audience: "internal",
+    origin: "group" as const, date: x.date, outdated: null, score: 0,
+  }));
+  // The meeting so far goes after the search results (they're ranked; it isn't).
+  const sources = [...found, ...extra].map((p, i) => ({ id: `S${i + 1}`, ...p }));
   let result: z.infer<typeof AnswerSchema>;
   if (!sources.length) {
     const filtered = Boolean(types || opts.since || opts.until);

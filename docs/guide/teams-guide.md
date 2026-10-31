@@ -130,6 +130,9 @@ In one of a group's chats, its **Team Lead** (or an **Org Owner/Admin**) can typ
 | `@Sidekick post meeting notes here` | Send this group's meeting notes to this chat (Team Lead or admin) |
 | `@Sidekick stop posting notes here` | Stop sending meeting notes to this chat (Team Lead or admin) |
 | `@Sidekick stop transcription reminders` | No more "Turn on transcription?" reminders in this group's calls (Team Lead or admin; `start transcription reminders` turns them back on) |
+| `@Sidekick join` | In a meeting's chat: Sidekick joins the meeting live as **Sidekick (notes)** (Enterprise; the group's Live in meetings switch must be on; not Viewers). Anywhere in the group's chats: `@Sidekick join <meeting link>`. See [Sidekick live in meetings](meetings.md#sidekick-live-in-meetings-enterprise) |
+| `@Sidekick leave` | Sidekick leaves the meeting it's in for this group; the notes follow in the group's notes chat |
+| In a meeting: "Sidekick, …" / "Sidekick, recap" / "Sidekick, quiet" / "go ahead, Sidekick" | Ask it (said or typed), hear the decisions so far, keep it to the chat, or call on it when its hand is up. See [Sidekick live in meetings](meetings.md#sidekick-live-in-meetings-enterprise) |
 | `@Sidekick help` | Show what Sidekick can do here |
 
 ## The welcome message and help

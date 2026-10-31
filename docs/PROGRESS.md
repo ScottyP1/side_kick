@@ -1,6 +1,13 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 25, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Layout: **Where we are now** (status, live setup, limits, next, Cody's to-dos) → **Feature notes** (how each area works, newest first) → **History** (older checkpoints) → run/code map/gotchas.
+> Last updated: October 29, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Layout: **Where we are now** (status, live setup, limits, next, Cody's to-dos) → **Feature notes** (how each area works, newest first) → **History** (older checkpoints) → run/code map/gotchas.
+
+## Live in Teams meetings: stage 1, built against fake bots (Oct 29, 2026, branch `claude/admiring-pare-513fff`, PR #105)
+- **Vision (Cody):** Sidekick as a real member of the meeting: listens to talk and chat, knows everything about the client, raises its hand, answers and asks. **Research** in `docs/LIVE-MEETINGS.md`, self-hosted first, with Cody's five must-haves checked per option.
+- **Pick:** **Attendee self-hosted in our Azure (AKS)** + Teams' own captions + Azure AI Speech for the voice + our raise-hand patch (the only option meeting all five; meeting audio goes to no new company). **Recall.ai** is a per-organization opt-in. Costs: ~$130/month self-hosted at low use, ~$200–250 at 1,000 h; Recall $0.65/h; Claude ~$0.35/h.
+- **Built (stage 1):** provider layer (`attendee` default, `recall` opt-in by the Org Owner, sub-processor page updated); invites (`@Sidekick join`, every group meeting); addressed questions (hand → short spoken answer → sourced chat answer), questions to the room nobody answers (wait, confidence, hand up, called on or after a pause, else to the chat after a minute), never over a speaker, quiet mode, its own questions about owners and dates, running list, guest wall, judging people always refused, this meeting so far as a cited source, notes once, hours, audit, traces with heard→hand/spoken/chat timings, Owner Console. Group settings: answer mode, speaking, pause, own questions.
+- **Also fixed:** notes card dates now come from the transcript's own start (`heldTimes`), not the meeting's first schedule.
+- **Next (stage 2, needs Cody's OK):** deploy Attendee + raise-hand patch on AKS, Azure AI Speech resource, first trial in Sidekick Labs with latency numbers, streaming spoken answers, daily synthetic join test. Stage 3: contradiction/gap spotting, Teams side-panel switch. **Pricing decision** (Enterprise-only vs every plan vs add-on) is Cody's; nothing changed in plans.
 
 ## Paused here (Oct 25, 2026, late evening)
 Cody asked for a pause point. State at the pause:

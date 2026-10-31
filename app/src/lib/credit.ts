@@ -62,6 +62,7 @@ const PAUSED: Record<string, string> = {
   insights: "Knowledge map updates are",
   assist: "The in-app assistant is",
   extract: "Notes for long meetings (over about an hour) are",
+  live: "Live meeting decision lists are",
 };
 
 const cache = new Map<string, { at: number; status: CreditStatus }>();

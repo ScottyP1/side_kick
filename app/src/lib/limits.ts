@@ -10,7 +10,7 @@
  * - **Enforced where created**: each route that creates something counted here calls `assertCanAdd` first
  *   (people: POST /api/users; groups: POST /api/workspaces; tracked chats: POST /api/teams-links; meeting
  *   hours: POST /api/meetings; documents: POST /api/docs and POST /api/firm (group documents and the firm library count together); connectors: allowing a new tool type in
- *   lib/connector-requests.ts (`allowKind`); live meeting hours: when that exists, e.g. `assertCanAdd(orgId, "liveMeetingHours", hours)` before Sidekick joins a call). The refusal is
+ *   lib/connector-requests.ts (`allowKind`); live meeting hours: `assertCanAdd(orgId, "liveMeetingHours", …)` before Sidekick joins a meeting, lib/live-meetings/sessions.ts). The refusal is
  *   a 402 whose message names the limit and how to get more, with `kind: "limit"` and `limit` in the body.
  * - **Never deletes**: when a plan shrinks (or the team lowers a limit) nothing is removed; new things are
  *   refused and Usage & billing and the Owner Console show "over limit".
@@ -29,7 +29,8 @@
  */
 import "server-only";
 import { audit, HttpError } from "./auth";
-import { get, now, run } from "./db";
+import { all, get, now, run } from "./db";
+import { liveMinutes } from "./live-meetings/rules";
 import { activeGroupCount, getSubscription } from "./billing";
 import { withErrorDetails } from "./api";
 import { ENTERPRISE, FEATURE_KEYS, FEATURE_LABEL, featuresOf, groupOptions, LIMIT_KEYS, LIMIT_LABEL, limitsWithExtras, limitState, parseCustomLimits, planById, planWithExtras, planWithFeature, priceText, UNLIMITED, usd, type FeatureKey, type GroupOption, type LimitKey, type Plan, type PlanLimits } from "./plans";
@@ -105,8 +106,16 @@ export async function usageCounts(orgId: string): Promise<Record<LimitKey, numbe
     // Allowed tool types (Azure DevOps, Jira, GitHub, Confluence, Microsoft 365: lib/connectors.ts), however many groups connect each.
     count("SELECT COUNT(*) AS n FROM connector_kinds WHERE org_id = ?", orgId),
   ]);
-  // Live meetings (Sidekick joining calls, product step 3) aren't built yet: nothing used so far.
-  return { seats, workspaces, chats, meetingHours: minutes / 60, liveMeetingHours: 0, documents, connectors, aiCreditUsd: 0 };
+  return { seats, workspaces, chats, meetingHours: minutes / 60, liveMeetingHours: await liveHours(orgId), documents, connectors, aiCreditUsd: 0 };
+}
+
+/**
+ * Live meeting hours this month (Sidekick in Teams meetings live, lib/live-meetings/): each session from when it was
+ * admitted to when it left, sessions still running counted up to now. Sessions that never got in count nothing.
+ */
+async function liveHours(orgId: string): Promise<number> {
+  const rows = await all<{ joined_at: string | null; ended_at: string | null }>("SELECT joined_at, ended_at FROM live_sessions WHERE org_id = ? AND joined_at >= ?", orgId, monthStart());
+  return rows.reduce((sum, r) => sum + liveMinutes(r.joined_at, r.ended_at), 0) / 60;
 }
 
 /** One line of the limits report: label, used, limit and how full it is. */

@@ -31,7 +31,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 
 /** Kinds of steps. "rank" = re-ranking search results for an answer; "firm" = firm library uploads; "feedback" = 👍/👎; "job" = a background job (lib/jobs.ts); "watch" = a watcher check (lib/watchers.ts); "connector" = Azure DevOps / Jira / GitHub / Confluence / Microsoft 365 sign-ins and syncs. */
-export type SpanKind = "request" | "search" | "rank" | "ai" | "embed" | "teams" | "index" | "file" | "guard" | "remind" | "billing" | "microsoft" | "auth" | "rolloff" | "firm" | "feedback" | "job" | "watch" | "connector";
+export type SpanKind = "request" | "search" | "rank" | "ai" | "embed" | "teams" | "index" | "file" | "guard" | "remind" | "billing" | "microsoft" | "auth" | "rolloff" | "firm" | "feedback" | "job" | "watch" | "connector" | "live";
 export type Channel = "portal" | "teams" | "system";
 type Attrs = Record<string, string | number | boolean | null>;
 

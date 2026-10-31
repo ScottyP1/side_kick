@@ -8,6 +8,10 @@ There are two ways meetings get to Sidekick:
 - **Automatic notes after Teams meetings**: when a Teams meeting of a group's people ends, Sidekick reads its transcript and writes the notes by itself. That includes scheduled meetings and calls started with **Meet now** inside a group chat. No bot joins the call.
 - **Add a past or outside meeting**: upload a transcript yourself, for meetings held before automatic notes were on, or outside Teams.
 
+On the Enterprise plan Sidekick can also **join a meeting live** and answer questions while it runs: see [Sidekick live in meetings](#sidekick-live-in-meetings-enterprise).
+
+The date on the notes is the day the meeting was **held** (when transcription started), not the day it was first scheduled: a recurring meeting, or one held again on a later day with the same link, shows the right day.
+
 ## Automatic notes after Teams meetings
 
 ### Turning it on (Org Owners and Org Admins)
@@ -135,6 +139,32 @@ Decisions, requirements, risks, facts and terms from a meeting can be **saved to
 - in the portal, on the meeting's page or in the Teams tab, with **Save to knowledge** next to each one.
 
 A saved item becomes lasting knowledge: answers find it first, long after the meeting, and it's marked *Saved* with who saved it. **Remove from knowledge** undoes it. Members, Team Leads and admins can save; Viewers can't. Open questions and decisions still to make can't be saved (they're temporary).
+
+## Sidekick live in meetings (Enterprise)
+Sidekick can take part in a Teams meeting as a member called **Sidekick (notes)**. It listens to what's said and typed, knows everything in the group (this meeting so far, past meetings and notes, documents, the firm library, connected tools), and helps like a teammate:
+- **Ask it, out loud or in the chat**: "Sidekick, what did the client say about the cutover?" (or "…, Sidekick?", or "Sidekick?" and then the question). It raises its hand, gives a short spoken answer when your group allows speaking, then puts the full answer with its sources in the meeting chat.
+- **Questions nobody answers**: when someone asks the room and nobody knows ("not sure…"), and Sidekick is confident it has the answer from the group's sources, it **raises its hand**. Say "go ahead, Sidekick" and it answers; nobody calls on it within a minute and it lowers its hand and puts the answer in the chat. It never talks over anyone, and when it isn't sure it stays quiet.
+- **It asks too**: when an action item has no owner or date, it asks once ("Quick check: by when should Lou do this?"), the same polite way.
+- **Running list** of decisions and action items: "Sidekick, recap" reads it back; the group's page shows it during the meeting.
+- **Quiet mode**: "Sidekick, quiet" keeps it to answering in the chat when asked; "Sidekick, you can speak up" undoes it.
+- **Notes afterwards, once**: from Teams' transcript if there is one, otherwise from what Sidekick heard.
+- **Client guests**: when someone from outside your organization is in the meeting, Sidekick says so once and only uses sources marked **Shareable**. It never rates or ranks people.
+
+**Settings** (group's **Teams chats** tab; the Team Lead or an Org Owner/Admin):
+- **Live in meetings**: Off (default), **When someone asks** (`@Sidekick join` in the meeting's chat, or `@Sidekick join <meeting link>`), or **Every group meeting** (it joins each scheduled group meeting as it starts; needs automatic notes on).
+- **Answers**: only questions to Sidekick, or also questions nobody answers (default).
+- **Speaking**: chat only, speak when asked or called on (default), or also speak by itself after a few seconds of silence.
+- **Asks its own questions** (owners and dates): on by default.
+
+**Where it runs and where the audio goes.** By default Sidekick uses **its own meeting bot**, run by Sidekick in its own Azure: it listens through Teams' own live captions, so the meeting's audio isn't sent to any other company, and its spoken answers are made with Azure AI Speech in Sidekick's Azure. The Org Owner can choose a hosted meeting bot (Recall.ai) instead; that company then receives the meeting's audio, and it's listed on the sub-processor page for organizations that chose it. As for all notes, the text needed for an answer goes to Anthropic (Claude), which doesn't train on it.
+
+If the meeting has a lobby, someone lets **Sidekick (notes)** in. Its first message in the chat says it's listening and how to remove it: say "Sidekick, leave", type **@Sidekick leave**, remove it from the participants, or press **Stop** on the group's page. It also leaves when the meeting ends, after 4 hours, when this month's live meeting hours run out, or if nobody lets it in within 15 minutes.
+
+**Plan.** Live in meetings is part of the Enterprise plan (100 live meeting hours a month; Usage & billing shows how many are used). Everything is in the audit log.
+
+<!-- help-center:skip -->
+For developers: lib/live-meetings/ (sessions.ts, provider.ts, attendee.ts, recall.ts, speech.ts, signature.ts, rules.ts, claims.ts), routes /api/live/events/:provider, /api/workspaces/:id/live, /api/live/provider, /api/owner/live; research, design and what Cody must sign up for: docs/LIVE-MEETINGS.md; tests in app/tests/meetings-graph.test.mjs (fake Recall.ai) and app/tests/db.test.mjs (rules).
+<!-- /help-center:skip -->
 
 ## Sidekick in the Teams app bar and as a tab
 Sidekick also works as a Teams app with a **Meetings** tab:

@@ -90,7 +90,9 @@ export async function deleteWorkspace(orgId: string, workspaceId: string): Promi
     // row so the meeting isn't set again for another group.
     await run("UPDATE meeting_autorecord SET workspace_id = NULL, title = NULL, reason = 'The group was deleted.' WHERE workspace_id = ? AND org_id = ?", ...ws);
     // Live meetings (lib/live-meetings/): the group's sessions and anything said in them (running ones were stopped above).
-    await run("DELETE FROM live_lines WHERE org_id = ? AND session_id IN (SELECT id FROM live_sessions WHERE workspace_id = ? AND org_id = ?)", orgId, ...ws);
+    for (const t of ["live_lines", "live_commands", "live_hearing"]) {
+      await run(`DELETE FROM ${t} WHERE org_id = ? AND session_id IN (SELECT id FROM live_sessions WHERE workspace_id = ? AND org_id = ?)`, orgId, ...ws);
+    }
     await run("DELETE FROM live_sessions WHERE workspace_id = ? AND org_id = ?", ...ws);
     // Scheduled meetings waiting for a transcription reminder (lib/meeting-nudge.ts): forget them.
     await run("DELETE FROM meeting_nudges WHERE workspace_id = ? AND org_id = ?", ...ws);

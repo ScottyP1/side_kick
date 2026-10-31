@@ -5,6 +5,7 @@
  * (tests/db.test.mjs) can check every rule. Who may call: lib/live-meetings/sessions.ts, lib/teams/bot.ts, pages.
  */
 import { BRAND } from "../brand";
+import { isSpeed, isVoice } from "./voices";
 
 /** The name Sidekick's meeting bot shows in the participant list. */
 export const BOT_NAME = `${BRAND.name} (notes)`;
@@ -105,9 +106,12 @@ export type LiveSettings = {
   pauseS: number;
   /** Whether Sidekick asks its own questions (an action item with no owner or date). */
   ask: boolean;
+  /** The group's voice and speed (lib/live-meetings/voices.ts); null = the organization's default. */
+  voiceId: string | null;
+  speed: number | null;
 };
 /** Defaults (Cody, Oct 29): room questions on, hand up, speaks only when asked or called on, asks its own questions. */
-export const DEFAULT_SETTINGS: LiveSettings = { answer: "room", voice: "called", pauseS: 6, ask: true };
+export const DEFAULT_SETTINGS: LiveSettings = { answer: "room", voice: "called", pauseS: 6, ask: true, voiceId: null, speed: null };
 /** How each setting is shown on the group page. */
 export const ANSWER_LABEL: Record<LiveSettings["answer"], string> = { addressed: "Only questions to Sidekick", room: "Also questions nobody answers" };
 export const VOICE_LABEL: Record<LiveSettings["voice"], string> = { off: "Chat only", called: "Speak when asked or called on", auto: "Also speak after a pause" };
@@ -126,6 +130,8 @@ export function parseSettings(json: string | null | undefined): LiveSettings {
     voice: v.voice === "off" || v.voice === "called" || v.voice === "auto" ? v.voice : DEFAULT_SETTINGS.voice,
     pauseS: Number.isInteger(pause) && pause >= 2 && pause <= 30 ? pause : DEFAULT_SETTINGS.pauseS,
     ask: typeof v.ask === "boolean" ? v.ask : DEFAULT_SETTINGS.ask,
+    voiceId: isVoice(v.voiceId) ? v.voiceId : null,
+    speed: isSpeed(v.speed) ? v.speed : null,
   };
 }
 
@@ -248,3 +254,38 @@ export function answerText(question: string, answer: string, sources: ChatSource
   const text = `${head}\n${answer}${src}`;
   return text.length > 4000 ? `${text.slice(0, 3999)}…` : text;
 }
+
+/** How long people can be heard talking with no Teams caption before Sidekick switches to Azure speech-to-text. */
+export const CAPTION_STALL_MS = 20_000;
+/** At least this long on speech-to-text before going back to captions (no flapping). */
+export const STT_MIN_MS = 120_000;
+/** Captions this recent while on speech-to-text mean they're working again. */
+export const CAPTIONS_FRESH_MS = 15_000;
+
+/** What Sidekick knows about how its own bot hears a meeting (times in ms since 1970, null = never). */
+export type HearingState = { source: "captions" | "stt"; since: number; captionsAt: number | null; speechAt: number | null; captionsUnavailable: boolean };
+
+/**
+ * Whether Sidekick's own bot should switch how it hears, and why (null = keep as is). Teams captions first (free); to
+ * Azure AI Speech speech-to-text when captions can't be turned on, or when people have been talking for
+ * `CAPTION_STALL_MS` with no caption since (stalled or turned off); back to captions once they're fresh again after at
+ * least `STT_MIN_MS` on speech-to-text. `scale` shortens the times in tests. Pure.
+ */
+export function hearingNext(h: HearingState, at: number, scale = 1): { source: "captions" | "stt"; reason: string } | null {
+  if (h.source === "captions") {
+    if (h.captionsUnavailable) return { source: "stt", reason: "Teams captions aren't available in this meeting." };
+    const lastCaption = h.captionsAt ?? h.since;
+    if (h.speechAt !== null && h.speechAt > lastCaption && at - lastCaption >= CAPTION_STALL_MS * scale) {
+      return { source: "stt", reason: "Teams captions stopped while people were talking." };
+    }
+    return null;
+  }
+  if (!h.captionsUnavailable && at - h.since >= STT_MIN_MS * scale && h.captionsAt !== null && h.captionsAt > h.since && at - h.captionsAt <= CAPTIONS_FRESH_MS * scale) {
+    return { source: "captions", reason: "Teams captions are working again." };
+  }
+  return null;
+}
+
+/** The minute a time falls in, as stored in `live_hearing` ("2026-10-31T10:05"). */
+export const minuteOf = (at: number) => new Date(at).toISOString().slice(0, 16);
+

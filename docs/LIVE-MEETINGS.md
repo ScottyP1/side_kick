@@ -8,7 +8,9 @@
 > `app/src/lib/live-meetings/` and tested against fake bots. Part 3 covers the stages and the pricing options for Cody.
 > Part 4 is what Cody must sign up for or approve.
 >
-> **Nothing has been paid for, signed up for or deployed.**
+> **Nothing has been paid for, signed up for or deployed.** Updated Oct 31, 2026 (stage 2 in code): the bot now runs
+> **only during meetings**, as one Azure Container Apps job execution per meeting, with a cost meter and a platform
+> cap ("Runs only during meetings", "Spending controls" in Part 2). The AKS design below is kept as the comparison.
 
 ## Why a browser-based meeting bot
 
@@ -60,10 +62,11 @@ Attendee is open source under the Elastic License 2.0. We may run and change it 
   subscription: neural voices at $15 per million characters, 0.5 million free a month [^az-speech]. A spoken answer is
   about 200 characters, so this costs nothing to speak of.
 - **Raising its hand:** Attendee has no endpoint. Our patch adds `POST /bots/:id/raise_hand {raised}`, which clicks
-  Teams' Raise/Lower hand control in the meeting toolbar. It is about 50 lines in `teams_ui_methods.py`, alongside the
-  existing Join, Leave and captions clicks. We maintain it ourselves; Sidekick only uses it when
-  `ATTENDEE_RAISE_HAND=1`, and otherwise falls back to "✋" in the chat.
-- **Hosting in our Azure** (Linux only, no Windows):
+  Teams' Raise/Lower hand control in the meeting toolbar, through the same path Attendee uses for chat messages
+  (`meetbot/patches/README.md`). It is designed but **not written yet**: the Teams button's selector has to be read in a
+  real meeting on the trial. We maintain it ourselves; Sidekick only uses it when `ATTENDEE_RAISE_HAND=1`, and
+  otherwise falls back to "✋" in the chat.
+- **Hosting in our Azure, as first planned (superseded):** Linux only, no Windows.
   - The pieces: Attendee's Django app with a Celery worker, Redis, and a Postgres database (a new database on our
     existing server).
   - Production runs **each bot in its own Kubernetes pod**, so we'd use AKS; its control plane is free on the Free tier.
@@ -154,6 +157,23 @@ heard → hand, heard → spoken and heard → chat in its trace (Activity page)
    sub-processor page as applying only to those clients.
 
 ### Monthly cost
+
+**Now (Oct 31): one Container Apps job execution per meeting, nothing between meetings.** Azure retail prices, East US,
+pay as you go (pulled Oct 31): container $0.000024 per vCPU-second and $0.000003 per GiB-second (the free grant is
+already used by `sidekick-app`); Azure AI Speech speech-to-text $1.00 per audio hour, text-to-speech $15 per million
+characters. Per meeting hour at 2 vCPU / 4 GiB: container $0.216 (×1.05 for the early start ≈ $0.23), speech-to-text up
+to $1.00 (only the minutes captions don't cover; $0 when Teams captions work), voice ≈ $0.09.
+
+| Meeting hours / month | Container | Speech-to-text (worst case: all minutes) | Voice | Azure total | + Claude |
+|---|---|---|---|---|---|
+| 5 | $1.15 | $5 | $0.45 | ≈ $6.60 | ≈ $8.35 |
+| 20 | $4.55 | $20 | $1.80 | ≈ $26 | ≈ $33 |
+| 100 | $23 | $100 | $9 | ≈ $132 | ≈ $167 |
+
+Fixed monthly cost **$0**: no AKS, no Redis service, no warm node (Redis runs in the container; Attendee's database is a
+new database on our existing Postgres server; the image fits the existing registry). If Chrome needs 4 vCPU / 8 GiB the
+container part doubles. With Teams captions working, the hour costs ≈ $0.32 plus Claude. The table below is the
+earlier AKS design, kept for comparison.
 
 Claude's part (answers, the running list, its questions) goes through the organization's AI credit and is about
 **$0.30–0.40 per meeting hour** on the default model.
@@ -274,6 +294,79 @@ live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.hand
 
 ---
 
+### Runs only during meetings (stage 2, built against fakes)
+- **One Container Apps job execution per meeting** (`sidekick-meetbot` in `sidekick-env`, consumption, East US):
+  - It starts about 2 minutes before a group meeting, or when someone types `@Sidekick join`.
+  - It exits when the meeting ends or Sidekick is stopped.
+  - Sidekick starts it through Azure Resource Manager with its managed identity, which has a role on that job only
+    (`lib/live-meetings/launcher.ts`).
+  - The meeting's settings go in as environment overrides; the job's secrets are referenced by name.
+- **The image** (`meetbot/`): Attendee v1.89.2, built from its own Dockerfile at the tag, plus our patches, Redis and
+  the shim.
+  - Attendee's web API and worker listen on 127.0.0.1 only.
+  - Its API key and webhook secret are made inside the container at start (`bootstrap.py`) and never leave it.
+  - Its database is `attendee` on `sidekick-labs-db`.
+  - Size: start at 2 vCPU / 4 GiB and measure.
+  - At most 4.5 hours per execution, so a stuck bot can't run on.
+- **The shim** (`meetbot/shim/`). Jobs have no inbound address, so it connects **out**:
+  - It forwards Attendee's events to `/api/live/events/attendee`, signed with the session's own key: an HMAC of the
+    session id with `SIDEKICK_MEETBOT_SECRET`, so a container can only act for its own meeting.
+  - It long-polls `/api/live/bot/commands` for chat, speak, hand, hearing and leave.
+  - It exits with the meeting.
+  - If a container doesn't exit within 3 minutes of the end, `live.watch` stops the execution in Azure.
+- **Hearing:**
+  - Teams live captions first: free, and Microsoft transcribes inside Teams.
+  - Automatic fallback to **Azure AI Speech speech-to-text** in our subscription when captions can't be turned on, or
+    when people have talked for 20 s with no caption (`rules.ts hearingNext`).
+  - Back to captions once they're fresh again, after at least 2 minutes.
+  - Each minute records which source it used (`live_hearing`) for the cost meter.
+  - The audio only goes to Azure Speech while speech-to-text is on; otherwise the shim drops it.
+- **Startup (estimate, to measure):** pulling and starting the image takes about 45–90 s (a large Chrome image, and the
+  consumption plan doesn't guarantee a cached image), then joining Teams and the lobby about 10–20 s. Starting 2
+  minutes early covers scheduled meetings; `@Sidekick join` takes about 1–2 minutes.
+
+### Spending controls (stage 2, built)
+- **Cost meter**, on the Owner Console → **Live meetings** page:
+  - this month's estimate in dollars and "on pace for", with meeting hours, next to the AI spend;
+  - worked out as container seconds × the rates above + speech-to-text minutes × $1/h + spoken characters × $15/M
+    (+ Recall.ai hours × $0.65 for opted-in clients);
+  - taken from Sidekick's own records (`lib/live-meetings/spend.ts`), with no Azure billing API.
+- **Platform-wide hard cap**, set by Cody on that page, in dollars or meeting hours a month. **$50 by default.**
+  - At 80%: a warning. At 100%: an alert. Both go to the operator log once per month and show on the Owner Console home.
+  - Once reached, Sidekick joins no new meetings and says "Live help is paused…" (the reply to `@Sidekick join`, or
+    once in the meeting's chat for automatic joins).
+  - Meetings already running finish, and notes after meetings still work.
+  - Per-customer plan limits are unchanged.
+- **Azure budget** `sidekick-meetbot-monthly` on the resources tagged `sidekick-meetbot=1`, emailing at 50/80/100%.
+  **Azure budgets only warn and never stop anything**; the app's cap is what stops spending.
+- **Setup:** `infra/azure/meetbot-setup.sh`, idempotent az CLI. It only runs with `CONFIRM=yes`. Runbook:
+  docs/RUNBOOKS.md → "Meeting bot".
+
+### First live trial (stage 2, after Cody's OK)
+1. Run `CONFIRM=yes BUDGET_EMAIL=… infra/azure/meetbot-setup.sh`.
+2. Turn Live in meetings on for a Sidekick Labs group (Enterprise).
+3. Hold a meeting with two test users, then `@Sidekick join` and try each must-have.
+4. Measure and write down:
+   - startup time;
+   - heard → hand, heard → spoken and heard → chat (Activity traces);
+   - container CPU and memory (Azure metrics), to settle the 2 vCPU / 4 GiB size;
+   - caption quality against speech-to-text.
+5. Find Teams' Raise hand selector and write `meetbot/patches/02-raise-hand.patch`. Then set `ATTENDEE_RAISE_HAND=1`.
+6. **Record footage for the pitch video and website** (Cody, Oct 31: the only footage still missing). Screen
+   recordings and screenshots of:
+   - "Sidekick (notes)" in the lobby and joining;
+   - its first chat message;
+   - its hand going up;
+   - a spoken answer, with the sourced answer in the chat;
+   - a question to the room it answers when called on;
+   - its own question about an owner or date;
+   - the group page's running list during the meeting;
+   - the notes card afterwards;
+   - the Owner Console cost meter.
+
+   Use made-up meeting content and the Sidekick Labs test users only. The clips go to `~/Desktop/Sidekick Pitch`; a
+   few polished shots go to `app/public/site/` through a PR.
+
 ## Part 3: stages and pricing
 
 ### Stages
@@ -285,10 +378,13 @@ live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.hand
   - Quiet mode; its own questions about owners and dates.
   - The running list, the guest wall, the context of this meeting so far plus the group's knowledge.
   - Notes written once, plan hours, audit, trace, the Owner Console.
-- **Stage 2: needs Cody's OK to deploy.**
-  - Deploy Attendee with the raise-hand patch on AKS in our subscription.
-  - Create an Azure AI Speech resource.
-  - Run the first live trial in Sidekick Labs and **measure latency**.
+- **Stage 2, code: built against fakes (Oct 31).** The bot runs only during meetings (one job execution each), with
+  the outbound shim, the captions → Azure speech-to-text fallback, the cost meter, the platform cap with alerts, and
+  the setup script.
+- **Stage 2, deploy: needs Cody's OK.**
+  - Run `infra/azure/meetbot-setup.sh`: the Speech resource, the job, the budget.
+  - Run the first live trial in Sidekick Labs, **measure latency and size**, and record the footage (above).
+  - Write the raise-hand patch.
   - Stream the answer: speak the first sentence while Claude still writes, with a faster model for the spoken part.
   - Compare Teams captions with Azure AI Speech speech-to-text.
   - Add a daily synthetic join test with an alert.
@@ -321,12 +417,19 @@ the main feature, the options are:
 ## Part 4: what Cody must sign up for or approve
 
 Nothing below has been done. For the default, self-hosted route:
-1. **Approve the Azure spend:** an AKS cluster (Free tier control plane), one small node plus a bot node pool, and
-   Azure Cache for Redis Basic. About **$130/month** at low use; budgets and alerts as for the other services.
-2. **Create an Azure AI Speech resource** (East US, S0) in our subscription. Pay per use; 0.5 M characters free a month.
-   Its key goes in Key Vault as `AZURE_SPEECH_KEY`.
+1. **Approve running the setup script** (`infra/azure/meetbot-setup.sh`, `CONFIRM=yes`). It creates:
+   - an Azure AI Speech resource (S0, East US);
+   - the Container Apps job `sidekick-meetbot` in the existing environment;
+   - a new database on the existing Postgres server;
+   - two images in the existing registry;
+   - Key Vault secrets;
+   - a $50/month Azure budget emailing Cody at 50/80/100%.
+
+   No fixed monthly cost. About $1.32 per meeting hour at worst (speech-to-text for every minute), ≈ $0.32 when Teams
+   captions work, plus Claude.
+2. **Set the platform cap** in the Owner Console → Live meetings ($50/month until changed).
 3. **Approve deploying Attendee** (Elastic License 2.0: fine for our own use, not for reselling Attendee itself) with
-   our raise-hand patch. Its API key and webhook secret go in Key Vault, and `ATTENDEE_*` gets set on the Container App.
+   our patches. Its credentials are made inside each container; nothing to put in Key Vault by hand.
 4. **Sidekick Labs Teams settings**, for the first trial:
    - allow anonymous users to join meetings (or give the bot a signed-in account);
    - allow live captions;

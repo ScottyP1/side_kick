@@ -4,7 +4,7 @@
  *   asks / every group meeting), who changed it, whether the plan includes it and it's set up, this month's live hours
  *   against the plan, the latest sessions (with the running list while one is live), and `canManage`.
  * - PUT `{ mode?: "off" | "ask" | "auto", answer?: "addressed" | "room", voice?: "off" | "called" | "auto", pauseS?: 2-30,
- *   ask?: boolean }`: the group's Team Lead or an Org Owner/Admin (`requireManage`: 403 for Members/Viewers). Turning it
+ *   ask?: boolean, voiceId?: <a listed voice> | null, speed?: 0.9-1.2 | null }`: the group's Team Lead or an Org Owner/Admin (`requireManage`: 403 for Members/Viewers). Turning it
  *   on needs the Enterprise plan (402) and a configured meeting bot (503); a bad value is 400. Audited ("Policy change").
  * - POST `{ action: "stop", session }`: the same people make Sidekick leave a running meeting now. Audited.
  */

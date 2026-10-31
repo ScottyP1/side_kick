@@ -55,10 +55,15 @@ import { answerCard, noticeCard } from "../teams/cards";
 import { BRAND } from "../brand";
 import { configuredProviders, PROVIDER_IDS, PROVIDER_INFO, providerById, type LiveEvent, type LiveProvider, type ProviderId } from "./provider";
 import { speechConfigured, synthesize } from "./speech";
+import { DEFAULT_VOICE } from "./voices";
+import { capReached, capState, checkCapAlerts, LIVE_PAUSED, monthSpend } from "./spend";
+import { reapBot } from "./attendee";
+import { botKey } from "./launcher";
+import { sameKey } from "./signature";
 import {
   answerText, BOT_NAME, confident, GUEST_NOTICE, HAND_NOTE, introText, isNonAnswer, isRoomQuestion, isTeamsMeetingUrl, liveMinutes, LIVE_MODES,
   LOBBY_TIMEOUT_MS, looksExternal, MAX_ANSWERS, MAX_SESSION_MS, meetingThreadFromUrl, ownQuestion, parseSettings, parseTrigger, recapText, spokenText,
-  type ListItem, type LiveMode, type LiveSettings, type Trigger,
+  hearingNext, minuteOf, type ListItem, type LiveMode, type LiveSettings, type Trigger,
 } from "./rules";
 
 /** A row of `live_sessions` (see db/schema.postgres.sql). */
@@ -79,6 +84,12 @@ export type LiveSession = {
   addressed_until: string | null; addressed_by: string | null;
   /** JSON list of action items Sidekick already asked about (never twice). */
   asked: string | null;
+  /** Sidekick's own bot: its Container Apps job execution, when it started and exited (cost meter). */
+  execution: string | null; launched_at: string | null; exited_at: string | null;
+  /** How it hears now ('captions' | 'stt') and since when; when a caption and someone talking were last seen. */
+  hearing: string | null; hearing_since: string | null; captions_at: string | null; speech_at: string | null; captions_unavailable: number;
+  /** Characters spoken (Azure AI Speech text-to-speech, cost meter). */
+  tts_chars: number;
 };
 
 /** What Sidekick has its hand up for: the chat text (full answer with sources), the short spoken version, the card. */
@@ -118,6 +129,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms * scale()));
 const ROOM_WAIT_MS = 5000;
 /** How long Sidekick keeps its hand up before it lowers it and puts the answer in the chat instead. */
 const HAND_MS = 60_000;
+/** How long after a session ends its bot's container may still be running before Sidekick stops it in Azure. */
+const REAP_AFTER_MS = 3 * 60_000;
 /** How long a lone "Sidekick" makes the speaker's next line a question to it. */
 const ADDRESSED_MS = 20_000;
 
@@ -165,14 +178,14 @@ export async function groupMode(orgId: string, workspaceId: string): Promise<Liv
 
 /**
  * Changes the group's live-meeting switch and settings. `body.mode` (off / ask / auto) and any of `answer`, `voice`,
- * `pauseS`, `ask` (lib/live-meetings/rules.ts `LiveSettings`). Only the group's Team Lead or an Org Owner/Admin
+ * `pauseS`, `ask`, `voiceId`, `speed` (lib/live-meetings/rules.ts `LiveSettings`; null voice/speed = the organization's). Only the group's Team Lead or an Org Owner/Admin
  * (`requireManage`); turning it on needs the plan's `liveMeetings` feature (Enterprise, 402 otherwise) and a
  * configured provider (503); a bad value is 400. Audited ("Policy change"). Returns the new status for the group page.
  */
 export async function setLiveMode(user: User, workspaceId: unknown, body: Record<string, unknown> | null) {
   const ws = await requireManage(user, typeof workspaceId === "string" ? workspaceId : null);
   const { mode, ...rest } = body ?? {};
-  const settingKeys = ["answer", "voice", "pauseS", "ask"].filter((k) => k in rest);
+  const settingKeys = ["answer", "voice", "pauseS", "ask", "voiceId", "speed"].filter((k) => k in rest);
   if (mode === undefined && !settingKeys.length) throw new HttpError(400, "Choose off, when someone asks, or every group meeting.");
   if (settingKeys.length) {
     const cur = await groupSettings(user.org_id, ws);
@@ -217,6 +230,7 @@ export async function liveStatus(user: User, workspaceId: unknown) {
     settings: await groupSettings(user.org_id, ws),
     provider: { id: providerId, ...PROVIDER_INFO[providerId], ready: Boolean(provider), canChoose: user.role === "Org Owner", choices: configuredProviders().map((id) => ({ id, label: PROVIDER_INFO[id].label, hosted: PROVIDER_INFO[id].hosted })) },
     can: { raiseHand: Boolean(provider?.can.raiseHand), speak: Boolean(provider?.can.speak && speechConfigured()) },
+    orgVoice: (await (await import("./voice-settings")).orgVoice(user.org_id)).voiceId ?? DEFAULT_VOICE,
     changedBy: row?.live_mode_by ?? null,
     changedAt: row?.live_mode_at ?? null,
     included,
@@ -227,6 +241,7 @@ export async function liveStatus(user: User, workspaceId: unknown) {
       id: s.id, title: s.title ?? "Teams meeting", status: s.status, invitedBy: s.invited_by, guests: s.guests === 1,
       createdAt: s.created_at, joinedAt: s.joined_at, endedAt: s.ended_at, minutes: Math.round(liveMinutes(s.joined_at, s.ended_at)),
       endReason: s.end_reason, error: s.error, answers: s.answers, quiet: s.quiet === 1,
+      hearing: s.provider === "attendee" && s.launched_at ? (s.hearing === "stt" ? "Azure speech-to-text" : "Teams captions") : null,
       notes: s.handoff === "graph" ? "From the Teams transcript" : s.handoff === "live" ? "From the live transcript" : null,
       decisions: s.status === "live" ? parseList(s.decisions) : [], actions: s.status === "live" ? parseList(s.action_items) : [],
     })),
@@ -271,6 +286,8 @@ export async function startLive(o: {
     throw new HttpError(409, `${BOT_NAME} is already in this meeting.`);
   }
   await assertCanAdd(orgId, "liveMeetingHours", 1 / 60);
+  // The Sidekick team's monthly cap on what meeting bots cost (lib/live-meetings/spend.ts): new meetings pause.
+  if (await capReached()) throw new HttpError(503, LIVE_PAUSED);
   const conv = await meetingConversation(orgId, workspaceId, o.threadId);
   const guests = o.guests || conv?.guests === 1 || Boolean(o.threadId && (await get("SELECT 1 AS ok FROM teams_conversations WHERE id = ? AND org_id = ? AND guests = 1", o.threadId, orgId)));
   const id = newId();
@@ -492,7 +509,22 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
     await run("UPDATE live_sessions SET updated_at = ? WHERE id = ? AND org_id = ?", now(), id, orgId);
     return true;
   }
+  // The bot's container exiting: its time stops counting; a session still running is over.
+  if (e.kind === "exit") {
+    await run("UPDATE live_sessions SET exited_at = COALESCE(exited_at, ?) WHERE id = ? AND org_id = ?", now(), id, orgId);
+    if (running) await stopSession(orgId, id, `${BOT_NAME}'s container stopped${e.detail ? ` (${e.detail})` : ""}.`, { callProvider: false });
+    return true;
+  }
   if (!running) return false;
+  if (e.kind === "hearing") {
+    await run("UPDATE live_sessions SET hearing = ?, hearing_since = ? WHERE id = ? AND org_id = ? AND (hearing IS NULL OR hearing <> ?)", e.source, now(), id, orgId, e.source);
+    return true;
+  }
+  if (e.kind === "captions_unavailable") {
+    await run("UPDATE live_sessions SET captions_unavailable = 1 WHERE id = ? AND org_id = ?", id, orgId);
+    await maybeSwitchHearing(orgId, id);
+    return true;
+  }
   if (e.kind === "participant") {
     const tenant = e.tenantId ? (await tenantOfOrg(orgId))?.toLowerCase() : null;
     const external = e.guest || looksExternal(e.name) || Boolean(e.tenantId && tenant && e.tenantId.toLowerCase() !== tenant);
@@ -512,12 +544,24 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
     const speaking = new Set(parseNames(s.speaking));
     if (e.speaking) speaking.add(e.name ?? "Someone");
     else speaking.delete(e.name ?? "Someone");
-    await run("UPDATE live_sessions SET speaking = ?, last_heard_at = ? WHERE id = ? AND org_id = ?", JSON.stringify([...speaking].slice(0, 50)), now(), id, orgId);
+    await run("UPDATE live_sessions SET speaking = ?, last_heard_at = ?, speech_at = ? WHERE id = ? AND org_id = ?", JSON.stringify([...speaking].slice(0, 50)), now(), e.speaking ? now() : s.speech_at, id, orgId);
+    await maybeSwitchHearing(orgId, id);
     return true;
   }
   // A line said or typed in the meeting. Sidekick's own chat messages (the meeting bot's, or its Teams bot's answer
   // cards) come back as chat lines: skip them.
   if (e.source === "chat" && (e.speaker === BOT_NAME || e.speaker === BRAND.name)) return false;
+  // Spoken lines: Teams captions or Azure speech-to-text, whichever Sidekick hears by now. A caption while on
+  // speech-to-text only says captions work again (no line twice).
+  if (e.source === "speech" && e.heardBy) {
+    if (e.heardBy === "captions") await run("UPDATE live_sessions SET captions_at = ? WHERE id = ? AND org_id = ?", now(), id, orgId);
+    const by = s.hearing === "stt" ? "stt" : "captions";
+    if (e.heardBy !== by) {
+      await maybeSwitchHearing(orgId, id);
+      return true;
+    }
+    await noteHearing(orgId, id, by);
+  }
   const t = now();
   const heardAt = Date.now();
   await run("INSERT INTO live_lines (id, org_id, session_id, speaker, text, said_at, source) VALUES (?, ?, ?, ?, ?, ?, ?)", newId(), orgId, id, e.speaker, e.text, t, e.source);
@@ -588,6 +632,64 @@ const parseNames = (json: string | null): string[] => {
 /** The people heard so far in this meeting (to tell a question to the room from one to a person by name). */
 async function meetingPeople(orgId: string, id: string): Promise<string[]> {
   return (await all<{ speaker: string }>("SELECT DISTINCT speaker FROM live_lines WHERE org_id = ? AND session_id = ? AND speaker IS NOT NULL LIMIT 50", orgId, id)).map((r) => r.speaker);
+}
+
+/** Records how this minute of the meeting was heard (cost meter): 'both' when it switched within the minute. */
+async function noteHearing(orgId: string, id: string, source: "captions" | "stt", at = Date.now()) {
+  await run(
+    `INSERT INTO live_hearing (org_id, session_id, minute, source) VALUES (?, ?, ?, ?)
+     ON CONFLICT (session_id, minute) DO UPDATE SET source = CASE WHEN live_hearing.source = excluded.source THEN live_hearing.source ELSE 'both' END`,
+    orgId, id, minuteOf(at), source,
+  );
+}
+
+/**
+ * Switches how Sidekick's own bot hears when the rule says so (lib/live-meetings/rules.ts `hearingNext`: captions
+ * first; Azure speech-to-text when captions are off or stalled; back when they work again). Compare-and-set, so one
+ * switch per change; the bot gets a `hearing` command. Traced, audited only in the trace (it's routine).
+ */
+async function maybeSwitchHearing(orgId: string, id: string, at = Date.now()) {
+  const s = await sessionById(orgId, id);
+  if (!s || s.status !== "live") return;
+  const provider = sessionProvider(s);
+  if (!provider?.setHearing) return;
+  const source = s.hearing === "stt" ? "stt" : "captions";
+  const ms = (v: string | null) => (v ? Date.parse(v) : null);
+  const next = hearingNext({ source, since: ms(s.hearing_since) ?? ms(s.joined_at) ?? at, captionsAt: ms(s.captions_at), speechAt: ms(s.speech_at), captionsUnavailable: s.captions_unavailable === 1 }, at, scale());
+  if (!next) return;
+  const claim = await run("UPDATE live_sessions SET hearing = ?, hearing_since = ? WHERE id = ? AND org_id = ? AND COALESCE(hearing, 'captions') = ?", next.source, new Date(at).toISOString(), id, orgId, source);
+  if (!claim.changes) return;
+  await noteHearing(orgId, id, next.source, at);
+  await span("live", next.source === "stt" ? "Hear with Azure speech-to-text" : "Hear with Teams captions again", () => provider.setHearing!(s.bot_id ?? id, next.source), { reason: next.reason }).catch((e) => noteError(orgId, id, e));
+}
+
+/**
+ * The bot's commands (GET /api/live/bot/commands): checks the session's key, then waits up to `waitMs` for commands not
+ * yet given and hands them over once each (claimed with a compare-and-set). `stop` once the session is over. Null when
+ * the key or session is wrong (the route answers 401 without saying which).
+ */
+export async function takeCommands(sessionId: string, token: string, waitMs: number): Promise<{ commands: { id: string; kind: string; data: unknown }[]; stop: boolean } | null> {
+  if (!/^[\w-]{1,80}$/.test(sessionId) || !process.env.SIDEKICK_MEETBOT_SECRET || !sameKey(token, botKey(sessionId))) return null;
+  const found = await asSystem("live meeting bot: find its session", () => get<{ org_id: string }>("SELECT org_id FROM live_sessions WHERE id = ? AND provider = 'attendee'", sessionId));
+  if (!found) return null;
+  return withOrg(found.org_id, async () => {
+    const start = Date.now();
+    for (;;) {
+      const s = await sessionById(found.org_id, sessionId);
+      if (!s) return null;
+      const pending = await all<{ id: string; kind: string; data: string | null }>(
+        "SELECT id, kind, data FROM live_commands WHERE org_id = ? AND session_id = ? AND taken_at IS NULL ORDER BY id LIMIT 20", found.org_id, sessionId,
+      );
+      const commands: { id: string; kind: string; data: unknown }[] = [];
+      for (const c of pending) {
+        const claim = await run("UPDATE live_commands SET taken_at = ? WHERE id = ? AND org_id = ? AND taken_at IS NULL", now(), c.id, found.org_id);
+        if (claim.changes) commands.push({ id: c.id, kind: c.kind, data: JSON.parse(c.data ?? "{}") });
+      }
+      const over = s.status === "ended" || s.status === "failed";
+      if (commands.length || over || Date.now() - start >= waitMs) return { commands, stop: over && !commands.length };
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -661,7 +763,10 @@ async function speakNow(s: LiveSession, text: string): Promise<boolean> {
   if (!provider || !s.bot_id || !text) return false;
   if (!(await waitForSilence(s.org_id, s.id, 800, 8000))) return false;
   try {
-    const mp3 = await synthesize(text);
+    // The group's chosen voice (else the organization's, lib/live-meetings/voice-settings.ts).
+    const { voiceFor } = await import("./voice-settings");
+    const mp3 = await synthesize(text, await voiceFor(s.org_id, s.workspace_id));
+    await run("UPDATE live_sessions SET tts_chars = tts_chars + ? WHERE id = ? AND org_id = ?", text.length, s.id, s.org_id);
     await span("live", "Speak in the meeting", () => provider.speak(s.bot_id!, mp3), { words: text.split(" ").length });
     return true;
   } catch (e) {
@@ -926,7 +1031,7 @@ export async function handoffLive(orgId: string, id: string): Promise<{ captured
  * feature paused or restricted by the Sidekick team, the plan no longer includes it, the month's live hours used up,
  * longer than 4 hours, or still in the lobby after 15 minutes. Returns how many it checked and stopped.
  */
-export async function watchLive(at = Date.now()): Promise<{ liveChecked: number; liveStopped: number }> {
+export async function watchLive(at = Date.now()): Promise<{ liveChecked: number; liveStopped: number; liveReaped: number; liveCapLevel: number }> {
   const running = await asSystem("live meetings watch: every running session", () =>
     all<{ id: string; org_id: string }>("SELECT id, org_id FROM live_sessions WHERE status IN ('joining', 'live') ORDER BY created_at LIMIT 500"),
   );
@@ -956,6 +1061,12 @@ export async function watchLive(at = Date.now()): Promise<{ liveChecked: number;
         if (at - raisedAt >= HAND_MS * scale()) await deliverPending(r.org_id, r.id, "expired");
         else if (settings.voice === "auto" && !parseNames(s.speaking).length && quietFor >= settings.pauseS * 1000 * scale()) await deliverPending(r.org_id, r.id, "pause");
       }
+      // How it hears: a stall with nobody's events arriving is noticed here; a minute on speech-to-text is counted.
+      if (s.status === "live") {
+        await maybeSwitchHearing(r.org_id, r.id, at);
+        const fresh = await sessionById(r.org_id, r.id);
+        if (fresh?.hearing === "stt") await noteHearing(r.org_id, r.id, "stt", at);
+      }
       const { limits } = await orgPlan(r.org_id);
       if (s.status === "live" && limits.liveMeetingHours !== null && (await usageCounts(r.org_id)).liveMeetingHours >= limits.liveMeetingHours) {
         return stopSession(r.org_id, r.id, "This month's live meeting hours are used up.", { say: "This month's live meeting hours are used up, so I'm leaving. The notes will follow in the group's chat." });
@@ -964,7 +1075,21 @@ export async function watchLive(at = Date.now()): Promise<{ liveChecked: number;
     });
     if (done) stopped++;
   }
-  return { liveChecked: running.length, liveStopped: stopped };
+  // Containers of sessions that ended a few minutes ago but never said they exited: stop them in Azure, so a stuck
+  // bot never runs (and bills) on.
+  const stuck = await asSystem("live meetings watch: bot containers left running", () =>
+    all<{ id: string; org_id: string; execution: string }>(
+      "SELECT id, org_id, execution FROM live_sessions WHERE execution IS NOT NULL AND exited_at IS NULL AND status IN ('ended', 'failed') AND ended_at < ? LIMIT 100",
+      new Date(at - REAP_AFTER_MS * scale()).toISOString(),
+    ),
+  );
+  for (const x of stuck) {
+    await reapBot(x.execution);
+    await withOrg(x.org_id, () => run("UPDATE live_sessions SET exited_at = ? WHERE id = ? AND org_id = ? AND exited_at IS NULL", new Date(at).toISOString(), x.id, x.org_id));
+  }
+  const cap = await checkCapAlerts(at);
+  // Job counts are numbers: 0 ok, 1 warning (80%), 2 reached.
+  return { liveChecked: running.length, liveStopped: stopped, liveReaped: stuck.length, liveCapLevel: cap === "reached" ? 2 : cap === "warn" ? 1 : 0 };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1018,6 +1143,11 @@ export async function autoJoinDue(at = Date.now()): Promise<{ liveAutoJoined: nu
           if (id) out.liveAutoJoined++;
         } catch (e) {
           out.liveAutoFailed++;
+          // Paused by the monthly cap: say so once in the meeting's chat when Sidekick's Teams app is there.
+          if (e instanceof HttpError && e.message === LIVE_PAUSED && m.chat_id) {
+            const conv = await meetingConversation(orgId, m.workspace_id, m.chat_id);
+            if (conv) await import("../teams/bot").then(({ postCard }) => postCard(conv, noticeCard(BOT_NAME, LIVE_PAUSED), conv.id, "a live meeting message")).catch(() => {});
+          }
           // Saved once as a failed session for this occurrence (startLive already did for a provider failure).
           const t = now();
           await run(
@@ -1074,6 +1204,8 @@ export async function ownerLiveReport() {
     return {
       configured: liveConfigured(),
       provider: configuredProviders().join(", ") || null,
+      spend: await monthSpend(),
+      cap: await capState(),
       orgs: orgs.sort((a, b) => b.minutes - a.minutes),
       running: rows.filter((r) => r.status === "joining" || r.status === "live").map(pick),
       failures: rows.filter((r) => r.status === "failed" || r.error).slice(0, 50).map(pick),

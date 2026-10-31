@@ -39,6 +39,7 @@ import { api, fmtDate, Icon, Modal, Pill, Spinner, Switch, useReportError, useTo
 import { ChatSettingsModal, lastReminderText, type ChatSettings, type LastReminder } from "@/components/chat-settings";
 import { Avatar, groupHealth, PeoplePicker, type Group, type OrgPerson } from "@/components/groups";
 import { BRAND } from "@/lib/brand";
+import { VoicePicker } from "@/components/voice-picker";
 import { ANSWER_LABEL, BOT_NAME, LIVE_MODE_LABEL, LIVE_MODES, VOICE_LABEL, type LiveMode, type LiveSettings } from "@/lib/live-meetings/rules";
 import { FindingRows, useFindings } from "@/components/findings";
 
@@ -530,6 +531,8 @@ type LivePanel = {
   settings: LiveSettings;
   provider: { id: string; label: string; hosted: boolean; where: string; ready: boolean; canChoose: boolean; choices: { id: string; label: string; hosted: boolean }[] };
   can: { raiseHand: boolean; speak: boolean };
+  /** The organization's voice (what "The organization's voice" means here). */
+  orgVoice: string;
   hours: { used: number; limit: number | null };
   sessions: {
     id: string; title: string; status: "joining" | "live" | "ended" | "failed"; invitedBy: string; guests: boolean; createdAt: string; minutes: number;
@@ -640,6 +643,11 @@ function LiveMeetings({ group }: { group: Group }) {
               </label>
             )}
             <label><input type="checkbox" disabled={!st.canManage || busy} checked={st.settings.ask} onChange={(e) => save({ ask: e.target.checked }, "Saved.")} /> Asks its own questions (owners and dates)</label>
+            {st.settings.voice !== "off" && (
+              <label>Voice{" "}
+                <VoicePicker voiceId={st.settings.voiceId} speed={st.settings.speed} inherit={st.orgVoice} disabled={!st.canManage || busy} speechReady={st.can.speak} onChange={(v) => save(v, "Saved.")} />
+              </label>
+            )}
           </div>
         )}
         {st.included && st.mode !== "off" && (

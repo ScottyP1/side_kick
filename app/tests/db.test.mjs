@@ -1881,8 +1881,8 @@ test(`[${engine}] live meetings: a member of the meeting: questions to the room,
   for (const t of ["It's on Saturday.", "Wave two starts in March", "Not until the budget is signed off"]) assert.equal(liveRules.isNonAnswer(t), false, t);
   assert.equal(liveRules.spokenText("The cutover moved to **Saturday** [S1]. Ana confirmed it on Tuesday [S2]. The rollback plan is still open [S3]."), "The cutover moved to Saturday. Ana confirmed it on Tuesday.");
   assert.ok(liveRules.spokenText("word ".repeat(80)).split(" ").length <= 46, "at most about 45 words");
-  assert.deepEqual(liveRules.parseSettings(null), { answer: "room", voice: "called", pauseS: 6, ask: true }, "Cody's defaults");
-  assert.deepEqual(liveRules.parseSettings('{"answer":"addressed","voice":"auto","pauseS":3,"ask":false}'), { answer: "addressed", voice: "auto", pauseS: 3, ask: false });
+  assert.deepEqual(liveRules.parseSettings(null), { answer: "room", voice: "called", pauseS: 6, ask: true, voiceId: null, speed: null }, "Cody's defaults");
+  assert.deepEqual(liveRules.parseSettings('{"answer":"addressed","voice":"auto","pauseS":3,"ask":false,"voiceId":"en-GB-SoniaNeural","speed":1.1}'), { answer: "addressed", voice: "auto", pauseS: 3, ask: false, voiceId: "en-GB-SoniaNeural", speed: 1.1 });
   assert.deepEqual(liveRules.parseSettings('{"voice":"shout","pauseS":99}'), liveRules.DEFAULT_SETTINGS, "anything unknown is the default");
   assert.equal(liveRules.confident({ found: true, sources: [{}], conflict: false, blocked: null }), true);
   for (const r of [{ found: false, sources: [{}], conflict: false }, { found: true, sources: [], conflict: false }, { found: true, sources: [{}], conflict: true }, { found: true, sources: [{}], conflict: false, blocked: "judging_people" }]) assert.equal(liveRules.confident(r), false);
@@ -1900,3 +1900,51 @@ test(`[${engine}] live meetings: a member of the meeting: questions to the room,
   assert.equal(liveSig.verifyAttendeeWebhook(undefined, new Headers({ "x-webhook-signature": sig }), JSON.stringify(body)), false);
   assert.equal(liveSig.verifyAttendeeWebhook(secret, new Headers(), JSON.stringify(body)), false);
 });
+
+test(`[${engine}] live meetings: how Sidekick's own bot hears (captions first, Azure speech-to-text when they stall), and its signatures`, () => {
+  const t0 = Date.parse("2026-10-31T10:00:00.000Z");
+  const h = (o) => ({ source: "captions", since: t0, captionsAt: t0, speechAt: null, captionsUnavailable: false, ...o });
+  assert.equal(liveRules.hearingNext(h({}), t0 + 60_000), null, "nobody talking: no reason to switch");
+  assert.equal(liveRules.hearingNext(h({ speechAt: t0 + 5000 }), t0 + 10_000), null, "talking, but not 20 s without a caption yet");
+  assert.deepEqual(liveRules.hearingNext(h({ speechAt: t0 + 5000 }), t0 + 21_000), { source: "stt", reason: "Teams captions stopped while people were talking." });
+  assert.equal(liveRules.hearingNext(h({ speechAt: t0 + 5000, captionsAt: t0 + 6000 }), t0 + 21_000), null, "a caption after the talking: fine");
+  assert.equal(liveRules.hearingNext(h({ captionsUnavailable: true }), t0).source, "stt", "captions can't be turned on");
+  const stt = (o) => h({ source: "stt", since: t0, captionsAt: null, ...o });
+  assert.equal(liveRules.hearingNext(stt({ captionsAt: t0 + 130_000 }), t0 + 60_000), null, "at least 2 minutes on speech-to-text");
+  assert.deepEqual(liveRules.hearingNext(stt({ captionsAt: t0 + 125_000 }), t0 + 130_000), { source: "captions", reason: "Teams captions are working again." });
+  assert.equal(liveRules.hearingNext(stt({ captionsAt: t0 + 100_000 }), t0 + 130_000), null, "a caption too long ago");
+  assert.equal(liveRules.hearingNext(stt({ captionsAt: t0 + 125_000, captionsUnavailable: true }), t0 + 130_000), null);
+  assert.equal(liveRules.minuteOf(t0 + 61_000), "2026-10-31T10:01");
+  // Events from the bot's container: the session's key over timestamp and body, and only for its own session.
+  const key = (session) => `key-${session}`;
+  const body = JSON.stringify([{ bot_id: "sess-1", trigger: "transcript.update", data: {} }]);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const sig = (k, b = body, t = ts) => `v1,${crypto.createHmac("sha256", k).update(`${t}.${b}`).digest("base64")}`;
+  const hdr = (session, s, t = ts) => new Headers({ "x-sidekick-bot-session": session, "x-sidekick-bot-timestamp": t, "x-sidekick-bot-signature": s });
+  assert.equal(liveSig.verifyBotEvent(key, hdr("sess-1", sig("key-sess-1")), body), true);
+  assert.equal(liveSig.verifyBotEvent(key, hdr("sess-1", sig("key-sess-2")), body), false, "another session's key");
+  assert.equal(liveSig.verifyBotEvent(key, hdr("sess-2", sig("key-sess-2")), body), false, "a container speaking for another meeting");
+  const old = String(Math.floor(Date.now() / 1000) - 600);
+  assert.equal(liveSig.verifyBotEvent(key, hdr("sess-1", sig("key-sess-1", body, old), old), body), false, "too old");
+  assert.equal(liveSig.sameKey("abc", "abc"), true);
+  assert.equal(liveSig.sameKey("abd", "abc"), false);
+  assert.equal(liveSig.sameKey(null, "abc"), false);
+});
+
+const voices = await import("../src/lib/live-meetings/voices.ts");
+
+test(`[${engine}] live meetings: the voices people can pick, the speeds, and which one Sidekick uses`, () => {
+  assert.ok(voices.VOICES.length >= 9);
+  assert.ok(["male", "female", "neutral"].every((g) => voices.VOICES.some((v) => v.gender === g)));
+  assert.ok(new Set(voices.VOICES.map((v) => v.accent)).size >= 4, "several English accents");
+  assert.equal(voices.isVoice("en-GB-SoniaNeural"), true);
+  assert.equal(voices.isVoice("en-GB-SoniaNeural<script>"), false);
+  assert.equal(voices.isSpeed(1.1), true);
+  assert.equal(voices.isSpeed(1.3), false);
+  assert.equal(voices.rateOf(1.1), "+10%");
+  assert.equal(voices.rateOf(0.9), "-10%");
+  assert.deepEqual(voices.parseVoice('{"voiceId":"nope","speed":2}'), { voiceId: null, speed: null });
+  assert.deepEqual(voices.effectiveVoice({ voiceId: null, speed: null }, { voiceId: null, speed: null }), { voiceId: voices.DEFAULT_VOICE, speed: 1 });
+  assert.deepEqual(voices.effectiveVoice({ voiceId: "en-IN-NeerjaNeural", speed: null }, { voiceId: "en-GB-SoniaNeural", speed: 1.1 }), { voiceId: "en-IN-NeerjaNeural", speed: 1.1 }, "the group's voice, the organization's speed");
+});
+

@@ -698,6 +698,32 @@ CREATE TABLE IF NOT EXISTS live_lines (
   said_at TEXT NOT NULL, source TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS live_lines_session ON live_lines(org_id, session_id, said_at);
+-- Live meetings, stage 2 (lib/live-meetings/attendee.ts): what Sidekick asks its meeting bot to do (chat, speak, hand,
+-- hearing, leave). The bot's container has no inbound address, so it fetches these over an outbound connection
+-- (/api/live/bot/commands); taken_at is set when it does. Deleted with the session.
+CREATE TABLE IF NOT EXISTS live_commands (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id), session_id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT,
+  created_at TEXT NOT NULL, taken_at TEXT
+);
+CREATE INDEX IF NOT EXISTS live_commands_session ON live_commands(org_id, session_id, taken_at, created_at);
+-- How Sidekick heard each minute of a live meeting: 'captions' (Teams' own, free), 'stt' (Azure AI Speech, $1/h) or
+-- 'both' (switching that minute). For the cost meter and the fallback (lib/live-meetings/spend.ts, rules.ts).
+CREATE TABLE IF NOT EXISTS live_hearing (
+  org_id TEXT NOT NULL REFERENCES orgs(id), session_id TEXT NOT NULL, minute TEXT NOT NULL, source TEXT NOT NULL,
+  PRIMARY KEY (session_id, minute)
+);
+CREATE INDEX IF NOT EXISTS live_hearing_minute ON live_hearing(org_id, minute);
+-- Platform-wide settings the Sidekick team sets in the Owner Console (no organization's data), e.g. 'live_cap': the
+-- monthly cap on live meeting bot spend (lib/live-meetings/spend.ts), JSON.
+CREATE TABLE IF NOT EXISTS platform_settings (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
+);
+-- "Play sample" for Sidekick's meeting voices (lib/live-meetings/voice-settings.ts): one MP3 (base64) per voice and
+-- speed, made once with Azure AI Speech. The sample sentence is fixed and made up, so it's the same for everyone (no org).
+CREATE TABLE IF NOT EXISTS live_voice_samples (
+  voice_id TEXT NOT NULL, speed TEXT NOT NULL, mp3 TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (voice_id, speed)
+);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -994,6 +1020,14 @@ function migrate(conn: DatabaseSync) {
   // organization's meeting bot (NULL = Sidekick's own, 'recall' = the hosted Recall.ai, opted in by the Org Owner).
   for (const col of ["live_mode", "live_mode_by", "live_mode_at", "live_settings"]) if (!has("workspaces", col)) conn.exec(`ALTER TABLE workspaces ADD COLUMN ${col} TEXT`);
   if (!has("orgs", "live_provider")) conn.exec("ALTER TABLE orgs ADD COLUMN live_provider TEXT");
+  // Sidekick's voice in meetings, the organization's default (JSON { voiceId, speed }, lib/live-meetings/voices.ts).
+  if (!has("orgs", "live_voice")) conn.exec("ALTER TABLE orgs ADD COLUMN live_voice TEXT");
+  // Live meetings, stage 2: the bot's job execution (launched, exited, its name), how it hears (captions or Azure
+  // speech-to-text, and when captions and speech were last seen), and the characters it spoke (cost meter).
+  for (const col of ["launched_at TEXT", "exited_at TEXT", "execution TEXT", "hearing TEXT", "captions_at TEXT", "speech_at TEXT", "hearing_since TEXT", "tts_chars INTEGER NOT NULL DEFAULT 0", "captions_unavailable INTEGER NOT NULL DEFAULT 0"]) {
+    const name = col.split(" ")[0];
+    if (!has("live_sessions", name)) conn.exec(`ALTER TABLE live_sessions ADD COLUMN ${col}`);
+  }
   // Meetings that record by themselves (lib/auto-record.ts): the organization's switch (0/1), who and when, and the last scan.
   if (!has("auto_meetings", "auto_record")) conn.exec("ALTER TABLE auto_meetings ADD COLUMN auto_record INTEGER NOT NULL DEFAULT 0");
   for (const col of ["auto_record_by", "auto_record_at", "record_checked_at", "record_error"]) if (!has("auto_meetings", col)) conn.exec(`ALTER TABLE auto_meetings ADD COLUMN ${col} TEXT`);

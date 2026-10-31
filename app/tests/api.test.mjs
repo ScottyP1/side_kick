@@ -6207,3 +6207,18 @@ test(`[${ENGINE}] accuracy fixes: old transcripts are re-cut once per org, speak
     ["Review cutover prep progress again in two weeks", "Grace Lee", "2026-11-05"],
   ]);
 });
+
+test(`[${ENGINE}] Sidekick's meeting voice without Azure AI Speech: choosing still works, Play sample says plainly it isn't set up`, async () => {
+  const st = (await admin("GET", "/api/live/voice")).body;
+  assert.equal(st.speechReady, false, "no Azure AI Speech key on this copy");
+  assert.equal(st.voiceId, "en-US-AndrewMultilingualNeural");
+  assert.equal(st.canManage, true);
+  assert.equal((await member("PUT", "/api/live/voice", { voiceId: "en-GB-RyanNeural" })).status, 403);
+  const set = await admin("PUT", "/api/live/voice", { voiceId: "en-GB-RyanNeural" });
+  assert.equal(set.status, 200, JSON.stringify(set.body));
+  assert.equal(set.body.voiceId, "en-GB-RyanNeural");
+  const sample = await admin("POST", "/api/live/voice/sample", { voiceId: "en-GB-RyanNeural", speed: 1 });
+  assert.equal(sample.status, 503);
+  assert.match(sample.body.error, /need Azure AI Speech, which isn't set up/);
+  assert.equal((await member("POST", "/api/live/voice/sample", { voiceId: "en-GB-RyanNeural" })).status, 403);
+});

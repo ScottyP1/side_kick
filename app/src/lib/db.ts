@@ -718,6 +718,12 @@ CREATE INDEX IF NOT EXISTS live_hearing_minute ON live_hearing(org_id, minute);
 CREATE TABLE IF NOT EXISTS platform_settings (
   key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_by TEXT, updated_at TEXT NOT NULL
 );
+-- "Play sample" for Sidekick's meeting voices (lib/live-meetings/voice-settings.ts): one MP3 (base64) per voice and
+-- speed, made once with Azure AI Speech. The sample sentence is fixed and made up, so it's the same for everyone (no org).
+CREATE TABLE IF NOT EXISTS live_voice_samples (
+  voice_id TEXT NOT NULL, speed TEXT NOT NULL, mp3 TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (voice_id, speed)
+);
 -- Full-text index over document and transcript passages. workspace_id and audience are
 -- stored alongside every passage and filtered on every search (workspace walls, guest rules).
 CREATE VIRTUAL TABLE IF NOT EXISTS passages USING fts5(
@@ -1014,6 +1020,8 @@ function migrate(conn: DatabaseSync) {
   // organization's meeting bot (NULL = Sidekick's own, 'recall' = the hosted Recall.ai, opted in by the Org Owner).
   for (const col of ["live_mode", "live_mode_by", "live_mode_at", "live_settings"]) if (!has("workspaces", col)) conn.exec(`ALTER TABLE workspaces ADD COLUMN ${col} TEXT`);
   if (!has("orgs", "live_provider")) conn.exec("ALTER TABLE orgs ADD COLUMN live_provider TEXT");
+  // Sidekick's voice in meetings, the organization's default (JSON { voiceId, speed }, lib/live-meetings/voices.ts).
+  if (!has("orgs", "live_voice")) conn.exec("ALTER TABLE orgs ADD COLUMN live_voice TEXT");
   // Live meetings, stage 2: the bot's job execution (launched, exited, its name), how it hears (captions or Azure
   // speech-to-text, and when captions and speech were last seen), and the characters it spoke (cost meter).
   for (const col of ["launched_at TEXT", "exited_at TEXT", "execution TEXT", "hearing TEXT", "captions_at TEXT", "speech_at TEXT", "hearing_since TEXT", "tts_chars INTEGER NOT NULL DEFAULT 0", "captions_unavailable INTEGER NOT NULL DEFAULT 0"]) {

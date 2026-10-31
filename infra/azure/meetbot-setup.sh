@@ -19,8 +19,9 @@
 #   7. An Azure budget `sidekick-meetbot-monthly` on the tagged resources, emailing at 50/80/100%. Azure budgets only
 #      warn; the app's own cap (Owner Console → Live meetings) is what stops new meetings.
 #
-# Usage: CONFIRM=yes BUDGET_EMAIL=<who gets the budget emails> [BUDGET_USD=50] infra/azure/meetbot-setup.sh
-# Without CONFIRM=yes it only prints what it would do.
+# Usage: CONFIRM=yes BUDGET_EMAIL=<who gets the budget emails> [BUDGET_USD=50] [SKIP_APP=1] infra/azure/meetbot-setup.sh
+# Without CONFIRM=yes it only prints what it would do. SKIP_APP=1 leaves out step 6 (the app's role on the job and its
+# settings): the resources exist but Sidekick can't start the bot yet (until the first live trial is approved).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -102,6 +103,9 @@ az containerapp job registry set -g $RG -n $JOB --server $ACR.azurecr.io --ident
 az containerapp job secret set -g $RG -n $JOB --secrets "${SECRETS[@]}" -o none
 az containerapp job update -g $RG -n $JOB --image "$IMAGE" --cpu 2 --memory 4Gi --replace-env-vars "${ENVV[@]}" -o none
 
+if [[ "${SKIP_APP:-}" == "1" ]]; then
+  echo "6/7 Skipped (SKIP_APP=1): the app can't start the bot yet."
+else
 echo "6/7 The app may start and stop the job"
 APP_PID=$(az containerapp show -g $RG -n $APP --query identity.principalId -o tsv)
 grant "$APP_PID" Contributor "$JOB_ID"
@@ -111,6 +115,7 @@ az containerapp secret set -g $RG -n $APP --secrets \
 az containerapp update -g $RG -n $APP --set-env-vars SIDEKICK_MEETBOT_JOB=$JOB SIDEKICK_MEETBOT_RG=$RG AZURE_SUBSCRIPTION_ID=$SUB \
   SIDEKICK_MEETBOT_IMAGE="$IMAGE" SIDEKICK_MEETBOT_SECRET=secretref:meetbot-secret SIDEKICK_MEETBOT_CPU=2 SIDEKICK_MEETBOT_MEMORY_GIB=4 \
   AZURE_SPEECH_KEY=secretref:azure-speech-key AZURE_SPEECH_REGION=$LOC ATTENDEE_RAISE_HAND=0 -o none
+fi
 
 echo "7/7 Budget on the meeting bot's resources"
 START=$(date -u +%Y-%m-01)

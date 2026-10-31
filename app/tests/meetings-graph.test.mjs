@@ -263,8 +263,10 @@ const tts = http.createServer((req, res) => {
       res.writeHead(401);
       return res.end();
     }
-    const text = (body.match(/<voice[^>]*>([\s\S]*)<\/voice>/)?.[1] ?? "").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-    ttsCalls.push({ format: req.headers["x-microsoft-outputformat"], text });
+    const voice = body.match(/<voice name="([^"]+)">/)?.[1] ?? null;
+    const rate = body.match(/<prosody rate="([^"]+)">/)?.[1] ?? null;
+    const text = (body.match(/<voice[^>]*>([\s\S]*)<\/voice>/)?.[1] ?? "").replace(/<\/?prosody[^>]*>/g, "").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    ttsCalls.push({ format: req.headers["x-microsoft-outputformat"], text, voice, rate });
     res.writeHead(200, { "content-type": "audio/mpeg" });
     res.end(Buffer.from(text, "utf8"));
   });
@@ -2449,6 +2451,55 @@ test(`[${ENGINE}] live: the Owner Console's cost meter, and the platform cap: wa
   assert.equal((await owner("PUT", "/api/owner/live/cap", { kind: "usd", amount: 50 })).status, 200);
   await say(running, "Lou Lead", "Sidekick, leave.");
   await waitSession(running, "status", "ended");
+});
+
+test(`[${ENGINE}] live: Sidekick's voice: the organization's default (admins), a group's own (Team Lead), Play sample made once, the bot speaks with it`, async () => {
+  let v = (await mo("GET", "/api/live/voice")).body;
+  assert.equal(v.voiceId, "en-US-AndrewMultilingualNeural");
+  assert.equal(v.speed, 1);
+  assert.equal(v.canManage, false);
+  assert.equal(v.speechReady, true);
+  assert.ok(v.voices.some((x) => x.gender === "neutral") && v.voices.some((x) => x.accent === "British"), "male, female and neutral voices, several accents");
+  assert.equal((await mo("PUT", "/api/live/voice", { voiceId: "en-GB-SoniaNeural" })).status, 403);
+  assert.equal((await ann("PUT", "/api/live/voice", { voiceId: "en-GB-MadeUpNeural" })).status, 400, "only listed voices");
+  assert.equal((await ann("PUT", "/api/live/voice", { speed: 1.5 })).status, 400);
+  v = (await ann("PUT", "/api/live/voice", { voiceId: "en-GB-SoniaNeural", speed: 1.1 })).body;
+  assert.equal(v.voiceId, "en-GB-SoniaNeural");
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Set Sidekick''s voice in meetings%' ORDER BY id DESC LIMIT 1"), /Sonia · female, British at 1.1×/);
+  // Play sample: made once with Azure AI Speech, then from the cache.
+  assert.equal((await mo("POST", "/api/live/voice/sample", { voiceId: "en-AU-WilliamNeural" })).status, 403);
+  const calls = ttsCalls.length;
+  const first = await lou("POST", "/api/live/voice/sample", { voiceId: "en-AU-WilliamNeural", speed: 1 });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.equal(first.body.cached, false);
+  assert.match(Buffer.from(first.body.mp3, "base64").toString("utf8"), /^Hi, I'm Sidekick\./);
+  assert.equal(ttsCalls.at(-1).voice, "en-AU-WilliamNeural");
+  const again = await lou("POST", "/api/live/voice/sample", { voiceId: "en-AU-WilliamNeural", speed: 1 });
+  assert.equal(again.body.cached, true);
+  assert.equal(ttsCalls.length, calls + 1, "the second play costs nothing");
+  // The group's own voice, then the bot speaks with it.
+  assert.equal((await lou("PUT", liveUrl(s.w1), { voiceId: "en-XX-NopeNeural" })).status, 400);
+  const g = (await lou("PUT", liveUrl(s.w1), { voiceId: "en-IN-NeerjaNeural", speed: 0.9 })).body;
+  assert.equal(g.settings.voiceId, "en-IN-NeerjaNeural");
+  assert.equal(g.orgVoice, "en-GB-SoniaNeural");
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("voice1")}`), /Joining now/);
+  const bot = lastBot();
+  await botStatus(bot, "in_call");
+  await waitChat(bot, /listening for W1/);
+  let n = logLen(bot);
+  await say(bot, "Lou Lead", "Sidekick, what is the zebracode rollout plan?");
+  await waitLog(bot, /speak:/, n);
+  assert.equal(ttsCalls.at(-1).voice, "en-IN-NeerjaNeural");
+  assert.equal(ttsCalls.at(-1).rate, "-10%");
+  // Back to the organization's voice.
+  assert.equal((await lou("PUT", liveUrl(s.w1), { voiceId: null, speed: null })).status, 200);
+  n = logLen(bot);
+  await say(bot, "Lou Lead", "Sidekick, what does the zebracode summary say?");
+  await waitLog(bot, /speak:/, n);
+  assert.equal(ttsCalls.at(-1).voice, "en-GB-SoniaNeural");
+  assert.equal(ttsCalls.at(-1).rate, "+10%");
+  await say(bot, "Lou Lead", "Sidekick, leave.");
+  await waitSession(bot, "status", "ended");
 });
 
 test(`[${ENGINE}] live: Owner Console report; Stop from the portal; isolation (another organization sees and stops nothing)`, async () => {

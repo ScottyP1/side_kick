@@ -7,7 +7,8 @@
  * - **Where**: `AZURE_SPEECH_KEY` with `AZURE_SPEECH_REGION` (e.g. `eastus`), or `AZURE_SPEECH_TTS_URL` for another
  *   endpoint (the tests' fake; plain http only outside production). REST API: `POST /cognitiveservices/v1` with SSML,
  *   output `audio-24khz-48kbitrate-mono-mp3` (https://learn.microsoft.com/azure/ai-services/speech-service/rest-text-to-speech).
- * - **Voice**: `SIDEKICK_LIVE_VOICE` (default `en-US-AndrewMultilingualNeural`), a neural voice.
+ * - **Voice and speed**: chosen in the portal (lib/live-meetings/voices.ts: the organization's default, a group's
+ *   override); only voices from that list, 0.9×–1.2× (SSML prosody rate).
  * - **Short only**: spoken answers are a sentence or two (lib/live-meetings/rules.ts `spokenText`), so one request is
  *   fast (well under a second for a short sentence) and costs a fraction of a cent ($15 per million characters).
  * - **Not configured** = no spoken answers anywhere; Sidekick answers in the chat only and the group page says why.
@@ -16,6 +17,7 @@
  */
 import "server-only";
 import { span } from "../trace";
+import { DEFAULT_VOICE, isSpeed, isVoice, rateOf } from "./voices";
 
 /** The Azure AI Speech text-to-speech address, or null when spoken answers aren't set up. */
 function ttsUrl(): string | null {
@@ -34,12 +36,15 @@ const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
  * Turns a short text into speech (MP3, base64). Throws a plain error when it isn't configured or Azure refuses (the
  * caller then answers in the chat only).
  */
-export async function synthesize(text: string): Promise<string> {
+export async function synthesize(text: string, opts: { voiceId?: string | null; speed?: number | null } = {}): Promise<string> {
   const url = ttsUrl();
   const key = process.env.AZURE_SPEECH_KEY?.trim();
   if (!url || !key) throw new Error("Spoken answers aren't set up (Azure AI Speech).");
-  const voice = process.env.SIDEKICK_LIVE_VOICE?.trim() || "en-US-AndrewMultilingualNeural";
-  const ssml = `<speak version="1.0" xml:lang="en-US"><voice name="${xml(voice)}">${xml(text.slice(0, 600))}</voice></speak>`;
+  // Only allowed voices and speeds (lib/live-meetings/voices.ts); anything else is the default.
+  const voice = isVoice(opts.voiceId) ? opts.voiceId : DEFAULT_VOICE;
+  const speed = isSpeed(opts.speed) ? opts.speed : 1;
+  const words = xml(text.slice(0, 600));
+  const ssml = `<speak version="1.0" xml:lang="en-US"><voice name="${xml(voice)}">${speed === 1 ? words : `<prosody rate="${rateOf(speed)}">${words}</prosody>`}</voice></speak>`;
   return span("live", "Make the spoken answer (Azure AI Speech)", async () => {
     const res = await fetch(url, {
       method: "POST",

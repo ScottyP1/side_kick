@@ -8,7 +8,8 @@
  *   "Require two-step sign-in for everyone" (Org Owner; Org Admins see it read-only), organization
  *   branding (logo and brand color), **Export your data** (the whole organization as a zip, GET /api/export) and
  *   **Roll-offs and certificates**: groups ending, a pending deletion of the organization, and deletion
- *   certificates to download (GET /api/rolloffs).
+ *   certificates to download (GET /api/rolloffs); **Sidekick's voice in meetings** (the organization's default voice and
+ *   speed for live meetings, with Play sample: /api/live/voice, components/voice-picker.tsx).
  * - **My account** (everyone): password, two-step sign-in (authenticator app or passkey, components/two-step.tsx),
  *   where you're signed in (sign out other sessions) and, for everyone but admins, whether Microsoft sign-in is on
  *   and their own account is linked. For Members, Viewers and Team Leads this is the whole page.
@@ -23,8 +24,44 @@ import { takeFlash } from "@/lib/flash";
 import { BACKUP_RETENTION_DAYS, ORG_GRACE_DAYS } from "@/lib/rolloff-policy";
 import { BRAND } from "@/lib/brand";
 import { featureNote } from "@/lib/plans";
+import { VoicePicker } from "@/components/voice-picker";
+import type { Voice } from "@/lib/live-meetings/voices";
 
 type MsStatus = { configured: boolean; connected: boolean; tenantId: string | null; required: boolean; linked: boolean; canManage: boolean };
+
+/** The organization's meeting voice, as GET /api/live/voice returns it. */
+type VoiceStatus = { voiceId: string; speed: number; voices: Voice[]; speeds: number[]; speechReady: boolean; canManage: boolean };
+
+/**
+ * "Sidekick's voice in meetings": the organization's default voice and speed for live meetings (Org Owner/Admin;
+ * PUT /api/live/voice, audited), with Play sample. Groups can choose their own in their live-meeting settings.
+ */
+function VoicePanel() {
+  const toast = useToast();
+  const reportError = useReportError();
+  const [st, setSt] = useState<VoiceStatus | null>(null);
+  useEffect(() => {
+    api<VoiceStatus>("/api/live/voice").then(setSt).catch(reportError);
+  }, [reportError]);
+  if (!st) return null;
+  const save = async (v: { voiceId?: string | null; speed?: number | null }) => {
+    try {
+      setSt(await api<VoiceStatus>("/api/live/voice", { method: "PUT", json: v }));
+      toast("Voice saved.");
+    } catch (e) {
+      reportError(e);
+    }
+  };
+  return (
+    <div className="panel">
+      <div className="panel-h"><h2>{BRAND.name}&apos;s voice in meetings</h2><span className="muted">Live in meetings</span></div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>The voice {BRAND.name} speaks with when it answers aloud in a Teams meeting. A group can pick its own in its live-meeting settings.</p>
+        <VoicePicker voiceId={st.voiceId} speed={st.speed} onChange={save} disabled={!st.canManage} speechReady={st.speechReady} />
+      </div>
+    </div>
+  );
+}
 
 /**
  * Microsoft sign-in panel. Everyone sees whether it's on and whether their own account is linked; the Org
@@ -310,6 +347,7 @@ export default function SettingsPage() {
             <MicrosoftPanel />
             <TwoStepPolicyPanel />
             <MicrosoftPermissionsPanel />
+            <VoicePanel />
             <div className="panel">
               <div className="panel-h"><h2>Your branding</h2><span className="muted">Applies to the whole portal</span></div>
               <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 14 }}>

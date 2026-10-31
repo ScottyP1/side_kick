@@ -769,6 +769,13 @@ ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS speech_at TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS hearing_since TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS tts_chars INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS captions_unavailable INTEGER NOT NULL DEFAULT 0;
+-- "Play sample" for Sidekick's meeting voices (lib/live-meetings/voice-settings.ts): one MP3 (base64) per voice and
+-- speed, made once with Azure AI Speech. The sample sentence is fixed and made up, so it's the same for everyone (no org).
+CREATE TABLE IF NOT EXISTS live_voice_samples (
+  voice_id TEXT NOT NULL, speed TEXT NOT NULL, mp3 TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (voice_id, speed)
+);
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS live_voice TEXT;
 -- ---------------------------------------------------------------------------------------------------------
 -- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
 -- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and

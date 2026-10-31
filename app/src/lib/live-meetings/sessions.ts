@@ -55,6 +55,7 @@ import { answerCard, noticeCard } from "../teams/cards";
 import { BRAND } from "../brand";
 import { configuredProviders, PROVIDER_IDS, PROVIDER_INFO, providerById, type LiveEvent, type LiveProvider, type ProviderId } from "./provider";
 import { speechConfigured, synthesize } from "./speech";
+import { DEFAULT_VOICE } from "./voices";
 import { capReached, capState, checkCapAlerts, LIVE_PAUSED, monthSpend } from "./spend";
 import { reapBot } from "./attendee";
 import { botKey } from "./launcher";
@@ -177,14 +178,14 @@ export async function groupMode(orgId: string, workspaceId: string): Promise<Liv
 
 /**
  * Changes the group's live-meeting switch and settings. `body.mode` (off / ask / auto) and any of `answer`, `voice`,
- * `pauseS`, `ask` (lib/live-meetings/rules.ts `LiveSettings`). Only the group's Team Lead or an Org Owner/Admin
+ * `pauseS`, `ask`, `voiceId`, `speed` (lib/live-meetings/rules.ts `LiveSettings`; null voice/speed = the organization's). Only the group's Team Lead or an Org Owner/Admin
  * (`requireManage`); turning it on needs the plan's `liveMeetings` feature (Enterprise, 402 otherwise) and a
  * configured provider (503); a bad value is 400. Audited ("Policy change"). Returns the new status for the group page.
  */
 export async function setLiveMode(user: User, workspaceId: unknown, body: Record<string, unknown> | null) {
   const ws = await requireManage(user, typeof workspaceId === "string" ? workspaceId : null);
   const { mode, ...rest } = body ?? {};
-  const settingKeys = ["answer", "voice", "pauseS", "ask"].filter((k) => k in rest);
+  const settingKeys = ["answer", "voice", "pauseS", "ask", "voiceId", "speed"].filter((k) => k in rest);
   if (mode === undefined && !settingKeys.length) throw new HttpError(400, "Choose off, when someone asks, or every group meeting.");
   if (settingKeys.length) {
     const cur = await groupSettings(user.org_id, ws);
@@ -229,6 +230,7 @@ export async function liveStatus(user: User, workspaceId: unknown) {
     settings: await groupSettings(user.org_id, ws),
     provider: { id: providerId, ...PROVIDER_INFO[providerId], ready: Boolean(provider), canChoose: user.role === "Org Owner", choices: configuredProviders().map((id) => ({ id, label: PROVIDER_INFO[id].label, hosted: PROVIDER_INFO[id].hosted })) },
     can: { raiseHand: Boolean(provider?.can.raiseHand), speak: Boolean(provider?.can.speak && speechConfigured()) },
+    orgVoice: (await (await import("./voice-settings")).orgVoice(user.org_id)).voiceId ?? DEFAULT_VOICE,
     changedBy: row?.live_mode_by ?? null,
     changedAt: row?.live_mode_at ?? null,
     included,
@@ -761,7 +763,9 @@ async function speakNow(s: LiveSession, text: string): Promise<boolean> {
   if (!provider || !s.bot_id || !text) return false;
   if (!(await waitForSilence(s.org_id, s.id, 800, 8000))) return false;
   try {
-    const mp3 = await synthesize(text);
+    // The group's chosen voice (else the organization's, lib/live-meetings/voice-settings.ts).
+    const { voiceFor } = await import("./voice-settings");
+    const mp3 = await synthesize(text, await voiceFor(s.org_id, s.workspace_id));
     await run("UPDATE live_sessions SET tts_chars = tts_chars + ? WHERE id = ? AND org_id = ?", text.length, s.id, s.org_id);
     await span("live", "Speak in the meeting", () => provider.speak(s.bot_id!, mp3), { words: text.split(" ").length });
     return true;

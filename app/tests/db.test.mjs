@@ -1881,8 +1881,8 @@ test(`[${engine}] live meetings: a member of the meeting: questions to the room,
   for (const t of ["It's on Saturday.", "Wave two starts in March", "Not until the budget is signed off"]) assert.equal(liveRules.isNonAnswer(t), false, t);
   assert.equal(liveRules.spokenText("The cutover moved to **Saturday** [S1]. Ana confirmed it on Tuesday [S2]. The rollback plan is still open [S3]."), "The cutover moved to Saturday. Ana confirmed it on Tuesday.");
   assert.ok(liveRules.spokenText("word ".repeat(80)).split(" ").length <= 46, "at most about 45 words");
-  assert.deepEqual(liveRules.parseSettings(null), { answer: "room", voice: "called", pauseS: 6, ask: true }, "Cody's defaults");
-  assert.deepEqual(liveRules.parseSettings('{"answer":"addressed","voice":"auto","pauseS":3,"ask":false}'), { answer: "addressed", voice: "auto", pauseS: 3, ask: false });
+  assert.deepEqual(liveRules.parseSettings(null), { answer: "room", voice: "called", pauseS: 6, ask: true, voiceId: null, speed: null }, "Cody's defaults");
+  assert.deepEqual(liveRules.parseSettings('{"answer":"addressed","voice":"auto","pauseS":3,"ask":false,"voiceId":"en-GB-SoniaNeural","speed":1.1}'), { answer: "addressed", voice: "auto", pauseS: 3, ask: false, voiceId: "en-GB-SoniaNeural", speed: 1.1 });
   assert.deepEqual(liveRules.parseSettings('{"voice":"shout","pauseS":99}'), liveRules.DEFAULT_SETTINGS, "anything unknown is the default");
   assert.equal(liveRules.confident({ found: true, sources: [{}], conflict: false, blocked: null }), true);
   for (const r of [{ found: false, sources: [{}], conflict: false }, { found: true, sources: [], conflict: false }, { found: true, sources: [{}], conflict: true }, { found: true, sources: [{}], conflict: false, blocked: "judging_people" }]) assert.equal(liveRules.confident(r), false);
@@ -1930,3 +1930,21 @@ test(`[${engine}] live meetings: how Sidekick's own bot hears (captions first, A
   assert.equal(liveSig.sameKey("abd", "abc"), false);
   assert.equal(liveSig.sameKey(null, "abc"), false);
 });
+
+const voices = await import("../src/lib/live-meetings/voices.ts");
+
+test(`[${engine}] live meetings: the voices people can pick, the speeds, and which one Sidekick uses`, () => {
+  assert.ok(voices.VOICES.length >= 9);
+  assert.ok(["male", "female", "neutral"].every((g) => voices.VOICES.some((v) => v.gender === g)));
+  assert.ok(new Set(voices.VOICES.map((v) => v.accent)).size >= 4, "several English accents");
+  assert.equal(voices.isVoice("en-GB-SoniaNeural"), true);
+  assert.equal(voices.isVoice("en-GB-SoniaNeural<script>"), false);
+  assert.equal(voices.isSpeed(1.1), true);
+  assert.equal(voices.isSpeed(1.3), false);
+  assert.equal(voices.rateOf(1.1), "+10%");
+  assert.equal(voices.rateOf(0.9), "-10%");
+  assert.deepEqual(voices.parseVoice('{"voiceId":"nope","speed":2}'), { voiceId: null, speed: null });
+  assert.deepEqual(voices.effectiveVoice({ voiceId: null, speed: null }, { voiceId: null, speed: null }), { voiceId: voices.DEFAULT_VOICE, speed: 1 });
+  assert.deepEqual(voices.effectiveVoice({ voiceId: "en-IN-NeerjaNeural", speed: null }, { voiceId: "en-GB-SoniaNeural", speed: 1.1 }), { voiceId: "en-IN-NeerjaNeural", speed: 1.1 }, "the group's voice, the organization's speed");
+});
+

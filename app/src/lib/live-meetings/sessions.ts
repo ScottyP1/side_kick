@@ -63,7 +63,7 @@ import { sameKey } from "./signature";
 import {
   answerText, BOT_NAME, confident, GUEST_NOTICE, HAND_NOTE, introText, isNonAnswer, isRoomQuestion, isTeamsMeetingUrl, liveMinutes, LIVE_MODES,
   LOBBY_TIMEOUT_MS, looksExternal, MAX_ANSWERS, MAX_SESSION_MS, meetingThreadFromUrl, ownQuestion, parseSettings, parseTrigger, recapText, spokenText,
-  hearingNext, minuteOf, type ListItem, type LiveMode, type LiveSettings, type Trigger,
+  hearingNext, isOwnAnswer, isOwnName, minuteOf, type ListItem, type LiveMode, type LiveSettings, type Trigger,
 } from "./rules";
 
 /** A row of `live_sessions` (see db/schema.postgres.sql). */
@@ -528,7 +528,7 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
   if (e.kind === "participant") {
     const tenant = e.tenantId ? (await tenantOfOrg(orgId))?.toLowerCase() : null;
     const external = e.guest || looksExternal(e.name) || Boolean(e.tenantId && tenant && e.tenantId.toLowerCase() !== tenant);
-    if (!external || s.guests === 1 || e.name === BOT_NAME) return false;
+    if (!external || s.guests === 1 || isOwnName(e.name)) return false;
     const flip = await run("UPDATE live_sessions SET guests = 1, updated_at = ? WHERE id = ? AND org_id = ? AND guests = 0", now(), id, orgId);
     if (flip.changes) {
       await auditAsSidekick(orgId, `A guest joined the Teams meeting “${s.title ?? "Teams meeting"}”: ${BRAND.name} now answers from Shareable sources only`, "Agent action", s.workspace_id);
@@ -549,8 +549,9 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
     return true;
   }
   // A line said or typed in the meeting. Sidekick's own chat messages (the meeting bot's, or its Teams bot's answer
-  // cards) come back as chat lines: skip them.
-  if (e.source === "chat" && (e.speaker === BOT_NAME || e.speaker === BRAND.name)) return false;
+  // cards) and its own spoken answers come back as lines: skip them, by name (Teams shows "Sidekick notes", not the
+  // exact name) and, for chat, by the answer's own "Sidekick · “…”" heading too.
+  if (isOwnName(e.speaker) || (e.source === "chat" && isOwnAnswer(e.text))) return false;
   // Spoken lines: Teams captions or Azure speech-to-text, whichever Sidekick hears by now. A caption while on
   // speech-to-text only says captions work again (no line twice).
   if (e.source === "speech" && e.heardBy) {

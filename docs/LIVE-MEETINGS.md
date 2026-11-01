@@ -353,7 +353,7 @@ customer. The Azure resources already exist (Oct 31, `SKIP_APP=1`); nothing has 
    - *Anonymous users can join a meeting*: **On**, in both places. The bot joins as a guest.
    - Live captions: allowed (Transcription section). The bot hears through them.
    - Meeting chat: on.
-   - Lobby: leave the default. Someone admitting "Sidekick (notes)" is part of the footage.
+   - Lobby: leave the default. Someone admitting "Sidekick" is part of the footage.
 3. **Owner Console:**
    - The Sidekick Labs organization is on Enterprise (Live in meetings needs it).
    - Live meetings → set the cap to about **$5** for the trial.
@@ -366,7 +366,7 @@ customer. The Azure resources already exist (Oct 31, `SKIP_APP=1`); nothing has 
    - Open its meeting chat → **+** → add Sidekick, then assign that chat to the group in the portal.
 
 **In the meeting (record the screen throughout: QuickTime or OBS, Teams window plus the portal side by side):**
-1. Type `@Sidekick join`. Admit "Sidekick (notes)" from the lobby. Its first chat message appears.
+1. Type `@Sidekick join`. Admit "Sidekick" from the lobby. Its first chat message appears.
 2. Say "Sidekick, what did we decide about …?" Expect the hand up, a short spoken answer, the answer with sources
    in the chat, then the hand down.
 3. Ask the room something the documents answer, and let a second person say "not sure". Expect the hand up. Then
@@ -467,7 +467,7 @@ Nothing below has been done. For the default, self-hosted route:
 4. **Sidekick Labs Teams settings**, for the first trial:
    - allow anonymous users to join meetings (or give the bot a signed-in account);
    - allow live captions;
-   - let someone admit "Sidekick (notes)" from the lobby.
+   - let someone admit "Sidekick" from the lobby.
 5. **Decide the pricing option** above.
 
 Only if a client asks for the hosted route:
@@ -480,7 +480,7 @@ Only if a client asks for the hosted route:
 - Sidekick's Teams app (already);
 - anonymous join, or trusting the bot account's tenant;
 - live captions;
-- admitting "Sidekick (notes)" from the lobby.
+- admitting "Sidekick" from the lobby.
 
 Only for the hosted route, Recall.ai as a sub-processor.
 

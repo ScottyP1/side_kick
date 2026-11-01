@@ -7,7 +7,7 @@ meetings, so there's no fixed cost.
 
 Inside the one container (`Dockerfile`, `entrypoint.sh`):
 - **Attendee** v1.89.2 (open source, Elastic License 2.0): headless Chrome joins the Teams meeting as
-  "Sidekick (notes)", turns on Teams' live captions, reads the chat, and posts, speaks and (with our patch) raises its
+  "Sidekick", turns on Teams' live captions, reads the chat, and posts, speaks and (with our patch) raises its
   hand. Its web API and Celery worker run on 127.0.0.1 only. Our changes: `patches/`.
 - **Redis**, in the container (no Azure Cache).
 - **The shim** (`shim/`, Node 22): forwards Attendee's events to Sidekick signed with the session's own key, and

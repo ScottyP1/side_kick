@@ -206,6 +206,7 @@ export function createShim(cfg, hooks = {}) {
         const bot = await attendee("POST", "/api/v1/bots", {
           meeting_url: cfg.meetingUrl,
           bot_name: cfg.botName,
+          ...(cfg.botImage ? { bot_image: { type: "image/png", data: cfg.botImage } } : {}),
           metadata: { sidekick_session: cfg.session },
           transcription_settings: { meeting_closed_captions: { teams_language: cfg.captionsLanguage ?? "en-us" } },
           recording_settings: { format: "none" },

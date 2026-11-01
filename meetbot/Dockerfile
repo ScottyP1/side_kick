@@ -14,7 +14,8 @@ RUN cd /attendee && for p in /meetbot/patches/*.patch; do patch -p1 < "$p"; done
 COPY shim/package.json /meetbot/shim/package.json
 RUN cd /meetbot/shim && npm install --omit=dev --no-audit --no-fund
 COPY shim/ /meetbot/shim/
-COPY entrypoint.sh bootstrap.py /meetbot/
+# The bot's camera picture in meetings: Sidekick's crystal ball (PNG, 1280x720).
+COPY entrypoint.sh bootstrap.py bot-image.png /meetbot/
 RUN chmod +x /meetbot/entrypoint.sh && chown -R app:app /meetbot
 USER app
 ENTRYPOINT ["/tini", "--", "/meetbot/entrypoint.sh"]

@@ -38,7 +38,7 @@
  *   runs without a transcript (through `postCard`); "@Sidekick stop/start transcription reminders" switches that for
  *   the chat's group (Team Lead or admin, `callNudgeFromTeams`).
  * - **Live in meetings** (lib/live-meetings/, Enterprise): `@Sidekick join` in a meeting chat (or `join <meeting link>`
- *   in any linked chat) sends the "Sidekick (notes)" meeting bot; `@Sidekick leave` sends it away. Its answers in a
+ *   in any linked chat) sends the "Sidekick" meeting bot; `@Sidekick leave` sends it away. Its answers in a
  *   meeting chat where this bot is come back through `postCard`. Viewers can't do either.
  * - **Adaptive Cards**: the formatted messages with buttons (see cards.ts). Button clicks come back as
  *   `card.action` activities and update the card in place.

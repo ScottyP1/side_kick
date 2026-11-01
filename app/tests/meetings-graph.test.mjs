@@ -2059,7 +2059,10 @@ test(`[${ENGINE}] live: the bot's camera: the ball's state only with the session
   // The page itself is public (the bot has no sign-in) and shows no data; only its state API is signed.
   const page = await fetch(`${BASE}/live/orb?session=${bot}&sig=x`, { redirect: "manual" });
   assert.equal(page.status, 200);
-  assert.doesNotMatch(await page.text(), /W1|Lou Lead|cutover/);
+  const html = await page.text();
+  assert.doesNotMatch(html, /W1|Lou Lead|cutover/);
+  // Nothing but the ball: Attendee's streamer error box is hidden on this page (first live test, Nov 1).
+  assert.match(html, /#attendee-audio-error\{display:none!important\}/);
   const sig = crypto.createHmac("sha256", botKeyOf(bot)).update("orb").digest("base64url");
   const orb = (q) => fetch(`${BASE}/api/live/bot/orb?${q}`);
   assert.equal((await orb(`session=${bot}`)).status, 401);

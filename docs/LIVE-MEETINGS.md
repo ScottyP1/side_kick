@@ -347,6 +347,11 @@ Cody asked on the first trial for the crystal ball instead of initials, then whe
     lost), or if the container's CPU stays over 90% for three readings 20 s apart (Attendee is told to stop the page,
     the streamer is shut down).
   - The session saves what the bot showed (`live_sessions.camera`: `orb` or `still: <why>`).
+  - **First live test (Nov 1, 4 vCPU / 8 GiB):** the ball streamed and moved, swirling while thinking and speaking.
+    One bug: a red "Failed to receive remote audio stream within 10 seconds" box stayed over it. Cause: the script
+    Attendee's streamer adds to every page fetches the meeting audio from `localhost:8000`, which is Attendee's API in
+    our container (the streamer is on 8001). Fixed in patch 03 (the right port), and the page hides that box and
+    ignores `alert()` as a backstop, since it uses no microphone.
 - **CPU, measured Nov 1** (`?demo=speaking`, Chrome 134-like software WebGL: `--disable-gpu`, SwiftShader; Cody's
   M3 Pro; the cost is per pixel drawn, the number of dust particles barely matters):
 

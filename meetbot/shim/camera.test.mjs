@@ -3,7 +3,8 @@
  * the shim against a fake Attendee, a fake Sidekick, a fake webpage streamer and fake CPU readings.
  * Covers: the animated ball asked for only when its browser is up (and reported), the still picture when it isn't or
  * when Attendee refuses it (the bot is still created), switching back to the still picture when the container stays
- * too busy (Attendee told, the browser stopped, Sidekick told why), CPU use reported, and the CPU arithmetic.
+ * too busy (Attendee told, the browser stopped, Sidekick told why), CPU use reported, the CPU arithmetic, and that our
+ * Attendee patch points the streamer's page script at the streamer's own port (else a red error box shows on the camera).
  *
  *   node --test meetbot/shim/camera.test.mjs
  */
@@ -185,4 +186,12 @@ test("CPU arithmetic: share of the container's limit from cgroup v2 readings", a
   const share = load.sample();
   assert.ok(share > 0 && share <= 0.5, `about 20 ms of CPU over about 20 ms on 2 vCPU (${share})`);
   assert.equal(createLoad({ root: path.join(dir, "missing") }).sample(), null, "outside a container: null");
+});
+
+test("patch 03 points the streamer's page script at its own port (8000 is Attendee's API here)", () => {
+  const patch = fs.readFileSync(new URL("../patches/03-local-webpage-streamer.patch", import.meta.url), "utf8");
+  // Without this the page's microphone hookup asks Attendee's API for the meeting audio, fails, and Attendee's script
+  // draws "Failed to receive remote audio stream within 10 seconds" over the ball (first live test, Nov 1).
+  assert.match(patch, /\+\s*payload_code = payload_code\.replace\("http:\/\/localhost:8000\/", f"http:\/\/localhost:\{os\.getenv\('WEBPAGE_STREAMER_PORT', '8000'\)\}\/"\)/);
+  assert.match(patch, /\+\s*port = int\(os\.getenv\("WEBPAGE_STREAMER_PORT", "8000"\)\)/);
 });

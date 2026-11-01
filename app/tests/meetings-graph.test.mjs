@@ -220,6 +220,9 @@ async function fakeContainer(session) {
       const res = await fetch(`${bot.env.SIDEKICK_URL}/api/live/bot/commands?wait=1`, { headers: { "x-sidekick-bot-session": session, Authorization: `Bearer ${bot.env.SIDEKICK_BOT_KEY}` } });
       if (res.status === 401) return void (bot.gone = true);
       out = await res.json();
+      // Made deaf while this fetch was waiting: a stuck container ignores what it got too (else it would leave and
+      // exit by itself, and the reaping test would have nothing to stop).
+      if (bot.deaf) continue;
     } catch {
       await new Promise((r) => setTimeout(r, 100));
       continue;
@@ -2408,7 +2411,12 @@ test(`[${ENGINE}] live: the bot's container exits when it leaves; one that doesn
   assert.equal(await sessionOf(stuck, "exited_at"), "");
   await dbExec(`UPDATE live_sessions SET ended_at = '${new Date(Date.now() - 10 * 60_000).toISOString()}' WHERE bot_id = '${stuck}'`);
   const stopped = () => armCalls.some((c) => c.op === "stop" && c.execution === BOTS.get(stuck).execution);
-  await sweepUntil(async () => stopped() && (await sessionOf(stuck, "exited_at")) !== "", "the stuck container stopped in Azure and marked exited");
+  // Runs live.watch itself, once, and reads its own counts: deterministic, and a failure says why.
+  const watch = await tick({ sweep: true, kinds: ["live.watch"] });
+  assert.equal(watch.failed, 0, `live.watch failed: ${JSON.stringify(watch)}`);
+  assert.ok(watch.liveReaped >= 1, `nothing reaped: ${JSON.stringify(watch)}`);
+  assert.ok(stopped(), "stopped in Azure");
+  assert.notEqual(await sessionOf(stuck, "exited_at"), "");
 });
 
 test(`[${ENGINE}] live: the Owner Console's cost meter, and the platform cap: warning at 80%, paused at 100% (running meetings finish)`, async () => {

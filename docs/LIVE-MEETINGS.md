@@ -342,30 +342,64 @@ live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.hand
 - **Setup:** `infra/azure/meetbot-setup.sh`, idempotent az CLI. It only runs with `CONFIRM=yes`. Runbook:
   docs/RUNBOOKS.md → "Meeting bot".
 
-### First live trial (stage 2, after Cody's OK)
-1. Run `CONFIRM=yes BUDGET_EMAIL=… infra/azure/meetbot-setup.sh`.
-2. Turn Live in meetings on for a Sidekick Labs group (Enterprise).
-3. Hold a meeting with two test users, then `@Sidekick join` and try each must-have.
-4. Measure and write down:
-   - startup time;
-   - heard → hand, heard → spoken and heard → chat (Activity traces);
-   - container CPU and memory (Azure metrics), to settle the 2 vCPU / 4 GiB size;
-   - caption quality against speech-to-text.
-5. Find Teams' Raise hand selector and write `meetbot/patches/02-raise-hand.patch`. Then set `ATTENDEE_RAISE_HAND=1`.
-6. **Record footage for the pitch video and website** (Cody, Oct 31: the only footage still missing). Screen
-   recordings and screenshots of:
-   - "Sidekick (notes)" in the lobby and joining;
-   - its first chat message;
-   - its hand going up;
-   - a spoken answer, with the sourced answer in the chat;
-   - a question to the room it answers when called on;
-   - its own question about an owner or date;
-   - the group page's running list during the meeting;
-   - the notes card afterwards;
-   - the Owner Console cost meter.
+### First live trial (stage 2, after Cody's OK and a time)
+Cody's plan (Oct 31): create the bot, do all the testing and capture the footage, then pause it until the first
+customer. The Azure resources already exist (Oct 31, `SKIP_APP=1`); nothing has run yet.
 
-   Use made-up meeting content and the Sidekick Labs test users only. The clips go to `~/Desktop/Sidekick Pitch`; a
-   few polished shots go to `app/public/site/` through a PR.
+**Before the meeting (Cody, about 15 minutes):**
+1. **Let Sidekick start the bot:** run `CONFIRM=yes BUDGET_EMAIL=cody.l.scott@outlook.com infra/azure/meetbot-setup.sh`
+   (without `SKIP_APP`). It gives `sidekick-app` its role on the job and its settings, which restarts the app once.
+2. **Teams admin center (Sidekick Labs)**, Meetings → Meeting policies → Global, and Meetings → Meeting settings:
+   - *Anonymous users can join a meeting*: **On**, in both places. The bot joins as a guest.
+   - Live captions: allowed (Transcription section). The bot hears through them.
+   - Meeting chat: on.
+   - Lobby: leave the default. Someone admitting "Sidekick (notes)" is part of the footage.
+3. **Owner Console:**
+   - The Sidekick Labs organization is on Enterprise (Live in meetings needs it).
+   - Live meetings → set the cap to about **$5** for the trial.
+4. **Portal (as the group's Team Lead):**
+   - Pick a demo group with made-up documents (the zebracode-style samples).
+   - Teams chats → Live in meetings: **When someone asks**; speaking **when asked or called on**; pick a voice
+     (Play sample).
+5. **Teams:**
+   - Schedule a 20-minute meeting, "Sidekick live trial", with the remaining test users (Cody, Jojo, Riley).
+   - Open its meeting chat → **+** → add Sidekick, then assign that chat to the group in the portal.
+
+**In the meeting (record the screen throughout: QuickTime or OBS, Teams window plus the portal side by side):**
+1. Type `@Sidekick join`. Admit "Sidekick (notes)" from the lobby. Its first chat message appears.
+2. Say "Sidekick, what did we decide about …?" Expect the hand up, a short spoken answer, the answer with sources
+   in the chat, then the hand down.
+3. Ask the room something the documents answer, and let a second person say "not sure". Expect the hand up. Then
+   say "Go ahead, Sidekick" and it answers.
+4. Say "I'll update the runbook." A few minutes later it asks by when.
+5. "Sidekick, recap." Then "Sidekick, leave." The notes card follows in the group's chat.
+6. In the portal: the group's running list during the meeting, the voice picker, and Owner Console → Live meetings
+   (the cost meter).
+
+**Measure and write down:**
+- startup time (`@Sidekick join` → in the lobby);
+- heard → hand, heard → spoken and heard → chat (Activity traces);
+- container CPU and memory (Azure metrics), to settle the 2 vCPU / 4 GiB size;
+- caption quality against speech-to-text;
+- the Teams Raise hand control, for `meetbot/patches/02-raise-hand.patch`.
+
+**Footage:**
+- Clips and screenshots go to
+  `~/Desktop/Sidekick Pitch/5 - Screenshots & mockups/final-capture-2026-10-29/live-meeting/`.
+- They're then added to the pitch video and decks (`_build`), and a few polished shots go to `app/public/site/`
+  through a PR.
+- Made-up content and the Sidekick Labs test users only.
+
+**Afterwards: pause until the first customer.**
+1. `CONFIRM=yes infra/azure/meetbot.sh pause`. It stops anything running, takes away the app's role and bot settings,
+   and deletes (and purges) the Speech resource. It keeps the job definition, the images, the attendee database, the
+   secrets and the budget, which cost nothing while idle.
+2. In the Owner Console: cap **$0**, and Releases & switches → *Live in meetings* **off**.
+3. `infra/azure/meetbot.sh status` shows this month's actual cost of the bot's resources. That's the cost of the test
+   session (Azure's usage data lags a few hours).
+
+To bring it back for a customer: `CONFIRM=yes BUDGET_EMAIL=… infra/azure/meetbot.sh resume`, then raise the cap and
+switch it on.
 
 ## Part 3: stages and pricing
 

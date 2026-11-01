@@ -49,8 +49,8 @@ az cognitiveservices account keys list -g $RG -n $SPEECH --query key1 -o tsv | t
   az keyvault secret set --vault-name $KV -n azure-speech-key --file /dev/stdin -o none
 
 echo "2/7 Attendee's database on $PG"
-az postgres flexible-server db show -g $RG -s $PG -d $DB -o none 2>/dev/null || \
-  az postgres flexible-server db create -g $RG -s $PG -d $DB -o none
+az postgres flexible-server db show -g $RG -s $PG -n $DB -o none 2>/dev/null || \
+  az postgres flexible-server db create -g $RG -s $PG -n $DB -o none
 if ! secret_exists meetbot-database-url; then
   az keyvault secret show --vault-name $KV -n database-url --query value -o tsv | \
     python3 -c "import sys,urllib.parse as u; p=u.urlsplit(sys.stdin.read().strip()); print(u.urlunsplit(p._replace(path='/$DB')), end='')" | \
@@ -65,8 +65,18 @@ secret_exists meetbot-secret || openssl rand -base64 48 | tr -d '\n' | az keyvau
 echo "4/7 Images"
 git fetch -q origin
 COMMIT=$(git rev-parse --short origin/main)
-az acr repository show-tags -n $ACR --repository attendee -o tsv 2>/dev/null | grep -qx "$ATTENDEE_REF" || \
-  az acr build -r $ACR -t attendee:$ATTENDEE_REF "https://github.com/attendee-labs/attendee.git#$ATTENDEE_REF" --platform linux/amd64 --no-logs -o none
+if ! az acr repository show-tags -n $ACR --repository attendee -o tsv 2>/dev/null | grep -qx "$ATTENDEE_REF"; then
+  # Attendee's own Dockerfile at the pinned tag, from its release archive (ACR's git-URL context couldn't fetch it).
+  ATT=$(mktemp -d)
+  curl -fsSL "https://github.com/attendee-labs/attendee/archive/refs/tags/$ATTENDEE_REF.tar.gz" | tar -xz -C "$ATT" --strip-components 1
+  # ACR's build scanner can't read "FROM --platform=…"; the platform is passed to the build instead.
+  sed -i '' -E 's/^FROM --platform=[^ ]+ /FROM /' "$ATT/Dockerfile"
+  # Nor "COPY --chmod" (BuildKit only): copy, then chmod (still root at that point; USER app comes later).
+  perl -pi -e 's|^COPY --chown=app:app --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh$|COPY --chown=app:app entrypoint.sh /usr/local/bin/entrypoint.sh\nRUN chmod 0755 /usr/local/bin/entrypoint.sh|' "$ATT/Dockerfile"
+  if grep -q -- "--chmod" "$ATT/Dockerfile"; then echo "Attendee's Dockerfile still uses COPY --chmod: update this script."; exit 1; fi
+  az acr build -r $ACR -t attendee:$ATTENDEE_REF "$ATT" --platform linux/amd64 --no-logs -o none
+  rm -rf "$ATT"
+fi
 SRC=$(mktemp -d)
 git archive origin/main meetbot | tar -x -C "$SRC"
 az acr build -r $ACR -t meetbot:$ATTENDEE_REF-$COMMIT --build-arg BASE=$ACR.azurecr.io/attendee:$ATTENDEE_REF "$SRC/meetbot" --platform linux/amd64 --no-logs -o none

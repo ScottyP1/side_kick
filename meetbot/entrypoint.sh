@@ -7,6 +7,9 @@ cd /attendee
 redis-server --daemonize yes --save "" --appendonly no --bind 127.0.0.1
 # Attendee calls the shim on 127.0.0.1 over plain http (its own switch); the bot runs in the Celery worker here.
 export REDIS_URL="redis://127.0.0.1:6379/0" LAUNCH_BOT_METHOD="celery" REQUIRE_HTTPS_WEBHOOKS="false"
+# Attendee's web API listens only on 127.0.0.1 inside this container, so no HTTPS redirect there (its production
+# settings default to one, which sent the shim's plain-http calls to https; found on the first live trial, Nov 1).
+export DJANGO_SSL_REQUIRE="false"
 # Attendee's database is its own database on Sidekick's Postgres server (DATABASE_URL from the job's secrets). Migrations
 # run at setup (infra/azure/meetbot-setup.sh); here only when something is missing, so a start stays quick.
 export DJANGO_SETTINGS_MODULE="attendee.settings.production"

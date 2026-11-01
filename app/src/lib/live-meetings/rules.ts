@@ -8,7 +8,7 @@ import { BRAND } from "../brand";
 import { isSpeed, isVoice } from "./voices";
 
 /** The name Sidekick's meeting bot shows in the participant list. */
-export const BOT_NAME = `${BRAND.name} (notes)`;
+export const BOT_NAME = BRAND.name;
 
 /** A group's switch: off (default), join when someone asks (`@Sidekick join`), or join every group meeting. */
 export const LIVE_MODES = ["off", "ask", "auto"] as const;
@@ -205,6 +205,25 @@ export function meetingThreadFromUrl(url: string): string | null {
     return null;
   }
 }
+
+/**
+ * Whether a shown name is Sidekick's own: the meeting bot or its Teams bot. Teams drops brackets from a guest's name
+ * and may add a tag ("(Unverified)"), so letters and digits are compared, not the exact text. Found on the first live
+ * trial (Nov 1): the bot was then called "Sidekick (notes)", Teams showed "Sidekick notes", the exact match missed it
+ * and Sidekick answered its own chat answers in a loop (that older name still counts, for bots already running).
+ * Pure; used by lib/live-meetings/sessions.ts for chat lines, spoken lines and participants.
+ */
+export function isOwnName(name: string | null | undefined): boolean {
+  const key = (s: string) => s.toLowerCase().replace(/\((?:guest|external|unverified)\)\s*$/i, "").replace(/[^a-z0-9]/g, "");
+  const n = key(name ?? "");
+  return Boolean(n) && [BOT_NAME, BRAND.name, `${BRAND.name} notes`].some((own) => n === key(own));
+}
+
+/**
+ * Whether a chat line is one of Sidekick's own answers coming back ("Sidekick · “question”…", from `answerText`),
+ * whoever Teams says sent it: a second guard against answering itself. Pure.
+ */
+export const isOwnAnswer = (text: string) => text.trimStart().startsWith(`${BRAND.name} · `);
 
 /** Whether a participant's shown name marks them as from outside the organization ("Pat (Guest)", "Ana (External)"). */
 export const looksExternal = (name: string | null | undefined) => /\((?:guest|external|unverified)\)\s*$/i.test(name ?? "");

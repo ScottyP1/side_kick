@@ -1,7 +1,7 @@
 /**
  * @file The meeting-bot providers behind "Sidekick live in Teams meetings" (docs/LIVE-MEETINGS.md). Sidekick doesn't
  * run Microsoft's Windows-only real-time media bot: a browser-based bot joins the meeting as a participant called
- * "Sidekick (notes)", streams what is said and typed to Sidekick by webhook, and can post in the meeting chat, raise
+ * "Sidekick", streams what is said and typed to Sidekick by webhook, and can post in the meeting chat, raise
  * its hand and play speech. This file is the provider-agnostic contract and the list of providers.
  *
  * Concepts

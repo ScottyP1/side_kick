@@ -1970,7 +1970,7 @@ test(`[${ENGINE}] live: the group switch is Enterprise only, for the Team Lead o
   assert.equal((await bob("PUT", liveUrl(s.w1), { mode: "off" })).status, 404);
 });
 
-test(`[${ENGINE}] live: @Sidekick join in a meeting chat joins as "Sidekick (notes)", says how to remove it, and answers "Sidekick, …" with sources once`, async () => {
+test(`[${ENGINE}] live: @Sidekick join in a meeting chat joins as "Sidekick", says how to remove it, and answers "Sidekick, …" with sources once`, async () => {
   // A meeting chat Sidekick's Teams app is in, assigned to W1; Graph knows its meeting's join link.
   MEETING_CHAT_LINKS.set(LIVE1, joinUrlFor("live1"));
   await toBot(activity(LIVE1, { type: "installationUpdate", action: "add" }));
@@ -1978,11 +1978,11 @@ test(`[${ENGINE}] live: @Sidekick join in a meeting chat joins as "Sidekick (not
   assert.equal((await lou("POST", "/api/teams-links", { id: LIVE1, ws: s.w1 })).status, 200);
   assert.match(await sayTo(LIVE1, "join", { id: "29:vic", name: "Vic Viewer", aadObjectId: OID.vic }), /Viewers can't bring/);
   assert.equal(BOTS.size, 0);
-  assert.match(await sayTo(LIVE1, "join"), /Joining now as “Sidekick \(notes\)”.*lobby/);
+  assert.match(await sayTo(LIVE1, "join"), /Joining now as “Sidekick”.*lobby/);
   const bot = lastBot();
   s.bot1 = bot;
   assert.equal(BOTS.get(bot).url, joinUrlFor("live1"), "the meeting's own link, from Graph");
-  assert.equal(BOTS.get(bot).name, "Sidekick (notes)");
+  assert.equal(BOTS.get(bot).name, "Sidekick");
   assert.equal(BOTS.get(bot).provider, "attendee", "Sidekick's own meeting bot by default");
   // One Container Apps job execution for this meeting: its size, the meeting's settings, the job's secrets by name only.
   const started = armCalls.filter((c) => c.op === "start").at(-1).body.containers[0];
@@ -2001,7 +2001,7 @@ test(`[${ENGINE}] live: @Sidekick join in a meeting chat joins as "Sidekick (not
   assert.equal(await sessionOf(bot, "status"), "joining");
   assert.equal((await botStatus(bot, "in_call")).status, 202);
   const intro = await waitFor(LIVE1, /listening for W1/, from);
-  assert.match(intro, /remove Sidekick \(notes\) from the participants/);
+  assert.match(intro, /remove Sidekick from the participants/);
   assert.match(intro, /Sidekick, leave/);
   assert.doesNotMatch(intro, /Client guests are here/);
   assert.equal(BOTS.get(bot).chat.length, 0, "Sidekick's own Teams bot posts in this chat, not the provider");
@@ -2079,7 +2079,7 @@ test(`[${ENGINE}] live: with a pasted link Sidekick posts through the provider; 
   assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'A guest joined%' ORDER BY id DESC LIMIT 1"), /Shareable sources only/);
   // Typed in the meeting chat (no Teams bot there): the same. Sidekick's own messages coming back are ignored.
   const k = BOTS.get(bot).chat.length;
-  await typeIn(bot, "Sidekick (notes)", "Sidekick, recap");
+  await typeIn(bot, "Sidekick", "Sidekick, recap");
   await new Promise((r) => setTimeout(r, 800));
   assert.equal(BOTS.get(bot).chat.length, k);
   await typeIn(bot, "Mo Member", "Sidekick, recap");
@@ -2107,7 +2107,7 @@ test(`[${ENGINE}] live: a running list of decisions and action items; "Sidekick,
   await waitSession(bot, "status", "ended");
   await until(() => BOTS.get(bot).left, `${bot} left`);
   assert.equal(await sessionOf(bot, "end_reason"), "Mo Member asked Sidekick to leave.");
-  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Sidekick (notes) left%' ORDER BY id DESC LIMIT 1"), /asked Sidekick to leave/);
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Sidekick left%' ORDER BY id DESC LIMIT 1"), /asked Sidekick to leave/);
   // No Teams transcript came: the live transcript becomes the meeting, and the usual notes are written and posted once.
   const from = sent.length;
   await drain();
@@ -2352,7 +2352,7 @@ test(`[${ENGINE}] live: "Every group meeting" joins a group's scheduled meeting 
   // Still in the lobby 15 minutes later: Sidekick gives up and says why.
   await dbExec(`UPDATE live_sessions SET created_at = '${new Date(Date.now() - 16 * 60_000).toISOString()}' WHERE bot_id = '${bot}'`);
   await sweepUntil(async () => (await sessionOf(bot, "status")) === "failed", "giving up in the lobby");
-  assert.match(await sessionOf(bot, "end_reason"), /Nobody let Sidekick \(notes\) in from the lobby/);
+  assert.match(await sessionOf(bot, "end_reason"), /Nobody let Sidekick in from the lobby/);
   await until(() => BOTS.get(bot).left, `${bot} left`);
   assert.equal((await lou("PUT", liveUrl(s.w1), { mode: "ask" })).status, 200);
 });

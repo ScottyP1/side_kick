@@ -1035,7 +1035,7 @@ CONFIRM=yes BUDGET_EMAIL=<who gets the budget emails> infra/azure/meetbot.sh res
   ```
 
 **Common problems:**
-- "Nobody let Sidekick (notes) in from the lobby": the meeting's lobby setting. Someone admits it, or the organizer
+- "Nobody let Sidekick in from the lobby": the meeting's lobby setting. Someone admits it, or the organizer
   lets people bypass the lobby.
 - The session shows "Azure speech-to-text" a lot: Teams captions are off or stalling in those meetings (live captions
   are a Teams meeting policy). The cost meter shows the speech-to-text minutes.

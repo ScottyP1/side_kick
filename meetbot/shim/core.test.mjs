@@ -57,7 +57,7 @@ const audio = { started: 0, stopped: 0, onLine: null, async start(onLine) { this
 let exited = null;
 const shim = createShim({
   session: "sess-1", sidekickUrl: `http://127.0.0.1:${sidekickPort}`, botKey: BOT_KEY, meetingUrl: "https://teams.microsoft.com/l/meetup-join/x/0",
-  botName: "Sidekick (notes)", raiseHand: true, attendeeUrl: `http://127.0.0.1:${attendeePort}`, attendeeKey: "att-key", attendeeSecret: SECRET,
+  botName: "Sidekick", raiseHand: true, attendeeUrl: `http://127.0.0.1:${attendeePort}`, attendeeKey: "att-key", attendeeSecret: SECRET,
   port: 0, pollSeconds: 0, audioUrl: "ws://127.0.0.1:8091/audio",
 }, { audio, exit: (c) => (exited = c), log: () => {} });
 const running = shim.start();
@@ -87,7 +87,7 @@ test("creates the bot: captions on, nothing recorded, webhooks and audio to the 
   const create = attendeeCalls.find((c) => c.url === "/api/v1/bots");
   assert.equal(create.auth, "Token att-key");
   assert.equal(create.body.meeting_url, "https://teams.microsoft.com/l/meetup-join/x/0");
-  assert.equal(create.body.bot_name, "Sidekick (notes)");
+  assert.equal(create.body.bot_name, "Sidekick");
   assert.equal(create.body.transcription_settings.meeting_closed_captions.teams_language, "en-us");
   assert.equal(create.body.recording_settings.format, "none");
   assert.equal(create.body.webhooks[0].url, `http://127.0.0.1:${shimPort}/attendee`);

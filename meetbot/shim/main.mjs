@@ -46,7 +46,9 @@ const shim = createShim({
   sidekickUrl: need("SIDEKICK_URL").replace(/\/+$/, ""),
   botKey: need("SIDEKICK_BOT_KEY"),
   meetingUrl: need("MEETING_URL"),
-  botName: process.env.BOT_NAME || "Sidekick (notes)",
+  botName: process.env.BOT_NAME || "Sidekick",
+  // Shown as the bot's video in the meeting instead of initials: the crystal ball (meetbot/bot-image.png).
+  botImage: await fs.promises.readFile(process.env.BOT_IMAGE || "/meetbot/bot-image.png").then((b) => b.toString("base64")).catch(() => null),
   raiseHand: process.env.RAISE_HAND === "1",
   attendeeUrl: process.env.ATTENDEE_URL || "http://127.0.0.1:8000",
   attendeeKey,

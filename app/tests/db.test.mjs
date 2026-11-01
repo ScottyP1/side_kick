@@ -1808,6 +1808,14 @@ test(`[${engine}] failed Teams posts read as a plain sentence, never a library e
 const liveRules = await import("../src/lib/live-meetings/rules.ts");
 const liveSig = await import("../src/lib/live-meetings/signature.ts");
 
+test(`[${engine}] live meetings: Sidekick knows its own name and answers however Teams shows them (first live trial)`, () => {
+  for (const n of ["Sidekick", "sidekick", "Sidekick notes", "Sidekick (notes)", "Sidekick (Unverified)", " SIDEKICK "]) assert.equal(liveRules.isOwnName(n), true, n);
+  for (const n of ["Sidekick fan club", "Jojo Boom", "Riley Chen (Guest)", "", null, undefined]) assert.equal(liveRules.isOwnName(n), false, String(n));
+  const answer = liveRules.answerText("when is the wave 2 cutover?", "Thursday, November 12.", [{ id: "S1", title: "Runbook" }]);
+  assert.equal(liveRules.isOwnAnswer(answer), true, "its own chat answer coming back");
+  assert.equal(liveRules.isOwnAnswer("Sidekick, when is the wave 2 cutover?"), false, "a person asking it");
+});
+
 test(`[${engine}] live meetings: what counts as talking to Sidekick, the chat commands and Teams meeting links`, () => {
   const q = (t) => liveRules.parseTrigger(t);
   assert.deepEqual(q("Sidekick, what did the client say about the cutover?"), { kind: "question", question: "what did the client say about the cutover?" });
@@ -1840,8 +1848,8 @@ test(`[${engine}] live meetings: minutes, the messages in the meeting chat, and 
   assert.equal(liveRules.liveMinutes(null, null), 0, "never admitted: nothing counted");
   assert.equal(liveRules.liveMinutes(t0, null, Date.parse("2026-10-29T10:30:00.000Z")), 30, "still running: up to now");
   const intro = liveRules.introText("Contoso", true);
-  assert.match(intro, /Sidekick \(notes\), listening for Contoso/);
-  assert.match(intro, /remove Sidekick \(notes\) from the participants/);
+  assert.match(intro, /Sidekick, listening for Contoso/);
+  assert.match(intro, /remove Sidekick from the participants/);
   assert.match(intro, /only use sources marked Shareable/);
   assert.doesNotMatch(liveRules.introText("Contoso", false), /Shareable/);
   assert.match(liveRules.recapText([], []), /Nothing decided/);

@@ -541,7 +541,7 @@ type LivePanel = {
 };
 
 /**
- * "Live in meetings" (Enterprise): whether Sidekick joins this group's Teams meetings live as "Sidekick (notes)" (off,
+ * "Live in meetings" (Enterprise): whether Sidekick joins this group's Teams meetings live as "Sidekick" (off,
  * when someone types @Sidekick join, or every group meeting), this month's live hours, and the latest sessions with
  * their running list of decisions and action items while live, how each ended, and **Stop** for a running one. The
  * group's Team Lead and Org Owners/Admins change it (PUT /api/workspaces/:id/live, audited); everyone else sees it.

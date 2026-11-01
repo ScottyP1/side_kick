@@ -777,6 +777,10 @@ ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS thinking_at TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS camera TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS cpu_avg INTEGER;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS cpu_peak INTEGER;
+-- When the bot's container first reached Sidekick (one that never does is failed by live.watch), and the action item
+-- Sidekick's own question waits on (JSON, lib/live-meetings/rules.ts Awaiting).
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS bot_seen_at TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS awaiting TEXT;
 -- "Play sample" for Sidekick's meeting voices (lib/live-meetings/voice-settings.ts): one MP3 (base64) per voice and
 -- speed, made once with Azure AI Speech. The sample sentence is fixed and made up, so it's the same for everyone (no org).
 CREATE TABLE IF NOT EXISTS live_voice_samples (

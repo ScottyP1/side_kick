@@ -11,6 +11,10 @@
  *   pixel per frame), so the ball is drawn at half resolution and stretched (`?scale=`, default 0.5), animation frames
  *   are capped (`?fps=`, default 12; the container captures at 15) and it has fewer dust particles than the home page
  *   (`?particles=`, default 5000). Measured costs: docs/LIVE-MEETINGS.md → "Sidekick's camera".
+ * - **Only the ball, ever**: Attendee's webpage streamer adds a script to every page it shows (it wires the meeting's
+ *   audio in as a microphone) that draws a red box (`#attendee-audio-error`) or calls `alert()` when that fails. This
+ *   page uses no microphone, so the box is hidden and `alert` does nothing here (the cause, the wrong port, is fixed in
+ *   meetbot/patches/03; this is the backstop: first live test, Nov 1).
  * - **Problems**: nobody watches this page and anything it showed would be on the bot's camera in front of the meeting,
  *   so it never shows an error; a failed poll is logged to the console and retried after a pause, and a 401 (wrong or
  *   expired address) stops polling with the ball idle.
@@ -80,6 +84,11 @@ function readSettings(): Settings {
 }
 const noSubscribe = () => () => {};
 
+/** Hides Attendee's own error box on this page (see the file comment). */
+export const HIDE_STREAMER_NOTICES = "#attendee-audio-error{display:none!important}";
+// Its alert() would be a dialog on the bot's camera; nothing on this page needs one.
+if (typeof window !== "undefined") window.alert = (msg?: unknown) => console.warn("[orb] alert suppressed:", msg);
+
 /** The camera page's content (see the file comment). */
 export default function OrbCamera() {
   // Null while rendering on the server: the ball is drawn in the browser only.
@@ -120,7 +129,8 @@ export default function OrbCamera() {
 
   const busy = word === "speaking";
   return (
-    <main style={{ position: "fixed", inset: 0, background: "radial-gradient(ellipse at center, #15132b 0%, #08070f 70%)", display: "grid", placeItems: "center", overflow: "hidden" }}>
+    <main data-orb-camera style={{ position: "fixed", inset: 0, background: "radial-gradient(ellipse at center, #15132b 0%, #08070f 70%)", display: "grid", placeItems: "center", overflow: "hidden" }}>
+      <style>{HIDE_STREAMER_NOTICES}</style>
       <div ref={coreRef} style={{ width: "min(100vh, 100vw)", height: "min(100vh, 100vw)" }} aria-hidden="true">
         {set && (
           <CrystalizedBall

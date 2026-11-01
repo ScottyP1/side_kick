@@ -6,7 +6,7 @@
  *
  * Concepts
  * - **Azure Resource Manager**: `POST …/Microsoft.App/jobs/{job}/start` with the meeting's settings as environment
- *   variable overrides, and `POST …/jobs/{job}/executions/{name}/stop` (API version 2024-03-01,
+ *   variable overrides, and `POST …/jobs/{job}/executions/{name}/stop`, and `GET …/executions/{name}` for its status (API version 2024-03-01,
  *   https://learn.microsoft.com/rest/api/resource-manager/containerapps/jobs/start).
  * - **Who may start it**: the Sidekick app's managed identity (Container Apps gives it `IDENTITY_ENDPOINT` and
  *   `IDENTITY_HEADER`), with a role on the job only (infra/azure/meetbot-setup.sh). No keys are stored.
@@ -80,14 +80,17 @@ async function armToken(): Promise<string> {
   return body.access_token;
 }
 
-/** One call to Azure Resource Manager; a plain error on failure (status and Azure's short message, never the token). */
+/**
+ * One call to Azure Resource Manager (POST with `body`, GET when `body` is null); a plain error on failure (status and
+ * Azure's short message, never the token).
+ */
 async function arm(path: string, body: unknown, what: string): Promise<Record<string, unknown>> {
   const url = jobUrl();
   if (!url) throw new Error("Sidekick's meeting bot isn't set up on this copy (SIDEKICK_MEETBOT_JOB).");
   const res = await fetch(`${url}${path}?api-version=2024-03-01`, {
-    method: "POST",
+    method: body === null ? "GET" : "POST",
     headers: { Authorization: `Bearer ${await armToken()}`, "content-type": "application/json" },
-    body: JSON.stringify(body ?? {}),
+    body: body === null ? undefined : JSON.stringify(body ?? {}),
     signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {
@@ -139,6 +142,22 @@ export async function stopBot(execution: string): Promise<void> {
     await span("live", "Stop the meeting bot's container", () => arm(`/executions/${encodeURIComponent(execution)}/stop`, {}, "stop the meeting bot"));
   } catch (e) {
     if (e instanceof Error && /\((404|409)\b/.test(e.message)) return;
+    throw e;
+  }
+}
+
+/**
+ * Where a meeting bot's execution is in Azure: `Running`, `Processing`, `Succeeded`, `Failed`, `Stopped`, `Degraded`
+ * or `Unknown` (`GET …/jobs/{job}/executions/{name}`). An execution Azure no longer knows is `Stopped`. Used by
+ * live.watch to fail a session whose container crashed before it got into the meeting.
+ */
+export async function executionStatus(execution: string): Promise<string> {
+  try {
+    const out = await span("live", "Check the meeting bot's container", () => arm(`/executions/${encodeURIComponent(execution)}`, null, "read the meeting bot's execution"));
+    const status = (out.properties as { status?: unknown } | undefined)?.status;
+    return typeof status === "string" && status ? status : "Unknown";
+  } catch (e) {
+    if (e instanceof Error && /\(404\b/.test(e.message)) return "Stopped";
     throw e;
   }
 }

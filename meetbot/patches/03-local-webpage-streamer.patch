@@ -51,10 +51,20 @@ index 1cfe50d..8194c8d 100644
          except Exception as e:
              logger.info(f"Webpage streamer shutdown response: {e}")
 diff --git a/bots/webpage_streamer/webpage_streamer.py b/bots/webpage_streamer/webpage_streamer.py
-index d2f4b7d..f2382be 100644
+index d2f4b7d..5293b9b 100644
 --- a/bots/webpage_streamer/webpage_streamer.py
 +++ b/bots/webpage_streamer/webpage_streamer.py
-@@ -415,7 +415,8 @@ class WebpageStreamer:
+@@ -270,6 +270,9 @@ class WebpageStreamer:
+ 
+         with open("bots/webpage_streamer/webpage_streamer_payload.js", "r") as file:
+             payload_code = file.read()
++        # Sidekick: the page fetches the meeting's audio from this streamer, which the payload assumes is on port 8000;
++        # here it runs on WEBPAGE_STREAMER_PORT (8000 is Attendee's own API), so point the payload at the right port.
++        payload_code = payload_code.replace("http://localhost:8000/", f"http://localhost:{os.getenv('WEBPAGE_STREAMER_PORT', '8000')}/")
+ 
+         combined_code = f"""
+             {payload_code}
+@@ -415,7 +418,8 @@ class WebpageStreamer:
              await self.shutdown_process()
              return web.json_response({"status": "success"})
  
@@ -64,7 +74,7 @@ index d2f4b7d..f2382be 100644
  
          app = web.Application()
          self.web_app = app
-@@ -471,4 +472,4 @@ class WebpageStreamer:
+@@ -471,4 +475,4 @@ class WebpageStreamer:
          app.router.add_post("/offer_meeting_audio", offer_meeting_audio)  # SDP exchange
          app.router.add_options("/offer_meeting_audio", handle_cors_preflight)
  

@@ -15,6 +15,9 @@
  *   what the bot shows (`sidekick.camera`) and the container's CPU use every few minutes (`sidekick.load`).
  * - **Exits** when the meeting is over for the bot (Attendee says it ended or failed, Sidekick says stop, or the
  *   container's own time limit), after telling Sidekick (`sidekick.exit`), so the job execution ends and stops costing.
+ *   When it's still in the call, it **leaves first**: posts a goodbye Sidekick queued with the stop ("Okay, leaving
+ *   now"), asks Attendee to leave and waits (`leaveTimeoutMs`, default 20 s) until Attendee says the bot is out, so no
+ *   frozen "Sidekick" tile stays in Teams (found in the first live trial, Nov 1 2026).
  *
  * No dependencies (Node 22 built-ins), so tests (app/tests/run.mjs → meetbot/shim/core.test.mjs) run it against fakes.
  * Who calls it: meetbot/shim/main.mjs (the container's entry), with settings from the environment.
@@ -46,7 +49,9 @@ export const chatHtml = (text) => String(text).replace(/&/g, "&amp;").replace(/<
 /**
  * Creates the shim. `cfg`: session, sidekickUrl, botKey, meetingUrl, botName, botImage, raiseHand, attendeeUrl,
  * attendeeKey, attendeeSecret, port (0 = any), maxMinutes, captionsLanguage, orbUrl, cpuEverySeconds (default 20),
- * cpuLimit (0..1, default 0.9), cpuStrikes (default 3), loadReportSeconds (default 300). Hooks (all optional):
+ * cpuLimit (0..1, default 0.9), cpuStrikes (default 3), loadReportSeconds (default 300), leaveTimeoutMs (how long to
+ * wait for Attendee to say the bot left, default 20000), chatSettleMs (a goodbye's head start on leaving, default
+ * 1500). Hooks (all optional):
  * `audio` = `{ start(onLine), stop() }` for Azure speech-to-text (audio.mjs); `streamer` = `{ ready(), stop() }` for the
  * moving ball's browser; `load` = `{ sample() }` → the container's CPU share since the last call (load.mjs);
  * `exit(code)` ends the process (tests pass their own). Returns `{ start(), stop(), port }`.
@@ -61,6 +66,11 @@ export function createShim(cfg, hooks = {}) {
   let timer;
   let loadTimer;
   let orb = false;
+  // Leaving the call: whether Attendee was asked to, whether it said the bot is out, when the last chat went out.
+  let leaveSent = false;
+  let left = false;
+  let lastChatAt = 0;
+  const leftWaiters = [];
   const cpu = { sum: 0, count: 0, peak: 0, strikes: 0, reported: Date.now() };
 
   /** Sends events to Sidekick, signed with the session's key. Retries a few times; never throws. */
@@ -109,13 +119,60 @@ export function createShim(cfg, hooks = {}) {
     return false;
   }
 
-  /** Ends the container: tells Sidekick why, stops speech-to-text, exits. Once. */
+  /** Attendee says the bot is out of the call (or never got in): whoever waits in `leaveCall` goes on. */
+  function markLeft() {
+    left = true;
+    for (const w of leftWaiters.splice(0)) w();
+  }
+
+  /** Asks Attendee to take the bot out of the call (once). */
+  async function sendLeave() {
+    if (leaveSent || !botId) return;
+    leaveSent = true;
+    await attendee("POST", `/api/v1/bots/${encodeURIComponent(botId)}/leave`, {});
+  }
+
+  /**
+   * Before exiting while the bot is still in the call: the goodbye Sidekick queued with the stop is posted (a last
+   * command fetch), then the bot leaves, and the shim waits for Attendee to say it's out (at most `leaveTimeoutMs`).
+   * Without this the container would vanish mid-call and Teams would show a frozen tile until it timed it out.
+   */
+  async function leaveCall() {
+    if (!botId || left) return;
+    await lastCommands();
+    if (left) return;
+    const settle = (cfg.chatSettleMs ?? 1500) - (Date.now() - lastChatAt);
+    if (lastChatAt && settle > 0) await new Promise((r) => setTimeout(r, settle));
+    await sendLeave().catch((e) => log("couldn't ask Attendee to leave", e.message));
+    if (left) return;
+    const gone = await Promise.race([
+      new Promise((r) => leftWaiters.push(() => r(true))),
+      new Promise((r) => setTimeout(() => r(false), cfg.leaveTimeoutMs ?? 20_000)),
+    ]);
+    log(gone ? "left the call" : "Attendee didn't confirm leaving in time; exiting anyway");
+  }
+
+  /** One quick fetch of commands still waiting (the goodbye queued with a stop); never throws. */
+  async function lastCommands() {
+    try {
+      const res = await fetch(`${cfg.sidekickUrl}/api/live/bot/commands?wait=0`, {
+        headers: { "x-sidekick-bot-session": cfg.session, Authorization: `Bearer ${cfg.botKey}` }, signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return;
+      for (const c of (await res.json()).commands ?? []) await run(c);
+    } catch (e) {
+      log("couldn't fetch the last commands", e.message);
+    }
+  }
+
+  /** Ends the container: leaves the call if still in it, tells Sidekick why, stops speech-to-text, exits. Once. */
   async function finish(reason) {
     if (stopping) return;
     stopping = true;
     log("exiting:", reason);
     clearTimeout(timer);
     clearInterval(loadTimer);
+    await leaveCall();
     await Promise.resolve(hooks.audio?.stop?.()).catch(() => {});
     await toSidekick([...(cpu.count ? [loadEvent()] : []), { trigger: "sidekick.exit", data: { reason } }]);
     server?.close();
@@ -167,11 +224,14 @@ export function createShim(cfg, hooks = {}) {
     try {
       if (!botId) throw new Error("no bot yet");
       const bot = `/api/v1/bots/${encodeURIComponent(botId)}`;
-      if (c.kind === "chat") await attendee("POST", `${bot}/send_chat_message`, { to: "everyone", message: chatHtml(c.data?.text ?? "") });
+      if (c.kind === "chat") {
+        await attendee("POST", `${bot}/send_chat_message`, { to: "everyone", message: chatHtml(c.data?.text ?? "") });
+        lastChatAt = Date.now();
+      }
       else if (c.kind === "speak") await attendee("POST", `${bot}/output_audio`, { type: "audio/mp3", data: c.data?.mp3 ?? "" });
       else if (c.kind === "hand" && cfg.raiseHand) await attendee("POST", `${bot}/raise_hand`, { raised: Boolean(c.data?.raised) });
       else if (c.kind === "hearing") await setHearing(c.data?.source === "stt" ? "stt" : "captions");
-      else if (c.kind === "leave") await attendee("POST", `${bot}/leave`, {});
+      else if (c.kind === "leave") await sendLeave();
     } catch (e) {
       log(`command ${c.kind} failed:`, e.message);
     }
@@ -208,6 +268,8 @@ export function createShim(cfg, hooks = {}) {
       if (data.entry_type === "could_not_enable_closed_captions") await toSidekick([{ trigger: "sidekick.captions_unavailable", data: { reason: "Teams captions couldn't be turned on" } }]);
       return;
     }
+    // Out of the call (Attendee goes leaving → post_processing → ended): a shim waiting to exit can go now.
+    if (trigger === "bot.state_change" && ["post_processing", "ended", "fatal_error", "data_deleted"].includes(data.new_state)) markLeft();
     await toSidekick([{ trigger, data }]);
     if (trigger === "bot.state_change" && ["ended", "fatal_error", "data_deleted"].includes(data.new_state)) await finish(`the bot's state is ${data.new_state}`);
   }

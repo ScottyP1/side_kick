@@ -1027,9 +1027,11 @@ function migrate(conn: DatabaseSync) {
   // Live meetings, stage 2: the bot's job execution (launched, exited, its name), how it hears (captions or Azure
   // speech-to-text, and when captions and speech were last seen), and the characters it spoke (cost meter).
   // Its camera (lib/live-meetings/orb.ts): when the ball shows "speaking" and "thinking", what the bot shows ('orb' or
-  // 'logo: <why>'; 'still: <why>' on sessions from before the logo) and the container's CPU use in percent.
+  // 'logo: <why>'; 'still: <why>' on sessions from before the logo) and the container's CPU use in percent. When the
+  // bot's container first reached Sidekick (a container that never does is failed by live.watch), and the action item
+  // its own question waits on (JSON).
   for (const col of ["launched_at TEXT", "exited_at TEXT", "execution TEXT", "hearing TEXT", "captions_at TEXT", "speech_at TEXT", "hearing_since TEXT", "tts_chars INTEGER NOT NULL DEFAULT 0", "captions_unavailable INTEGER NOT NULL DEFAULT 0",
-    "speaking_from TEXT", "speaking_until TEXT", "thinking_at TEXT", "camera TEXT", "cpu_avg INTEGER", "cpu_peak INTEGER",
+    "speaking_from TEXT", "speaking_until TEXT", "thinking_at TEXT", "camera TEXT", "cpu_avg INTEGER", "cpu_peak INTEGER", "bot_seen_at TEXT", "awaiting TEXT",
     // The camera asked for ('logo' or 'orb') and the container's size (vCPU, GiB), so costs use each meeting's own size.
     "bot_camera TEXT", "bot_cpu REAL", "bot_memory_gib REAL"]) {
     const name = col.split(" ")[0];

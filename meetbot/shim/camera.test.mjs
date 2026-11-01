@@ -3,7 +3,8 @@
  * the shim against a fake Attendee, a fake Sidekick, a fake webpage streamer and fake CPU readings.
  * Covers: the moving ball asked for only when its browser is up (and reported), the logo when it isn't or
  * when Attendee refuses it (the bot is still created), falling back to the logo when the container stays
- * too busy (Attendee told, the browser stopped, Sidekick told why), CPU use reported, and the CPU arithmetic.
+ * too busy (Attendee told, the browser stopped, Sidekick told why), CPU use reported, the CPU arithmetic, and that our
+ * Attendee patch points the streamer's page script at the streamer's own port (else a red error box shows on the camera).
  *
  *   node --test meetbot/shim/camera.test.mjs
  */
@@ -83,7 +84,7 @@ function shimFor(w, { orbUrl = ORB, streamerUp = true, readings = [] } = {}) {
   const shim = createShim({
     session: "sess-cam", sidekickUrl: `http://127.0.0.1:${w.sp}`, botKey: BOT_KEY, meetingUrl: "https://teams.microsoft.com/l/meetup-join/y/0",
     botName: "Sidekick", botImage: "iVBORw0KGgo=", attendeeUrl: `http://127.0.0.1:${w.ap}`, attendeeKey: "k", attendeeSecret: crypto.randomBytes(32).toString("base64"),
-    port: 0, pollSeconds: 0, orbUrl, cpuEverySeconds: 0.05, cpuLimit: 0.9, cpuStrikes: 3, loadReportSeconds: 0.1,
+    port: 0, pollSeconds: 0, orbUrl, cpuEverySeconds: 0.05, cpuLimit: 0.9, cpuStrikes: 3, loadReportSeconds: 0.1, leaveTimeoutMs: 200,
   }, { streamer, load, exit: (c) => (exited = c), log: () => {} });
   const running = shim.start();
   return { shim, streamer, running, exited: () => exited };
@@ -185,4 +186,12 @@ test("CPU arithmetic: share of the container's limit from cgroup v2 readings", a
   const share = load.sample();
   assert.ok(share > 0 && share <= 0.5, `about 20 ms of CPU over about 20 ms on 2 vCPU (${share})`);
   assert.equal(createLoad({ root: path.join(dir, "missing") }).sample(), null, "outside a container: null");
+});
+
+test("patch 03 points the streamer's page script at its own port (8000 is Attendee's API here)", () => {
+  const patch = fs.readFileSync(new URL("../patches/03-local-webpage-streamer.patch", import.meta.url), "utf8");
+  // Without this the page's microphone hookup asks Attendee's API for the meeting audio, fails, and Attendee's script
+  // draws "Failed to receive remote audio stream within 10 seconds" over the ball (first live test, Nov 1).
+  assert.match(patch, /\+\s*payload_code = payload_code\.replace\("http:\/\/localhost:8000\/", f"http:\/\/localhost:\{os\.getenv\('WEBPAGE_STREAMER_PORT', '8000'\)\}\/"\)/);
+  assert.match(patch, /\+\s*port = int\(os\.getenv\("WEBPAGE_STREAMER_PORT", "8000"\)\)/);
 });

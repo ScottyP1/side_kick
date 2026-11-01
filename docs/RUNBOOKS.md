@@ -1053,4 +1053,13 @@ the meeting-bot image (infra/azure/meetbot-setup.sh); nothing else changes.
   are a Teams meeting policy). The cost meter shows the speech-to-text minutes.
 - Joins fail with "Azure couldn't start the meeting bot (403…)": the app's identity lost its role on the job. Re-run
   the setup script.
+- "I couldn't join the meeting: Sidekick's meeting bot stopped before it got into the meeting" (or "didn't start
+  within 6 minutes"): the container crashed or never started. `live.watch` already failed the session, so asking
+  again works. Read that execution's logs (above) for why; repeated failures usually mean a bad image or an
+  Attendee/Teams change.
+- A "Sidekick" tile stays in the meeting after it left: the shim couldn't get Attendee to confirm leaving within
+  20 s (its log says "Attendee didn't confirm leaving in time"). Teams drops the tile after a while; remove it from
+  the participants to clear it at once.
+- The setup script's step 7 used to fail on a later run with "Start date of budgets cannot be updated"; it now keeps
+  the existing budget's start date (`infra/azure/meetbot-budget.sh`).
 - The image build fails on a patch: Attendee changed. Re-check `meetbot/patches/` against the new tag.

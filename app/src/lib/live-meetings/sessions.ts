@@ -59,14 +59,14 @@ import { DEFAULT_VOICE } from "./voices";
 import { MOVING_BALL_ADDON } from "../plans";
 import { capReached, capState, checkCapAlerts, LIVE_PAUSED, monthSpend } from "./spend";
 import { reapBot } from "./attendee";
-import { botKey } from "./launcher";
+import { botKey, executionStatus } from "./launcher";
 import { noteCamera, noteSpeaking, noteThinking } from "./orb";
 import { cameraFor } from "./camera";
 import { sameKey } from "./signature";
 import {
   answerText, BOT_NAME, confident, GUEST_NOTICE, HAND_NOTE, introText, isNonAnswer, isRoomQuestion, isTeamsMeetingUrl, liveMinutes, LIVE_MODES,
   LOBBY_TIMEOUT_MS, looksExternal, MAX_ANSWERS, MAX_SESSION_MS, meetingThreadFromUrl, ownQuestion, parseSettings, parseTrigger, recapText, spokenText,
-  hearingNext, isOwnAnswer, isOwnName, minuteOf, type ListItem, type LiveMode, type LiveSettings, type Trigger,
+  applyReply, hearingNext, isOwnAnswer, isOwnName, minuteOf, REPLY_WINDOW_MS, type Awaiting, type ListItem, type LiveMode, type LiveSettings, type Trigger,
 } from "./rules";
 
 /** A row of `live_sessions` (see db/schema.postgres.sql). */
@@ -97,10 +97,14 @@ export type LiveSession = {
   speaking_from: string | null; speaking_until: string | null; thinking_at: string | null; camera: string | null; cpu_avg: number | null; cpu_peak: number | null;
   /** The camera it was started with ('logo' or 'orb', lib/live-meetings/camera.ts) and its container's size (cost meter). */
   bot_camera: string | null; bot_cpu: number | null; bot_memory_gib: number | null;
+  /** When the bot's container first reached Sidekick (an event or a command fetch); null = not yet (live.watch). */
+  bot_seen_at: string | null;
+  /** JSON `Awaiting`: the action item Sidekick's own question is waiting on; the next fitting line fills it in. */
+  awaiting: string | null;
 };
 
 /** What Sidekick has its hand up for: the chat text (full answer with sources), the short spoken version, the card. */
-type Pending = { kind: "answer" | "own"; question: string; chat: string; spoken: string; card?: unknown; raisedAt: string };
+type Pending = { kind: "answer" | "own"; question: string; chat: string; spoken: string; card?: unknown; raisedAt: string; item?: ListItem };
 
 /** Said when this copy of Sidekick has no meeting-bot provider configured. */
 export const NOT_SET_UP = `Live meetings aren't set up on this ${BRAND.name} yet (the meeting-bot service). The ${BRAND.name} team turns them on.`;
@@ -140,6 +144,13 @@ const HAND_MS = 60_000;
 const REAP_AFTER_MS = 3 * 60_000;
 /** How long a lone "Sidekick" makes the speaker's next line a question to it. */
 const ADDRESSED_MS = 20_000;
+/**
+ * How long after a session ends the bot's command fetch keeps saying "more may come" instead of "stop", so the goodbye
+ * and the leave command `stopSession` queues just after ending it reach the bot before it is told to exit.
+ */
+const STOP_GRACE_MS = 3000;
+/** How long Sidekick's own bot may take to first reach Sidekick after its container was started (else it's failed). */
+const STARTUP_MS = 6 * 60_000;
 
 /**
  * The organization's meeting bot: the self-hosted one (`attendee`) unless its Org Owner opted in to a hosted one
@@ -383,10 +394,10 @@ export async function leaveFromTeams(chat: LiveChat, asker: User): Promise<strin
 
 /**
  * Ends a running session (compare-and-set: only `joining`/`live` ones, once): records why, optionally says goodbye in
- * the chat, makes the bot leave (unless the meeting already ended), audits it and queues the notes handoff. Returns
+ * the chat (`say`, only once it's in the meeting) or posts a plain `note` even when it never got in (`postNote`), makes the bot leave (unless the meeting already ended), audits it and queues the notes handoff. Returns
  * whether this call ended it. Never throws for a provider failure (saved on the session instead).
  */
-export async function stopSession(orgId: string, id: string, reason: string, opts: { callProvider?: boolean; failed?: boolean; say?: string } = {}): Promise<boolean> {
+export async function stopSession(orgId: string, id: string, reason: string, opts: { callProvider?: boolean; failed?: boolean; say?: string; note?: string } = {}): Promise<boolean> {
   const s = await sessionById(orgId, id);
   if (!s) return false;
   const t = now();
@@ -396,6 +407,7 @@ export async function stopSession(orgId: string, id: string, reason: string, opt
   );
   if (!claim.changes) return false;
   if (opts.say && s.status === "live") await postToMeeting(s, opts.say).catch((e) => noteError(orgId, id, e));
+  if (opts.note) await postNote(s, opts.note).catch((e) => noteError(orgId, id, e));
   const provider = sessionProvider(s);
   if (s.hand && provider?.can.raiseHand && s.bot_id) await provider.raiseHand(s.bot_id, false).catch(() => {});
   await run("UPDATE live_sessions SET hand = NULL WHERE id = ? AND org_id = ?", id, orgId);
@@ -449,6 +461,21 @@ async function postToMeeting(s: LiveSession, text: string, card?: ReturnType<typ
   await span("live", "Post in the meeting chat", () => provider.sendChatMessage(s.bot_id!, text));
 }
 
+/**
+ * A plain note about a bot that isn't in the meeting (it never got in), so nobody waits for it: in the meeting chat
+ * through Sidekick's Teams bot when it's there, else in the group's internal notes chat (lib/notes-chats.ts; never a
+ * chat with client guests). Throws on a failed post (callers record it); does nothing when there's no such chat.
+ */
+async function postNote(s: LiveSession, text: string) {
+  const { postCard } = await import("../teams/bot");
+  const conv = await meetingConversation(s.org_id, s.workspace_id, s.thread_id);
+  if (conv) return void (await postCard(conv, noticeCard(BOT_NAME, text), conv.id, "a live meeting note"));
+  const { notesTargetsFor } = await import("../notes-chats");
+  const target = (await notesTargetsFor(s.org_id, s.workspace_id, false))[0];
+  const chat = target && (await get<{ id: string; service_url: string }>("SELECT id, service_url FROM teams_conversations WHERE id = ? AND org_id = ?", target.id, s.org_id));
+  if (chat) await postCard(chat, noticeCard(BOT_NAME, `${text} (Meeting: “${s.title ?? "Teams meeting"}”.)`), chat.id, "a live meeting note");
+}
+
 /* ------------------------------------------------------------------ */
 /* Webhooks from the provider                                          */
 /* ------------------------------------------------------------------ */
@@ -493,6 +520,7 @@ export async function handleLiveWebhook(providerId: string, headers: Headers, ra
 async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]): Promise<boolean> {
   const s = await sessionById(orgId, id);
   if (!s) return false;
+  if (!s.bot_seen_at) await run("UPDATE live_sessions SET bot_seen_at = ? WHERE id = ? AND org_id = ? AND bot_seen_at IS NULL", now(), id, orgId);
   const running = s.status === "joining" || s.status === "live";
   const later = (name: string, fn: () => Promise<void>) =>
     work.push(() => withOrg(orgId, () => withTrace({ name, channel: "teams", orgId, workspaceId: s.workspace_id, actor: BOT_NAME, detached: true }, fn)));
@@ -596,6 +624,9 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
     trigger = { kind: "question", question: e.text.slice(0, 1000) };
     await run("UPDATE live_sessions SET addressed_until = NULL, addressed_by = NULL WHERE id = ? AND org_id = ?", id, orgId);
   }
+  // The reply to Sidekick's own question ("by when…?" → "By Wednesday."): applied to that item right away, not at the
+  // next update of the list.
+  if (!trigger && s.awaiting && (await applyAwaited(orgId, s, e.speaker, e.text, heardAt))) return true;
   const say = (name: string, text: string) => later(name, async () => {
     const fresh = (await sessionById(orgId, id))!;
     await postToMeeting(fresh, text).catch((err) => noteError(orgId, id, err));
@@ -681,7 +712,9 @@ async function maybeSwitchHearing(orgId: string, id: string, at = Date.now()) {
 
 /**
  * The bot's commands (GET /api/live/bot/commands): checks the session's key, then waits up to `waitMs` for commands not
- * yet given and hands them over once each (claimed with a compare-and-set). `stop` once the session is over. Null when
+ * yet given and hands them over once each (claimed with a compare-and-set). `stop` once the session is over (a few
+ * seconds after, so the goodbye and the leave command queued while ending it come first). Notes that the bot's
+ * container reached Sidekick (`bot_seen_at`). Null when
  * the key or session is wrong (the route answers 401 without saying which).
  */
 export async function takeCommands(sessionId: string, token: string, waitMs: number): Promise<{ commands: { id: string; kind: string; data: unknown }[]; stop: boolean } | null> {
@@ -693,6 +726,7 @@ export async function takeCommands(sessionId: string, token: string, waitMs: num
     for (;;) {
       const s = await sessionById(found.org_id, sessionId);
       if (!s) return null;
+      if (!s.bot_seen_at) await run("UPDATE live_sessions SET bot_seen_at = ? WHERE id = ? AND org_id = ? AND bot_seen_at IS NULL", now(), sessionId, found.org_id);
       const pending = await all<{ id: string; kind: string; data: string | null }>(
         "SELECT id, kind, data FROM live_commands WHERE org_id = ? AND session_id = ? AND taken_at IS NULL ORDER BY id LIMIT 20", found.org_id, sessionId,
       );
@@ -701,7 +735,8 @@ export async function takeCommands(sessionId: string, token: string, waitMs: num
         const claim = await run("UPDATE live_commands SET taken_at = ? WHERE id = ? AND org_id = ? AND taken_at IS NULL", now(), c.id, found.org_id);
         if (claim.changes) commands.push({ id: c.id, kind: c.kind, data: JSON.parse(c.data ?? "{}") });
       }
-      const over = s.status === "ended" || s.status === "failed";
+      // Over, and past the moment the goodbye and the leave command are queued (STOP_GRACE_MS): tell it to exit.
+      const over = (s.status === "ended" || s.status === "failed") && Date.now() - Date.parse(s.ended_at ?? s.updated_at) >= STOP_GRACE_MS * scale();
       if (commands.length || over || Date.now() - start >= waitMs) return { commands, stop: over && !commands.length };
       await new Promise((r) => setTimeout(r, 300));
     }
@@ -902,6 +937,7 @@ export async function deliverPending(orgId: string, id: string, how: "called" | 
   }
   await hand(s, false);
   if (s.status !== "live") return;
+  if (p.kind === "own" && p.item) await noteAwaiting(orgId, id, p.item);
   const settings = await groupSettings(orgId, s.workspace_id);
   if (how !== "expired" && canSpeak(s, settings, sessionProvider(s))) await speakNow(s, p.spoken);
   const intro = how === "expired" ? (p.kind === "own" ? "" : "In case it helps (I had my hand up):\n") : "";
@@ -981,10 +1017,49 @@ async function askOwnQuestion(orgId: string, id: string, actions: ListItem[]) {
   const question = ownQuestion(item)!;
   await run("UPDATE live_sessions SET asked = ? WHERE id = ? AND org_id = ?", JSON.stringify([...asked, item.text].slice(-100)), id, orgId);
   if (settings.voice === "off") {
+    await noteAwaiting(orgId, id, item);
     await postToMeeting(s, question).catch((e) => noteError(orgId, id, e));
     return;
   }
-  await putHandUp(s, { kind: "own", question, chat: question, spoken: question, raisedAt: now() });
+  await putHandUp(s, { kind: "own", question, chat: question, spoken: question, raisedAt: now(), item });
+}
+
+/** Sidekick's own question about `item` is going out now: the next fitting line is taken as its reply. */
+async function noteAwaiting(orgId: string, id: string, item: ListItem) {
+  const awaiting: Awaiting = { text: item.text, who: item.who, due: item.due ?? null, askedAt: now() };
+  await run("UPDATE live_sessions SET awaiting = ? WHERE id = ? AND org_id = ?", JSON.stringify(awaiting), id, orgId);
+}
+
+/**
+ * A line heard while Sidekick's own question waits for its reply (`awaiting`, at most REPLY_WINDOW_MS old): when it
+ * answers the question (rules.ts `applyReply`), the item on the running list gets the owner or date right away, the
+ * wait ends, and true is returned (the line needs nothing else). A stale wait is dropped.
+ */
+async function applyAwaited(orgId: string, s: LiveSession, speaker: string | null, text: string, at: number): Promise<boolean> {
+  let a: Awaiting;
+  try {
+    a = JSON.parse(s.awaiting ?? "");
+  } catch {
+    a = { text: "", who: null, due: null, askedAt: "" };
+  }
+  if (!a.text || at - Date.parse(a.askedAt) > REPLY_WINDOW_MS) {
+    await run("UPDATE live_sessions SET awaiting = NULL WHERE id = ? AND org_id = ? AND awaiting = ?", s.id, orgId, s.awaiting);
+    return false;
+  }
+  const filled = applyReply(a, speaker, text, await meetingPeople(orgId, s.id));
+  if (!filled) return false;
+  return span("live", "Apply the reply to Sidekick's question", async () => {
+    const claim = await run("UPDATE live_sessions SET awaiting = NULL, updated_at = ? WHERE id = ? AND org_id = ? AND awaiting = ?", now(), s.id, orgId, s.awaiting);
+    if (!claim.changes) return false;
+    const fresh = (await sessionById(orgId, s.id))!;
+    const actions = parseList(fresh.action_items);
+    const i = actions.findIndex((x) => x.text === a.text);
+    if (i < 0) return false;
+    actions[i] = { ...actions[i], who: actions[i].who ?? filled.who, due: actions[i].due ?? filled.due };
+    await run("UPDATE live_sessions SET action_items = ? WHERE id = ? AND org_id = ?", JSON.stringify(actions), s.id, orgId);
+    spanAttrs({ filled: filled.due && !a.due ? (filled.who && !a.who ? "owner and date" : "date") : "owner" });
+    return true;
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1050,7 +1125,8 @@ export async function handoffLive(orgId: string, id: string): Promise<{ captured
 /**
  * Checks every running session (all organizations, each in its own org scope) and ends the ones that must stop: the
  * feature paused or restricted by the Sidekick team, the plan no longer includes it, the month's live hours used up,
- * longer than 4 hours, or still in the lobby after 15 minutes. Returns how many it checked and stopped.
+ * longer than 4 hours, still in the lobby after 15 minutes, or (our own bot) its container crashed or never started
+ * (`startupProblem`). Returns how many it checked and stopped.
  */
 export async function watchLive(at = Date.now()): Promise<{ liveChecked: number; liveStopped: number; liveReaped: number; liveErrors: number; liveCapLevel: number }> {
   const running = await asSystem("live meetings watch: every running session", () =>
@@ -1082,6 +1158,17 @@ export async function watchLive(at = Date.now()): Promise<{ liveChecked: number;
         return stopSession(r.org_id, r.id, e instanceof Error ? e.message : "Live meetings were paused.", { say: "I have to leave: live meetings were paused. The notes will follow in the group's chat." });
       }
       if (!(await hasFeature(r.org_id, "liveMeetings"))) return stopSession(r.org_id, r.id, "The plan no longer includes live meetings.");
+      // Our own bot's container that crashed or never started: the session would stay "joining" for good and block
+      // joining again (first live trial, Nov 1 2026). Failed, with a plain note in the chat.
+      if (s.status === "joining" && s.provider === "attendee" && s.execution) {
+        const why = await startupProblem(s, at);
+        if (why) {
+          return stopSession(r.org_id, r.id, why, {
+            failed: true, callProvider: false,
+            note: `I couldn't join the meeting: ${why} You can ask me to join again (@${BRAND.name} join).`,
+          });
+        }
+      }
       if (s.status === "joining" && at - Date.parse(s.created_at) > LOBBY_TIMEOUT_MS) {
         return stopSession(r.org_id, r.id, `Nobody let ${BOT_NAME} in from the lobby within 15 minutes.`, { failed: true });
       }
@@ -1119,6 +1206,22 @@ export async function watchLive(at = Date.now()): Promise<{ liveChecked: number;
   const cap = await checkCapAlerts(at);
   // Job counts are numbers: 0 ok, 1 warning (80%), 2 reached.
   return { liveChecked: running.length, liveStopped: stopped, liveReaped: stuck.length, liveErrors: errors, liveCapLevel: cap === "reached" ? 2 : cap === "warn" ? 1 : 0 };
+}
+
+/**
+ * Why a joining session's own bot is not coming (live.watch), or null while it may still: its Container Apps execution
+ * already ended or failed in Azure, or its container hasn't reached Sidekick within STARTUP_MS of being started (a
+ * bot waiting in the lobby has reached it: `bot_seen_at`). An Azure hiccup reading the execution isn't a reason.
+ */
+async function startupProblem(s: LiveSession, at: number): Promise<string | null> {
+  const state = await executionStatus(s.execution!).catch((e) => {
+    console.error("live.watch: couldn't read the meeting bot's execution", e instanceof Error ? e.message : e);
+    return null;
+  });
+  if (state && /^(failed|stopped|succeeded|degraded)$/i.test(state)) return `${BOT_NAME}'s meeting bot stopped before it got into the meeting (Azure says ${state.toLowerCase()}).`;
+  const started = Date.parse(s.launched_at ?? s.created_at);
+  if (!s.bot_seen_at && at - started > STARTUP_MS) return `${BOT_NAME}'s meeting bot didn't start within ${STARTUP_MS / 60_000} minutes.`;
+  return null;
 }
 
 /* ------------------------------------------------------------------ */

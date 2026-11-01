@@ -3,13 +3,15 @@
  * settings from the environment the job execution was started with (app/src/lib/live-meetings/launcher.ts) and the
  * job's secrets, then runs the shim (core.mjs) with Azure speech-to-text (audio.mjs) when a Speech key is there.
  *
- * Environment: SIDEKICK_SESSION, SIDEKICK_URL, SIDEKICK_BOT_KEY, MEETING_URL, BOT_NAME, RAISE_HAND (from the launch);
+ * Environment: SIDEKICK_SESSION, SIDEKICK_URL, SIDEKICK_BOT_KEY, MEETING_URL, BOT_NAME, RAISE_HAND, ORB_URL (optional: the
+ * animated crystal ball's page; entrypoint.sh then starts Attendee's webpage streamer on WEBPAGE_STREAMER_PORT) (from the launch);
  * AZURE_SPEECH_KEY, AZURE_SPEECH_REGION (job secrets); Attendee's API key and webhook secret from the file bootstrap.py
  * wrote (or ATTENDEE_API_KEY / ATTENDEE_WEBHOOK_SECRET); optional
  * ATTENDEE_URL (default http://127.0.0.1:8000), MEETBOT_MAX_MINUTES (default 270).
  */
 import fs from "node:fs";
 import { createShim } from "./core.mjs";
+import { createLoad } from "./load.mjs";
 
 const need = (k) => {
   const v = process.env[k];
@@ -41,6 +43,27 @@ if (process.env.AZURE_SPEECH_KEY && process.env.AZURE_SPEECH_REGION) {
   audio = await createAudio({ port: audioPort, key: process.env.AZURE_SPEECH_KEY, region: process.env.AZURE_SPEECH_REGION });
 }
 
+// The animated ball's browser (Attendee's webpage streamer, started by entrypoint.sh when ORB_URL is set).
+const streamerUrl = `http://127.0.0.1:${process.env.WEBPAGE_STREAMER_PORT || 8001}`;
+const streamer = process.env.ORB_URL ? {
+  /** Waits up to a minute for the streamer to answer its keepalive. */
+  async ready() {
+    for (let i = 0; i < 120; i++) {
+      try {
+        if ((await fetch(`${streamerUrl}/keepalive`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(2000) })).ok) return true;
+      } catch {
+        // not up yet
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
+  },
+  /** Stops it (frees its CPU once the bot shows the still picture). */
+  async stop() {
+    await fetch(`${streamerUrl}/shutdown`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(5000) }).catch(() => {});
+  },
+} : undefined;
+
 const shim = createShim({
   session: need("SIDEKICK_SESSION"),
   sidekickUrl: need("SIDEKICK_URL").replace(/\/+$/, ""),
@@ -55,7 +78,8 @@ const shim = createShim({
   attendeeSecret,
   maxMinutes: Number(process.env.MEETBOT_MAX_MINUTES) || 270,
   audioUrl: audio ? `ws://127.0.0.1:${audioPort}/audio` : null,
-}, { audio });
+  orbUrl: process.env.ORB_URL || null,
+}, { audio, streamer, load: createLoad() });
 
 for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => shim.stop(`the container got ${sig}`));
 await shim.start();

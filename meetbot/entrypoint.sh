@@ -16,6 +16,16 @@ export DJANGO_SETTINGS_MODULE="attendee.settings.production"
 python manage.py migrate --check >/dev/null 2>&1 || python manage.py migrate --noinput
 # This meeting's Attendee API key and the project's webhook secret, made here and kept in the container (bootstrap.py).
 python /meetbot/bootstrap.py
+# The animated crystal ball as the bot's camera (only when Sidekick sends ORB_URL; docs/LIVE-MEETINGS.md → "Sidekick's
+# camera"): Attendee's webpage streamer, a second Chrome that shows Sidekick's /live/orb page and streams it to the bot.
+# It runs here on 127.0.0.1:8001 (our patch 03), sandbox off like the bot's own Chrome, through Attendee's own
+# entrypoint (it starts PulseAudio, which the streamer's audio capture needs). If it fails, the shim keeps the still picture.
+if [ -n "${ORB_URL:-}" ]; then
+  export ENABLE_VOICE_AGENTS="true" VOICE_AGENT_URL_PREFIX_ALLOWLIST="${SIDEKICK_URL%/}/live/orb?"
+  export WEBPAGE_STREAMER_PORT="8001" WEBPAGE_STREAMER_HOST="127.0.0.1" WEBPAGE_STREAMER_LOCAL_ADDRESS="127.0.0.1:8001"
+  export ENABLE_CHROME_SANDBOX_FOR_WEBPAGE_STREAMER="false"
+  /usr/local/bin/entrypoint.sh python bots/webpage_streamer/run_webpage_streamer.py --video-frame-size 640x360 &
+fi
 gunicorn attendee.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads 4 --log-level warning &
 # More than one worker slot: the bot itself occupies one for the whole meeting, and Attendee delivers its webhooks and
 # processes captions as Celery tasks too (with one slot they queued behind the bot forever; first live trial, Nov 1).

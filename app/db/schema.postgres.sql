@@ -769,6 +769,14 @@ ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS speech_at TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS hearing_since TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS tts_chars INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS captions_unavailable INTEGER NOT NULL DEFAULT 0;
+-- Sidekick's camera in meetings (lib/live-meetings/orb.ts): when the ball shows speaking/thinking, what the bot shows
+-- ('orb' or 'still: <why>') and its container's CPU use in percent.
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS speaking_from TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS speaking_until TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS thinking_at TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS camera TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS cpu_avg INTEGER;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS cpu_peak INTEGER;
 -- "Play sample" for Sidekick's meeting voices (lib/live-meetings/voice-settings.ts): one MP3 (base64) per voice and
 -- speed, made once with Azure AI Speech. The sample sentence is fixed and made up, so it's the same for everyone (no org).
 CREATE TABLE IF NOT EXISTS live_voice_samples (

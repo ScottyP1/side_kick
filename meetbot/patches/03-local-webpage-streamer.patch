@@ -1,0 +1,72 @@
+diff --git a/bots/bot_controller/webpage_streamer_manager.py b/bots/bot_controller/webpage_streamer_manager.py
+index 1cfe50d..8194c8d 100644
+--- a/bots/bot_controller/webpage_streamer_manager.py
++++ b/bots/bot_controller/webpage_streamer_manager.py
+@@ -94,9 +94,14 @@ class WebpageStreamerManager:
+         # Otherwise the streaming service will be running in a separate docker compose service, so we address it using the service name
+         return "attendee-webpage-streamer-local"
+ 
++    def streaming_service_address(self):
++        # Sidekick: the streamer runs in the same container as the bot, on 127.0.0.1 next to Attendee's own API
++        # (meetbot/patches/README.md), so its address comes from WEBPAGE_STREAMER_LOCAL_ADDRESS when set.
++        return os.getenv("WEBPAGE_STREAMER_LOCAL_ADDRESS") or f"{self.streaming_service_hostname()}:8000"
++
+     def update_webrtc_connection(self, url):
+         # Start and update do the same thing, so we can use the same endpoint
+-        update_streaming_response = requests.post(f"http://{self.streaming_service_hostname()}:8000/start_streaming", json={"url": url})
++        update_streaming_response = requests.post(f"http://{self.streaming_service_address()}/start_streaming", json={"url": url})
+         logger.info(f"Update streaming response: {update_streaming_response}")
+ 
+         if update_streaming_response.status_code != 200:
+@@ -114,11 +119,11 @@ class WebpageStreamerManager:
+             logger.error(f"Error getting peer connection offer: {peerConnectionOffer.get('error')}, returning")
+             return
+ 
+-        offer_response = requests.post(f"http://{self.streaming_service_hostname()}:8000/offer", json={"sdp": peerConnectionOffer["sdp"], "type": peerConnectionOffer["type"]})
++        offer_response = requests.post(f"http://{self.streaming_service_address()}/offer", json={"sdp": peerConnectionOffer["sdp"], "type": peerConnectionOffer["type"]})
+         logger.info(f"Offer response: {offer_response.json()}")
+         self.start_peer_connection_callback(offer_response.json())
+ 
+-        start_streaming_response = requests.post(f"http://{self.streaming_service_hostname()}:8000/start_streaming", json={"url": url})
++        start_streaming_response = requests.post(f"http://{self.streaming_service_address()}/start_streaming", json={"url": url})
+         logger.info(f"Start streaming response: {start_streaming_response}")
+ 
+         if start_streaming_response.status_code != 200:
+@@ -139,7 +144,7 @@ class WebpageStreamerManager:
+                 if self.cleaned_up:
+                     break
+ 
+-                response = requests.post(f"http://{self.streaming_service_hostname()}:8000/keepalive", json={})
++                response = requests.post(f"http://{self.streaming_service_address()}/keepalive", json={})
+                 logger.info(f"Webpage streamer keepalive response: {response.status_code}")
+                 if response.status_code == 200 and not self.webpage_streamer_connection_can_start:
+                     bot_is_ready_for_webpage_streamer = self.is_bot_ready_for_webpage_streamer_callback()
+@@ -158,7 +163,7 @@ class WebpageStreamerManager:
+ 
+     def send_webpage_streamer_shutdown_request(self):
+         try:
+-            response = requests.post(f"http://{self.streaming_service_hostname()}:8000/shutdown", json={})
++            response = requests.post(f"http://{self.streaming_service_address()}/shutdown", json={})
+             logger.info(f"Webpage streamer shutdown response: {response.json()}")
+         except Exception as e:
+             logger.info(f"Webpage streamer shutdown response: {e}")
+diff --git a/bots/webpage_streamer/webpage_streamer.py b/bots/webpage_streamer/webpage_streamer.py
+index d2f4b7d..f2382be 100644
+--- a/bots/webpage_streamer/webpage_streamer.py
++++ b/bots/webpage_streamer/webpage_streamer.py
+@@ -415,7 +415,8 @@ class WebpageStreamer:
+             await self.shutdown_process()
+             return web.json_response({"status": "success"})
+ 
+-        port = 8000
++        # Sidekick: port and address from the environment, so it can run beside Attendee's API in one container.
++        port = int(os.getenv("WEBPAGE_STREAMER_PORT", "8000"))
+ 
+         app = web.Application()
+         self.web_app = app
+@@ -471,4 +472,4 @@ class WebpageStreamer:
+         app.router.add_post("/offer_meeting_audio", offer_meeting_audio)  # SDP exchange
+         app.router.add_options("/offer_meeting_audio", handle_cors_preflight)
+ 
+-        web.run_app(app, host="0.0.0.0", port=port)
++        web.run_app(app, host=os.getenv("WEBPAGE_STREAMER_HOST", "0.0.0.0"), port=port)

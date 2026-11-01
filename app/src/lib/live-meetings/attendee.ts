@@ -19,6 +19,9 @@
  *   the shim plays it through Attendee's `output_audio`.
  * - **Raising its hand**: `hand` commands; the shim calls our patch's `raise_hand` in Attendee. `ATTENDEE_RAISE_HAND=1`
  *   says the deployed image has the patch; without it Sidekick puts "✋" in the chat instead.
+ * - **Its camera**: the animated crystal ball, a page of Sidekick's (`ORB_URL`, lib/live-meetings/orb.ts) the container
+ *   streams as the bot's webcam; the still picture when that's off or the container is too busy. The shim reports
+ *   which (`sidekick.camera`) and the container's CPU use (`sidekick.load`).
  * - **Leaving**: a `leave` command; the container exits once Attendee says the bot left. If it doesn't within a few
  *   minutes, `live.watch` stops the execution in Azure (`stopBot`).
  *
@@ -30,6 +33,7 @@ import { get, newId, now, run } from "../db";
 import { notificationBase } from "../meetings-graph";
 import type { LiveEvent, LiveProvider, LiveStatus } from "./provider";
 import { botKey, launcherConfigured, startBot, stopBot } from "./launcher";
+import { orbUrl } from "./orb";
 import { verifyBotEvent } from "./signature";
 
 /** Attendee's bot states in Sidekick's words. Unknown states are ignored. */
@@ -68,7 +72,7 @@ export function attendeeProvider(): LiveProvider | null {
     async join({ meetingUrl, botName, sessionId }) {
       const base = notificationBase();
       if (!base) throw new Error("Sidekick has no public address for its meeting bot to call.");
-      const execution = await startBot({ sessionId, meetingUrl, botName, sidekickUrl: base, raiseHand: process.env.ATTENDEE_RAISE_HAND === "1" });
+      const execution = await startBot({ sessionId, meetingUrl, botName, sidekickUrl: base, raiseHand: process.env.ATTENDEE_RAISE_HAND === "1", orbUrl: orbUrl(base, sessionId) });
       await run("UPDATE live_sessions SET execution = ?, launched_at = ?, hearing = 'captions', hearing_since = ? WHERE id = ?", execution, now(), now(), sessionId);
       // The bot's id is the session's: the shim reports under it.
       return { botId: sessionId };
@@ -120,6 +124,10 @@ export function attendeeProvider(): LiveProvider | null {
           out.push({ kind: "hearing", botId, source: data.source === "stt" ? "stt" : "captions", detail: str(data.reason) });
         } else if (trigger === "sidekick.captions_unavailable") {
           out.push({ kind: "captions_unavailable", botId, detail: str(data.reason) });
+        } else if (trigger === "sidekick.camera" || trigger === "sidekick.load") {
+          const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+          const camera = trigger === "sidekick.camera" ? (data.camera === "orb" ? "orb" : "still") : null;
+          out.push({ kind: "camera", botId, camera, detail: str(data.reason), cpuAvg: num(data.cpu_avg), cpuPeak: num(data.cpu_peak) });
         } else if (trigger === "sidekick.exit") {
           out.push({ kind: "exit", botId, detail: str(data.reason) });
         }

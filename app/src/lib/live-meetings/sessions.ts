@@ -59,6 +59,7 @@ import { DEFAULT_VOICE } from "./voices";
 import { capReached, capState, checkCapAlerts, LIVE_PAUSED, monthSpend } from "./spend";
 import { reapBot } from "./attendee";
 import { botKey } from "./launcher";
+import { noteCamera, noteSpeaking, noteThinking } from "./orb";
 import { sameKey } from "./signature";
 import {
   answerText, BOT_NAME, confident, GUEST_NOTICE, HAND_NOTE, introText, isNonAnswer, isRoomQuestion, isTeamsMeetingUrl, liveMinutes, LIVE_MODES,
@@ -90,6 +91,8 @@ export type LiveSession = {
   hearing: string | null; hearing_since: string | null; captions_at: string | null; speech_at: string | null; captions_unavailable: number;
   /** Characters spoken (Azure AI Speech text-to-speech, cost meter). */
   tts_chars: number;
+  /** Its camera (lib/live-meetings/orb.ts): when the ball shows speaking and thinking, what the bot shows, CPU use (%). */
+  speaking_from: string | null; speaking_until: string | null; thinking_at: string | null; camera: string | null; cpu_avg: number | null; cpu_peak: number | null;
 };
 
 /** What Sidekick has its hand up for: the chat text (full answer with sources), the short spoken version, the card. */
@@ -509,6 +512,12 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
     await run("UPDATE live_sessions SET updated_at = ? WHERE id = ? AND org_id = ?", now(), id, orgId);
     return true;
   }
+  // What the bot shows as its camera (the animated ball or the still picture) and its container's CPU use (kept after
+  // the session ends too: the last reading comes with the container's exit).
+  if (e.kind === "camera") {
+    await noteCamera(orgId, id, e.camera ? (e.camera === "orb" ? "orb" : `still${e.detail ? `: ${e.detail}` : ""}`) : null, { avg: e.cpuAvg, peak: e.cpuPeak });
+    return true;
+  }
   // The bot's container exiting: its time stops counting; a session still running is over.
   if (e.kind === "exit") {
     await run("UPDATE live_sessions SET exited_at = COALESCE(exited_at, ?) WHERE id = ? AND org_id = ?", now(), id, orgId);
@@ -769,6 +778,8 @@ async function speakNow(s: LiveSession, text: string): Promise<boolean> {
     const mp3 = await synthesize(text, await voiceFor(s.org_id, s.workspace_id));
     await run("UPDATE live_sessions SET tts_chars = tts_chars + ? WHERE id = ? AND org_id = ?", text.length, s.id, s.org_id);
     await span("live", "Speak in the meeting", () => provider.speak(s.bot_id!, mp3), { words: text.split(" ").length });
+    // The ball on the bot's camera shows "speaking" while the meeting hears it (lib/live-meetings/orb.ts).
+    await noteSpeaking(s.org_id, s.id, mp3);
     return true;
   } catch (e) {
     await noteError(s.org_id, s.id, e);
@@ -801,6 +812,8 @@ export async function answerLive(orgId: string, id: string, speaker: string | nu
   try {
     // Quiet mode ("Sidekick, quiet"): it still answers when asked, in the chat, without raising its hand or speaking.
     if (s.quiet !== 1 && (await hand(s, true))) timing.handMs = Date.now() - heardAt;
+    // The ball on the bot's camera swirls while Sidekick works out the answer (lib/live-meetings/orb.ts).
+    await noteThinking(orgId, id, true);
     const result = await askInMeeting(s, speaker, question);
     if (!result.blocked && result.found && canSpeak(s, settings, provider) && (await speakNow(s, spokenText(result.answer)))) timing.spokenMs = Date.now() - heardAt;
     const { text, card } = chatAnswer(s, question, result, group);
@@ -812,6 +825,7 @@ export async function answerLive(orgId: string, id: string, speaker: string | nu
     await noteError(orgId, id, e);
     await postToMeeting(s, e instanceof HttpError ? e.message : "Sorry, I couldn't answer that just now. Please ask again in a minute.").catch(() => {});
   } finally {
+    await noteThinking(orgId, id, false).catch(() => {}); // only the ball's swirl; it stops by itself after 90 s anyway
     if (timing.handMs !== undefined) await hand(s, false);
     spanAttrs({ addressed: true, ...timing });
   }

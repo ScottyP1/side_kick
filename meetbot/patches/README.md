@@ -9,6 +9,7 @@ re-check each patch.
 |---|---|---|
 | `01-local-audio-websocket.patch` | Lets the audio websocket (`websocket_settings.audio.url`) be `ws://127.0.0.1:<port>`: the shim in the same container receives the meeting's mixed audio for Azure speech-to-text (`../shim/audio.mjs`). Attendee only accepts `wss://` otherwise. | Applies to v1.89.2 (checked with `patch --dry-run`) |
 | (no patch) local webhooks | Attendee's own switch `REQUIRE_HTTPS_WEBHOOKS=false` (`attendee/settings/base.py`) lets it call the shim at `http://127.0.0.1:8090`. Set in `../entrypoint.sh`. | Built in |
+| `03-local-webpage-streamer.patch` | Lets Attendee's webpage streamer (the animated crystal ball as the bot's camera, docs/LIVE-MEETINGS.md → "Sidekick's camera") run in the same container: its port and address from `WEBPAGE_STREAMER_PORT`/`WEBPAGE_STREAMER_HOST`, and the bot finds it at `WEBPAGE_STREAMER_LOCAL_ADDRESS` (127.0.0.1:8001) instead of a separate Kubernetes or Compose service on port 8000, which Attendee's own API uses here. | Applies to v1.89.2 (checked with `patch --dry-run`) |
 | `02-raise-hand.patch` | **Not written yet: needs a real Teams meeting (stage 2 trial).** See below. Until it's in the image, `ATTENDEE_RAISE_HAND` stays unset and Sidekick puts "✋" in the meeting chat instead. | To do on the trial |
 
 ## 02: raise hand (design, from reading v1.89.2)

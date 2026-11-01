@@ -2052,6 +2052,54 @@ test(`[${ENGINE}] live: webhooks must be signed by the meeting bot (wrong secret
   assert.equal((await fetch(`${BASE}/api/live/events/nobody`, { method: "POST", body: "{}" })).status, 404);
 });
 
+test(`[${ENGINE}] live: the bot's camera: the ball's state only with the session's signature, speaking and thinking noted, camera and CPU saved`, async () => {
+  const bot = s.bot1;
+  // The animated ball is off by default (too heavy for 2 vCPU, docs/LIVE-MEETINGS.md): no page address for the container.
+  assert.equal(BOTS.get(bot).env.ORB_URL, undefined);
+  // The page itself is public (the bot has no sign-in) and shows no data; only its state API is signed.
+  const page = await fetch(`${BASE}/live/orb?session=${bot}&sig=x`, { redirect: "manual" });
+  assert.equal(page.status, 200);
+  assert.doesNotMatch(await page.text(), /W1|Lou Lead|cutover/);
+  const sig = crypto.createHmac("sha256", botKeyOf(bot)).update("orb").digest("base64url");
+  const orb = (q) => fetch(`${BASE}/api/live/bot/orb?${q}`);
+  assert.equal((await orb(`session=${bot}`)).status, 401);
+  assert.equal((await orb(`session=${bot}&sig=${crypto.createHmac("sha256", "wrong").update("orb").digest("base64url")}`)).status, 401);
+  assert.equal((await orb(`session=${s.bot2 ?? "nobody"}&sig=${sig}`)).status, 401, "another session's address is refused");
+  const idle = await orb(`session=${bot}&sig=${sig}`);
+  assert.equal(idle.status, 200);
+  assert.deepEqual(await idle.json(), { speaking: false, thinking: false, over: false }, "three flags, nothing about the meeting");
+  // A long poll: while the state is what the page already shows, it waits (up to `wait` seconds); otherwise it answers at once.
+  let t = Date.now();
+  assert.equal((await (await orb(`session=${bot}&sig=${sig}&known=idle&wait=1`)).json()).speaking, false);
+  assert.ok(Date.now() - t >= 900, "waited for a change");
+  t = Date.now();
+  await orb(`session=${bot}&sig=${sig}&known=speaking&wait=5`);
+  assert.ok(Date.now() - t < 2500, "a changed state answers at once");
+  // A spoken answer marks "speaking" for as long as the meeting hears it (from the MP3's length, after a short lag);
+  // "thinking" lasts while the answer is worked out and is cleared after.
+  const log0 = logLen(bot);
+  await say(bot, "Lou Lead", "Sidekick, what is the camera test plan?");
+  await waitLog(bot, /hand:false/, log0);
+  const from = Date.parse(await sessionOf(bot, "speaking_from"));
+  const until = Date.parse(await sessionOf(bot, "speaking_until"));
+  assert.ok(from > Date.now() - 60_000 && until > from, "speaking window noted");
+  assert.equal(await sessionOf(bot, "thinking_at"), "", "thinking cleared once answered");
+  await dbExec(`UPDATE live_sessions SET speaking_from = '${new Date(Date.now() - 1000).toISOString()}', speaking_until = '${new Date(Date.now() + 30_000).toISOString()}' WHERE bot_id = '${bot}'`);
+  assert.deepEqual(await (await orb(`session=${bot}&sig=${sig}&known=idle&wait=5`)).json(), { speaking: true, thinking: false, over: false });
+  await dbExec(`UPDATE live_sessions SET speaking_until = NULL, thinking_at = '${new Date().toISOString()}' WHERE bot_id = '${bot}'`);
+  assert.equal((await (await orb(`session=${bot}&sig=${sig}`)).json()).thinking, true);
+  await dbExec(`UPDATE live_sessions SET thinking_at = NULL WHERE bot_id = '${bot}'`);
+  // What the bot shows and the container's CPU use, as the shim reports them (the peak only goes up).
+  assert.equal((await pushLive(bot, { trigger: "sidekick.camera", data: { camera: "orb" } })).status, 202);
+  assert.equal(await sessionOf(bot, "camera"), "orb");
+  await pushLive(bot, { trigger: "sidekick.camera", data: { camera: "still", reason: "the container was too busy (CPU at 96%)", cpu_peak: 97 } });
+  assert.equal(await sessionOf(bot, "camera"), "still: the container was too busy (CPU at 96%)");
+  await pushLive(bot, { trigger: "sidekick.load", data: { cpu_avg: 41, cpu_peak: 60 } });
+  assert.equal(await sessionOf(bot, "cpu_avg"), "41");
+  assert.equal(await sessionOf(bot, "cpu_peak"), "97");
+  assert.equal(await sessionOf(bot, "camera"), "still: the container was too busy (CPU at 96%)", "a load report leaves the camera alone");
+});
+
 test(`[${ENGINE}] live: with a pasted link Sidekick posts through the provider; once a guest joins it only uses Shareable sources`, async () => {
   await uploadDoc(lou, s.w1, "zebra-internal.md", "Zebracode rollout plan. The zebracode rollout plan is internal: zebracode waves, zebracode budget, zebracode risks.");
   await uploadDoc(lou, s.w1, "zebra-shareable.md", "Zebracode summary for the client.", "shareable");

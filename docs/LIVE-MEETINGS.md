@@ -325,6 +325,49 @@ live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.hand
   consumption plan doesn't guarantee a cached image), then joining Teams and the lobby about 10–20 s. Starting 2
   minutes early covers scheduled meetings; `@Sidekick join` takes about 1–2 minutes.
 
+### Sidekick's camera (built Nov 1; the animated ball is off by default)
+Cody asked on the first trial for the crystal ball instead of initials, then whether it can move like the particles.
+- **Still picture (default):** `meetbot/bot-image.png` (1280×720) as Attendee's `bot_image`. Costs nothing extra.
+- **Animated ball (built, switch `SIDEKICK_MEETBOT_ORB=on`):**
+  - The page `/live/orb?session=…&sig=…` (`app/src/app/live/orb/`) draws the home page's crystal ball full-frame on a
+    dark 16:9 background. No data on it; `sig` is an HMAC of "orb" with the session's own key.
+  - It long-polls `GET /api/live/bot/orb` (`lib/live-meetings/orb.ts`): **speaking** (faster, crackling, sparking) from
+    when a spoken answer is queued, for the MP3's length (48 kbit/s, after a 0.9 s lag); **thinking** (the dust swirls)
+    while an answer to "Sidekick, …" is worked out; idle otherwise.
+  - In the container, Attendee's **webpage streamer** (a second Chrome on a virtual screen, captured at 15 fps by
+    GStreamer and sent over WebRTC to the bot's Chrome) shows that page as the bot's webcam
+    (`voice_agent_settings.url`). Our patch 03 runs it on 127.0.0.1:8001 next to Attendee's API; `entrypoint.sh` starts
+    it only when Sidekick sends `ORB_URL`.
+  - **Spoken answers stay on `output_audio`.** The page's own audio (silence) and the MP3 go through the same mixer in
+    the bot's Chrome (`playMediaStream` and `playPCMAudio` both feed one gain node), so they don't conflict. The
+    bot's microphone shows as on until its first spoken answer (Attendee turns the mic on for the stream, and off
+    2 s after each answer).
+  - **Falls back to the still picture by itself** (the shim, `meetbot/shim/core.mjs`): if the streamer doesn't start
+    within a minute, if Attendee refuses the setting (the bot is created again without it, so the meeting isn't
+    lost), or if the container's CPU stays over 90% for three readings 20 s apart (Attendee is told to stop the page,
+    the streamer is shut down).
+  - The session saves what the bot showed (`live_sessions.camera`: `orb` or `still: <why>`).
+- **CPU, measured Nov 1** (`?demo=speaking`, Chrome 134-like software WebGL: `--disable-gpu`, SwiftShader; Cody's
+  M3 Pro; the cost is per pixel drawn, the number of dust particles barely matters):
+
+  | Page setting (640×360 frame) | Chrome CPU, fast cores | frames/s | Chrome CPU, efficiency cores (closer to a cloud vCPU) | frames/s |
+  |---|---|---|---|---|
+  | full resolution, 15 fps | 1.5 cores | 15 | 1.4 cores | 7.5 (can't keep up) |
+  | 1280×720 frame, full resolution | 4.0 cores | 15 | | |
+  | **half resolution, 12 fps (the page's defaults)** | **0.55 cores** | 12 | **0.7 cores** | 9 (can't keep up) |
+  | blank page | 0.03 cores | | | |
+
+  On top of that the streamer encodes the video (aiortc VP8 in Python, 640×360) and the bot's Chrome decodes and
+  redraws it. The bot's own Chrome in Teams already needs about 1 vCPU. **Verdict: too heavy for 2 vCPU / 4 GiB**,
+  so the still picture stays the default. To use the animated ball: `SIDEKICK_MEETBOT_ORB=on` with
+  `SIDEKICK_MEETBOT_CPU=4` and `SIDEKICK_MEETBOT_MEMORY_GIB=8` on the app (about twice the container cost:
+  ~$0.43 instead of ~$0.22 a meeting hour), and check `camera` and the CPU numbers after a trial meeting.
+- **CPU reported on every meeting** (whatever the camera): the shim reads the container's own cgroup CPU every 20 s
+  and reports the average and peak (`sidekick.load`, every 5 minutes and at exit) into `live_sessions.cpu_avg` /
+  `cpu_peak` (%). That also settles the 2 vCPU size question below.
+- Not tried: a pre-made looping video through Attendee's `output_video` (`loop: true`) is cheap to play but can't
+  switch between idle and speaking (Attendee refuses a new video while one is playing).
+
 ### Spending controls (stage 2, built)
 - **Cost meter**, on the Owner Console → **Live meetings** page:
   - this month's estimate in dollars and "on pace for", with meeting hours, next to the AI spend;
@@ -379,7 +422,7 @@ customer. The Azure resources already exist (Oct 31, `SKIP_APP=1`); nothing has 
 **Measure and write down:**
 - startup time (`@Sidekick join` → in the lobby);
 - heard → hand, heard → spoken and heard → chat (Activity traces);
-- container CPU and memory (Azure metrics), to settle the 2 vCPU / 4 GiB size;
+- container CPU and memory (Azure metrics, and `cpu_avg`/`cpu_peak` on the session), to settle the 2 vCPU / 4 GiB size;
 - caption quality against speech-to-text;
 - the Teams Raise hand control, for `meetbot/patches/02-raise-hand.patch`.
 

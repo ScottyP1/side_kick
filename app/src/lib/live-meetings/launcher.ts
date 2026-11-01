@@ -97,9 +97,10 @@ async function arm(path: string, body: unknown, what: string): Promise<Record<st
 
 /**
  * Starts one execution of the meeting-bot job for a session, with its settings as environment overrides. Returns the
- * execution's name (to stop it later).
+ * execution's name (to stop it later). `orbUrl` is the page the bot shows as its camera (lib/live-meetings/orb.ts);
+ * without it the bot shows the still picture.
  */
-export async function startBot(o: { sessionId: string; meetingUrl: string; botName: string; sidekickUrl: string; raiseHand: boolean }): Promise<string> {
+export async function startBot(o: { sessionId: string; meetingUrl: string; botName: string; sidekickUrl: string; raiseHand: boolean; orbUrl?: string | null }): Promise<string> {
   const { cpu, memoryGib } = botSize();
   const image = process.env.SIDEKICK_MEETBOT_IMAGE?.trim();
   if (!image) throw new Error("Sidekick's meeting bot image isn't set (SIDEKICK_MEETBOT_IMAGE).");
@@ -110,6 +111,7 @@ export async function startBot(o: { sessionId: string; meetingUrl: string; botNa
     { name: "MEETING_URL", value: o.meetingUrl },
     { name: "BOT_NAME", value: o.botName },
     { name: "RAISE_HAND", value: o.raiseHand ? "1" : "0" },
+    ...(o.orbUrl ? [{ name: "ORB_URL", value: o.orbUrl }] : []),
     // A start's container replaces the job's own, so the job's secrets are named again here (the same names as
     // infra/azure/meetbot-setup.sh gives them; the values stay in Key Vault).
     ...JOB_SECRETS.map(([name, secretRef]) => ({ name, secretRef })),

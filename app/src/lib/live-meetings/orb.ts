@@ -1,6 +1,6 @@
 /**
- * @file Sidekick's face in Teams meetings: the animated crystal ball its own meeting bot shows as its camera
- * (docs/LIVE-MEETINGS.md → "Sidekick's camera").
+ * @file Sidekick's face in Teams meetings: the moving crystal ball its own meeting bot shows as its camera when the
+ * organization chose it (lib/live-meetings/camera.ts; docs/LIVE-MEETINGS.md → "Sidekick's camera").
  *
  * Concepts
  * - **The page**: `/live/orb?session=…&sig=…` (app/live/orb) draws the ball full-frame on a dark 16:9 background. The bot's
@@ -11,14 +11,14 @@
  *   set when a spoken answer is queued (from the MP3's length), `thinking_at` while an answer is being written.
  * - **Signed**: `sig` is an HMAC of the session id with the session's own key (`botKey`), so only that session's
  *   container (or Sidekick) can make the address, and it answers nothing but those two flags. Wrong or missing → 401.
- * - **What the bot shows** (`live_sessions.camera`): `orb` (the animated ball) or `still: <why>` (the still picture,
- *   meetbot/bot-image.png), reported by the container's shim; with the container's CPU use (`cpu_avg`, `cpu_peak`, %),
- *   so the first trials show whether 2 vCPU are enough. The shim falls back to the still picture by itself when the
- *   container is too busy (meetbot/shim/core.mjs).
- * - **Off by default** (measured Nov 1, docs/LIVE-MEETINGS.md → "Sidekick's camera"): the container has no graphics
- *   card, so a second browser draws the ball in software, which needs about 1.5 more vCPU than the 2 the bot has.
- *   `SIDEKICK_MEETBOT_ORB=on` on the app sends the page address (pair it with `SIDEKICK_MEETBOT_CPU=4` and
- *   `SIDEKICK_MEETBOT_MEMORY_GIB=8`); otherwise every bot shows the still picture.
+ * - **What the bot shows** (`live_sessions.camera`): `orb` (the moving ball) or `logo: <why>` (the still logo,
+ *   meetbot/bot-logo.png), reported by the container's shim; with the container's CPU use (`cpu_avg`, `cpu_peak`, %).
+ *   The shim falls back to the logo by itself when the ball's browser doesn't start, Attendee refuses it or the
+ *   container is too busy (meetbot/shim/core.mjs). Never the old still crystal ball. (`still: <why>` on older sessions.)
+ * - **Only when the organization chose it** (Settings → "Sidekick's camera in meetings", lib/live-meetings/camera.ts):
+ *   the container has no graphics card, so a second browser draws the ball in software (measured Nov 1,
+ *   docs/LIVE-MEETINGS.md → "Sidekick's camera"), which needs a bigger bot: 4 vCPU / 8 GiB instead of 2 / 4
+ *   (lib/live-meetings/launcher.ts `botSize`). Otherwise the bot shows the logo and gets no page address.
  *
  * Who may call: lib/live-meetings/launcher.ts (`orbUrl`), lib/live-meetings/sessions.ts (speaking, thinking, camera)
  * and the route app/api/live/bot/orb (`orbState`). Every query names the org.
@@ -29,20 +29,19 @@ import { asSystem, get, now, run } from "../db";
 import { botKey } from "./launcher";
 import { sameKey } from "./signature";
 
-/** Whether bots show the animated ball (`SIDEKICK_MEETBOT_ORB=on`; off by default, see the file comment). */
-export const orbEnabled = () => (process.env.SIDEKICK_MEETBOT_ORB ?? "").trim().toLowerCase() === "on";
-
 /** The page address's signature for a session: an HMAC of "orb" with the session's own key. */
 export function orbSig(sessionId: string): string {
   return crypto.createHmac("sha256", botKey(sessionId)).update("orb").digest("base64url");
 }
 
-/** The address the bot's container loads as its camera, or null when the animated ball is off or the base isn't https. */
+/**
+ * The address the bot's container loads as its camera (for a session whose organization chose the moving ball), or
+ * null when the base can't serve it: Attendee only loads https pages (its own check), so a plain-http address gets no
+ * page in production; outside production (local tests against the fakes) http is let through so the tests see it.
+ */
 export function orbUrl(base: string, sessionId: string): string | null {
-  if (!orbEnabled()) return null;
   const root = base.replace(/\/+$/, "");
-  // Attendee only loads https pages (its own check), so a plain-http copy (local tests) gets no page.
-  if (!/^https:\/\//i.test(root)) return null;
+  if (!/^https:\/\//i.test(root) && (process.env.NODE_ENV === "production" || !/^http:\/\//i.test(root))) return null;
   return `${root}/live/orb?session=${encodeURIComponent(sessionId)}&sig=${orbSig(sessionId)}`;
 }
 
@@ -72,7 +71,7 @@ export async function noteThinking(orgId: string, sessionId: string, on: boolean
   await run("UPDATE live_sessions SET thinking_at = ? WHERE id = ? AND org_id = ?", on ? now() : null, sessionId, orgId);
 }
 
-/** Saves what the bot shows (`orb` or `still: <why>`) and, when reported, the container's CPU use in percent. */
+/** Saves what the bot shows (`orb` or `logo: <why>`) and, when reported, the container's CPU use in percent. */
 export async function noteCamera(orgId: string, sessionId: string, camera: string | null, cpu: { avg?: number | null; peak?: number | null }): Promise<void> {
   const pct = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null);
   const avg = pct(cpu.avg);

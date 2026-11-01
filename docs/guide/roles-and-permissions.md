@@ -113,6 +113,7 @@ use (Usage & billing, Guardrails, Connectors, Activity, Security & audit) show t
 | Bring Sidekick into a meeting (`@Sidekick join` / `leave`, when the group's switch is on) | ✓ | ✓ | ✓ | ✓ | |
 | Choose where the meeting bot runs for the organization (Sidekick's own, or the hosted Recall.ai) | ✓ | | | | |
 | Choose Sidekick's voice in meetings for the organization (Settings) | ✓ | ✓ | | | |
+| Choose Sidekick's camera in meetings: logo or moving crystal ball (Settings) | ✓ | ✓ | | | |
 | Choose a group's own meeting voice, play voice samples | ✓ | ✓ | ✓ (own groups) | | |
 | Choose which chats get a group's meeting notes ("Meeting notes go to" in the portal, or "@Sidekick post meeting notes here" in the chat; everyone in the group sees it) | ✓ | ✓ | ✓ (own groups) | | |
 | Send a test message to one of a group's chats (to see where notes will land; once per chat per minute) | ✓ | ✓ | ✓ (own groups) | | |

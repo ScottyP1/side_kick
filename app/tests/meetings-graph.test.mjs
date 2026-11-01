@@ -2068,8 +2068,9 @@ test(`[${ENGINE}] live: webhooks must be signed by the meeting bot (wrong secret
 
 test(`[${ENGINE}] live: the bot's camera: the ball's state only with the session's signature, speaking and thinking noted, camera and CPU saved`, async () => {
   const bot = s.bot1;
-  // The animated ball is off by default (too heavy for 2 vCPU, docs/LIVE-MEETINGS.md): no page address for the container.
+  // The logo is the default camera (the moving ball is the organization's opt-in): no page address for the container.
   assert.equal(BOTS.get(bot).env.ORB_URL, undefined);
+  assert.equal(await sessionOf(bot, "bot_camera"), "logo");
   // The page itself is public (the bot has no sign-in) and shows no data; only its state API is signed.
   const page = await fetch(`${BASE}/live/orb?session=${bot}&sig=x`, { redirect: "manual" });
   assert.equal(page.status, 200);
@@ -2109,12 +2110,65 @@ test(`[${ENGINE}] live: the bot's camera: the ball's state only with the session
   // What the bot shows and the container's CPU use, as the shim reports them (the peak only goes up).
   assert.equal((await pushLive(bot, { trigger: "sidekick.camera", data: { camera: "orb" } })).status, 202);
   assert.equal(await sessionOf(bot, "camera"), "orb");
-  await pushLive(bot, { trigger: "sidekick.camera", data: { camera: "still", reason: "the container was too busy (CPU at 96%)", cpu_peak: 97 } });
-  assert.equal(await sessionOf(bot, "camera"), "still: the container was too busy (CPU at 96%)");
+  await pushLive(bot, { trigger: "sidekick.camera", data: { camera: "logo", reason: "the container was too busy (CPU at 96%)", cpu_peak: 97 } });
+  assert.equal(await sessionOf(bot, "camera"), "logo: the container was too busy (CPU at 96%)");
   await pushLive(bot, { trigger: "sidekick.load", data: { cpu_avg: 41, cpu_peak: 60 } });
   assert.equal(await sessionOf(bot, "cpu_avg"), "41");
   assert.equal(await sessionOf(bot, "cpu_peak"), "97");
-  assert.equal(await sessionOf(bot, "camera"), "still: the container was too busy (CPU at 96%)", "a load report leaves the camera alone");
+  assert.equal(await sessionOf(bot, "camera"), "logo: the container was too busy (CPU at 96%)", "a load report leaves the camera alone");
+});
+
+test(`[${ENGINE}] live: Sidekick's camera is the organization's choice: the logo at 2 vCPU, the moving ball at 4 vCPU with its page, falling back to the logo`, async () => {
+  // The choice: everyone sees it, only Org Owners/Admins change it (the full role matrix: tests/permissions-matrix.mjs).
+  let c = (await mo("GET", "/api/live/camera")).body;
+  assert.equal(c.camera, "logo", "the logo by default");
+  assert.deepEqual(c.cameras.map((x) => x.id), ["logo", "orb"], "two choices, never the still crystal ball");
+  assert.match(c.cameras.find((x) => x.id === "orb").note, /bigger meeting bot, so it costs more per meeting hour/);
+  assert.doesNotMatch(JSON.stringify(c), /\$|usd|cost_|price/i, "a plain note, never a price");
+  assert.equal(c.canManage, false);
+  assert.equal((await mo("PUT", "/api/live/camera", { camera: "orb" })).status, 403);
+  assert.equal((await lou("PUT", "/api/live/camera", { camera: "orb" })).status, 403, "Team Leads can't either");
+  assert.equal((await ann("PUT", "/api/live/camera", { camera: "still" })).status, 400, "the still ball is not a choice");
+  c = (await ann("PUT", "/api/live/camera", { camera: "orb" })).body;
+  assert.equal(c.camera, "orb");
+  assert.equal(c.canManage, true);
+  assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Set Sidekick''s camera in meetings%' ORDER BY id DESC LIMIT 1"), /moving crystal ball/);
+  // The moving ball: a 4 vCPU / 8 GiB container with the signed page address; the session records both.
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("camera-orb")}`), /Joining now/);
+  const ball = lastBot();
+  const started = armCalls.filter((a) => a.op === "start").at(-1).body.containers[0];
+  assert.deepEqual(started.resources, { cpu: 4, memory: "8Gi" });
+  const sig = crypto.createHmac("sha256", botKeyOf(ball)).update("orb").digest("base64url");
+  assert.equal(BOTS.get(ball).env.ORB_URL, `${BASE}/live/orb?session=${encodeURIComponent(ball)}&sig=${sig}`);
+  assert.equal(await sessionOf(ball, "bot_camera"), "orb");
+  assert.equal(Number(await sessionOf(ball, "bot_cpu")), 4);
+  assert.equal(Number(await sessionOf(ball, "bot_memory_gib")), 8);
+  // The shim falls back to the logo by itself (here: too busy); the session says so.
+  await botStatus(ball, "in_call");
+  await pushLive(ball, { trigger: "sidekick.camera", data: { camera: "orb" } });
+  await pushLive(ball, { trigger: "sidekick.camera", data: { camera: "logo", reason: "the container was too busy (CPU at 95%)", cpu_peak: 95 } });
+  assert.equal(await sessionOf(ball, "camera"), "logo: the container was too busy (CPU at 95%)");
+  // The Owner Console's camera line: this client's choice and its meeting hours with the moving ball (not priced yet).
+  await dbExec(`UPDATE live_sessions SET joined_at = '${new Date(Date.now() - 3600_000).toISOString()}' WHERE bot_id = '${ball}'`);
+  const report = (await owner("GET", "/api/owner/live")).body;
+  const row = report.orgs.find((o) => o.orgId === s.orgA);
+  assert.equal(row.camera, "orb");
+  assert.ok(row.orbHours >= 0.9, JSON.stringify(row));
+  assert.equal(row.orbAddonUsd, null, "the add-on isn't priced yet");
+  assert.deepEqual(report.movingBallAddon, { usdPerMeetingHour: null });
+  assert.deepEqual(report.spend.orbSize, { cpu: 4, memoryGib: 8 });
+  // Tidy up so later tests (live hours used, "The meeting ended." sessions) aren't affected: never joined, ended.
+  const tidy = (bot) => dbExec(`UPDATE live_sessions SET status = 'ended', joined_at = NULL, ended_at = '${new Date().toISOString()}', end_reason = 'Camera test' WHERE bot_id = '${bot}'`);
+  await tidy(ball);
+  // Back to the logo: the normal size and no page address.
+  assert.equal((await ann("PUT", "/api/live/camera", { camera: "logo" })).body.camera, "logo");
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("camera-logo")}`), /Joining now/);
+  const logo = lastBot();
+  assert.deepEqual(armCalls.filter((a) => a.op === "start").at(-1).body.containers[0].resources, { cpu: 2, memory: "4Gi" });
+  assert.equal(BOTS.get(logo).env.ORB_URL, undefined);
+  assert.equal(await sessionOf(logo, "bot_camera"), "logo");
+  assert.equal(Number(await sessionOf(logo, "bot_cpu")), 2);
+  await tidy(logo);
 });
 
 test(`[${ENGINE}] live: with a pasted link Sidekick posts through the provider; once a guest joins it only uses Shareable sources`, async () => {

@@ -4,7 +4,7 @@
  * job's secrets, then runs the shim (core.mjs) with Azure speech-to-text (audio.mjs) when a Speech key is there.
  *
  * Environment: SIDEKICK_SESSION, SIDEKICK_URL, SIDEKICK_BOT_KEY, MEETING_URL, BOT_NAME, RAISE_HAND, ORB_URL (optional: the
- * animated crystal ball's page; entrypoint.sh then starts Attendee's webpage streamer on WEBPAGE_STREAMER_PORT) (from the launch);
+ * moving crystal ball's page, when the organization chose it; entrypoint.sh then starts Attendee's webpage streamer on WEBPAGE_STREAMER_PORT) (from the launch);
  * AZURE_SPEECH_KEY, AZURE_SPEECH_REGION (job secrets); Attendee's API key and webhook secret from the file bootstrap.py
  * wrote (or ATTENDEE_API_KEY / ATTENDEE_WEBHOOK_SECRET); optional
  * ATTENDEE_URL (default http://127.0.0.1:8000), MEETBOT_MAX_MINUTES (default 270).
@@ -43,7 +43,7 @@ if (process.env.AZURE_SPEECH_KEY && process.env.AZURE_SPEECH_REGION) {
   audio = await createAudio({ port: audioPort, key: process.env.AZURE_SPEECH_KEY, region: process.env.AZURE_SPEECH_REGION });
 }
 
-// The animated ball's browser (Attendee's webpage streamer, started by entrypoint.sh when ORB_URL is set).
+// The moving ball's browser (Attendee's webpage streamer, started by entrypoint.sh when ORB_URL is set).
 const streamerUrl = `http://127.0.0.1:${process.env.WEBPAGE_STREAMER_PORT || 8001}`;
 const streamer = process.env.ORB_URL ? {
   /** Waits up to a minute for the streamer to answer its keepalive. */
@@ -58,7 +58,7 @@ const streamer = process.env.ORB_URL ? {
     }
     return false;
   },
-  /** Stops it (frees its CPU once the bot shows the still picture). */
+  /** Stops it (frees its CPU once the bot shows the logo). */
   async stop() {
     await fetch(`${streamerUrl}/shutdown`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(5000) }).catch(() => {});
   },
@@ -70,8 +70,9 @@ const shim = createShim({
   botKey: need("SIDEKICK_BOT_KEY"),
   meetingUrl: need("MEETING_URL"),
   botName: process.env.BOT_NAME || "Sidekick",
-  // Shown as the bot's video in the meeting instead of initials: the crystal ball (meetbot/bot-image.png).
-  botImage: await fs.promises.readFile(process.env.BOT_IMAGE || "/meetbot/bot-image.png").then((b) => b.toString("base64")).catch(() => null),
+  // Shown as the bot's video in the meeting instead of initials: Sidekick's logo (meetbot/bot-logo.png), also what the
+  // moving crystal ball falls back to.
+  botImage: await fs.promises.readFile(process.env.BOT_IMAGE || "/meetbot/bot-logo.png").then((b) => b.toString("base64")).catch(() => null),
   raiseHand: process.env.RAISE_HAND === "1",
   attendeeUrl: process.env.ATTENDEE_URL || "http://127.0.0.1:8000",
   attendeeKey,

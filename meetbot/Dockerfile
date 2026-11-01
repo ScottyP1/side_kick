@@ -14,8 +14,9 @@ RUN cd /attendee && for p in /meetbot/patches/*.patch; do patch -p1 < "$p"; done
 COPY shim/package.json /meetbot/shim/package.json
 RUN cd /meetbot/shim && npm install --omit=dev --no-audit --no-fund
 COPY shim/ /meetbot/shim/
-# The bot's camera picture in meetings: Sidekick's crystal ball (PNG, 1280x720).
-COPY entrypoint.sh bootstrap.py bot-image.png /meetbot/
+# The bot's camera picture in meetings: Sidekick's logo on a dark 16:9 frame (PNG, 1280x720). To change it, replace
+# bot-logo.png (same name and size) and rebuild the image; nothing else changes (README → "The camera").
+COPY entrypoint.sh bootstrap.py bot-logo.png /meetbot/
 RUN chmod +x /meetbot/entrypoint.sh && chown -R app:app /meetbot
 USER app
 ENTRYPOINT ["/tini", "--", "/meetbot/entrypoint.sh"]

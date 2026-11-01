@@ -340,10 +340,23 @@ live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.hand
   consumption plan doesn't guarantee a cached image), then joining Teams and the lobby about 10–20 s. Starting 2
   minutes early covers scheduled meetings; `@Sidekick join` takes about 1–2 minutes.
 
-### Sidekick's camera (built Nov 1; the animated ball is off by default)
+### Sidekick's camera (each organization's choice: the logo, or the moving crystal ball)
 Cody asked on the first trial for the crystal ball instead of initials, then whether it can move like the particles.
-- **Still picture (default):** `meetbot/bot-image.png` (1280×720) as Attendee's `bot_image`. Costs nothing extra.
-- **Animated ball (built, switch `SIDEKICK_MEETBOT_ORB=on`):**
+The still crystal ball (#109) looked bad, so it's gone (Nov 1): **each client chooses** in Settings → "Sidekick's camera
+in meetings" (Org Owner/Admin, audited; `orgs.live_camera`, `lib/live-meetings/camera.ts`, `GET/PUT /api/live/camera`).
+- **Sidekick logo (default):** `meetbot/bot-logo.png` (1280×720, the logo on a dark 16:9 frame) as Attendee's
+  `bot_image`, in a **2 vCPU / 4 GiB** container. Costs nothing extra. Placeholder: the indigo "S" app icon until
+  Cody's real logo exists; **to change it, replace that one file** (same name and size) and rebuild the image.
+- **Moving crystal ball (opt-in, the client decides):** Sidekick sends the page address (`ORB_URL`) and starts a
+  **4 vCPU / 8 GiB** container (`launcher.ts botSize`; env overrides `SIDEKICK_MEETBOT_ORB_CPU` /
+  `_ORB_MEMORY_GIB`), about twice the container cost (~$0.43 instead of ~$0.22 a meeting hour). Settings tells firms
+  only that it "uses a bigger meeting bot, so it costs more per meeting hour", never a price. The Sidekick team can turn
+  it off for everyone with `SIDEKICK_MEETBOT_ORB=off` on the app (every bot then shows the logo).
+  - **Cost tracking:** each session records the camera it was started with and its size (`live_sessions.bot_camera`,
+    `bot_cpu`, `bot_memory_gib`). The Owner Console cost meter adds each session at its own size; Live meetings → "This
+    month by client" shows each client's camera and meeting hours with the moving ball, and the client's usage CSV
+    (Owner Console copy only) has "Moving ball meeting hours". The add-on price is **not decided**:
+    `MOVING_BALL_ADDON.usdPerMeetingHour` in `lib/plans.ts` is null (nothing charged, "not priced yet") until Cody sets it.
   - The page `/live/orb?session=…&sig=…` (`app/src/app/live/orb/`) draws the home page's crystal ball full-frame on a
     dark 16:9 background. No data on it; `sig` is an HMAC of "orb" with the session's own key.
   - It long-polls `GET /api/live/bot/orb` (`lib/live-meetings/orb.ts`): **speaking** (faster, crackling, sparking) from
@@ -357,11 +370,12 @@ Cody asked on the first trial for the crystal ball instead of initials, then whe
     the bot's Chrome (`playMediaStream` and `playPCMAudio` both feed one gain node), so they don't conflict. The
     bot's microphone shows as on until its first spoken answer (Attendee turns the mic on for the stream, and off
     2 s after each answer).
-  - **Falls back to the still picture by itself** (the shim, `meetbot/shim/core.mjs`): if the streamer doesn't start
+  - **Falls back to the logo by itself** (the shim, `meetbot/shim/core.mjs`; never the old still ball): if the streamer doesn't start
     within a minute, if Attendee refuses the setting (the bot is created again without it, so the meeting isn't
     lost), or if the container's CPU stays over 90% for three readings 20 s apart (Attendee is told to stop the page,
     the streamer is shut down).
-  - The session saves what the bot showed (`live_sessions.camera`: `orb` or `still: <why>`).
+  - The session saves what the bot showed (`live_sessions.camera`: `orb` or `logo: <why>`; `still: <why>` on sessions
+    from before Nov 1). After a fallback the container keeps its bigger size until the meeting ends.
   - **First live test (Nov 1, 4 vCPU / 8 GiB):** the ball streamed and moved, swirling while thinking and speaking.
     One bug: a red "Failed to receive remote audio stream within 10 seconds" box stayed over it. Cause: the script
     Attendee's streamer adds to every page fetches the meeting audio from `localhost:8000`, which is Attendee's API in
@@ -379,9 +393,8 @@ Cody asked on the first trial for the crystal ball instead of initials, then whe
 
   On top of that the streamer encodes the video (aiortc VP8 in Python, 640×360) and the bot's Chrome decodes and
   redraws it. The bot's own Chrome in Teams already needs about 1 vCPU. **Verdict: too heavy for 2 vCPU / 4 GiB**,
-  so the still picture stays the default. To use the animated ball: `SIDEKICK_MEETBOT_ORB=on` with
-  `SIDEKICK_MEETBOT_CPU=4` and `SIDEKICK_MEETBOT_MEMORY_GIB=8` on the app (about twice the container cost:
-  ~$0.43 instead of ~$0.22 a meeting hour), and check `camera` and the CPU numbers after a trial meeting.
+  so the moving ball gets a 4 vCPU / 8 GiB container and the logo stays the default. Check `camera` and the CPU
+  numbers after the first trial meeting with the ball.
 - **CPU reported on every meeting** (whatever the camera): the shim reads the container's own cgroup CPU every 20 s
   and reports the average and peak (`sidekick.load`, every 5 minutes and at exit) into `live_sessions.cpu_avg` /
   `cpu_peak` (%). That also settles the 2 vCPU size question below.

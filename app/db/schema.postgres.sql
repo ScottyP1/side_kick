@@ -788,6 +788,13 @@ CREATE TABLE IF NOT EXISTS live_voice_samples (
   PRIMARY KEY (voice_id, speed)
 );
 ALTER TABLE orgs ADD COLUMN IF NOT EXISTS live_voice TEXT;
+-- Sidekick's camera in meetings, the organization's choice (lib/live-meetings/camera.ts): NULL/'logo' = the still logo,
+-- 'orb' = the moving crystal ball (a bigger meeting bot). Per session: the camera asked for and the container's size,
+-- so the cost meter and the per-organization camera line use each meeting's own size.
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS live_camera TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS bot_camera TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS bot_cpu REAL;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS bot_memory_gib REAL;
 -- ---------------------------------------------------------------------------------------------------------
 -- Row-level security: the second lock behind the app's org checks (docs/ARCHITECTURE.md → "Row-level
 -- security", docs/security/2026-10-row-level-security.md). Every table with an org_id column, plus orgs and

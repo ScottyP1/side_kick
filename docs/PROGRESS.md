@@ -1,6 +1,12 @@
 # Sidekick: progress & handoff
 
-> Last updated: October 29, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Layout: **Where we are now** (status, live setup, limits, next, Cody's to-dos) → **Feature notes** (how each area works, newest first) → **History** (older checkpoints) → run/code map/gotchas.
+> Last updated: November 1, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Layout: **Where we are now** (status, live setup, limits, next, Cody's to-dos) → **Feature notes** (how each area works, newest first) → **History** (older checkpoints) → run/code map/gotchas.
+
+## The meeting bot's camera is each client's choice: Sidekick logo or moving crystal ball (Nov 1, 2026, branch `claude/meetbot-camera-setting`)
+- Cody (Nov 1): no more still crystal ball (it looked bad); clients choose. **Settings → "Sidekick's camera in meetings"** (Org Owner/Admin, audited, `orgs.live_camera`, `lib/live-meetings/camera.ts`, `GET/PUT /api/live/camera`): **Sidekick logo** (default, `meetbot/bot-logo.png`, 2 vCPU / 4 GiB) or **Moving crystal ball** (the #110 page, 4 vCPU / 8 GiB, ≈2× container cost). Firms see only "uses a bigger meeting bot, so it costs more per meeting hour".
+- The size is chosen per meeting (`launcher.ts botSize(camera)`), recorded per session (`bot_camera`, `bot_cpu`, `bot_memory_gib`) and used by the cost meter. The shim falls back to the **logo** (never the old ball). `SIDEKICK_MEETBOT_ORB=off` on the app turns the ball off for everyone.
+- Charging: Owner Console → Live meetings shows each client's camera and moving-ball meeting hours; the owner usage CSV has "Moving ball meeting hours". **Price not decided**: `MOVING_BALL_ADDON.usdPerMeetingHour` in `lib/plans.ts` is null (Cody's call).
+- **Logo placeholder**: the indigo "S" app icon on a dark 16:9 frame. To use the real logo, replace `meetbot/bot-logo.png` (1280×720) and rebuild the image; nothing else changes. Not tried in a real meeting yet.
 
 ## Meeting bot: five fixes from the first live Teams trial (Nov 1, 2026, branch `claude/meetbot-trial-fixes`)
 - **Leaves cleanly**: the shim posts a queued goodbye, asks Attendee to leave and waits (≤20 s) for "left" before the container exits; `takeCommands` says stop only 3 s after the end so the goodbye and leave arrive first. No more frozen "Sidekick" tile.

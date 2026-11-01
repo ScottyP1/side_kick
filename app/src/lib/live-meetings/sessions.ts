@@ -56,10 +56,12 @@ import { BRAND } from "../brand";
 import { configuredProviders, PROVIDER_IDS, PROVIDER_INFO, providerById, type LiveEvent, type LiveProvider, type ProviderId } from "./provider";
 import { speechConfigured, synthesize } from "./speech";
 import { DEFAULT_VOICE } from "./voices";
+import { MOVING_BALL_ADDON } from "../plans";
 import { capReached, capState, checkCapAlerts, LIVE_PAUSED, monthSpend } from "./spend";
 import { reapBot } from "./attendee";
 import { botKey, executionStatus } from "./launcher";
 import { noteCamera, noteSpeaking, noteThinking } from "./orb";
+import { cameraFor } from "./camera";
 import { sameKey } from "./signature";
 import {
   answerText, BOT_NAME, confident, GUEST_NOTICE, HAND_NOTE, introText, isNonAnswer, isRoomQuestion, isTeamsMeetingUrl, liveMinutes, LIVE_MODES,
@@ -93,6 +95,8 @@ export type LiveSession = {
   tts_chars: number;
   /** Its camera (lib/live-meetings/orb.ts): when the ball shows speaking and thinking, what the bot shows, CPU use (%). */
   speaking_from: string | null; speaking_until: string | null; thinking_at: string | null; camera: string | null; cpu_avg: number | null; cpu_peak: number | null;
+  /** The camera it was started with ('logo' or 'orb', lib/live-meetings/camera.ts) and its container's size (cost meter). */
+  bot_camera: string | null; bot_cpu: number | null; bot_memory_gib: number | null;
   /** When the bot's container first reached Sidekick (an event or a command fetch); null = not yet (live.watch). */
   bot_seen_at: string | null;
   /** JSON `Awaiting`: the action item Sidekick's own question is waiting on; the next fitting line fills it in. */
@@ -313,8 +317,10 @@ export async function startLive(o: {
     id, orgId, workspaceId, provider.id, key, o.startsAt ?? t, o.threadId, title, o.invitedBy.slice(0, 120), guests ? 1 : 0, conv ? "teams" : "provider", t, t,
   );
   if (!inserted.changes) return null;
+  // What the bot shows as its camera: the organization's choice (Settings), the logo by default.
+  const camera = await cameraFor(orgId);
   try {
-    const { botId } = await span("live", "Send Sidekick to a Teams meeting", () => provider.join({ meetingUrl: o.meetingUrl, botName: BOT_NAME, webhookUrl: `${base}/api/live/events/${provider.id}`, sessionId: id }), { provider: provider.id, via: conv ? "teams" : "provider" });
+    const { botId } = await span("live", "Send Sidekick to a Teams meeting", () => provider.join({ meetingUrl: o.meetingUrl, botName: BOT_NAME, webhookUrl: `${base}/api/live/events/${provider.id}`, sessionId: id, camera }), { provider: provider.id, via: conv ? "teams" : "provider" });
     await run("UPDATE live_sessions SET bot_id = ?, updated_at = ? WHERE id = ? AND org_id = ?", botId, now(), id, orgId);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -540,10 +546,10 @@ async function onEvent(orgId: string, id: string, e: LiveEvent, work: LiveWork[]
     await run("UPDATE live_sessions SET updated_at = ? WHERE id = ? AND org_id = ?", now(), id, orgId);
     return true;
   }
-  // What the bot shows as its camera (the animated ball or the still picture) and its container's CPU use (kept after
+  // What the bot shows as its camera (the moving ball or the still logo) and its container's CPU use (kept after
   // the session ends too: the last reading comes with the container's exit).
   if (e.kind === "camera") {
-    await noteCamera(orgId, id, e.camera ? (e.camera === "orb" ? "orb" : `still${e.detail ? `: ${e.detail}` : ""}`) : null, { avg: e.cpuAvg, peak: e.cpuPeak });
+    await noteCamera(orgId, id, e.camera ? (e.camera === "orb" ? "orb" : `logo${e.detail ? `: ${e.detail}` : ""}`) : null, { avg: e.cpuAvg, peak: e.cpuPeak });
     return true;
   }
   // The bot's container exiting: its time stops counting; a session still running is over.
@@ -1295,24 +1301,29 @@ export async function autoJoinDue(at = Date.now()): Promise<{ liveAutoJoined: nu
 
 /**
  * The Owner Console's Live meetings page: whether a provider is set up, every organization's live use this month
- * (sessions, hours against the plan's limit, failures), the sessions running now and the latest failures. Titles are
+ * (sessions, hours against the plan's limit, failures, and the camera line: its camera choice, meeting hours with the
+ * moving crystal ball and, once priced, the add-on in dollars), the sessions running now and the latest failures. Titles are
  * shown (operators see client names already); never anything said in a meeting. Platform operators only (the route
  * checks `requireOwner`).
  */
 export async function ownerLiveReport() {
   const month = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString();
   return asSystem("Owner Console: live meetings across clients", async () => {
-    const rows = await all<{ id: string; org_id: string; org: string; workspace: string | null; title: string | null; status: string; invited_by: string; joined_at: string | null; ended_at: string | null; end_reason: string | null; error: string | null; created_at: string; answers: number }>(
-      `SELECT s.id, s.org_id, o.name AS org, w.name AS workspace, s.title, s.status, s.invited_by, s.joined_at, s.ended_at, s.end_reason, s.error, s.created_at, s.answers
+    const rows = await all<{ id: string; org_id: string; org: string; org_camera: string | null; workspace: string | null; title: string | null; status: string; invited_by: string; joined_at: string | null; ended_at: string | null; end_reason: string | null; error: string | null; created_at: string; answers: number; bot_camera: string | null }>(
+      `SELECT s.id, s.org_id, o.name AS org, o.live_camera AS org_camera, w.name AS workspace, s.title, s.status, s.invited_by, s.joined_at, s.ended_at, s.end_reason, s.error, s.created_at, s.answers, s.bot_camera
          FROM live_sessions s JOIN orgs o ON o.id = s.org_id LEFT JOIN workspaces w ON w.id = s.workspace_id AND w.org_id = s.org_id
         WHERE s.created_at >= ? OR s.status IN ('joining', 'live') ORDER BY s.created_at DESC LIMIT 2000`,
       month,
     );
-    const byOrg = new Map<string, { orgId: string; org: string; sessions: number; minutes: number; failures: number; answers: number; running: number }>();
+    // Per client, also the camera line: its choice now and the meeting minutes its bot showed the moving crystal ball
+    // (a bigger bot), so the add-on can be charged (lib/plans.ts MOVING_BALL_ADDON; unset = not priced yet).
+    const byOrg = new Map<string, { orgId: string; org: string; camera: "logo" | "orb"; sessions: number; minutes: number; orbMinutes: number; failures: number; answers: number; running: number }>();
     for (const r of rows) {
-      const o = byOrg.get(r.org_id) ?? { orgId: r.org_id, org: r.org, sessions: 0, minutes: 0, failures: 0, answers: 0, running: 0 };
+      const o = byOrg.get(r.org_id) ?? { orgId: r.org_id, org: r.org, camera: r.org_camera === "orb" ? "orb" : "logo", sessions: 0, minutes: 0, orbMinutes: 0, failures: 0, answers: 0, running: 0 };
       o.sessions++;
-      o.minutes += liveMinutes(r.joined_at, r.ended_at);
+      const minutes = liveMinutes(r.joined_at, r.ended_at);
+      o.minutes += minutes;
+      if (r.bot_camera === "orb") o.orbMinutes += minutes;
       o.answers += Number(r.answers) || 0;
       if (r.status === "failed") o.failures++;
       if (r.status === "joining" || r.status === "live") o.running++;
@@ -1321,7 +1332,9 @@ export async function ownerLiveReport() {
     const orgs = [];
     for (const o of byOrg.values()) {
       const limit = await withOrg(o.orgId, async () => (await orgPlan(o.orgId)).limits.liveMeetingHours);
-      orgs.push({ ...o, hours: Math.round((o.minutes / 60) * 10) / 10, limit });
+      const orbHours = Math.round((o.orbMinutes / 60) * 10) / 10;
+      const price = MOVING_BALL_ADDON.usdPerMeetingHour;
+      orgs.push({ ...o, hours: Math.round((o.minutes / 60) * 10) / 10, limit, orbHours, orbAddonUsd: price === null ? null : Math.round(orbHours * price * 100) / 100 });
     }
     const pick = (r: (typeof rows)[number]) => ({
       id: r.id, orgId: r.org_id, org: r.org, group: r.workspace ?? "(deleted group)", title: r.title ?? "Teams meeting", status: r.status, invitedBy: r.invited_by,
@@ -1331,6 +1344,7 @@ export async function ownerLiveReport() {
       configured: liveConfigured(),
       provider: configuredProviders().join(", ") || null,
       spend: await monthSpend(),
+      movingBallAddon: MOVING_BALL_ADDON,
       cap: await capState(),
       orgs: orgs.sort((a, b) => b.minutes - a.minutes),
       running: rows.filter((r) => r.status === "joining" || r.status === "live").map(pick),

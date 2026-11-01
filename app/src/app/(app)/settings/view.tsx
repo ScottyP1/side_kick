@@ -9,7 +9,9 @@
  *   branding (logo and brand color), **Export your data** (the whole organization as a zip, GET /api/export) and
  *   **Roll-offs and certificates**: groups ending, a pending deletion of the organization, and deletion
  *   certificates to download (GET /api/rolloffs); **Sidekick's voice in meetings** (the organization's default voice and
- *   speed for live meetings, with Play sample: /api/live/voice, components/voice-picker.tsx).
+ *   speed for live meetings, with Play sample: /api/live/voice, components/voice-picker.tsx); **Sidekick's camera in
+ *   meetings** (what the meeting bot shows: the Sidekick logo, or the moving crystal ball, which uses a bigger meeting
+ *   bot and costs more per meeting hour; /api/live/camera, lib/live-meetings/camera.ts).
  * - **My account** (everyone): password, two-step sign-in (authenticator app or passkey, components/two-step.tsx),
  *   where you're signed in (sign out other sessions) and, for everyone but admins, whether Microsoft sign-in is on
  *   and their own account is linked. For Members, Viewers and Team Leads this is the whole page.
@@ -58,6 +60,57 @@ function VoicePanel() {
       <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>The voice {BRAND.name} speaks with when it answers aloud in a Teams meeting. A group can pick its own in its live-meeting settings.</p>
         <VoicePicker voiceId={st.voiceId} speed={st.speed} onChange={save} disabled={!st.canManage} speechReady={st.speechReady} />
+      </div>
+    </div>
+  );
+}
+
+/** The organization's meeting-bot camera, as GET /api/live/camera returns it. */
+type CameraStatus = { camera: "logo" | "orb"; cameras: { id: "logo" | "orb"; label: string; note: string; bigger: boolean }[]; orbAllowed: boolean; canManage: boolean };
+
+/**
+ * "Sidekick's camera in meetings": what Sidekick's meeting bot shows as its video in Teams meetings (Org Owner/Admin;
+ * PUT /api/live/camera, audited): the Sidekick logo (default) or the moving crystal ball, with the plain note that the
+ * ball uses a bigger meeting bot and costs more per meeting hour (never a price: lib/firm-usage.ts rules).
+ */
+function CameraPanel() {
+  const toast = useToast();
+  const reportError = useReportError();
+  const [st, setSt] = useState<CameraStatus | null>(null);
+  useEffect(() => {
+    api<CameraStatus>("/api/live/camera").then(setSt).catch(reportError);
+  }, [reportError]);
+  if (!st) return null;
+  const save = async (camera: "logo" | "orb") => {
+    if (camera === st.camera) return;
+    try {
+      setSt(await api<CameraStatus>("/api/live/camera", { method: "PUT", json: { camera } }));
+      toast(camera === "orb" ? "Moving crystal ball saved. It applies to meetings from now on." : "Logo saved. It applies to meetings from now on.");
+    } catch (e) {
+      reportError(e);
+    }
+  };
+  return (
+    <div className="panel">
+      <div className="panel-h"><h2>{BRAND.name}&apos;s camera in meetings</h2><span className="muted">Live in meetings</span></div>
+      <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          What {BRAND.name}&apos;s video tile shows when it joins a Teams meeting, for the whole organization.{" "}
+          <a href="/docs/meetings" target="_blank" rel="noreferrer">Learn more</a>
+        </p>
+        <div role="radiogroup" aria-label={`${BRAND.name}'s camera in meetings`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {st.cameras.map((c) => (
+            <label key={c.id} title={c.note} style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: st.canManage ? "pointer" : "default" }}>
+              <input type="radio" name="live-camera" value={c.id} checked={st.camera === c.id} disabled={!st.canManage} onChange={() => save(c.id)} style={{ marginTop: 3 }} />
+              <span>
+                <b>{c.label}</b>{c.id === "logo" && <span className="muted"> (default)</span>}{c.bigger && <> <Pill kind="warn" nodot>Costs more</Pill></>}
+                <span className="muted" style={{ display: "block", fontSize: 12.5 }}>{c.note}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {st.camera === "orb" && !st.orbAllowed && <div className="callout warn"><span>The moving crystal ball is paused by the {BRAND.name} team for now, so meetings show the logo. Your choice is kept.</span></div>}
+        {!st.canManage && <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>Only an Org Owner or Org Admin can change this.</p>}
       </div>
     </div>
   );
@@ -348,6 +401,7 @@ export default function SettingsPage() {
             <TwoStepPolicyPanel />
             <MicrosoftPermissionsPanel />
             <VoicePanel />
+            <CameraPanel />
             <div className="panel">
               <div className="panel-h"><h2>Your branding</h2><span className="muted">Applies to the whole portal</span></div>
               <div className="panel-b" style={{ display: "flex", flexDirection: "column", gap: 14 }}>

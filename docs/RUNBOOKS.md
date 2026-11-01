@@ -1034,15 +1034,17 @@ CONFIRM=yes BUDGET_EMAIL=<who gets the budget emails> infra/azure/meetbot.sh res
   az containerapp job stop -g sidekick-rg -n sidekick-meetbot --job-execution-name <name>
   ```
 
-**The animated crystal ball as the bot's camera** (off by default: too heavy for 2 vCPU; measurements in
-docs/LIVE-MEETINGS.md → "Sidekick's camera"). To try it, give the bot 4 vCPU / 8 GiB (about twice the cost per
-meeting hour) and switch it on, on the app:
+**The bot's camera** is each client's choice (Settings → "Sidekick's camera in meetings"; docs/LIVE-MEETINGS.md →
+"Sidekick's camera"): the Sidekick logo (2 vCPU / 4 GiB, default) or the moving crystal ball (4 vCPU / 8 GiB, about
+twice the cost per meeting hour). Sizes are set per meeting by the app; nothing to change in Azure. After a meeting,
+the session's `bot_camera` / `bot_cpu` / `bot_memory_gib` say what it was started with, `camera` what it showed (`orb`,
+or `logo: <why>` after a fallback) and `cpu_avg`/`cpu_peak` how busy the container was. To stop the moving ball for
+everyone (every bot shows the logo, new meetings only):
 ```bash
-az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars SIDEKICK_MEETBOT_ORB=on SIDEKICK_MEETBOT_CPU=4 SIDEKICK_MEETBOT_MEMORY_GIB=8
+az containerapp update -g sidekick-rg -n sidekick-app --set-env-vars SIDEKICK_MEETBOT_ORB=off
 ```
-After a meeting, the session's `camera` says what the bot showed (`orb`, or `still: <why>`) and `cpu_avg`/`cpu_peak`
-how busy the container was. To go back: `--set-env-vars SIDEKICK_MEETBOT_ORB=off SIDEKICK_MEETBOT_CPU=2
-SIDEKICK_MEETBOT_MEMORY_GIB=4`.
+**To change the logo** the bot shows: replace `meetbot/bot-logo.png` (PNG, 1280×720, logo centred on dark) and rebuild
+the meeting-bot image (infra/azure/meetbot-setup.sh); nothing else changes.
 
 **Common problems:**
 - "Nobody let Sidekick in from the lobby": the meeting's lobby setting. Someone admits it, or the organizer

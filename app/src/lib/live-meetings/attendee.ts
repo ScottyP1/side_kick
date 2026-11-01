@@ -19,9 +19,11 @@
  *   the shim plays it through Attendee's `output_audio`.
  * - **Raising its hand**: `hand` commands; the shim calls our patch's `raise_hand` in Attendee. `ATTENDEE_RAISE_HAND=1`
  *   says the deployed image has the patch; without it Sidekick puts "✋" in the chat instead.
- * - **Its camera**: the animated crystal ball, a page of Sidekick's (`ORB_URL`, lib/live-meetings/orb.ts) the container
- *   streams as the bot's webcam; the still picture when that's off or the container is too busy. The shim reports
- *   which (`sidekick.camera`) and the container's CPU use (`sidekick.load`).
+ * - **Its camera**, the organization's choice (lib/live-meetings/camera.ts): the still Sidekick logo (the default, a
+ *   2 vCPU / 4 GiB container) or the moving crystal ball, a page of Sidekick's (`ORB_URL`, lib/live-meetings/orb.ts) the
+ *   container streams as the bot's webcam (a 4 vCPU / 8 GiB container). The ball falls back to the logo when its
+ *   browser doesn't start or the container is too busy. The shim reports which (`sidekick.camera`) and the container's
+ *   CPU use (`sidekick.load`). The session records the camera asked for and the size (cost meter).
  * - **Leaving**: a `leave` command (after the goodbye chat); the container exits once Attendee says the bot left
  *   (meetbot/shim/core.mjs leaves the call itself if told to stop first). If it doesn't exit within a few minutes,
  *   `live.watch` stops the execution in Azure (`stopBot`). A container that crashes before getting in is noticed by
@@ -71,11 +73,16 @@ export function attendeeProvider(): LiveProvider | null {
   return {
     id: "attendee",
     can: { raiseHand: process.env.ATTENDEE_RAISE_HAND === "1", speak: true },
-    async join({ meetingUrl, botName, sessionId }) {
+    async join({ meetingUrl, botName, sessionId, camera }) {
       const base = notificationBase();
       if (!base) throw new Error("Sidekick has no public address for its meeting bot to call.");
-      const execution = await startBot({ sessionId, meetingUrl, botName, sidekickUrl: base, raiseHand: process.env.ATTENDEE_RAISE_HAND === "1", orbUrl: orbUrl(base, sessionId) });
-      await run("UPDATE live_sessions SET execution = ?, launched_at = ?, hearing = 'captions', hearing_since = ? WHERE id = ?", execution, now(), now(), sessionId);
+      // The moving ball only when the organization chose it and its page can be served; otherwise the logo.
+      const page = camera === "orb" ? orbUrl(base, sessionId) : null;
+      const bot = await startBot({ sessionId, meetingUrl, botName, sidekickUrl: base, raiseHand: process.env.ATTENDEE_RAISE_HAND === "1", orbUrl: page });
+      await run(
+        "UPDATE live_sessions SET execution = ?, launched_at = ?, hearing = 'captions', hearing_since = ?, bot_camera = ?, bot_cpu = ?, bot_memory_gib = ? WHERE id = ?",
+        bot.execution, now(), now(), page ? "orb" : "logo", bot.cpu, bot.memoryGib, sessionId,
+      );
       // The bot's id is the session's: the shim reports under it.
       return { botId: sessionId };
     },
@@ -128,7 +135,7 @@ export function attendeeProvider(): LiveProvider | null {
           out.push({ kind: "captions_unavailable", botId, detail: str(data.reason) });
         } else if (trigger === "sidekick.camera" || trigger === "sidekick.load") {
           const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-          const camera = trigger === "sidekick.camera" ? (data.camera === "orb" ? "orb" : "still") : null;
+          const camera = trigger === "sidekick.camera" ? (data.camera === "orb" ? "orb" : "logo") : null;
           out.push({ kind: "camera", botId, camera, detail: str(data.reason), cpuAvg: num(data.cpu_avg), cpuPeak: num(data.cpu_peak) });
         } else if (trigger === "sidekick.exit") {
           out.push({ kind: "exit", botId, detail: str(data.reason) });

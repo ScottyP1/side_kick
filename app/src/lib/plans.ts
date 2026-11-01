@@ -213,6 +213,16 @@ export const EXTRA_GROUP = {
   priceUsd: 129,
   adds: { workspaces: 1, seats: 15, meetingHours: 30, aiCreditUsd: 40, chats: 5, documents: 500 } satisfies Partial<PlanLimits>,
 } as const;
+/**
+ * The moving crystal ball add-on for live meetings (Settings → "Sidekick's camera in meetings",
+ * lib/live-meetings/camera.ts): the moving ball needs a bigger meeting bot (4 vCPU / 8 GiB instead of 2 / 4), about
+ * twice the container cost per meeting hour (roughly $0.43 vs $0.22 at Azure list prices). **Placeholder: not priced
+ * yet.** `usdPerMeetingHour` is Cody's decision; while it's null nothing is charged and the Owner Console shows the
+ * hours "not priced yet". Once set, the Owner Console's live meetings page shows hours × price per client. Never shown
+ * to firms in dollars (lib/firm-usage.ts): they see only that it uses a bigger meeting bot and costs more.
+ */
+export const MOVING_BALL_ADDON: { usdPerMeetingHour: number | null } = { usdPerMeetingHour: null };
+
 /** Most extra groups bought through the portal; past this, the Sidekick team sets up Enterprise. */
 export const MAX_EXTRA_GROUPS = 50;
 

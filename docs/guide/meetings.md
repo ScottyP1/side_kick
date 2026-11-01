@@ -159,7 +159,11 @@ Sidekick can take part in a Teams meeting as a member called **Sidekick**. It li
 
 **Where it runs and where the audio goes.** By default Sidekick uses **its own meeting bot**, run by Sidekick in its own Azure only while your meeting is on (it starts a minute or two before and stops when the meeting ends). It listens through Teams' own live captions, so the meeting's audio isn't sent to any other company; when captions are off or stop working, it switches by itself to Azure AI Speech in Sidekick's own Azure. Its spoken answers are made with Azure AI Speech too. After `@Sidekick join`, give it a minute or two to arrive. If Sidekick says "live help is paused", the Sidekick team's monthly limit for meeting bots was reached: notes after meetings still work. The Org Owner can choose a hosted meeting bot (Recall.ai) instead; that company then receives the meeting's audio, and it's listed on the sub-processor page for organizations that chose it. As for all notes, the text needed for an answer goes to Anthropic (Claude), which doesn't train on it.
 
-In the meeting, Sidekick's video tile shows **Sidekick's crystal ball** (a still picture) instead of initials; Teams' own speaking ring shows when it talks.
+In the meeting, Sidekick's video tile shows a picture instead of initials; Teams' own speaking ring shows when it talks. An Org Owner or Admin chooses which in **Settings → Sidekick's camera in meetings**:
+- **Sidekick logo** (default): a still picture of the Sidekick logo.
+- **Moving crystal ball**: Sidekick's crystal ball, moving. It sparkles while Sidekick speaks and swirls while it thinks. It needs a bigger meeting bot, so it **costs more per meeting hour**; turn it on only if you want it. If the meeting bot gets too busy, it switches to the logo by itself for the rest of that meeting.
+
+The choice applies to meetings Sidekick joins from then on, for the whole organization, and the change is in the audit log.
 
 If the meeting has a lobby, someone lets **Sidekick** in. Its first message in the chat says it's listening and how to remove it: say "Sidekick, leave", type **@Sidekick leave**, remove it from the participants, or press **Stop** on the group's page. It also leaves when the meeting ends, after 4 hours, when this month's live meeting hours run out, or if nobody lets it in within 15 minutes. When it leaves it says so ("Okay, leaving now") and its tile goes from the meeting.
 
@@ -168,7 +172,7 @@ If Sidekick's meeting bot breaks down before it gets in (it doesn't arrive withi
 **Plan.** Live in meetings is part of the Enterprise plan (100 live meeting hours a month; Usage & billing shows how many are used). Everything is in the audit log.
 
 <!-- help-center:skip -->
-For developers: lib/live-meetings/ (sessions.ts, provider.ts, attendee.ts, recall.ts, speech.ts, signature.ts, rules.ts, claims.ts, orb.ts), routes /api/live/events/:provider, /api/live/bot/orb and the camera page /live/orb (the animated ball, off by default: docs/LIVE-MEETINGS.md → "Sidekick's camera"), /api/workspaces/:id/live, /api/live/provider, /api/owner/live; research, design and what Cody must sign up for: docs/LIVE-MEETINGS.md; tests in app/tests/meetings-graph.test.mjs (fake Recall.ai) and app/tests/db.test.mjs (rules).
+For developers: lib/live-meetings/ (sessions.ts, provider.ts, attendee.ts, recall.ts, speech.ts, signature.ts, rules.ts, claims.ts, orb.ts), routes /api/live/events/:provider, /api/live/bot/orb and the camera page /live/orb (the moving ball, the organization's choice: camera.ts, /api/live/camera; docs/LIVE-MEETINGS.md → "Sidekick's camera"), /api/workspaces/:id/live, /api/live/provider, /api/owner/live; research, design and what Cody must sign up for: docs/LIVE-MEETINGS.md; tests in app/tests/meetings-graph.test.mjs (fake Recall.ai) and app/tests/db.test.mjs (rules).
 <!-- /help-center:skip -->
 
 ## Sidekick in the Teams app bar and as a tab

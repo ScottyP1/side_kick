@@ -11,8 +11,8 @@
  * - **Who may start it**: the Sidekick app's managed identity (Container Apps gives it `IDENTITY_ENDPOINT` and
  *   `IDENTITY_HEADER`), with a role on the job only (infra/azure/meetbot-setup.sh). No keys are stored.
  * - **Settings** (environment): `SIDEKICK_MEETBOT_JOB` (job name), `SIDEKICK_MEETBOT_RG` (default `sidekick-rg`),
- *   `AZURE_SUBSCRIPTION_ID`, `SIDEKICK_MEETBOT_IMAGE` (the pinned image), `SIDEKICK_MEETBOT_CPU` / `_MEMORY_GIB`
- *   (default 2 vCPU / 4 GiB; measure and adjust). `SIDEKICK_ARM_BASE` points at a fake in the tests (http only outside
+ *   `AZURE_SUBSCRIPTION_ID`, `SIDEKICK_MEETBOT_IMAGE` (the pinned image), and the container's size per camera
+ *   (`botSize`: 2 vCPU / 4 GiB with the logo, 4 vCPU / 8 GiB with the moving crystal ball). `SIDEKICK_ARM_BASE` points at a fake in the tests (http only outside
  *   production).
  * - **What the container gets**: the session id, the meeting link, the bot's name, Sidekick's address, the session's own
  *   key (`botKey`: an HMAC of the session id with `SIDEKICK_MEETBOT_SECRET`, so a container can only act for its own
@@ -29,11 +29,18 @@ const JOB_SECRETS: [string, string][] = [
   ["DATABASE_URL", "database-url"], ["DJANGO_SECRET_KEY", "django-secret"], ["CREDENTIALS_ENCRYPTION_KEY", "credentials-key"], ["AZURE_SPEECH_KEY", "speech-key"],
 ];
 
-/** Container size for one meeting (vCPU, GiB). Start at 2 / 4 and measure (Chrome is the heavy part). */
-export function botSize(): { cpu: number; memoryGib: number } {
-  const cpu = Number(process.env.SIDEKICK_MEETBOT_CPU) || 2;
-  const memoryGib = Number(process.env.SIDEKICK_MEETBOT_MEMORY_GIB) || 4;
-  return { cpu, memoryGib };
+/**
+ * Container size for one meeting (vCPU, GiB), by what the bot shows as its camera (lib/live-meetings/camera.ts):
+ * - `logo` (the still logo): 2 / 4 by default (`SIDEKICK_MEETBOT_CPU`, `SIDEKICK_MEETBOT_MEMORY_GIB`);
+ * - `orb` (the moving crystal ball, drawn in software in a second browser): 4 / 8 by default
+ *   (`SIDEKICK_MEETBOT_ORB_CPU`, `SIDEKICK_MEETBOT_ORB_MEMORY_GIB`), measured Nov 1 (docs/LIVE-MEETINGS.md).
+ * Container Apps only takes certain pairs (0.5 vCPU steps, 2 GiB per vCPU), so change both together.
+ */
+export function botSize(camera: "logo" | "orb" = "logo"): { cpu: number; memoryGib: number } {
+  if (camera === "orb") {
+    return { cpu: Number(process.env.SIDEKICK_MEETBOT_ORB_CPU) || 4, memoryGib: Number(process.env.SIDEKICK_MEETBOT_ORB_MEMORY_GIB) || 8 };
+  }
+  return { cpu: Number(process.env.SIDEKICK_MEETBOT_CPU) || 2, memoryGib: Number(process.env.SIDEKICK_MEETBOT_MEMORY_GIB) || 4 };
 }
 
 /** The job's address in Azure Resource Manager, or null when the meeting bot isn't set up on this copy. */
@@ -100,11 +107,12 @@ async function arm(path: string, body: unknown, what: string): Promise<Record<st
 
 /**
  * Starts one execution of the meeting-bot job for a session, with its settings as environment overrides. Returns the
- * execution's name (to stop it later). `orbUrl` is the page the bot shows as its camera (lib/live-meetings/orb.ts);
- * without it the bot shows the still picture.
+ * execution's name (to stop it later) and the container's size (recorded on the session for the cost meter).
+ * `orbUrl` is the moving crystal ball's page (lib/live-meetings/orb.ts): with it the bot shows the ball and gets the
+ * bigger size; without it the bot shows the still logo at the normal size.
  */
-export async function startBot(o: { sessionId: string; meetingUrl: string; botName: string; sidekickUrl: string; raiseHand: boolean; orbUrl?: string | null }): Promise<string> {
-  const { cpu, memoryGib } = botSize();
+export async function startBot(o: { sessionId: string; meetingUrl: string; botName: string; sidekickUrl: string; raiseHand: boolean; orbUrl?: string | null }): Promise<{ execution: string; cpu: number; memoryGib: number }> {
+  const { cpu, memoryGib } = botSize(o.orbUrl ? "orb" : "logo");
   const image = process.env.SIDEKICK_MEETBOT_IMAGE?.trim();
   if (!image) throw new Error("Sidekick's meeting bot image isn't set (SIDEKICK_MEETBOT_IMAGE).");
   const env = [
@@ -125,7 +133,7 @@ export async function startBot(o: { sessionId: string; meetingUrl: string; botNa
     arm("/start", { containers: [{ name: "meetbot", image, env, resources: { cpu, memory: `${memoryGib}Gi` } }] }, "start the meeting bot"), { cpu, memoryGib });
   const name = typeof out.name === "string" ? out.name : typeof out.id === "string" ? String(out.id).split("/").pop() ?? "" : "";
   if (!name) throw new Error("Azure didn't name the meeting bot's execution.");
-  return name;
+  return { execution: name, cpu, memoryGib };
 }
 
 /** Stops a meeting bot's execution (when its container didn't leave by itself). An execution already gone is fine. */

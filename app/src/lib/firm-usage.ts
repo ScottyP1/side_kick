@@ -17,13 +17,16 @@
  * - **Firm trace attributes** (`firmAttrs`): a trace step's attributes without model names, token counts or
  *   costs (`OPERATOR_ONLY_KEY`). Timings, result counts and the like stay.
  * - **Usage export** (`usageCsv`): the per-group, per-month CSV. Firms get counts only; the Owner Console's copy
- *   (`withCost`) adds AI requests and AI cost for chargeback and margin checks.
+ *   (`withCost`) adds AI requests and AI cost for chargeback and margin checks, and the camera line: live meeting hours
+ *   with the moving crystal ball (a bigger, costlier meeting bot, lib/live-meetings/camera.ts) to charge its add-on.
+ *   Firms are only told in Settings, in plain words, that the moving ball costs more.
  *
  * Who may import it: server code only (API routes for the portal and the Owner Console). Every function takes an
  * org id the caller has already checked (`requireUser` / `requireOwner`) and filters on it.
  */
 import "server-only";
 import { all } from "./db";
+import { liveMinutes } from "./live-meetings/rules";
 import type { CreditStatus } from "./credit";
 import type { LimitLine } from "./limits";
 
@@ -141,7 +144,8 @@ function cell(v: string | number | null): string {
  * The usage CSV: one row per group (with its engagement code and client) per calendar month (UTC) from `from`
  * to `to`, for charging work back to engagements. Columns: Month, Group, Engagement code, Client, Questions
  * asked, Questions answered, Meetings imported, Meeting hours, Documents added, Reminders sent, Assistant replies;
- * with `withCost` (Owner Console only) also AI requests and AI cost (USD). Work not in a group is one
+ * with `withCost` (Owner Console only) also AI requests, AI cost (USD) and Moving ball meeting hours (live meetings
+ * where the bot showed the moving crystal ball, by when it joined). Work not in a group is one
  * "Organization-wide" row a month; rows with no activity are left out.
  */
 export async function usageCsv(orgId: string, from: string, to: string, opts: { withCost?: boolean } = {}): Promise<string> {
@@ -157,14 +161,19 @@ export async function usageCsv(orgId: string, from: string, to: string, opts: { 
     per("reminder_runs", "", " AND status = 'posted'"),
     per("usage_events", "", " AND feature = 'assist' AND ok = 1 AND payer IS NULL"),
   ]);
+  // Live meetings with the moving crystal ball (Owner Console copy only): minutes from joining to ending, by join month.
+  const orb = opts.withCost
+    ? await all<{ ws: string | null; joined_at: string; ended_at: string | null }>(
+      "SELECT workspace_id AS ws, joined_at, ended_at FROM live_sessions WHERE org_id = ? AND bot_camera = 'orb' AND joined_at >= ? AND joined_at < ?", orgId, from, to)
+    : [];
   const byId = new Map(groups.map((g) => [g.id, g]));
-  type Row = { month: string; ws: string | null; calls: number; cost: number; questions: number; answered: number; meetings: number; minutes: number; documents: number; reminders: number; assistant: number };
+  type Row = { month: string; ws: string | null; calls: number; cost: number; questions: number; answered: number; meetings: number; minutes: number; documents: number; reminders: number; assistant: number; orbMinutes: number };
   const rows = new Map<string, Row>();
   const row = (c: Count) => {
     // Work in a group that was since deleted, or not in a group, lands on the organization-wide row.
     const ws = c.ws && byId.has(c.ws) ? c.ws : null;
     const key = `${c.month}|${ws ?? ""}`;
-    if (!rows.has(key)) rows.set(key, { month: c.month, ws, calls: 0, cost: 0, questions: 0, answered: 0, meetings: 0, minutes: 0, documents: 0, reminders: 0, assistant: 0 });
+    if (!rows.has(key)) rows.set(key, { month: c.month, ws, calls: 0, cost: 0, questions: 0, answered: 0, meetings: 0, minutes: 0, documents: 0, reminders: 0, assistant: 0, orbMinutes: 0 });
     return rows.get(key)!;
   };
   for (const c of ai) {
@@ -182,8 +191,9 @@ export async function usageCsv(orgId: string, from: string, to: string, opts: { 
   for (const c of documents) row(c).documents += Number(c.n);
   for (const c of reminders) row(c).reminders += Number(c.n);
   for (const c of assistant) row(c).assistant += Number(c.n);
+  for (const o of orb) row({ ws: o.ws, month: o.joined_at.slice(0, 7), n: 0 }).orbMinutes += liveMinutes(o.joined_at, o.ended_at);
 
-  const header = ["Month", "Group", "Engagement code", "Client", "Questions asked", "Questions answered", "Meetings imported", "Meeting hours", "Documents added", "Reminders sent", "Assistant replies", ...(opts.withCost ? ["AI requests", "AI cost (USD)"] : [])];
+  const header = ["Month", "Group", "Engagement code", "Client", "Questions asked", "Questions answered", "Meetings imported", "Meeting hours", "Documents added", "Reminders sent", "Assistant replies", ...(opts.withCost ? ["AI requests", "AI cost (USD)", "Moving ball meeting hours"] : [])];
   const lines = [...rows.values()]
     .sort((a, b) => a.month.localeCompare(b.month) || (a.ws ? byId.get(a.ws)!.name : "~").localeCompare(b.ws ? byId.get(b.ws)!.name : "~"))
     .map((r) => {
@@ -191,7 +201,7 @@ export async function usageCsv(orgId: string, from: string, to: string, opts: { 
       return [
         r.month, g?.name ?? "Organization-wide (no group)", g?.code ?? null, g?.client ?? null,
         r.questions, r.answered, r.meetings, Math.round((r.minutes / 60) * 10) / 10, r.documents, r.reminders, r.assistant,
-        ...(opts.withCost ? [r.calls, Number(r.cost.toFixed(4))] : []),
+        ...(opts.withCost ? [r.calls, Number(r.cost.toFixed(4)), Math.round((r.orbMinutes / 60) * 10) / 10] : []),
       ].map(cell).join(",");
     });
   return [header.join(","), ...lines].join("\r\n") + "\r\n";

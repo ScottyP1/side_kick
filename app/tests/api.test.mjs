@@ -1862,6 +1862,12 @@ test(`[${ENGINE}] isolation: a secret in workspace B never reaches workspace A, 
     assert.equal(Number(await dbValue(`SELECT COUNT(*) FROM passages WHERE text LIKE '%ZEBRA-7731%' AND source_type = '${type}'`)), 0, `${kind}: search entries gone`);
   }
   assert.ok(!leaks(await other("POST", "/api/ask", { ws: theirWs, question: "ZEBRA vault key Fabrikam merger handover" })));
+  // Sidekick's camera in meetings (lib/live-meetings/camera.ts): each organization's own choice; another
+  // organization's admin changing theirs never changes this one's, and never sees it.
+  const ownCamera = (await admin("GET", "/api/live/camera")).body.camera;
+  assert.equal((await other("PUT", "/api/live/camera", { camera: ownCamera === "orb" ? "logo" : "orb" })).status, 200, "its own admin sets its own");
+  assert.equal((await admin("GET", "/api/live/camera")).body.camera, ownCamera, "this organization's camera is unchanged");
+  assert.notEqual((await other("GET", "/api/live/camera")).body.camera, ownCamera, "the other sees only its own choice");
 });
 
 /* ---------- Support: tickets, Owner Console inbox, articles, Help chat, help bot, follow-ups ---------- */
@@ -3774,7 +3780,7 @@ test(`[${ENGINE}] usage export: a CSV per group and month with the engagement co
   const withCost = await owner("GET", `/api/owner/tenants/${orgId}/usage-export?months=3`);
   assert.equal(withCost.status, 200);
   const [ownerHead, ...ownerLines] = withCost.body.trim().split("\r\n");
-  assert.equal(ownerHead, `${head},AI requests,AI cost (USD)`);
+  assert.equal(ownerHead, `${head},AI requests,AI cost (USD),Moving ball meeting hours`);
   assert.ok(Number(ownerLines.find((l) => l.includes("Limit Group")).split(",")[12]) >= 10.5, "the AI cost charged to the group");
   assert.equal((await s.lee("GET", `/api/owner/tenants/${orgId}/usage-export`)).status, 401, "clients can't fetch the copy with cost");
   assert.equal((await owner("GET", `/api/owner/tenants/${orgId}/usage-export?months=0`)).status, 400);

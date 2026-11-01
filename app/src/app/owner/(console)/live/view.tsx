@@ -6,7 +6,9 @@
  * Azure speech-to-text minutes, spoken characters, Recall.ai hours; "on pace for") and the **platform cap** the operator
  * sets (dollars or meeting hours a month, $50 by default; PUT /api/owner/live/cap; at 100% no new meetings).
  * Whether the meeting-bot service is set up on this copy; per client this month: sessions, live hours against the
- * plan's limit, answers given and failures; the sessions running now; the latest failures with their reason (lobby
+ * plan's limit, answers given and failures, and the **camera line** (the client's choice of Sidekick's camera in
+ * meetings, meeting hours with the moving crystal ball, which runs a bigger bot, and the add-on in dollars once it's
+ * priced: lib/plans.ts MOVING_BALL_ADDON, unset = "not priced yet"); the sessions running now; the latest failures with their reason (lobby
  * timeouts, the provider refusing, chat posts that failed). Titles only, never anything said in a meeting. The
  * "Live in meetings" switch on Releases & switches pauses it for everyone or one client. Operators only.
  * Data: GET /api/owner/live.
@@ -17,11 +19,11 @@ import { useEffect, useState } from "react";
 import { api, fmtTime, Pill, useReportError, useToast } from "@/components/ui";
 
 type Session = { id: string; orgId: string; org: string; group: string; title: string; status: string; invitedBy: string; createdAt: string; minutes: number; endReason: string | null; error: string | null };
-type Spend = { containerUsd: number; sttUsd: number; ttsUsd: number; recallUsd: number; totalUsd: number; onPaceUsd: number; hours: number; onPaceHours: number; containerHours: number; sttMinutes: number; ttsChars: number; size: { cpu: number; memoryGib: number } };
+type Spend = { containerUsd: number; sttUsd: number; ttsUsd: number; recallUsd: number; totalUsd: number; onPaceUsd: number; hours: number; onPaceHours: number; containerHours: number; sttMinutes: number; ttsChars: number; orbUsd: number; orbContainerHours: number; size: { cpu: number; memoryGib: number }; orbSize: { cpu: number; memoryGib: number } };
 type CapState = { cap: { kind: "usd" | "hours"; amount: number }; used: number; pct: number; level: "ok" | "warn" | "reached"; message: string | null };
 type Report = {
-  configured: boolean; provider: string | null; spend: Spend; cap: CapState;
-  orgs: { orgId: string; org: string; sessions: number; hours: number; limit: number | null; failures: number; answers: number; running: number }[];
+  configured: boolean; provider: string | null; spend: Spend; cap: CapState; movingBallAddon: { usdPerMeetingHour: number | null };
+  orgs: { orgId: string; org: string; camera: "logo" | "orb"; sessions: number; hours: number; limit: number | null; orbHours: number; orbAddonUsd: number | null; failures: number; answers: number; running: number }[];
   running: Session[]; failures: Session[];
 };
 
@@ -65,7 +67,7 @@ export default function LiveMeetingsPage() {
         <div className="panel-b">
           <p style={{ margin: 0 }}><b>{usd(s.totalUsd)}</b> so far, on pace for <b>{usd(s.onPaceUsd)}</b> · {s.hours} meeting hours (on pace for {s.onPaceHours})</p>
           <p className="muted" style={{ margin: "4px 0 0", fontSize: 12.5 }}>
-            Bot containers {usd(s.containerUsd)} ({s.containerHours} h at {s.size.cpu} vCPU / {s.size.memoryGib} GiB) · Azure speech-to-text {usd(s.sttUsd)} ({s.sttMinutes} min) · spoken answers {usd(s.ttsUsd)} ({s.ttsChars.toLocaleString()} characters){s.recallUsd ? ` · Recall.ai ${usd(s.recallUsd)}` : ""}. From Sidekick&apos;s own records and Azure list prices (East US); Claude is the AI spend on the home page.
+            Bot containers {usd(s.containerUsd)} ({s.containerHours} h, each at its own size: {s.size.cpu} vCPU / {s.size.memoryGib} GiB with the logo, {s.orbSize.cpu} / {s.orbSize.memoryGib} with the moving ball{s.orbContainerHours ? `; moving ball ${usd(s.orbUsd)} for ${s.orbContainerHours} h` : ""}) · Azure speech-to-text {usd(s.sttUsd)} ({s.sttMinutes} min) · spoken answers {usd(s.ttsUsd)} ({s.ttsChars.toLocaleString()} characters){s.recallUsd ? ` · Recall.ai ${usd(s.recallUsd)}` : ""}. From Sidekick&apos;s own records and Azure list prices (East US); Claude is the AI spend on the home page.
           </p>
           {r.cap.message && <div className={`callout ${r.cap.level === "reached" ? "bad" : "warn"}`} style={{ marginTop: 10 }}><span>{r.cap.message}</span></div>}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
@@ -84,14 +86,16 @@ export default function LiveMeetingsPage() {
         <div className="panel-h"><h2>This month by client</h2>{r.provider && <Pill nodot>{r.provider}</Pill>}</div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Client</th><th className="r">Sessions</th><th className="r">Hours</th><th className="r">Answers</th><th className="r">Failures</th><th className="r">Running</th></tr></thead>
+            <thead><tr><th>Client</th><th className="r">Sessions</th><th className="r">Hours</th><th>Camera</th><th className="r" title="Meeting hours with the moving crystal ball (a bigger bot)">Moving ball h</th><th className="r">Answers</th><th className="r">Failures</th><th className="r">Running</th></tr></thead>
             <tbody>
-              {!r.orgs.length && <tr><td colSpan={6} className="muted">No live meetings this month.</td></tr>}
+              {!r.orgs.length && <tr><td colSpan={8} className="muted">No live meetings this month.</td></tr>}
               {r.orgs.map((o) => (
                 <tr key={o.orgId}>
                   <td><Link href={`/owner/clients/${o.orgId}`}>{o.org}</Link></td>
                   <td className="r num">{o.sessions}</td>
                   <td className="r num">{o.hours}{o.limit !== null && <span className="muted"> / {o.limit}</span>}</td>
+                  <td>{o.camera === "orb" ? <Pill kind="warn" nodot>Moving ball</Pill> : <span className="muted">Logo</span>}</td>
+                  <td className="r num">{o.orbHours}{o.orbAddonUsd !== null && o.orbHours > 0 && <span className="muted"> · {usd(o.orbAddonUsd)}</span>}</td>
                   <td className="r num">{o.answers}</td>
                   <td className="r num">{o.failures ? <Pill kind="bad">{o.failures}</Pill> : 0}</td>
                   <td className="r num">{o.running}</td>
@@ -99,6 +103,14 @@ export default function LiveMeetingsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="panel-b">
+          <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+            Camera: what each client chose in Settings. The moving crystal ball runs a bigger bot ({s.orbSize.cpu} vCPU / {s.orbSize.memoryGib} GiB instead of {s.size.cpu} / {s.size.memoryGib}), so it costs about twice as much per hour.{" "}
+            {r.movingBallAddon.usdPerMeetingHour === null
+              ? "Moving ball add-on: not priced yet (set MOVING_BALL_ADDON in lib/plans.ts), so nothing is charged for it."
+              : `Moving ball add-on: ${usd(r.movingBallAddon.usdPerMeetingHour)} per meeting hour, shown next to each client's hours.`}
+          </p>
         </div>
       </div>
       <SessionTable title="Running now" rows={r.running} empty="Nothing running." />

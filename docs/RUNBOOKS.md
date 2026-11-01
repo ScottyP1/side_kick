@@ -1010,6 +1010,22 @@ CONFIRM=yes BUDGET_EMAIL=<who gets the budget emails> infra/azure/meetbot-setup.
   az containerapp job logs show -g sidekick-rg -n sidekick-meetbot --execution <name> --container meetbot
   ```
 
+**Pause until a customer needs it / bring it back** (one command each way; docs/LIVE-MEETINGS.md → First live trial):
+```bash
+CONFIRM=yes infra/azure/meetbot.sh pause
+```
+```bash
+CONFIRM=yes BUDGET_EMAIL=<who gets the budget emails> infra/azure/meetbot.sh resume
+```
+- **Pause** stops running executions, takes away the app's role and bot settings (Sidekick then says live meetings
+  aren't set up) and deletes and purges the Speech resource. It keeps the job definition, images, database, secrets
+  and budget, which cost nothing idle. Then, in the Owner Console, set the cap to 0 and switch *Live in meetings* off.
+- **Resume** re-runs the setup script. Then raise the cap and switch it back on.
+- To see what exists, what's running and this month's cost (read-only):
+  ```bash
+  infra/azure/meetbot.sh status
+  ```
+
 **Stop spending now:**
 - Owner Console → Live meetings → set the cap to 0. No new meetings; running ones finish.
 - Or Releases & switches → **Live in meetings** off. Running ones leave within a minute.

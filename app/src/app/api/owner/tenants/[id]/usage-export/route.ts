@@ -1,7 +1,7 @@
 /**
  * GET /api/owner/tenants/:id/usage-export: one client's usage CSV with cost, for the Sidekick team (margin
  * checks, or sending a client a chargeback file on request). The same rows as the client's own export
- * (GET /api/usage/export) plus "AI requests" and "AI cost (USD)" columns (`usageCsv` with `withCost`).
+ * (GET /api/usage/export) plus "AI requests", "AI cost (USD)" and "Moving ball meeting hours" (the camera add-on) columns (`usageCsv` with `withCost`).
  * Who: platform operators only. Logged in the operator log.
  * Query: `month=YYYY-MM` or `months=N` (1-36, default 12), as for the client's export.
  */

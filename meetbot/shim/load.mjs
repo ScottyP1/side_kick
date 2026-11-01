@@ -1,6 +1,6 @@
 /**
  * @file How busy the meeting-bot container is (meetbot/shim/core.mjs uses it to report CPU use to Sidekick and to fall
- * back from the animated crystal ball to the still picture when the container is too busy).
+ * back from the moving crystal ball to the logo when the container is too busy).
  *
  * Reads the container's own CPU time from cgroup v2 (`/sys/fs/cgroup/cpu.stat` usage_usec) and its CPU limit
  * (`/sys/fs/cgroup/cpu.max`, e.g. "200000 100000" = 2 vCPU). Outside a container (tests, a Mac) it reports null.

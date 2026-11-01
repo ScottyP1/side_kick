@@ -7,8 +7,10 @@
  * - **The estimate** (`monthSpend`): from Sidekick's own records and Azure's list prices (East US, pay as you go,
  *   checked Oct 31, 2026), no Azure billing API:
  *   - the bot's container: seconds from launch to exit × (vCPU × $0.000024 + GiB × $0.000003)
- *     (`live_sessions.launched_at` / `exited_at`, the size from lib/live-meetings/launcher.ts; one still running counts
- *     up to now);
+ *     (`live_sessions.launched_at` / `exited_at`; each session's own size, `bot_cpu` / `bot_memory_gib`: 2 vCPU / 4 GiB
+ *     with the logo, 4 / 8 with the moving crystal ball, lib/live-meetings/camera.ts; sessions from before sizes were
+ *     recorded count at the logo's size; one still running counts up to now). The moving ball's part is also shown
+ *     on its own (`orbUsd`, `orbContainerHours`);
  *   - Azure AI Speech speech-to-text: minutes heard that way (`live_hearing`) × $1 per hour;
  *   - Azure AI Speech text-to-speech: characters spoken (`live_sessions.tts_chars`) × $15 per million;
  *   - the hosted Recall.ai (organizations that opted in): meeting hours × $0.65.
@@ -50,12 +52,16 @@ const round = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
 export async function monthSpend(at = Date.now()) {
   const from = monthStart(at);
   return asSystem("live meetings: this month's bot spend across clients", async () => {
-    const sessions = await all<{ provider: string; launched_at: string | null; exited_at: string | null; joined_at: string | null; ended_at: string | null; tts_chars: number | null }>(
-      "SELECT provider, launched_at, exited_at, joined_at, ended_at, tts_chars FROM live_sessions WHERE created_at >= ? OR (launched_at IS NOT NULL AND exited_at IS NULL)",
+    const sessions = await all<{ provider: string; launched_at: string | null; exited_at: string | null; joined_at: string | null; ended_at: string | null; tts_chars: number | null; bot_camera: string | null; bot_cpu: number | null; bot_memory_gib: number | null }>(
+      "SELECT provider, launched_at, exited_at, joined_at, ended_at, tts_chars, bot_camera, bot_cpu, bot_memory_gib FROM live_sessions WHERE created_at >= ? OR (launched_at IS NOT NULL AND exited_at IS NULL)",
       from,
     );
-    const { cpu, memoryGib } = botSize();
+    const logo = botSize("logo");
+    const orb = botSize("orb");
     let containerSeconds = 0;
+    let containerUsd = 0;
+    let orbSeconds = 0;
+    let orbUsd = 0;
     let hours = 0;
     let recallHours = 0;
     let ttsChars = 0;
@@ -63,7 +69,17 @@ export async function monthSpend(at = Date.now()) {
       if (s.launched_at) {
         const start = Math.max(Date.parse(s.launched_at), Date.parse(from));
         const end = s.exited_at ? Date.parse(s.exited_at) : at;
-        if (end > start) containerSeconds += (end - start) / 1000;
+        if (end > start) {
+          const seconds = (end - start) / 1000;
+          // The session's own size; older sessions (before sizes were recorded) ran at the logo's size.
+          const usd = seconds * ((Number(s.bot_cpu) || logo.cpu) * RATES.vcpuSecond + (Number(s.bot_memory_gib) || logo.memoryGib) * RATES.gibSecond);
+          containerSeconds += seconds;
+          containerUsd += usd;
+          if (s.bot_camera === "orb") {
+            orbSeconds += seconds;
+            orbUsd += usd;
+          }
+        }
       }
       const h = liveMinutes(s.joined_at, s.ended_at, at) / 60;
       hours += h;
@@ -71,7 +87,6 @@ export async function monthSpend(at = Date.now()) {
       ttsChars += Number(s.tts_chars) || 0;
     }
     const sttMinutes = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM live_hearing WHERE minute >= ? AND source IN ('stt', 'both')", from.slice(0, 16)))?.n ?? 0);
-    const containerUsd = containerSeconds * (cpu * RATES.vcpuSecond + memoryGib * RATES.gibSecond);
     const sttUsd = (sttMinutes / 60) * RATES.sttHour;
     const ttsUsd = (ttsChars / 1e6) * RATES.ttsPerMillion;
     const recallUsd = recallHours * RATES.recallHour;
@@ -84,7 +99,9 @@ export async function monthSpend(at = Date.now()) {
     return {
       containerUsd: round(containerUsd), sttUsd: round(sttUsd), ttsUsd: round(ttsUsd), recallUsd: round(recallUsd), totalUsd: round(totalUsd),
       onPaceUsd: round(totalUsd / share), hours: round(hours, 1), onPaceHours: round(hours / share, 1),
-      containerHours: round(containerSeconds / 3600, 1), sttMinutes, ttsChars, size: { cpu, memoryGib },
+      containerHours: round(containerSeconds / 3600, 1), sttMinutes, ttsChars,
+      // The moving crystal ball's containers (already in containerUsd), and the two sizes for the label.
+      orbUsd: round(orbUsd), orbContainerHours: round(orbSeconds / 3600, 1), size: logo, orbSize: orb,
     };
   });
 }

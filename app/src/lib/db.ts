@@ -1022,12 +1022,16 @@ function migrate(conn: DatabaseSync) {
   if (!has("orgs", "live_provider")) conn.exec("ALTER TABLE orgs ADD COLUMN live_provider TEXT");
   // Sidekick's voice in meetings, the organization's default (JSON { voiceId, speed }, lib/live-meetings/voices.ts).
   if (!has("orgs", "live_voice")) conn.exec("ALTER TABLE orgs ADD COLUMN live_voice TEXT");
+  // Sidekick's camera in meetings, the organization's choice (NULL/'logo' or 'orb', lib/live-meetings/camera.ts).
+  if (!has("orgs", "live_camera")) conn.exec("ALTER TABLE orgs ADD COLUMN live_camera TEXT");
   // Live meetings, stage 2: the bot's job execution (launched, exited, its name), how it hears (captions or Azure
   // speech-to-text, and when captions and speech were last seen), and the characters it spoke (cost meter).
   // Its camera (lib/live-meetings/orb.ts): when the ball shows "speaking" and "thinking", what the bot shows ('orb' or
-  // 'still: <why>') and the container's CPU use in percent.
+  // 'logo: <why>'; 'still: <why>' on sessions from before the logo) and the container's CPU use in percent.
   for (const col of ["launched_at TEXT", "exited_at TEXT", "execution TEXT", "hearing TEXT", "captions_at TEXT", "speech_at TEXT", "hearing_since TEXT", "tts_chars INTEGER NOT NULL DEFAULT 0", "captions_unavailable INTEGER NOT NULL DEFAULT 0",
-    "speaking_from TEXT", "speaking_until TEXT", "thinking_at TEXT", "camera TEXT", "cpu_avg INTEGER", "cpu_peak INTEGER"]) {
+    "speaking_from TEXT", "speaking_until TEXT", "thinking_at TEXT", "camera TEXT", "cpu_avg INTEGER", "cpu_peak INTEGER",
+    // The camera asked for ('logo' or 'orb') and the container's size (vCPU, GiB), so costs use each meeting's own size.
+    "bot_camera TEXT", "bot_cpu REAL", "bot_memory_gib REAL"]) {
     const name = col.split(" ")[0];
     if (!has("live_sessions", name)) conn.exec(`ALTER TABLE live_sessions ADD COLUMN ${col}`);
   }

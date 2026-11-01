@@ -1,8 +1,8 @@
 /**
  * Tests for the meeting bot's camera (meetbot/shim/core.mjs "Camera", meetbot/shim/load.mjs), run by app/tests/run.mjs:
  * the shim against a fake Attendee, a fake Sidekick, a fake webpage streamer and fake CPU readings.
- * Covers: the animated ball asked for only when its browser is up (and reported), the still picture when it isn't or
- * when Attendee refuses it (the bot is still created), switching back to the still picture when the container stays
+ * Covers: the moving ball asked for only when its browser is up (and reported), the logo when it isn't or
+ * when Attendee refuses it (the bot is still created), falling back to the logo when the container stays
  * too busy (Attendee told, the browser stopped, Sidekick told why), CPU use reported, and the CPU arithmetic.
  *
  *   node --test meetbot/shim/camera.test.mjs
@@ -92,14 +92,14 @@ function shimFor(w, { orbUrl = ORB, streamerUp = true, readings = [] } = {}) {
 const worlds = [];
 after(() => worlds.forEach((w) => w.close()));
 
-test("shows the animated ball when its browser is up: the page as the webcam, the still picture behind it", async () => {
+test("shows the moving ball when its browser is up: the page as the webcam, the logo behind it", async () => {
   const w = await world();
   worlds.push(w);
   const s = shimFor(w);
   await until(() => w.events.some((e) => e.trigger === "sidekick.camera"));
   const create = w.calls.find((c) => c.url === "/api/v1/bots");
   assert.deepEqual(create.body.voice_agent_settings, { url: ORB });
-  assert.equal(create.body.bot_image.data, "iVBORw0KGgo=", "the still picture shows until the page streams, and after a fallback");
+  assert.equal(create.body.bot_image.data, "iVBORw0KGgo=", "the logo shows until the page streams, and after a fallback");
   assert.equal(w.events.find((e) => e.trigger === "sidekick.camera").data.camera, "orb");
   // CPU use is reported to Sidekick (here every 0.1 s).
   await until(() => w.events.some((e) => e.trigger === "sidekick.load"));
@@ -111,20 +111,20 @@ test("shows the animated ball when its browser is up: the page as the webcam, th
   assert.equal(s.streamer.stopped, 0, "a calm container keeps the ball");
 });
 
-test("keeps the still picture when the ball's browser didn't start, and says so", async () => {
+test("falls back to the logo when the ball's browser didn't start, and says so", async () => {
   const w = await world();
   worlds.push(w);
   const s = shimFor(w, { streamerUp: false });
   await until(() => w.events.some((e) => e.trigger === "sidekick.camera"));
   assert.equal(w.calls.find((c) => c.url === "/api/v1/bots").body.voice_agent_settings, undefined);
   const cam = w.events.find((e) => e.trigger === "sidekick.camera").data;
-  assert.equal(cam.camera, "still");
+  assert.equal(cam.camera, "logo");
   assert.match(cam.reason, /browser didn't start/);
   w.end();
   await s.running;
 });
 
-test("Attendee refusing the ball doesn't cost the meeting: the bot is created again with the still picture", async () => {
+test("Attendee refusing the ball doesn't cost the meeting: the bot is created again with the logo", async () => {
   const w = await world({ refuseOrb: true });
   worlds.push(w);
   const s = shimFor(w);
@@ -133,7 +133,7 @@ test("Attendee refusing the ball doesn't cost the meeting: the bot is created ag
   assert.equal(creates.length, 2);
   assert.ok(creates[0].body.voice_agent_settings && !creates[1].body.voice_agent_settings);
   const cam = w.events.find((e) => e.trigger === "sidekick.camera").data;
-  assert.equal(cam.camera, "still");
+  assert.equal(cam.camera, "logo");
   assert.match(cam.reason, /refused/);
   assert.equal(s.streamer.stopped, 1, "its browser is stopped");
   assert.ok(!w.events.some((e) => e.trigger === "bot.state_change"), "no failed join reported");
@@ -141,17 +141,17 @@ test("Attendee refusing the ball doesn't cost the meeting: the bot is created ag
   await s.running;
 });
 
-test("a container too busy for three readings in a row goes back to the still picture", async () => {
+test("a container too busy for three readings in a row falls back to the logo", async () => {
   const w = await world();
   worlds.push(w);
   // One busy reading, a calm one (the count starts again), then three busy ones.
   const s = shimFor(w, { readings: [0.95, 0.5, 0.97, 0.99, 0.96] });
-  await until(() => w.events.some((e) => e.trigger === "sidekick.camera" && e.data.camera === "still"));
+  await until(() => w.events.some((e) => e.trigger === "sidekick.camera" && e.data.camera === "logo"));
   const patch = w.calls.find((c) => c.method === "PATCH");
   assert.equal(patch.url, "/api/v1/bots/bot_cam/voice_agent_settings");
   assert.deepEqual(patch.body, { url: "" }, "Attendee stops showing the page (back to the bot image)");
   assert.equal(s.streamer.stopped, 1);
-  const cam = w.events.find((e) => e.trigger === "sidekick.camera" && e.data.camera === "still").data;
+  const cam = w.events.find((e) => e.trigger === "sidekick.camera" && e.data.camera === "logo").data;
   assert.match(cam.reason, /too busy \(CPU at 96%\)/);
   assert.equal(cam.cpu_peak, 99);
   assert.equal(w.calls.filter((c) => c.method === "PATCH").length, 1, "only once");
@@ -159,7 +159,7 @@ test("a container too busy for three readings in a row goes back to the still pi
   await s.running;
 });
 
-test("without a page address nothing about the camera changes (the still picture, no camera event)", async () => {
+test("without a page address (the logo chosen) nothing about the camera changes (the logo, no camera event)", async () => {
   const w = await world();
   worlds.push(w);
   const s = shimFor(w, { orbUrl: null });

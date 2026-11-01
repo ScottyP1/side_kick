@@ -57,10 +57,10 @@ export type LiveEvent =
   /** Sidekick's own bot: Teams captions can't be turned on in this meeting (switch to speech-to-text). */
   | { kind: "captions_unavailable"; botId: string; detail: string | null }
   /**
-   * Sidekick's own bot: what it shows as its camera (`orb` = the animated ball, `still` = the still picture, null = no
+   * Sidekick's own bot: what it shows as its camera (`orb` = the moving ball, `logo` = the still logo, null = no
    * change) and its container's CPU use in percent (lib/live-meetings/orb.ts).
    */
-  | { kind: "camera"; botId: string; camera: "orb" | "still" | null; detail: string | null; cpuAvg: number | null; cpuPeak: number | null }
+  | { kind: "camera"; botId: string; camera: "orb" | "logo" | null; detail: string | null; cpuAvg: number | null; cpuPeak: number | null }
   /** Sidekick's own bot: its container is exiting (the meeting is over for it). */
   | { kind: "exit"; botId: string; detail: string | null };
 
@@ -70,8 +70,12 @@ export interface LiveProvider {
   readonly id: ProviderId;
   /** What the bot can do besides listening and chatting. */
   readonly can: { raiseHand: boolean; speak: boolean };
-  /** Sends a bot to the meeting at `meetingUrl` with display name `botName`; its events go to `webhookUrl`. */
-  join(o: { meetingUrl: string; botName: string; webhookUrl: string; sessionId: string }): Promise<{ botId: string }>;
+  /**
+   * Sends a bot to the meeting at `meetingUrl` with display name `botName`; its events go to `webhookUrl`. `camera` is
+   * what the organization chose for the bot's camera (lib/live-meetings/camera.ts; Sidekick's own bot only, others
+   * ignore it).
+   */
+  join(o: { meetingUrl: string; botName: string; webhookUrl: string; sessionId: string; camera?: "logo" | "orb" }): Promise<{ botId: string }>;
   /** Makes the bot leave the meeting. A bot that already left is not an error. */
   stop(botId: string): Promise<void>;
   /** Posts `text` (plain text, at most about 4,000 characters) to everyone in the meeting chat. */

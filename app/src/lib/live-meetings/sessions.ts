@@ -1031,12 +1031,27 @@ export async function handoffLive(orgId: string, id: string): Promise<{ captured
  * feature paused or restricted by the Sidekick team, the plan no longer includes it, the month's live hours used up,
  * longer than 4 hours, or still in the lobby after 15 minutes. Returns how many it checked and stopped.
  */
-export async function watchLive(at = Date.now()): Promise<{ liveChecked: number; liveStopped: number; liveReaped: number; liveCapLevel: number }> {
+export async function watchLive(at = Date.now()): Promise<{ liveChecked: number; liveStopped: number; liveReaped: number; liveErrors: number; liveCapLevel: number }> {
   const running = await asSystem("live meetings watch: every running session", () =>
     all<{ id: string; org_id: string }>("SELECT id, org_id FROM live_sessions WHERE status IN ('joining', 'live') ORDER BY created_at LIMIT 500"),
   );
   let stopped = 0;
+  let errors = 0;
+  // First, containers of sessions that ended a few minutes ago but never said they exited: stop them in Azure, so a stuck
+  // bot never runs (and bills) on.
+  const stuck = await asSystem("live meetings watch: bot containers left running", () =>
+    all<{ id: string; org_id: string; execution: string }>(
+      "SELECT id, org_id, execution FROM live_sessions WHERE execution IS NOT NULL AND exited_at IS NULL AND status IN ('ended', 'failed') AND ended_at < ? LIMIT 100",
+      new Date(at - REAP_AFTER_MS * scale()).toISOString(),
+    ),
+  );
+  for (const x of stuck) {
+    await reapBot(x.execution);
+    await withOrg(x.org_id, () => run("UPDATE live_sessions SET exited_at = ? WHERE id = ? AND org_id = ? AND exited_at IS NULL", new Date(at).toISOString(), x.id, x.org_id))
+      .catch((e) => console.error("live.watch: couldn't mark a stopped container", e instanceof Error ? e.message : e));
+  }
   for (const r of running) {
+    // One session's problem (a database hiccup, a provider error) never stops the others or the steps after.
     const done = await withOrg(r.org_id, async () => {
       const s = await sessionById(r.org_id, r.id);
       if (!s || (s.status !== "joining" && s.status !== "live")) return false;
@@ -1072,24 +1087,17 @@ export async function watchLive(at = Date.now()): Promise<{ liveChecked: number;
         return stopSession(r.org_id, r.id, "This month's live meeting hours are used up.", { say: "This month's live meeting hours are used up, so I'm leaving. The notes will follow in the group's chat." });
       }
       return false;
+    }).catch(async (e) => {
+      errors++;
+      console.error("live.watch: a session failed", e instanceof Error ? e.message : e);
+      await withOrg(r.org_id, () => noteError(r.org_id, r.id, e)).catch(() => {});
+      return false;
     });
     if (done) stopped++;
   }
-  // Containers of sessions that ended a few minutes ago but never said they exited: stop them in Azure, so a stuck
-  // bot never runs (and bills) on.
-  const stuck = await asSystem("live meetings watch: bot containers left running", () =>
-    all<{ id: string; org_id: string; execution: string }>(
-      "SELECT id, org_id, execution FROM live_sessions WHERE execution IS NOT NULL AND exited_at IS NULL AND status IN ('ended', 'failed') AND ended_at < ? LIMIT 100",
-      new Date(at - REAP_AFTER_MS * scale()).toISOString(),
-    ),
-  );
-  for (const x of stuck) {
-    await reapBot(x.execution);
-    await withOrg(x.org_id, () => run("UPDATE live_sessions SET exited_at = ? WHERE id = ? AND org_id = ? AND exited_at IS NULL", new Date(at).toISOString(), x.id, x.org_id));
-  }
   const cap = await checkCapAlerts(at);
   // Job counts are numbers: 0 ok, 1 warning (80%), 2 reached.
-  return { liveChecked: running.length, liveStopped: stopped, liveReaped: stuck.length, liveCapLevel: cap === "reached" ? 2 : cap === "warn" ? 1 : 0 };
+  return { liveChecked: running.length, liveStopped: stopped, liveReaped: stuck.length, liveErrors: errors, liveCapLevel: cap === "reached" ? 2 : cap === "warn" ? 1 : 0 };
 }
 
 /* ------------------------------------------------------------------ */

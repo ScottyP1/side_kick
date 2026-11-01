@@ -8,7 +8,8 @@ import { NextResponse, type NextRequest } from "next/server";
  * security, pricing, FAQ, the /docs help center, support, changelog, sign-up, privacy, terms, plus robots.txt and
  * sitemap.xml, and the website's pictures in public/site/) needs no sign-in and is skipped too, as are the installable
  * app's manifest and icons (/manifest.webmanifest, /app-icons/: browsers fetch them without cookies; lib/pwa.ts), and the
- * Teams tab pages (/teams/: they sign in with Teams single sign-on, never a cookie; lib/teams/tab.ts); checkout isn't
+ * Teams tab pages (/teams/: they sign in with Teams single sign-on, never a cookie; lib/teams/tab.ts), and the meeting
+ * bot's camera page (/live/orb: shows no data, its state API is signed; lib/live-meetings/orb.ts); checkout isn't
  * (it pays for a signed-in organization).
  *
  * `/` is the one shared address: visitors get the website, and anyone with a portal session cookie is sent
@@ -37,5 +38,5 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // Keep the public names in step with lib/site.ts PUBLIC_PAGES (a test checks each answers without a session).
-  matcher: ["/((?!api|login|setup|pricing|signup|privacy|terms|support|features|how-it-works|security|faq|docs|changelog|robots.txt|sitemap.xml|manifest.webmanifest|app-icons/|site/|teams/|_next|favicon.ico).*)"],
+  matcher: ["/((?!api|login|setup|pricing|signup|privacy|terms|support|features|how-it-works|security|faq|docs|changelog|robots.txt|sitemap.xml|manifest.webmanifest|app-icons/|site/|teams/|live/orb|_next|favicon.ico).*)"],
 };

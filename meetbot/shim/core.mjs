@@ -7,6 +7,11 @@
  * - **Commands in**: the container has no inbound address, so the shim long-polls Sidekick's `/api/live/bot/commands`
  *   and carries them out on Attendee: chat, speak (an MP3 from Azure AI Speech), raise/lower hand (our patch), how to
  *   hear (Teams captions or Azure speech-to-text, `audio.mjs`), leave.
+ * - **Camera**: the still crystal ball (`bot_image`), or, when Sidekick sends a page address (`orbUrl`, ORB_URL) and the
+ *   container's second browser (Attendee's webpage streamer) is up, the animated ball: that page as the bot's webcam
+ *   (`voice_agent_settings.url`). If Attendee refuses it, or the container stays too busy (CPU over `cpuLimit` for
+ *   `cpuStrikes` readings in a row), the shim switches back to the still picture and stops that browser. It reports
+ *   what the bot shows (`sidekick.camera`) and the container's CPU use every few minutes (`sidekick.load`).
  * - **Exits** when the meeting is over for the bot (Attendee says it ended or failed, Sidekick says stop, or the
  *   container's own time limit), after telling Sidekick (`sidekick.exit`), so the job execution ends and stops costing.
  *
@@ -38,10 +43,12 @@ export function attendeeSigned(secret, signature, body) {
 export const chatHtml = (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
 
 /**
- * Creates the shim. `cfg`: session, sidekickUrl, botKey, meetingUrl, botName, raiseHand, attendeeUrl, attendeeKey,
- * attendeeSecret, port (0 = any), maxMinutes, captionsLanguage; `hooks.audio` (optional) = `{ start(onLine), stop() }`
- * for Azure speech-to-text (audio.mjs); `hooks.exit(code)` ends the process (tests pass their own). Returns
- * `{ start(), stop(), port }`.
+ * Creates the shim. `cfg`: session, sidekickUrl, botKey, meetingUrl, botName, botImage, raiseHand, attendeeUrl,
+ * attendeeKey, attendeeSecret, port (0 = any), maxMinutes, captionsLanguage, orbUrl, cpuEverySeconds (default 20),
+ * cpuLimit (0..1, default 0.9), cpuStrikes (default 3), loadReportSeconds (default 300). Hooks (all optional):
+ * `audio` = `{ start(onLine), stop() }` for Azure speech-to-text (audio.mjs); `streamer` = `{ ready(), stop() }` for the
+ * animated ball's browser; `load` = `{ sample() }` → the container's CPU share since the last call (load.mjs);
+ * `exit(code)` ends the process (tests pass their own). Returns `{ start(), stop(), port }`.
  */
 export function createShim(cfg, hooks = {}) {
   const log = hooks.log ?? ((...a) => console.log("[meetbot]", ...a));
@@ -51,6 +58,9 @@ export function createShim(cfg, hooks = {}) {
   let stopping = false;
   let server;
   let timer;
+  let loadTimer;
+  let orb = false;
+  const cpu = { sum: 0, count: 0, peak: 0, strikes: 0, reported: Date.now() };
 
   /** Sends events to Sidekick, signed with the session's key. Retries a few times; never throws. */
   async function toSidekick(items) {
@@ -104,10 +114,39 @@ export function createShim(cfg, hooks = {}) {
     stopping = true;
     log("exiting:", reason);
     clearTimeout(timer);
+    clearInterval(loadTimer);
     await Promise.resolve(hooks.audio?.stop?.()).catch(() => {});
-    await toSidekick([{ trigger: "sidekick.exit", data: { reason } }]);
+    await toSidekick([...(cpu.count ? [loadEvent()] : []), { trigger: "sidekick.exit", data: { reason } }]);
     server?.close();
     (hooks.exit ?? ((c) => process.exit(c)))(0);
+  }
+
+  /** The container's CPU use so far, in percent, as Sidekick saves it. */
+  const loadEvent = () => ({ trigger: "sidekick.load", data: { cpu_avg: Math.round((100 * cpu.sum) / Math.max(1, cpu.count)), cpu_peak: Math.round(100 * cpu.peak) } });
+
+  /** Back to the still picture: Attendee stops showing the page, the second browser is stopped, Sidekick is told why. */
+  async function stillPicture(reason) {
+    if (!orb) return;
+    orb = false;
+    log("camera: back to the still picture:", reason);
+    await attendee("PATCH", `/api/v1/bots/${encodeURIComponent(botId)}/voice_agent_settings`, { url: "" }).catch((e) => log("couldn't stop the page", e.message));
+    await Promise.resolve(hooks.streamer?.stop?.()).catch((e) => log("couldn't stop the page's browser", e.message));
+    await toSidekick([{ trigger: "sidekick.camera", data: { camera: "still", reason, cpu_peak: Math.round(100 * cpu.peak) } }]);
+  }
+
+  /** One CPU reading: kept for the report, and too many busy readings in a row end the animated ball. */
+  async function checkLoad() {
+    const share = hooks.load?.sample?.();
+    if (typeof share !== "number" || !Number.isFinite(share)) return;
+    cpu.sum += share;
+    cpu.count++;
+    cpu.peak = Math.max(cpu.peak, share);
+    cpu.strikes = share > (cfg.cpuLimit ?? 0.9) ? cpu.strikes + 1 : 0;
+    if (orb && cpu.strikes >= (cfg.cpuStrikes ?? 3)) await stillPicture(`the container was too busy (CPU at ${Math.round(100 * share)}%)`);
+    if (Date.now() - cpu.reported >= (cfg.loadReportSeconds ?? 300) * 1000) {
+      cpu.reported = Date.now();
+      await toSidekick([loadEvent()]);
+    }
   }
 
   /** Switches how the bot hears: Azure speech-to-text lines are posted as transcript lines marked `azure_stt`. */
@@ -202,24 +241,45 @@ export function createShim(cfg, hooks = {}) {
       // Never run (and bill) past the longest meeting, whatever happens.
       timer = setTimeout(() => finish("the container's time limit"), (cfg.maxMinutes ?? 270) * 60_000);
       if (!(await attendeeReady(cfg.readyTimeoutMs))) return finish("Attendee didn't start");
+      // The animated ball only when its browser came up; otherwise (or if Attendee refuses it) the still picture.
+      let why = null;
+      if (cfg.orbUrl) {
+        orb = Boolean(hooks.streamer && (await Promise.resolve(hooks.streamer.ready()).catch(() => false)));
+        if (!orb) why = "the animated ball's browser didn't start";
+      }
+      const create = (withOrb) => attendee("POST", "/api/v1/bots", {
+        meeting_url: cfg.meetingUrl,
+        bot_name: cfg.botName,
+        ...(cfg.botImage ? { bot_image: { type: "image/png", data: cfg.botImage } } : {}),
+        metadata: { sidekick_session: cfg.session },
+        transcription_settings: { meeting_closed_captions: { teams_language: cfg.captionsLanguage ?? "en-us" } },
+        recording_settings: { format: "none" },
+        // Local addresses: plain http to the shim on 127.0.0.1 (REQUIRE_HTTPS_WEBHOOKS=false; the audio websocket: our patch).
+        webhooks: [{ url: `http://127.0.0.1:${server.address().port}/attendee`, triggers: TRIGGERS }],
+        ...(cfg.audioUrl ? { websocket_settings: { audio: { url: cfg.audioUrl, sample_rate: 16000 } } } : {}),
+        // The page shown as the bot's webcam (Attendee's "voice agent" page; its audio is silent, answers stay on output_audio).
+        ...(withOrb ? { voice_agent_settings: { url: cfg.orbUrl } } : {}),
+      });
       try {
-        const bot = await attendee("POST", "/api/v1/bots", {
-          meeting_url: cfg.meetingUrl,
-          bot_name: cfg.botName,
-          ...(cfg.botImage ? { bot_image: { type: "image/png", data: cfg.botImage } } : {}),
-          metadata: { sidekick_session: cfg.session },
-          transcription_settings: { meeting_closed_captions: { teams_language: cfg.captionsLanguage ?? "en-us" } },
-          recording_settings: { format: "none" },
-          // Local addresses: plain http to the shim on 127.0.0.1 (REQUIRE_HTTPS_WEBHOOKS=false; the audio websocket: our patch).
-          webhooks: [{ url: `http://127.0.0.1:${server.address().port}/attendee`, triggers: TRIGGERS }],
-          ...(cfg.audioUrl ? { websocket_settings: { audio: { url: cfg.audioUrl, sample_rate: 16000 } } } : {}),
-        });
+        let bot;
+        try {
+          bot = await create(orb);
+        } catch (e) {
+          if (!orb) throw e;
+          orb = false;
+          why = `Attendee refused the animated ball (${e.message})`;
+          log("camera:", why);
+          await Promise.resolve(hooks.streamer?.stop?.()).catch(() => {});
+          bot = await create(false);
+        }
         botId = bot.id;
       } catch (e) {
         await toSidekick([{ trigger: "bot.state_change", data: { new_state: "fatal_error", event_type: "could_not_create_bot" } }]);
         return finish(`Attendee couldn't create the bot: ${e.message}`);
       }
       log("bot", botId, "joining", cfg.meetingUrl.slice(0, 60));
+      if (cfg.orbUrl) await toSidekick([{ trigger: "sidekick.camera", data: { camera: orb ? "orb" : "still", reason: why } }]);
+      if (hooks.load) loadTimer = setInterval(() => checkLoad().catch((e) => log("load check failed", e.message)), (cfg.cpuEverySeconds ?? 20) * 1000);
       await commandLoop();
     },
     stop: finish,

@@ -56,6 +56,11 @@ export type LiveEvent =
   | { kind: "hearing"; botId: string; source: "captions" | "stt"; detail: string | null }
   /** Sidekick's own bot: Teams captions can't be turned on in this meeting (switch to speech-to-text). */
   | { kind: "captions_unavailable"; botId: string; detail: string | null }
+  /**
+   * Sidekick's own bot: what it shows as its camera (`orb` = the animated ball, `still` = the still picture, null = no
+   * change) and its container's CPU use in percent (lib/live-meetings/orb.ts).
+   */
+  | { kind: "camera"; botId: string; camera: "orb" | "still" | null; detail: string | null; cpuAvg: number | null; cpuPeak: number | null }
   /** Sidekick's own bot: its container is exiting (the meeting is over for it). */
   | { kind: "exit"; botId: string; detail: string | null };
 

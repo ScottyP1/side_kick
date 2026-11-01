@@ -144,8 +144,8 @@ A saved item becomes lasting knowledge: answers find it first, long after the me
 Sidekick can take part in a Teams meeting as a member called **Sidekick**. It listens to what's said and typed, knows everything in the group (this meeting so far, past meetings and notes, documents, the firm library, connected tools), and helps like a teammate:
 - **Ask it, out loud or in the chat**: "Sidekick, what did the client say about the cutover?" (or "…, Sidekick?", or "Sidekick?" and then the question). It raises its hand, gives a short spoken answer when your group allows speaking, then puts the full answer with its sources in the meeting chat.
 - **Questions nobody answers**: when someone asks the room and nobody knows ("not sure…"), and Sidekick is confident it has the answer from the group's sources, it **raises its hand**. Say "go ahead, Sidekick" and it answers; nobody calls on it within a minute and it lowers its hand and puts the answer in the chat. It never talks over anyone, and when it isn't sure it stays quiet.
-- **It asks too**: when an action item has no owner or date, it asks once ("Quick check: by when should Lou do this?"), the same polite way.
-- **Running list** of decisions and action items: "Sidekick, recap" reads it back; the group's page shows it during the meeting.
+- **It asks too**: when an action item has no owner or date, it asks once ("Quick check: by when should Lou do this?"), the same polite way. The answer ("By Wednesday.", "I'll take it") goes on that item straight away.
+- **Running list** of decisions and action items: "Sidekick, recap" reads it back ("1. Update the runbook (Cody Scott, by Wednesday)"); the group's page shows it during the meeting.
 - **Quiet mode**: "Sidekick, quiet" keeps it to answering in the chat when asked; "Sidekick, you can speak up" undoes it.
 - **Notes afterwards, once**: from Teams' transcript if there is one, otherwise from what Sidekick heard.
 - **Client guests**: when someone from outside your organization is in the meeting, Sidekick says so once and only uses sources marked **Shareable**. It never rates or ranks people.
@@ -161,7 +161,9 @@ Sidekick can take part in a Teams meeting as a member called **Sidekick**. It li
 
 In the meeting, Sidekick's video tile shows **Sidekick's crystal ball** (a still picture) instead of initials; Teams' own speaking ring shows when it talks.
 
-If the meeting has a lobby, someone lets **Sidekick** in. Its first message in the chat says it's listening and how to remove it: say "Sidekick, leave", type **@Sidekick leave**, remove it from the participants, or press **Stop** on the group's page. It also leaves when the meeting ends, after 4 hours, when this month's live meeting hours run out, or if nobody lets it in within 15 minutes.
+If the meeting has a lobby, someone lets **Sidekick** in. Its first message in the chat says it's listening and how to remove it: say "Sidekick, leave", type **@Sidekick leave**, remove it from the participants, or press **Stop** on the group's page. It also leaves when the meeting ends, after 4 hours, when this month's live meeting hours run out, or if nobody lets it in within 15 minutes. When it leaves it says so ("Okay, leaving now") and its tile goes from the meeting.
+
+If Sidekick's meeting bot breaks down before it gets in (it doesn't arrive within about 6 minutes), Sidekick says "I couldn't join the meeting" in the meeting chat (or the group's notes chat) and you can ask it to join again straight away.
 
 **Plan.** Live in meetings is part of the Enterprise plan (100 live meeting hours a month; Usage & billing shows how many are used). Everything is in the audit log.
 

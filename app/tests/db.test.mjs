@@ -1853,7 +1853,12 @@ test(`[${engine}] live meetings: minutes, the messages in the meeting chat, and 
   assert.match(intro, /only use sources marked Shareable/);
   assert.doesNotMatch(liveRules.introText("Contoso", false), /Shareable/);
   assert.match(liveRules.recapText([], []), /Nothing decided/);
-  assert.equal(liveRules.recapText([{ text: "Move the cutover", who: "Lou" }], [{ text: "Send the report", who: "Mo", due: "Friday" }]), "Decisions so far:\n1. Move the cutover (Lou)\nAction items so far:\n1. Send the report: Mo, by Friday");
+  assert.equal(liveRules.recapText([{ text: "Move the cutover", who: "Lou" }], [{ text: "Send the report", who: "Mo", due: "Friday" }]), "Decisions so far:\n1. Move the cutover (Lou)\nAction items so far:\n1. Send the report (Mo, by Friday)");
+  // The first live trial (Nov 1 2026) read "…cutover date.: Cody Scott": the sentence's own full stop goes, who and when follow in brackets.
+  assert.equal(
+    liveRules.recapText([{ text: "Move the cutover to March.", who: null }], [{ text: "Update the runbook with the new cutover date.", who: "Cody Scott" }, { text: "Book the load test.", who: null, due: "Monday" }, { text: "Ask legal", who: null }]),
+    "Decisions so far:\n1. Move the cutover to March\nAction items so far:\n1. Update the runbook with the new cutover date (Cody Scott)\n2. Book the load test (by Monday)\n3. Ask legal",
+  );
   const text = liveRules.answerText("q".repeat(300), "a".repeat(5000), [{ id: "S1", title: "Plan.pdf", loc: "p. 2" }]);
   assert.ok(text.length <= 4000 && text.includes("…"), "fits a meeting chat message");
   assert.match(liveRules.answerText("When?", "Friday [S1].", [{ id: "S1", title: "Plan.pdf", loc: "p. 2" }]), /Sources: \[S1\] Plan\.pdf \(p\. 2\)$/);
@@ -1897,6 +1902,21 @@ test(`[${engine}] live meetings: a member of the meeting: questions to the room,
   assert.equal(liveRules.ownQuestion({ text: "Book the load test", who: null, due: null }), "Quick check: who's taking “Book the load test”, and by when?");
   assert.equal(liveRules.ownQuestion({ text: "Send the report", who: "Mo", due: null }), "Quick check: by when should Mo do “Send the report”?");
   assert.equal(liveRules.ownQuestion({ text: "Send the report", who: "Mo", due: "Friday" }), null);
+  assert.equal(liveRules.ownQuestion({ text: "Update the runbook.", who: "Lou", due: null }), "Quick check: by when should Lou do “Update the runbook”?");
+  // The reply to its own question fills in the item right away (a when, an owner), only when it answers it.
+  const item = { text: "Update the runbook", who: "Lou Lead", due: null };
+  assert.deepEqual(liveRules.applyReply(item, "Lou Lead", "By Wednesday."), { text: "Update the runbook", who: "Lou Lead", due: "Wednesday" });
+  assert.equal(liveRules.applyReply(item, "Mo Member", "end of the week, I think")?.due, "End of the week");
+  assert.equal(liveRules.applyReply(item, "Lou Lead", "next Friday works")?.due, "Next Friday");
+  assert.equal(liveRules.applyReply(item, "Lou Lead", "Nov 5")?.due, "Nov 5");
+  assert.equal(liveRules.applyReply(item, "Lou Lead", "Good question, let me think."), null, "not an answer");
+  assert.equal(liveRules.applyReply(item, "Lou Lead", `${"We talked about this a lot and ".repeat(5)}maybe Monday`), null, "a long remark isn't the reply");
+  assert.equal(liveRules.applyReply({ ...item, due: "Friday" }, "Lou Lead", "Monday"), null, "nothing missing: nothing changes");
+  const nobody = { text: "Book the load test", who: null, due: null };
+  assert.deepEqual(liveRules.applyReply(nobody, "Mo Member", "I'll take it, by Friday."), { text: "Book the load test", who: "Mo Member", due: "Friday" });
+  assert.equal(liveRules.applyReply(nobody, "Lou Lead", "Mo can do that.", ["Lou Lead", "Mo Member"])?.who, "Mo Member");
+  assert.equal(liveRules.applyReply(nobody, "Lou Lead", "Mo or Lou.", ["Lou Lead", "Mo Member"]), null, "two names: unclear");
+  assert.equal(liveRules.applyReply(nobody, "Sidekick", "I'll take it."), null, "never itself");
   // Attendee's webhook signature: HMAC over the canonical JSON (keys sorted), whatever order the body's keys came in.
   const secret = crypto.randomBytes(32).toString("base64");
   const body = { trigger: "transcript.update", bot_id: "bot_1", data: { transcription: { transcript: "héllo" }, speaker_name: "Ana" } };

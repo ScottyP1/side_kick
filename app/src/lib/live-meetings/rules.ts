@@ -161,9 +161,9 @@ export const HAND_NOTE = `✋ I can help with that. Say “go ahead, ${BRAND.nam
 
 /** Sidekick's own question about an action item that has no owner or no date (asked once per item). */
 export function ownQuestion(item: { text: string; who: string | null; due?: string | null }): string | null {
-  if (!item.who && !item.due) return `Quick check: who's taking “${item.text}”, and by when?`;
-  if (!item.who) return `Quick check: who's taking “${item.text}”?`;
-  if (!item.due) return `Quick check: by when should ${item.who} do “${item.text}”?`;
+  if (!item.who && !item.due) return `Quick check: who's taking “${bare(item.text)}”, and by when?`;
+  if (!item.who) return `Quick check: who's taking “${bare(item.text)}”?`;
+  if (!item.due) return `Quick check: by when should ${item.who} do “${bare(item.text)}”?`;
   return null;
 }
 
@@ -251,14 +251,74 @@ export const GUEST_NOTICE = "Someone from outside your organization joined, so f
 /** A decision or action item on the running list. */
 export type ListItem = { text: string; who: string | null; due?: string | null };
 
-/** "Sidekick, recap": the running list read back in plain text (or that there's nothing yet). */
+/** An item's sentence without its closing punctuation, so who and when can follow it ("…date (Cody, by Friday)"). */
+const bare = (text: string) => text.trim().replace(/[\s.;:,!]+$/, "");
+
+/**
+ * "Sidekick, recap": the running list read back in plain text (or that there's nothing yet). Who and when go in
+ * brackets after the sentence: "1. Update the runbook (Cody Scott, by Wednesday)". (Before Nov 1 2026 it read
+ * "…runbook.: Cody Scott", found in the first live trial.)
+ */
 export function recapText(decisions: ListItem[], actions: ListItem[]): string {
   if (!decisions.length && !actions.length) return "Nothing decided or assigned yet that I've noted. I update the list every few minutes.";
   const lines: string[] = [];
-  if (decisions.length) lines.push("Decisions so far:", ...decisions.map((d, i) => `${i + 1}. ${d.text}${d.who ? ` (${d.who})` : ""}`));
-  if (actions.length) lines.push("Action items so far:", ...actions.map((a, i) => `${i + 1}. ${a.text}${a.who ? `: ${a.who}` : ""}${a.due ? `, by ${a.due}` : ""}`));
+  if (decisions.length) lines.push("Decisions so far:", ...decisions.map((d, i) => `${i + 1}. ${bare(d.text)}${d.who ? ` (${d.who})` : ""}`));
+  if (actions.length) {
+    lines.push("Action items so far:", ...actions.map((a, i) => {
+      const extra = [a.who, a.due ? `by ${a.due}` : null].filter(Boolean).join(", ");
+      return `${i + 1}. ${bare(a.text)}${extra ? ` (${extra})` : ""}`;
+    }));
+  }
   return lines.join("\n");
 }
+
+/**
+ * An action item Sidekick just asked about with its own question (`ownQuestion`), waiting for the reply: the item as it
+ * was (its text finds it on the list) and when the question went out. Saved on the session (`live_sessions.awaiting`).
+ */
+export type Awaiting = { text: string; who: string | null; due: string | null; askedAt: string };
+
+/** How long after its own question Sidekick takes a line as the reply. */
+export const REPLY_WINDOW_MS = 3 * 60_000;
+
+const WEEKDAY = "(?:mon|tues|wednes|thurs|fri|satur|sun)day";
+const MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+/** A when, as people say it in a meeting: a day, "end of the week", "next Friday", "Nov 5", "11/5", "EOD". */
+const WHEN = new RegExp(
+  `\\b(?:(?:next|this)\\s+(?:week|month|sprint|${WEEKDAY})|end of (?:the\\s+)?(?:day|week|month|sprint|quarter)|${WEEKDAY}|today|tonight|tomorrow|eod|eow|` +
+  `${MONTH}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?|\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH}|\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?)\\b`,
+  "i",
+);
+/** "I'll take it", "me", "I can do it", "on it": the speaker takes the item. */
+const SELF = /^(?:(?:yes|yeah|yep|sure|ok(?:ay)?|sounds good)[\s,.!]*)?(?:i(?:'ll|’ll| will| can| am|'m|’m)\b|me\b|mine\b|i've got|i’ve got|i got|on it\b)/i;
+
+/**
+ * Applies a line said right after Sidekick's own question to the item it asked about: a when ("By Wednesday." →
+ * due "Wednesday") when the item had no date, and an owner when it had none (the speaker for "I'll take it", or the one
+ * person heard in the meeting the line names). Only short lines (at most 25 words) count, so a long remark that
+ * happens to mention a day isn't taken as the answer. Returns the item with what the reply filled in, or null when the
+ * line doesn't answer the question.
+ */
+export function applyReply(item: Pick<Awaiting, "text" | "who" | "due">, speaker: string | null, text: string, people: string[] = []): ListItem | null {
+  const line = text.replace(/\s+/g, " ").trim();
+  if (!line || line.split(" ").length > 25) return null;
+  let { who, due } = item;
+  if (!due) {
+    const m = WHEN.exec(line);
+    if (m) due = m[0].replace(/^./, (c) => c.toUpperCase());
+  }
+  if (!who) {
+    if (SELF.test(line) && speaker && !isOwnName(speaker)) who = speaker;
+    else {
+      const named = people.filter((p) => p && !isOwnName(p) && new RegExp(`\\b(?:${escapeRe(p)}|${escapeRe(p.split(" ")[0])})\\b`, "i").test(line) && p.split(" ")[0].length >= 2);
+      if (named.length === 1) who = named[0];
+    }
+  }
+  if (who === item.who && due === (item.due ?? null)) return null;
+  return { text: item.text, who: who ?? null, due: due ?? null };
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** A cited source as the meeting chat shows it. */
 export type ChatSource = { id: string; title: string; loc?: string | null };

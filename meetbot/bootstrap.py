@@ -9,8 +9,13 @@ import base64
 import datetime
 import json
 import os
+import sys
 
-import django
+# Python puts this script's own folder (/meetbot) on the import path, not the working directory, so Attendee's Django
+# project in /attendee is added by hand (found on the first live trial, Nov 1: "No module named 'attendee'").
+sys.path.insert(0, "/attendee")
+
+import django  # noqa: E402
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "attendee.settings.production")
 django.setup()

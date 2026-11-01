@@ -17,5 +17,7 @@ python manage.py migrate --check >/dev/null 2>&1 || python manage.py migrate --n
 # This meeting's Attendee API key and the project's webhook secret, made here and kept in the container (bootstrap.py).
 python /meetbot/bootstrap.py
 gunicorn attendee.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads 4 --log-level warning &
-celery -A attendee worker --loglevel=warning --concurrency=1 &
+# More than one worker slot: the bot itself occupies one for the whole meeting, and Attendee delivers its webhooks and
+# processes captions as Celery tasks too (with one slot they queued behind the bot forever; first live trial, Nov 1).
+celery -A attendee worker --loglevel=warning --concurrency=4 &
 exec node /meetbot/shim/main.mjs

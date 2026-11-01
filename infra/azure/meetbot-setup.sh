@@ -16,8 +16,9 @@
 #      Key Vault secrets and pulls the image.
 #   6. The app (`sidekick-app`) may start and stop that job only (Contributor on the job), and gets the settings
 #      SIDEKICK_MEETBOT_JOB / _IMAGE / _SECRET, AZURE_SUBSCRIPTION_ID, AZURE_SPEECH_KEY / _REGION, ATTENDEE_RAISE_HAND.
-#   7. An Azure budget `sidekick-meetbot-monthly` on the tagged resources, emailing at 50/80/100%. Azure budgets only
-#      warn; the app's own cap (Owner Console → Live meetings) is what stops new meetings.
+#   7. An Azure budget `sidekick-meetbot-monthly` on the tagged resources, emailing at 50/80/100% (meetbot-budget.sh;
+#      an existing budget keeps its start date, which Azure won't change). Azure budgets only warn; the app's own cap
+#      (Owner Console → Live meetings) is what stops new meetings.
 #
 # Usage: CONFIRM=yes BUDGET_EMAIL=<who gets the budget emails> [BUDGET_USD=50] [SKIP_APP=1] infra/azure/meetbot-setup.sh
 # Without CONFIRM=yes it only prints what it would do. SKIP_APP=1 leaves out step 6 (the app's role on the job and its
@@ -128,20 +129,7 @@ az containerapp update -g $RG -n $APP --set-env-vars SIDEKICK_MEETBOT_JOB=$JOB S
 fi
 
 echo "7/7 Budget on the meeting bot's resources"
-START=$(date -u +%Y-%m-01)
-cat > /tmp/meetbot-budget.json <<JSON
-{ "properties": {
-  "category": "Cost", "amount": $BUDGET_USD, "timeGrain": "Monthly",
-  "timePeriod": { "startDate": "${START}T00:00:00Z" },
-  "filter": { "tags": { "name": "sidekick-meetbot", "operator": "In", "values": ["1"] } },
-  "notifications": {
-    "actual50": { "enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 50, "contactEmails": ["$BUDGET_EMAIL"], "thresholdType": "Actual" },
-    "actual80": { "enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 80, "contactEmails": ["$BUDGET_EMAIL"], "thresholdType": "Actual" },
-    "actual100": { "enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 100, "contactEmails": ["$BUDGET_EMAIL"], "thresholdType": "Actual" }
-  } } }
-JSON
-az rest --method put --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Consumption/budgets/sidekick-meetbot-monthly?api-version=2023-05-01" \
-  --body @/tmp/meetbot-budget.json -o none
-rm -f /tmp/meetbot-budget.json
+# An existing budget keeps its start date (Azure refuses to change it): see meetbot-budget.sh.
+SUB=$SUB RG=$RG BUDGET_USD=$BUDGET_USD BUDGET_EMAIL=$BUDGET_EMAIL bash infra/azure/meetbot-budget.sh
 echo "✓ Meeting bot ready: job $JOB runs $IMAGE. Nothing runs until a meeting starts."
 echo "  Test: in the portal turn Live in meetings on for a group, then type @Sidekick join in a meeting chat."

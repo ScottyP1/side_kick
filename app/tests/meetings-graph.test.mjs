@@ -114,7 +114,8 @@ const RECALL_KEY = "test-recall-key";
 const LIVE_SECRET = `whsec_${crypto.randomBytes(24).toString("base64")}`;
 // bot id → { provider, url, name, webhook, settings, left, chat: [messages], spoken: [texts], hand: [true/false], log: [everything in order] }
 const BOTS = new Map();
-const liveFail = { join: null }; // a status to refuse the next join with (either provider)
+// A status to refuse the next join with (either provider); `silent`: the next container of our own bot never starts.
+const liveFail = { join: null, silent: false };
 /** One fake meeting-bot server; `routes` maps an action to the request path that means it. */
 function fakeBots(provider, key, paths) {
   return http.createServer((req, res) => {
@@ -193,9 +194,18 @@ const arm = http.createServer((req, res) => {
       const c = b.containers[0];
       const env = Object.fromEntries(c.env.filter((e) => "value" in e).map((e) => [e.name, e.value]));
       const execution = `sidekick-meetbot-${armCalls.length}`;
-      BOTS.set(env.SIDEKICK_SESSION, { provider: "attendee", url: env.MEETING_URL, name: env.BOT_NAME, env, container: c, execution, left: false, gone: false, deaf: false, hearing: "captions", chat: [], spoken: [], hand: [], log: [] });
+      BOTS.set(env.SIDEKICK_SESSION, { provider: "attendee", url: env.MEETING_URL, name: env.BOT_NAME, env, container: c, execution, left: false, gone: false, deaf: liveFail.silent, crashed: false, hearing: "captions", chat: [], spoken: [], hand: [], log: [] });
+      liveFail.silent = false;
       fakeContainer(env.SIDEKICK_SESSION);
       return send(200, { name: execution, id: `${ARM_JOB}/executions/${execution}` });
+    }
+    // An execution's status: Failed once its container crashed, Succeeded once it exited, else Running.
+    const status = url.pathname.match(new RegExp(`^${ARM_JOB}/executions/([^/]+)$`));
+    if (req.method === "GET" && status) {
+      armCalls.push({ op: "status", execution: status[1] });
+      const bot = [...BOTS.values()].find((x) => x.execution === status[1]);
+      if (!bot) return send(404, { error: { message: "Not found." } });
+      return send(200, { name: status[1], properties: { status: bot.crashed ? "Failed" : bot.gone ? "Succeeded" : "Running" } });
     }
     const stop = url.pathname.match(new RegExp(`^${ARM_JOB}/executions/([^/]+)/stop$`));
     if (req.method === "POST" && stop) {
@@ -207,10 +217,13 @@ const arm = http.createServer((req, res) => {
     send(404, { error: { message: "Not found." } });
   });
 });
-/** The fake container's shim: polls commands until it leaves; `deaf` bots ignore everything (a stuck container). */
+/**
+ * The fake container's shim: polls commands until it leaves; `deaf` bots ignore everything (a stuck container);
+ * `crashed` ones stop without a word (no sidekick.exit), as a container dying during startup does.
+ */
 async function fakeContainer(session) {
   const bot = BOTS.get(session);
-  while (!bot.gone) {
+  while (!bot.gone && !bot.crashed) {
     if (bot.deaf) {
       await new Promise((r) => setTimeout(r, 100));
       continue;
@@ -244,6 +257,7 @@ async function fakeContainer(session) {
         await pushLive(session, { trigger: "sidekick.hearing", data: { source: c.data.source } });
       } else if (c.kind === "leave") {
         bot.left = true;
+        bot.log.push("leave");
         await pushLive(session, { trigger: "bot.state_change", data: { new_state: "ended", event_type: "bot_left" } });
         await pushLive(session, { trigger: "sidekick.exit", data: { reason: "left" } });
         bot.gone = true;
@@ -2154,6 +2168,9 @@ test(`[${ENGINE}] live: a running list of decisions and action items; "Sidekick,
   await waitChat(bot, /Okay, leaving now/, k);
   await waitSession(bot, "status", "ended");
   await until(() => BOTS.get(bot).left, `${bot} left`);
+  // The goodbye reaches the bot before it's told to leave (and before it's told to exit: first live trial, Nov 1 2026).
+  const log = BOTS.get(bot).log;
+  assert.ok(log.findIndex((x) => /^chat:Okay, leaving now/.test(x)) < log.indexOf("leave"), log.join(" | "));
   assert.equal(await sessionOf(bot, "end_reason"), "Mo Member asked Sidekick to leave.");
   assert.match(await scalar("SELECT action FROM audit_log WHERE action LIKE 'Sidekick left%' ORDER BY id DESC LIMIT 1"), /asked Sidekick to leave/);
   // No Teams transcript came: the live transcript becomes the meeting, and the usual notes are written and posted once.
@@ -2314,6 +2331,10 @@ test(`[${ENGINE}] live: quiet mode for one meeting; Sidekick asks its own questi
   await say(bot, "Lou Lead", "Yes, Sidekick?");
   const asked = await waitLog(bot, /chat:Quick check/, n);
   assert.match(asked, /speak:Quick check: by when should Lou Lead do “update the runbook”\?/);
+  // The reply goes on the item at once, not at the next update of the list (first live trial, Nov 1 2026).
+  await say(bot, "Lou Lead", "By Wednesday.");
+  await until(async () => JSON.parse((await sessionOf(bot, "action_items")) || "[]").some((a) => /update the runbook/i.test(a.text) && a.due === "Wednesday"), "the date on the item");
+  assert.equal(await sessionOf(bot, "awaiting"), "", "the wait is over");
   await drain();
   assert.equal((BOTS.get(bot).log.join("\n").match(/Quick check: by when should Lou Lead/g) ?? []).length, 2, "asked once (spoken + chat)");
   await say(bot, "Lou Lead", "Sidekick, leave.");
@@ -2465,6 +2486,39 @@ test(`[${ENGINE}] live: the bot's container exits when it leaves; one that doesn
   assert.ok(watch.liveReaped >= 1, `nothing reaped: ${JSON.stringify(watch)}`);
   assert.ok(stopped(), "stopped in Azure");
   assert.notEqual(await sessionOf(stuck, "exited_at"), "");
+});
+
+test(`[${ENGINE}] live: a bot whose container crashes or never starts is failed with a note in the chat, so joining again works`, async () => {
+  // Crashes while starting (no exit message): Azure says the execution failed, so live.watch fails the session.
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("crash1")}`), /Joining now/);
+  const bot = lastBot();
+  await until(async () => (await sessionOf(bot, "bot_seen_at")) !== "", "the container reaching Sidekick");
+  BOTS.get(bot).crashed = true;
+  let from = sent.length;
+  let watch = await tick({ sweep: true, kinds: ["live.watch"] });
+  assert.equal(watch.failed, 0, `live.watch failed: ${JSON.stringify(watch)}`);
+  assert.equal(await sessionOf(bot, "status"), "failed");
+  assert.match(await sessionOf(bot, "end_reason"), /meeting bot stopped before it got into the meeting \(Azure says failed\)/);
+  assert.match(await waitFor(CHAT_W1, /couldn't join the meeting/, from), /join again/);
+  // Not stuck at "joining": asking again sends a new bot.
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("crash1")}`), /Joining now/);
+  const again = lastBot();
+  assert.notEqual(again, bot);
+  assert.equal((await lou("POST", liveUrl(s.w1), { action: "stop", session: await sessionOf(again, "id") })).status, 200);
+  // Never starts at all: no word from it 6 minutes after Azure started it.
+  liveFail.silent = true;
+  assert.match(await sayTo(CHAT_W1, `join ${joinUrlFor("crash2")}`), /Joining now/);
+  const silent = lastBot();
+  watch = await tick({ sweep: true, kinds: ["live.watch"] });
+  assert.equal(await sessionOf(silent, "status"), "joining", "still within its startup time");
+  await dbExec(`UPDATE live_sessions SET launched_at = '${new Date(Date.now() - 7 * 60_000).toISOString()}' WHERE bot_id = '${silent}'`);
+  from = sent.length;
+  watch = await tick({ sweep: true, kinds: ["live.watch"] });
+  assert.equal(watch.failed, 0, `live.watch failed: ${JSON.stringify(watch)}`);
+  assert.equal(await sessionOf(silent, "status"), "failed");
+  assert.match(await sessionOf(silent, "end_reason"), /didn't start within 6 minutes/);
+  await waitFor(CHAT_W1, /couldn't join the meeting/, from);
+  BOTS.get(silent).gone = true;
 });
 
 test(`[${ENGINE}] live: the Owner Console's cost meter, and the platform cap: warning at 80%, paused at 100% (running meetings finish)`, async () => {

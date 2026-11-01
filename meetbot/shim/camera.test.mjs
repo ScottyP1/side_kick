@@ -83,7 +83,7 @@ function shimFor(w, { orbUrl = ORB, streamerUp = true, readings = [] } = {}) {
   const shim = createShim({
     session: "sess-cam", sidekickUrl: `http://127.0.0.1:${w.sp}`, botKey: BOT_KEY, meetingUrl: "https://teams.microsoft.com/l/meetup-join/y/0",
     botName: "Sidekick", botImage: "iVBORw0KGgo=", attendeeUrl: `http://127.0.0.1:${w.ap}`, attendeeKey: "k", attendeeSecret: crypto.randomBytes(32).toString("base64"),
-    port: 0, pollSeconds: 0, orbUrl, cpuEverySeconds: 0.05, cpuLimit: 0.9, cpuStrikes: 3, loadReportSeconds: 0.1,
+    port: 0, pollSeconds: 0, orbUrl, cpuEverySeconds: 0.05, cpuLimit: 0.9, cpuStrikes: 3, loadReportSeconds: 0.1, leaveTimeoutMs: 200,
   }, { streamer, load, exit: (c) => (exited = c), log: () => {} });
   const running = shim.start();
   return { shim, streamer, running, exited: () => exited };

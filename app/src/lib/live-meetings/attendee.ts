@@ -22,8 +22,10 @@
  * - **Its camera**: the animated crystal ball, a page of Sidekick's (`ORB_URL`, lib/live-meetings/orb.ts) the container
  *   streams as the bot's webcam; the still picture when that's off or the container is too busy. The shim reports
  *   which (`sidekick.camera`) and the container's CPU use (`sidekick.load`).
- * - **Leaving**: a `leave` command; the container exits once Attendee says the bot left. If it doesn't within a few
- *   minutes, `live.watch` stops the execution in Azure (`stopBot`).
+ * - **Leaving**: a `leave` command (after the goodbye chat); the container exits once Attendee says the bot left
+ *   (meetbot/shim/core.mjs leaves the call itself if told to stop first). If it doesn't exit within a few minutes,
+ *   `live.watch` stops the execution in Azure (`stopBot`). A container that crashes before getting in is noticed by
+ *   `live.watch` too (`executionStatus`, or no word from it within 6 minutes) and its session failed.
  *
  * Configured by: `SIDEKICK_MEETBOT_JOB`, `AZURE_SUBSCRIPTION_ID`, `SIDEKICK_MEETBOT_IMAGE`, `SIDEKICK_MEETBOT_SECRET`
  * and the app's managed identity (launcher.ts). Who may call: lib/live-meetings/provider.ts `providerById("attendee")`.

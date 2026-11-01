@@ -270,7 +270,10 @@ A guest is seen when:
 asked or called on** (also: chat only, or also after a pause of 2–30 s); **asks its own questions** on.
 
 **Running list** of decisions and action items: Claude feature `live`, updated every 12 lines. "Sidekick, recap"
-reads it back.
+reads it back, who and when in brackets ("1. Update the runbook (Cody Scott, by Wednesday)"). The reply to Sidekick's
+own question ("by when…?" → "By Wednesday.") goes on that item at once, without waiting for the next update: the
+question saves the item (`live_sessions.awaiting`), and the next short line within 3 minutes that names a when, or
+an owner ("I'll take it", one person heard in the meeting), fills it in (`rules.ts applyReply`).
 
 ### Stopping, notes, limits
 
@@ -281,6 +284,17 @@ reads it back.
 - it has been there 4 hours;
 - nobody admits it from the lobby within 15 minutes;
 - the kill switch is used.
+
+**Leaving cleanly** (fixed after the first trial, Nov 1 2026, where a frozen "Sidekick" tile stayed in Teams and the
+goodbye was never said): the session's command fetch says "stop" only 3 s after the session ended, so the goodbye and
+the leave command queued while ending it reach the bot first; and the shim, before its container exits, posts any
+goodbye still waiting, asks Attendee to leave and waits up to 20 s for Attendee to say the bot is out.
+
+**A bot that never gets in:** `live.watch` fails a joining session whose job execution already ended or failed in
+Azure (`GET …/executions/{name}`), or whose container hasn't reached Sidekick (`bot_seen_at`: any event or command
+fetch) 6 minutes after it was started. It posts "I couldn't join the meeting: …" in the meeting chat through
+Sidekick's Teams bot, else in the group's notes chat, so nobody waits and joining again works at once (before, such a
+session stayed "joining" and blocked rejoining until someone pressed Stop).
 
 **Notes afterwards:** written exactly once. The Teams transcript claims the session if one exists; otherwise the
 live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.handoff`).
@@ -312,8 +326,9 @@ live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.hand
   - It forwards Attendee's events to `/api/live/events/attendee`, signed with the session's own key: an HMAC of the
     session id with `SIDEKICK_MEETBOT_SECRET`, so a container can only act for its own meeting.
   - It long-polls `/api/live/bot/commands` for chat, speak, hand, hearing and leave.
-  - It exits with the meeting.
+  - It exits with the meeting, after leaving the call (above: "Leaving cleanly").
   - If a container doesn't exit within 3 minutes of the end, `live.watch` stops the execution in Azure.
+  - If it crashes before it gets in, `live.watch` fails the session (above: "A bot that never gets in").
 - **Hearing:**
   - Teams live captions first: free, and Microsoft transcribes inside Teams.
   - Automatic fallback to **Azure AI Speech speech-to-text** in our subscription when captions can't be turned on, or
@@ -383,7 +398,8 @@ Cody asked on the first trial for the crystal ball instead of initials, then whe
 - **Azure budget** `sidekick-meetbot-monthly` on the resources tagged `sidekick-meetbot=1`, emailing at 50/80/100%.
   **Azure budgets only warn and never stop anything**; the app's cap is what stops spending.
 - **Setup:** `infra/azure/meetbot-setup.sh`, idempotent az CLI. It only runs with `CONFIRM=yes`. Runbook:
-  docs/RUNBOOKS.md → "Meeting bot".
+  docs/RUNBOOKS.md → "Meeting bot". Its budget step (`meetbot-budget.sh`) keeps an existing budget's start date,
+  since Azure refuses to change it (a second run in a new month failed with "Start date of budgets cannot be updated").
 
 ### First live trial (stage 2, after Cody's OK and a time)
 Cody's plan (Oct 31): create the bot, do all the testing and capture the footage, then pause it until the first

@@ -1,8 +1,8 @@
 /**
  * Features (/features): everything Sidekick does, grouped by where people meet it (in Teams, live in Teams
- * meetings, in the portal, for admins), in plain language, with a real chat shot, the portal's Ask page on a
- * laptop (components/product-shot.tsx) and an example meeting drawn in HTML with the real crystal ball
- * (components/meeting-demo.tsx). Public and static. Each claim matches a shipped feature described in the
+ * meetings, in the portal, for admins), in plain language, with an example group chat drawn in HTML
+ * (components/chat-demo.tsx), the portal's Ask page on a laptop (components/product-shot.tsx) and an example
+ * meeting drawn in HTML with the real crystal ball (components/meeting-demo.tsx). Public and static. Each claim matches a shipped feature described in the
  * guides (docs/guide/), which the cards link to.
  */
 import Link from "next/link";
@@ -11,6 +11,7 @@ import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
 import { ProductShot } from "@/components/product-shot";
 import { MeetingDemo } from "@/components/meeting-demo";
+import { ChatDemo } from "@/components/chat-demo";
 import { pageMetadata } from "@/lib/site";
 import { BRAND } from "@/lib/brand";
 
@@ -36,7 +37,7 @@ const GROUPS: { id: string; title: string; lead: string; badge?: string; items: 
     badge: "Available on Enterprise",
     lead: `${BRAND.name} can join a Teams meeting as a member of the call. It listens, reads the meeting chat, knows everything in the client's group, and helps like a teammate who did the reading.`,
     items: [
-      { icon: "answer", title: "Ask it, out loud or in the chat", text: `Say or type "${BRAND.name}, …" and it answers from the group's documents, past meetings and connected tools.`, points: ["A short spoken answer, the full one in the chat", "Every answer lists its sources", "Its crystal ball swirls while it thinks and sparkles while it speaks"] },
+      { icon: "answer", title: "Ask it, out loud or in the chat", text: `Say or type "${BRAND.name}, …" and it answers from the group's documents, past meetings and connected tools.`, points: ["A short spoken answer, the full one in the chat", "Every answer lists its sources", "Shows in the call as a moving crystal ball"] },
       { icon: "people", title: "Raises its hand", text: `When someone asks the room and nobody knows, and ${BRAND.name} is sure of the answer, it raises its hand and waits to be called on.`, points: ["\"Go ahead, Sidekick\" and it answers", "Never talks over anyone", "Stays quiet when it isn't sure"] },
       { icon: "notes", title: "Keeps the list as you talk", text: "It notes decisions and action items during the meeting, and asks once when an action item has no owner or date.", points: ["\"Quick check: by when should Lou do this?\"", "\"Sidekick, recap\" reads the list back", "The notes follow in the group's chat afterwards"] },
       { icon: "shield", title: "Polite, and in your control", text: `Let it in from the lobby; say "${BRAND.name}, leave" and it says goodbye and goes. Client guests in the call only get shareable material.`, points: ["The meeting audio stays in Sidekick's own Azure", "Team Leads choose when it joins and whether it speaks", "Everything is in the audit log"] },
@@ -79,10 +80,10 @@ export default function FeaturesPage() {
             <h2 id={`f-${g.id}`}>{g.title} {g.badge && <span className="site-badge-ent" style={{ verticalAlign: "middle" }}>{g.badge}</span>}</h2>
             <p className="site-lead">{g.lead}</p>
             {g.id === "teams" ? (
-              <div className="site-grid two" style={{ alignItems: "start" }}>
-                <div className="site-grid two">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>
-                <ProductShot name="chat-answer" frame="window" alt={`A team chat where someone asks ${BRAND.name} when the wave 2 cutover is; ${BRAND.name} answers with the date, store count and rollback owner, and lists five sources from meetings and documents.`} caption="Made-up example data." />
-              </div>
+              <>
+                <ChatDemo caption="An example group chat with made-up client content." />
+                <div className="site-cards-row">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>
+              </>
             ) : g.id === "live" ? (
               <>
                 <div style={{ marginBottom: 28 }}><MeetingDemo caption="An example meeting with made-up client content." /></div>

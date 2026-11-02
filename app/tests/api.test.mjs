@@ -710,7 +710,7 @@ test(`[${ENGINE}] website: every public page answers without a session; the port
   // Pictures: served by the app itself without a session, sized (no layout shift), lazy below the fold, with alt text.
   const home = (await client()("GET", "/")).body;
   const imgs = [...home.matchAll(/<img [^>]*>/g)].map((m) => m[0]);
-  assert.ok(imgs.length >= 3, "home shows product shots");
+  assert.ok(imgs.length >= 1, "home shows the portal on a laptop");
   for (const img of imgs) {
     assert.match(img, /src="\/site\/[\w-]+\.webp"/, img);
     assert.match(img, / width="\d+"/, img);
@@ -740,6 +740,8 @@ test(`[${ENGINE}] website: every public page answers without a session; the port
     assert.equal((body.match(/class="meet-tile/g) ?? []).length, 4, `${p}: Sidekick is one of four people in the call`);
     assert.doesNotMatch(body, /<video /, `${p} downloads no video`);
   }
+  // The Teams chat is an example conversation drawn in HTML too (answer with sources, notes card, reminder).
+  for (const [p, body] of [["/", home], ["/features", features]]) assert.match(body, /class="chat-demo"/, `${p} shows the example group chat`);
   for (const p of ["/", "/how-it-works", "/pricing"]) assert.doesNotMatch((await client()("GET", p)).body, /coming soon/i, `${p}: live meetings are available`);
   assert.match(home, /Available on Enterprise/);
   assert.match(features, /id="f-live"/, "Features has a live meetings section");

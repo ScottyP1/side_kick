@@ -421,6 +421,6 @@ body:has(> .site){margin:0}
 @keyframes meet-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes meet-pop{from{transform:scale(.6)}to{transform:none}}
 @media (prefers-reduced-motion: reduce){.meet-msg,.meet-hand{animation:none}}
-@media (max-width:720px){.meet-demo{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;height:auto}.meet-grid{height:300px}.meet-chat{height:280px}}
+@media (max-width:720px){.meet-caption{display:none}.meet-demo{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;height:auto}.meet-grid{height:300px}.meet-chat{height:280px}}
 .site-live-stack{display:grid;gap:28px}
 .site-live-stack .site-checks{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));column-gap:28px}

@@ -1,8 +1,10 @@
 /**
  * Website home (/) for visitors: what Sidekick is in one screen with an illustration (components/site-art.tsx),
- * "every meeting, remembered", what it does, real product shots in frames (chat, phone, the portal on a laptop;
- * components/product-shot.tsx), who it's for, placeholders where customer quotes and logos will go (clearly marked, nothing made up),
- * and Get started / Sign in. Public, static, no JavaScript of its own.
+ * the headline feature, Sidekick live in Teams meetings (real, edited clips of the meeting bot with its moving
+ * crystal ball: components/live-clip.tsx, the only script on the page, which plays the clips once they scroll into
+ * view), "every meeting, remembered", what it does, real product shots in frames (chat, phone, the portal on a
+ * laptop; components/product-shot.tsx), who it's for, placeholders where customer quotes and logos will go
+ * (clearly marked, nothing made up), and Get started / Sign in. Public and static.
  *
  * Signed-in people never see this page: src/proxy.ts sends anyone with a portal session cookie from / to
  * their portal home at /home (docs/ARCHITECTURE.md → Routes).
@@ -12,6 +14,7 @@ import type { Metadata } from "next";
 import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
 import { ProductShot } from "@/components/product-shot";
+import { LiveClip } from "@/components/live-clip";
 import { HeroArt, RememberArt } from "@/components/site-art";
 import { TRIAL_DAYS } from "@/lib/plans";
 import { pageMetadata } from "@/lib/site";
@@ -41,8 +44,8 @@ export default function HomePage() {
             </p>
             <p className="site-hero-sub">A fast, reliable teammate in Teams chats, channels and 1:1. Answers with sources. A wall around every client.</p>
             <ul className="site-hero-badges" aria-label="What's new and coming">
+              <li><span className="site-badge">New · Enterprise</span> <a href="#live-title">{BRAND.name} live in your Teams meetings</a></li>
               <li><span className="site-badge">New</span> Automatic notes after every Teams meeting</li>
-              <li><span className="site-badge">Enterprise · coming soon</span> {BRAND.name} live in your meetings</li>
             </ul>
             <div className="site-hero-cta">
               <Link className="btn primary" href="/signup">Get started</Link>
@@ -55,7 +58,30 @@ export default function HomePage() {
         </section>
       </div>
 
-      <section className="site-section" aria-labelledby="mem-title">
+      <section className="site-section" aria-labelledby="live-title">
+        <div className="site-wrap">
+          <span className="site-eyebrow">Live in your meetings</span>
+          <h2 id="live-title">{BRAND.name} joins the call and answers, with sources</h2>
+          <p className="site-lead">Ask a question out loud or in the meeting chat. {BRAND.name} thinks, then answers from that client&apos;s documents and past meetings, and shows where the answer came from. <span className="site-badge-ent">Available on Enterprise</span></p>
+          <div className="site-live">
+            <LiveClip name="clip-live-ask" alt={`A Teams meeting: someone types "Sidekick, when is the wave 2 cutover?" in the meeting chat, ${BRAND.name}'s crystal ball swirls while it thinks, then its answer arrives in the chat with the date and its sources.`} caption="A real Teams meeting, not sped up. Made-up client content." />
+            <ul className="site-checks">
+              <li><span><b>Hears the question</b>, said or typed: &quot;{BRAND.name}, when is the wave 2 cutover?&quot;</span></li>
+              <li><span><b>Raises its hand</b> when the room asks something nobody answers, and waits to be called on.</span></li>
+              <li><span><b>Answers out loud and in the chat</b>, with the documents and meetings it used.</span></li>
+              <li><span><b>Asks its own questions</b>, like who owns an action item and by when.</span></li>
+              <li><span><b>Recaps and leaves</b> when asked. The notes follow in the group&apos;s chat.</span></li>
+            </ul>
+          </div>
+          <div className="site-live-pair">
+            <LiveClip name="clip-live-hand" alt={`Someone asks the room what could make the wave 2 cutover slip again. ${BRAND.name}'s crystal ball swirls, then it posts a raised hand: "I can help with that. Say go ahead, Sidekick."`} caption="Nobody knows? It raises its hand." />
+            <LiveClip name="clip-live-speak" alt={`Someone says "Go ahead, Sidekick". ${BRAND.name}'s crystal ball sparkles while it answers out loud, and the full answer with its sources appears in the meeting chat.`} caption="Called on, it answers out loud and in the chat." />
+          </div>
+          <p style={{ margin: "20px 0 0" }}><Link href="/features#f-live">More about live meetings →</Link> The meeting audio stays in {BRAND.name}&apos;s own Azure.</p>
+        </div>
+      </section>
+
+      <section className="site-section alt" aria-labelledby="mem-title">
         <div className="site-wrap site-grid two" style={{ alignItems: "center" }}>
           <RememberArt />
           <div>
@@ -65,13 +91,13 @@ export default function HomePage() {
             <ul className="site-checks">
               <li><span><span className="site-badge-now">Today</span> Automatic notes, decisions and action items after every Teams meeting</span></li>
               <li><span><span className="site-badge-now">Today</span> Save decisions to the group&apos;s knowledge, right from the notes card</span></li>
-              <li><span><span className="site-badge-soon">Enterprise · coming soon</span> {BRAND.name} live in your meetings</span></li>
+              <li><span><span className="site-badge-ent">Enterprise</span> {BRAND.name} live in your meetings: answers, a raised hand, a running list</span></li>
             </ul>
           </div>
         </div>
       </section>
 
-      <section className="site-section alt" aria-labelledby="what-title">
+      <section className="site-section" aria-labelledby="what-title">
         <div className="site-wrap">
           <span className="site-eyebrow">What it does</span>
           <h2 id="what-title">Less hunting for answers, fewer dropped balls</h2>
@@ -89,7 +115,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="site-section" aria-labelledby="see-title">
+      <section className="site-section alt" aria-labelledby="see-title">
         <div className="site-wrap">
           <span className="site-eyebrow">See it at work</span>
           <h2 id="see-title">Right in your team&apos;s Teams chat</h2>

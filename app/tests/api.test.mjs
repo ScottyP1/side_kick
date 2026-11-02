@@ -732,6 +732,29 @@ test(`[${ENGINE}] website: every public page answers without a session; the port
   assert.match(how, /src="\/site\/portal-meetings-auto\.webp"/, "and meetings captured from Teams");
   const features = (await client()("GET", "/features")).body;
   for (const f of ["portal-meeting", "portal-attention", "portal-connectors"]) assert.match(features, new RegExp(`src="/site/${f}\\.webp"`), `Features shows ${f}`);
+  // Live meetings are the headline: real clips (silent, lazy: nothing downloads before they're in view, with a
+  // poster that holds the space), on Enterprise, no longer "coming soon".
+  const videos = [...home.matchAll(/<video [^>]*>[\s\S]*?<\/video>/g)].map((m) => m[0]);
+  assert.ok(videos.length >= 3, "home shows the live meeting clips");
+  for (const v of videos) {
+    assert.match(v, /preload="none"/, v);
+    assert.match(v, /poster="\/site\/clip-live-[\w-]+-poster\.webp"/, v);
+    assert.match(v, / width="\d+"/, v);
+    assert.match(v, / aria-label="[^"]{20,}"/, v);
+    assert.match(v, /<source src="\/site\/clip-live-[\w-]+\.webm" type="video\/webm"[\s\S]*<source src="\/site\/clip-live-[\w-]+\.mp4" type="video\/mp4"/, v);
+  }
+  for (const p of ["/", "/how-it-works", "/pricing"]) assert.doesNotMatch((await client()("GET", p)).body, /coming soon/i, `${p}: live meetings are available`);
+  assert.match(home, /Available on Enterprise/);
+  assert.match(features, /id="f-live"/, "Features has a live meetings section");
+  assert.match(features, /src="\/site\/live-own-question\.webp"/);
+  assert.match(how, /src="\/site\/live-hand\.webp"/, "How it works walks through a live meeting");
+  assert.match((await client()("GET", "/faq")).body, /id="live-meetings"/);
+  for (const [f, type, max] of [["clip-live-ask.webm", "video/webm", 900_000], ["clip-live-ask.mp4", "video/mp4", 900_000], ["clip-live-hand.webm", "video/webm", 900_000], ["clip-live-speak.mp4", "video/mp4", 900_000], ["clip-live-ask-poster.webp", "image/webp", 80_000], ["live-recap.webp", "image/webp", 120_000]]) {
+    const r = await fetch(`${BASE}/site/${f}`, { redirect: "manual" });
+    assert.equal(r.status, 200, f);
+    assert.equal(r.headers.get("content-type"), type, f);
+    assert.ok((await r.arrayBuffer()).byteLength < max, `${f} stays small`);
+  }
   const sec = (await client()("GET", "/security")).body;
   assert.match(sec, /class="site-walls"/, "Security shows the walls diagram");
   assert.match(sec, /pending legal review/, "the AI-training pillar is marked for legal review");

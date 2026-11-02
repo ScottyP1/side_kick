@@ -50,6 +50,16 @@ export const FAQ: readonly FaqItem[] = [
     guide: "/docs/meetings",
   },
   {
+    id: "live-meetings",
+    q: `Can ${BRAND.name} join a meeting live?`,
+    a: [
+      `Yes, on the Enterprise plan. ${BRAND.name} joins the Teams meeting as a member of the call. When it hears a question for it, said or typed ("${BRAND.name}, when is the cutover?"), it answers out loud and puts the full answer with its sources in the meeting chat. When someone asks the room and nobody knows, it raises its hand and waits to be called on. It also asks its own questions, like who owns an action item and by when, reads back the decisions and action items when you say "${BRAND.name}, recap", and leaves politely when you say "${BRAND.name}, leave". The notes follow in the group's chat.`,
+      `Someone in the meeting lets it in from the lobby, and Team Leads choose when it joins and whether it speaks. It runs in ${BRAND.name}'s own Azure only while the meeting is on, so the meeting audio isn't sent to any other company.`,
+    ],
+    topics: ["how-it-works", "security"],
+    guide: "/docs/meetings#sidekick-live-in-meetings-enterprise",
+  },
+  {
     id: "every-chat",
     q: `Does ${BRAND.name} read every Teams chat?`,
     a: [

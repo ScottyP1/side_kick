@@ -24,8 +24,10 @@
  *   minutes in the lobby, and leaves when the feature is paused or no longer in the plan. At most 60 answers a meeting.
  * - **Afterwards** (`handoffLive`, 30 minutes after the end): the Teams transcript, if one arrived, already claimed
  *   the session (lib/live-meetings/claims.ts) and writes the notes; otherwise the live lines become the meeting
- *   (`meetings.source = 'teams-live'`) and the usual `meetings.notes` job writes and posts the notes. Either way, one
- *   set of notes, and the live lines are deleted.
+ *   (`meetings.source = 'teams-live'`, dated in the group's time zone) and the usual `meetings.notes` job writes and
+ *   posts the notes. Either way, one set of notes, which also get the running list (its owners and dates) and
+ *   Sidekick's own answers in the meeting (kept as `sidekick` live lines, `noteAnswerLine`); the live lines are then
+ *   deleted.
  * - **Never silent**: a failed join, a failed chat post or a provider failure is saved on the session (`error`) and
  *   shown on the group page and the Owner Console's Live meetings page; every join and leave is audited; every step
  *   is a trace span (kind `live`, counts and times only).
@@ -63,6 +65,8 @@ import { botKey, executionStatus } from "./launcher";
 import { noteCamera, noteSpeaking, noteThinking } from "./orb";
 import { cameraFor } from "./camera";
 import { sameKey } from "./signature";
+import { liveContext } from "./claims";
+import { meetingDay } from "../reminders";
 import {
   answerText, BOT_NAME, confident, GUEST_NOTICE, HAND_NOTE, introText, isNonAnswer, isRoomQuestion, isTeamsMeetingUrl, liveMinutes, LIVE_MODES,
   LOBBY_TIMEOUT_MS, looksExternal, MAX_ANSWERS, MAX_SESSION_MS, meetingThreadFromUrl, ownQuestion, parseSettings, parseTrigger, recapText, spokenText,
@@ -104,7 +108,7 @@ export type LiveSession = {
 };
 
 /** What Sidekick has its hand up for: the chat text (full answer with sources), the short spoken version, the card. */
-type Pending = { kind: "answer" | "own"; question: string; chat: string; spoken: string; card?: unknown; raisedAt: string; item?: ListItem };
+type Pending = { kind: "answer" | "own"; question: string; chat: string; spoken: string; card?: unknown; raisedAt: string; item?: ListItem; answer?: string };
 
 /** Said when this copy of Sidekick has no meeting-bot provider configured. */
 export const NOT_SET_UP = `Live meetings aren't set up on this ${BRAND.name} yet (the meeting-bot service). The ${BRAND.name} team turns them on.`;
@@ -678,7 +682,7 @@ const parseNames = (json: string | null): string[] => {
 
 /** The people heard so far in this meeting (to tell a question to the room from one to a person by name). */
 async function meetingPeople(orgId: string, id: string): Promise<string[]> {
-  return (await all<{ speaker: string }>("SELECT DISTINCT speaker FROM live_lines WHERE org_id = ? AND session_id = ? AND speaker IS NOT NULL LIMIT 50", orgId, id)).map((r) => r.speaker);
+  return (await all<{ speaker: string }>("SELECT DISTINCT speaker FROM live_lines WHERE org_id = ? AND session_id = ? AND speaker IS NOT NULL AND source <> 'sidekick' LIMIT 50", orgId, id)).map((r) => r.speaker);
 }
 
 /** Records how this minute of the meeting was heard (cost meter): 'both' when it switched within the minute. */
@@ -747,13 +751,52 @@ export async function takeCommands(sessionId: string, token: string, waitMs: num
 /* Answering in the meeting                                            */
 /* ------------------------------------------------------------------ */
 
+/** One live line as a transcript line: "Ana (chat): …", or Sidekick's own answer ("Sidekick (answer to “…”): …"). */
+function lineText(l: { speaker: string | null; text: string; source: string }): string {
+  if (l.source === "sidekick") {
+    try {
+      const a = JSON.parse(l.text) as { question: string; answer: string };
+      return `${BOT_NAME} (answer to “${a.question}”): ${a.answer}`;
+    } catch {
+      return `${BOT_NAME}: ${l.text}`;
+    }
+  }
+  return `${l.speaker ?? "Someone"}${l.source === "chat" ? " (chat)" : ""}: ${l.text}`;
+}
+
+/**
+ * Keeps one of Sidekick's own answers in the meeting as a live line (source `sidekick`, speaker Sidekick, the question
+ * and answer as JSON), so the notes count it as meeting content, marked as Sidekick's (claims.ts `liveContext`), and
+ * "what did Sidekick just say?" works. It doesn't count as talk (not in `line_count`, the running list, who was heard,
+ * or "someone answered the room"). Only answers that found something; deleted with the other live lines. Never throws.
+ */
+async function noteAnswerLine(orgId: string, id: string, question: string, answer: string) {
+  if (!answer.trim()) return;
+  // The answer is already in the meeting: a failure here is logged, never turned into an apology in the chat.
+  await run("INSERT INTO live_lines (id, org_id, session_id, speaker, text, said_at, source) VALUES (?, ?, ?, ?, ?, ?, 'sidekick')",
+    newId(), orgId, id, BOT_NAME, JSON.stringify({ question: question.slice(0, 500), answer: answer.slice(0, 3000) }), now())
+    .catch((e) => console.error("Couldn't keep Sidekick's meeting answer for the notes", e));
+}
+
+/**
+ * Sidekick's Teams bot answered a question typed in a meeting chat (lib/teams/bot.ts): when Sidekick is in that meeting
+ * live (a running session with that meeting chat), the answer is kept like its other answers (`noteAnswerLine`). Never
+ * throws (the answer was already sent; a failure is logged).
+ */
+export async function noteOwnAnswer(orgId: string, chatId: string, question: string, answer: string, found: boolean): Promise<void> {
+  if (!found) return;
+  const s = await get<{ id: string }>("SELECT id FROM live_sessions WHERE org_id = ? AND thread_id = ? AND status = 'live' ORDER BY created_at DESC LIMIT 1", orgId, chatId)
+    .catch((e) => void console.error("Couldn't look up the live meeting for Sidekick's answer", e));
+  if (s) await noteAnswerLine(orgId, s.id, question, answer);
+}
+
 /** This meeting so far (its latest lines) as a source for answers, so "what did Ana just say?" works. */
 async function meetingSoFar(orgId: string, s: LiveSession) {
   const lines = await all<{ speaker: string | null; text: string; said_at: string; source: string }>(
     "SELECT speaker, text, said_at, source FROM live_lines WHERE org_id = ? AND session_id = ? ORDER BY said_at DESC, id DESC LIMIT 80", orgId, s.id,
   );
   if (!lines.length) return [];
-  const text = lines.reverse().map((l) => `[${l.said_at.slice(11, 19)}] ${l.speaker ?? "Someone"}${l.source === "chat" ? " (chat)" : ""}: ${l.text}`).join("\n");
+  const text = lines.reverse().map((l) => `[${l.said_at.slice(11, 19)}] ${lineText(l)}`).join("\n");
   return [{ title: `This meeting so far (${s.title ?? "Teams meeting"})`, loc: "live", text: text.slice(-12_000), sourceType: "meeting", sourceId: `live:${s.id}`, date: (s.joined_at ?? s.created_at).slice(0, 10) }];
 }
 
@@ -860,6 +903,7 @@ export async function answerLive(orgId: string, id: string, speaker: string | nu
     const { text, card } = chatAnswer(s, question, result, group);
     await span("live", "Post the answer in the meeting", () => postToMeeting(s, text, card), { sources: result.sources.length, found: result.found });
     timing.chatMs = Date.now() - heardAt;
+    if (result.found && !result.blocked) await noteAnswerLine(orgId, id, question, result.answer);
   } catch (e) {
     console.error("Live meeting answer failed", e);
     traceFailed(e instanceof HttpError ? e.status : 500, e instanceof Error ? e.message : String(e), undefined, { refusal: e instanceof FeatureOffError });
@@ -884,7 +928,7 @@ export async function roomQuestion(orgId: string, id: string, speaker: string | 
   await sleep(ROOM_WAIT_MS);
   const s = await sessionById(orgId, id);
   if (!s || s.status !== "live" || s.quiet === 1 || s.hand) return;
-  const after = await all<{ speaker: string | null; text: string }>("SELECT speaker, text FROM live_lines WHERE org_id = ? AND session_id = ? AND said_at > ? ORDER BY said_at", orgId, id, saidAt);
+  const after = await all<{ speaker: string | null; text: string }>("SELECT speaker, text FROM live_lines WHERE org_id = ? AND session_id = ? AND said_at > ? AND source <> 'sidekick' ORDER BY said_at", orgId, id, saidAt);
   // Someone else answered (a statement of a few words that isn't "not sure" or another question): stay out of it.
   if (after.some((l) => l.speaker !== speaker && !isNonAnswer(l.text) && !parseTrigger(l.text) && !isRoomQuestion(l.text) && l.text.split(" ").length >= 3)) {
     spanAttrs({ room: "answered by someone" });
@@ -901,11 +945,11 @@ export async function roomQuestion(orgId: string, id: string, speaker: string | 
   const group = await groupName(orgId, s.workspace_id);
   const { text, card } = chatAnswer(s, question, result, group);
   if (settings.voice === "off") {
-    await postToMeeting(s, text, card).catch((e) => noteError(orgId, id, e));
+    await postToMeeting(s, text, card).then(() => noteAnswerLine(orgId, id, question, result.answer), (e) => noteError(orgId, id, e));
     spanAttrs({ room: "answered in the chat" });
     return;
   }
-  const pending: Pending = { kind: "answer", question, chat: text, spoken: spokenText(result.answer), card, raisedAt: now() };
+  const pending: Pending = { kind: "answer", question, chat: text, spoken: spokenText(result.answer), card, raisedAt: now(), answer: result.answer };
   if (!(await putHandUp(s, pending))) return;
   spanAttrs({ room: "hand raised" });
   if (settings.voice === "auto" && (await waitForSilence(orgId, id, settings.pauseS * 1000, HAND_MS))) await deliverPending(orgId, id, "pause");
@@ -942,7 +986,8 @@ export async function deliverPending(orgId: string, id: string, how: "called" | 
   if (how !== "expired" && canSpeak(s, settings, sessionProvider(s))) await speakNow(s, p.spoken);
   const intro = how === "expired" ? (p.kind === "own" ? "" : "In case it helps (I had my hand up):\n") : "";
   const card = p.kind === "answer" && how !== "expired" ? (p.card as ReturnType<typeof noticeCard>) : undefined;
-  await span("live", p.kind === "own" ? "Ask in the meeting" : "Post the answer in the meeting", () => postToMeeting(s, `${intro}${p.chat}`, card)).catch((e) => noteError(orgId, id, e));
+  await span("live", p.kind === "own" ? "Ask in the meeting" : "Post the answer in the meeting", () => postToMeeting(s, `${intro}${p.chat}`, card))
+    .then(() => (p.kind === "answer" && p.answer ? noteAnswerLine(orgId, id, p.question, p.answer) : undefined), (e) => noteError(orgId, id, e));
   spanAttrs({ delivered: how, kind: p.kind });
 }
 
@@ -980,7 +1025,7 @@ export async function extractLive(orgId: string, id: string): Promise<{ decision
   const s = await sessionById(orgId, id);
   if (!s || s.status !== "live") return { decisions: 0, actions: 0 };
   const lines = await all<{ speaker: string | null; text: string; said_at: string; source: string }>(
-    "SELECT speaker, text, said_at, source FROM live_lines WHERE org_id = ? AND session_id = ? ORDER BY said_at, id", orgId, id,
+    "SELECT speaker, text, said_at, source FROM live_lines WHERE org_id = ? AND session_id = ? AND source <> 'sidekick' ORDER BY said_at, id", orgId, id,
   );
   let transcript = lines.map((l) => `[${l.said_at.slice(11, 16)}] ${tagSafe(l.speaker ?? "Someone")}${l.source === "chat" ? " (chat)" : ""}: ${tagSafe(l.text)}`).join("\n");
   if (transcript.length > 40_000) transcript = transcript.slice(transcript.length - 40_000).replace(/^[^\n]*\n/, "");
@@ -1080,14 +1125,15 @@ export async function handoffLive(orgId: string, id: string): Promise<{ captured
     await dropLines();
     return { captured: 0 };
   }
-  const lines = await all<{ speaker: string | null; text: string; source: string }>("SELECT speaker, text, source FROM live_lines WHERE org_id = ? AND session_id = ? ORDER BY said_at, id", orgId, id);
+  // What people said (Sidekick's own answers go to the notes separately, marked as its own: claims.ts liveContext).
+  const lines = await all<{ speaker: string | null; text: string; source: string }>("SELECT speaker, text, source FROM live_lines WHERE org_id = ? AND session_id = ? AND source <> 'sidekick' ORDER BY said_at, id", orgId, id);
   const claim = await run("UPDATE live_sessions SET handoff = ?, updated_at = ? WHERE id = ? AND org_id = ? AND handoff IS NULL", lines.length ? "live" : "none", now(), id, orgId);
   if (!claim.changes || !lines.length) {
     await dropLines();
     return { captured: 0 };
   }
   const title = s.title ?? "Teams meeting";
-  const transcript = lines.map((l) => `${l.speaker ?? "Someone"}${l.source === "chat" ? " (chat)" : ""}: ${l.text}`).join("\n");
+  const transcript = lines.map(lineText).join("\n");
   const minutes = Math.max(1, Math.round(liveMinutes(s.joined_at, s.ended_at)));
   const refuse = async (reason: string) => {
     await run("UPDATE live_sessions SET error = ?, updated_at = ? WHERE id = ? AND org_id = ?", reason, now(), id, orgId);
@@ -1106,10 +1152,14 @@ export async function handoffLive(orgId: string, id: string): Promise<{ captured
     throw e;
   }
   const meetingId = newId();
+  // The running list (owners and dates heard live) and Sidekick's own answers go with it to the notes.
+  const context = await liveContext(orgId, [id]);
+  // The meeting's day where the group is (8 pm in New York on Nov 1 is Nov 2 in UTC: first live trial, Nov 1 2026).
+  const heldAt = await meetingDay(orgId, s.workspace_id, s.thread_id, s.joined_at ?? s.created_at);
   await run(
-    `INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at, duration_min, source)
-     VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?, ?, 'teams-live')`,
-    meetingId, orgId, s.workspace_id, title, (s.joined_at ?? s.created_at).slice(0, 10), s.guests, transcript, BOT_NAME, now(), minutes,
+    `INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at, duration_min, source, live_context)
+     VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?, ?, 'teams-live', ?)`,
+    meetingId, orgId, s.workspace_id, title, heldAt, s.guests, transcript, BOT_NAME, now(), minutes, context ? JSON.stringify(context) : null,
   );
   await run("UPDATE live_sessions SET notes_meeting_id = ?, updated_at = ? WHERE id = ? AND org_id = ?", meetingId, now(), id, orgId);
   await auditAsSidekick(orgId, `Captured the live Teams meeting “${title}” (${minutes} min)`, "Data", s.workspace_id);

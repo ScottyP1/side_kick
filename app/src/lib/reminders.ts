@@ -89,6 +89,29 @@ export async function getChatSettings(conv: Pick<TeamsConversation, "id" | "work
 }
 
 /**
+ * The time zone a meeting's notes are dated in (a meeting at 8 pm in New York on Nov 1 is Nov 1, not the UTC Nov 2):
+ * the time zone set on the meeting's own chat when it is one of this group's linked chats, else the one most recently
+ * saved on another of the group's chats, else on any of the organization's chats, else the default
+ * (America/New_York, `DEFAULT_CHAT_SETTINGS`). Used by the meeting-capture paths (lib/meetings-graph.ts,
+ * lib/live-meetings/sessions.ts). Org-scoped.
+ */
+export async function meetingTimeZone(orgId: string, workspaceId: string, chatId: string | null): Promise<string> {
+  const row = await get<{ json: string }>(
+    `SELECT json FROM teams_chat_settings WHERE org_id = ?
+      ORDER BY CASE WHEN conversation_id = ? AND workspace_id = ? THEN 0 WHEN workspace_id = ? THEN 1 ELSE 2 END, updated_at DESC LIMIT 1`,
+    orgId, chatId ?? "", workspaceId, workspaceId,
+  );
+  return parseChatSettings(row?.json).timeZone;
+}
+
+/** The calendar day (YYYY-MM-DD) of the moment `at` (ISO) in the meeting's time zone (`meetingTimeZone`). */
+export async function meetingDay(orgId: string, workspaceId: string, chatId: string | null, at: string): Promise<string> {
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return at.slice(0, 10);
+  return localTime(when, await meetingTimeZone(orgId, workspaceId, chatId)).day;
+}
+
+/**
  * Saves a manager's changes to one linked chat's settings and audits them. The caller checks that `user`
  * may manage the chat's workspace (`managedLinkedChat`). Throws 400 with a reason if a value is wrong.
  * Message tracking can't be turned on in a 1:1 chat (everything there is a question to Sidekick).

@@ -712,6 +712,11 @@ function registerHandlers(app: App) {
               throw e;
             },
           );
+          // A meeting chat Sidekick is in live: the answer counts as meeting content for the notes (marked as its own).
+          if (conv.kind !== "personal" && conv.kind !== "channel") {
+            const { noteOwnAnswer } = await import("../live-meetings/sessions");
+            await noteOwnAnswer(conv.org_id!, conv.id, question, result.answer, result.found && !result.blocked);
+          }
         } catch (e) {
           console.error("Teams ask failed", e);
           // A feature paused or turned off by the Sidekick team is a refusal, not a failure of Sidekick.

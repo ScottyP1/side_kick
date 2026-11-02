@@ -75,9 +75,9 @@ import { assertEnabled, FeatureOffError } from "./owner";
 import { MAX_TRANSCRIPT_CHARS, vttToTranscript } from "./extract";
 import { processMeeting } from "./sidekick";
 import { postMeetingNotes } from "./teams/bot";
-import { remindAfterMeeting } from "./reminders";
+import { meetingDay, remindAfterMeeting } from "./reminders";
 import { BRAND } from "./brand";
-import { claimForGraph } from "./live-meetings/claims";
+import { claimForGraph, graphLiveContext } from "./live-meetings/claims";
 import { isOid, knownPeople, matchGroup, noteDirectory, sameTenant, type DirectoryCache, type Participant } from "./meeting-group";
 
 /** The Graph resource for every scheduled-meeting transcript in a tenant (one subscription per organization). */
@@ -1017,20 +1017,24 @@ export async function fetchTranscript(orgId: string, rowId: string): Promise<{ c
   }
 
   // Sidekick was in this meeting live (lib/live-meetings/claims.ts): only one of the two transcripts writes the notes.
-  if ((await claimForGraph(orgId, call.chatId, call.startedAt)) === "live") return skip("Notes for this meeting were already written from Sidekick's live session.", withGroup);
+  const claim = await claimForGraph(orgId, call.chatId, call.startedAt);
+  if (claim === "live") return skip("Notes for this meeting were already written from Sidekick's live session.", withGroup);
+  // Sidekick was there live but Teams' transcript writes the notes: they still get its running list and own answers.
+  const liveContext = claim === "graph" ? await graphLiveContext(orgId, call.chatId, call.startedAt) : null;
   // A second transcript of the same meeting (transcription stopped and started again) is a part of its own.
   const earlier = Number((await get<{ n: number }>("SELECT COUNT(*) AS n FROM graph_meetings WHERE org_id = ? AND online_meeting_id = ? AND kind = ? AND meeting_id IS NOT NULL", orgId, row.online_meeting_id, row.kind))?.n ?? 0);
   const meetingTitle = earlier ? `${title} (part ${earlier + 1})` : title;
-  const heldAt = (call.startedAt ?? now()).slice(0, 10);
+  // The meeting's day where the group is (not the UTC day: 8 pm in New York is the next day in UTC).
+  const heldAt = await meetingDay(orgId, workspaceId, call.chatId, call.startedAt ?? now());
   // Picked by a person: the meeting's own-tenant people who aren't in that group yet, so the picker can add them.
   const newcomers = row.picked_by ? JSON.stringify(await newcomersFor(orgId, tenant, workspaceId, [call.organizer, ...(await people())], cache)) : null;
   const meetingId = newId();
   const saved = await tx(async () => {
     if (!(await setStatus(row.id, ["queued"], "captured", { ...withGroup, meeting_id: meetingId, reason: null, newcomers }))) return false;
     await run(
-      `INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at, duration_min, source, graph_meeting_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?, ?, 'teams', ?)`,
-      meetingId, orgId, workspaceId, meetingTitle, heldAt, call.guests ? 1 : 0, transcript, "Microsoft Teams", now(), minutes, row.id,
+      `INSERT INTO meetings (id, org_id, workspace_id, title, held_at, external_guests, status, transcript, imported_by, created_at, duration_min, source, graph_meeting_id, live_context)
+       VALUES (?, ?, ?, ?, ?, ?, 'Processing', ?, ?, ?, ?, 'teams', ?, ?)`,
+      meetingId, orgId, workspaceId, meetingTitle, heldAt, call.guests ? 1 : 0, transcript, "Microsoft Teams", now(), minutes, row.id, liveContext,
     );
     return true;
   });

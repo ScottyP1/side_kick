@@ -297,7 +297,14 @@ Sidekick's Teams bot, else in the group's notes chat, so nobody waits and joinin
 session stayed "joining" and blocked rejoining until someone pressed Stop).
 
 **Notes afterwards:** written exactly once. The Teams transcript claims the session if one exists; otherwise the
-live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.handoff`).
+live transcript goes to `meetings.notes` (compare-and-set on `live_sessions.handoff`). Either path saves what
+Sidekick gathered live on the meeting (`meetings.live_context`, lib/live-meetings/claims.ts `liveContext`): the
+running list and Sidekick's own answers (kept as `live_lines` with source `sidekick`, from the meeting bot's answers
+and from the Teams bot's answers typed in the meeting chat; not counted as talk). The notes prompt gets both, marked as
+Sidekick's, and `mergeLiveList` (lib/meeting-notes-rules.ts) fills missing owners and due dates from the list and adds
+list action items the notes left out; `dueFromPhrase` turns "Wednesday" into the date after the meeting day. The
+meeting is dated in the group's time zone (lib/reminders.ts `meetingDay`), not the UTC day (all three found in the
+first live trial, Nov 1 2026).
 
 **Bookkeeping:**
 - Hours count against `liveMeetingHours`.

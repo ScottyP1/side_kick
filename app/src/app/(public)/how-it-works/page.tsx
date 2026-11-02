@@ -3,7 +3,7 @@
  * Six numbered steps alternate left and right; each has an icon, a short headline and line, and a small
  * picture of the screen involved (components/how-mocks.tsx: sign-up form, Microsoft approval, Teams app,
  * group card, chat waiting for a group, Teams answer). Then the setup wizard as a horizontal stepper, meetings
- * (automatic notes, and Sidekick live in a meeting step by step with real edited screenshots), and the setup
+ * (automatic notes, and Sidekick live in a meeting step by step beside an example meeting, components/meeting-demo.tsx), and the setup
  * questions from lib/faq.ts. Public and static; on phones the steps stack.
  */
 import Link from "next/link";
@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { FaqList } from "@/components/faq-list";
 import { AnswerMock, ApproveMock, GroupMock, InstallMock, SignupMock, WaitingChatMock } from "@/components/how-mocks";
 import { ProductShot } from "@/components/product-shot";
+import { MeetingDemo } from "@/components/meeting-demo";
 import { PublicShell } from "@/components/public-shell";
 import { JourneyArt } from "@/components/site-art";
 import { SiteIcon } from "@/components/site-icons";
@@ -113,8 +114,8 @@ export default function HowItWorksPage() {
         <div className="site-wrap">
           <span className="site-eyebrow">Live in a meeting</span>
           <h2 id="live-title">How a meeting with {BRAND.name} goes <span className="site-badge-ent" style={{ verticalAlign: "middle" }}>Available on Enterprise</span></h2>
-          <div className="site-live" style={{ alignItems: "start" }}>
-            <ProductShot name="live-hand" frame="window" alt={`A Teams meeting with ${BRAND.name}'s crystal ball on its video tile. Someone asked the room what could make the wave 2 cutover slip again, and ${BRAND.name} answered in the chat with a raised hand: "I can help with that. Say go ahead, Sidekick, and I'll answer."`} caption="A room question nobody answered: it raises its hand. Made-up client content." />
+          <div className="site-live-stack">
+            <MeetingDemo caption="An example meeting with made-up client content." />
             <ol className="site-checks">
               {LIVE_STEPS.map(([title, text]) => <li key={title}><span><b>{title}.</b> {text}</span></li>)}
             </ol>

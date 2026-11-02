@@ -611,6 +611,9 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_by TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS notes_choice_at TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_posted_to TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS notes_sent_at TEXT;
+-- Sidekick was in the meeting live (lib/live-meetings/claims.ts liveContext): its running list and its own answers, JSON,
+-- read by the notes (lib/sidekick.ts processMeeting).
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS live_context TEXT;
 -- Notes picker polish: how many people a linked chat has (from the Teams roster, checked at most daily) and when.
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS member_count INTEGER;
 ALTER TABLE teams_conversations ADD COLUMN IF NOT EXISTS members_checked_at TEXT;

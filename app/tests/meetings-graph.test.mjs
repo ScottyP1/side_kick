@@ -984,8 +984,10 @@ test(`[${ENGINE}] held date: a meeting held again on a later day shows the day i
   const resource = `communications/onlineMeetings('${w.meetingId}')/transcripts('${w.transcriptId}')`;
   assert.equal((await notify([{ subscriptionId: s.sub.id, clientState: s.sub.clientState, changeType: "created", resource, tenantId: TA }])).status, 202);
   await drain();
-  const heldDay = held.toISOString().slice(0, 10);
-  const scheduledDay = scheduled.toISOString().slice(0, 10);
+  // The day where the group is (no chat has a time zone set here: the default, New York), not the UTC day.
+  const nyDay = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
+  const heldDay = nyDay(held);
+  const scheduledDay = nyDay(scheduled);
   const card = await waitFor(CHAT_W1, /Wave 2 cutover sync/, from);
   assert.ok(card.includes(heldDay), "the card shows the day it was held");
   assert.ok(!card.includes(scheduledDay), "not the first scheduled day");
@@ -2078,6 +2080,9 @@ test(`[${ENGINE}] live: the bot's camera: the ball's state only with the session
   assert.doesNotMatch(html, /W1|Lou Lead|cutover/);
   // Nothing but the ball: Attendee's streamer error box is hidden on this page (first live test, Nov 1).
   assert.match(html, /#attendee-audio-error\{display:none!important\}/);
+  // …and no scrollbar on the bot's video (a white strip at its right edge in the first live trial, Nov 1 2026).
+  assert.match(html, /html,body\{[^}]*overflow:hidden!important/);
+  assert.match(html, /::-webkit-scrollbar\{display:none!important/);
   const sig = crypto.createHmac("sha256", botKeyOf(bot)).update("orb").digest("base64url");
   const orb = (q) => fetch(`${BASE}/api/live/bot/orb?${q}`);
   assert.equal((await orb(`session=${bot}`)).status, 401);
@@ -2253,11 +2258,21 @@ test(`[${ENGINE}] live: a running list of decisions and action items; "Sidekick,
 
 test(`[${ENGINE}] live: when Teams' transcript arrives, it writes the notes; the meeting ending stops Sidekick without a second set`, async () => {
   const bot = s.bot1;
+  // Asked in the meeting chat, Sidekick's Teams bot answers there: that answer is part of the meeting for the notes,
+  // even though Teams' transcript (speech only) doesn't have it (first live trial, Nov 1 2026).
+  const keptAnswers = () => scalar(`SELECT COUNT(*) FROM live_lines WHERE source = 'sidekick' AND session_id = (SELECT id FROM live_sessions WHERE bot_id = '${bot}')`).then(Number);
+  const before = await keptAnswers();
+  const asked = sent.length;
+  await sayTo(LIVE1, "what is the zebracode rollout plan?", MO_TEAMS());
+  await waitFor(LIVE1, /Test answer/, asked);
+  await until(async () => (await keptAnswers()) === before + 1, "the answer kept");
   const t = addMeeting("live1", { organizer: OID.lou, attendees: [OID.mo], chat: LIVE1 });
   assert.equal((await transcriptReady(t)).status, 202);
   await drain();
   assert.equal(await sessionOf(bot, "handoff"), "graph", "the Teams transcript claimed the session");
-  assert.equal((await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.filter((x) => x.title === "Meeting live1").length, 1);
+  const fromTeams = (await mo("GET", `/api/meetings?ws=${s.w1}`)).body.meetings.filter((x) => x.title === "Meeting live1");
+  assert.equal(fromTeams.length, 1);
+  assert.match((await mo("GET", `/api/meetings/${fromTeams[0].id}`)).body.meeting.summary, /Sidekick said: Test answer/, "Sidekick's answer reached the notes");
   // The meeting ends (the provider says so): Sidekick stops; it isn't asked to leave a meeting that's over.
   assert.equal((await botStatus(bot, "ended")).status, 202);
   await waitSession(bot, "status", "ended");
@@ -2396,6 +2411,27 @@ test(`[${ENGINE}] live: quiet mode for one meeting; Sidekick asks its own questi
   assert.equal((BOTS.get(bot).log.join("\n").match(/Quick check: by when should Lou Lead/g) ?? []).length, 2, "asked once (spoken + chat)");
   await say(bot, "Lou Lead", "Sidekick, leave.");
   await waitSession(bot, "status", "ended");
+  // The notes (first live trial, Nov 1 2026): the live list's owner and date carry over ("by Wednesday" was on the
+  // list, the card said "No date"), Sidekick's own answers count as meeting content, and the meeting is dated where
+  // the group is: 8:15 pm in New York on Sunday, Nov 1 is 01:15 UTC on Nov 2.
+  // (Half a minute long, so later tests' live hours stay as they were.)
+  await dbExec(`UPDATE live_sessions SET joined_at = '2026-11-02T01:15:00.000Z', ended_at = '2026-11-02T01:15:30.000Z' WHERE bot_id = '${bot}'`);
+  const kept = `FROM live_lines WHERE source = 'sidekick' AND session_id = (SELECT id FROM live_sessions WHERE bot_id = '${bot}')`;
+  assert.ok(Number(await scalar(`SELECT COUNT(*) ${kept}`)) >= 1, "Sidekick's answers are kept for the notes");
+  assert.equal(await scalar(`SELECT DISTINCT speaker ${kept}`), "Sidekick");
+  await drain();
+  const meetingId = await scalar(`SELECT notes_meeting_id FROM live_sessions WHERE bot_id = '${bot}'`);
+  assert.ok(meetingId, "the live transcript became the meeting");
+  const m = (await mo("GET", `/api/meetings/${meetingId}`)).body;
+  assert.equal(m.meeting.held_at, "2026-11-01", "the day in New York, not the UTC day");
+  assert.match(m.meeting.summary, /Sidekick said: Test answer/, "Sidekick's answer reached the notes");
+  assert.doesNotMatch(m.meeting.transcript, /"question"|answer to/, "its answers aren't mixed into the people's transcript");
+  const runbook = m.actions.find((a) => /update the runbook/i.test(a.text));
+  assert.ok(runbook, JSON.stringify(m.actions));
+  assert.equal(runbook.owner, "Lou Lead");
+  assert.equal(runbook.due, "Wednesday");
+  assert.equal(runbook.due_on, "2026-11-04", "the Wednesday after Sunday, Nov 1");
+  assert.equal(await scalar(`SELECT COUNT(*) ${kept}`), "0", "deleted with the other live lines");
 });
 
 test(`[${ENGINE}] live: the hosted meeting bot (Recall.ai) only when the Org Owner chooses it; it can't raise a hand, so ✋ goes in the chat`, async () => {

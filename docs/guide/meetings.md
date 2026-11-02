@@ -10,7 +10,7 @@ There are two ways meetings get to Sidekick:
 
 On the Enterprise plan Sidekick can also **join a meeting live** and answer questions while it runs: see [Sidekick live in meetings](#sidekick-live-in-meetings-enterprise).
 
-The date on the notes is the day the meeting was **held** (when transcription started), not the day it was first scheduled: a recurring meeting, or one held again on a later day with the same link, shows the right day.
+The date on the notes is the day the meeting was **held** (when transcription started), not the day it was first scheduled: a recurring meeting, or one held again on a later day with the same link, shows the right day. It's the day **where your group is**: the time zone set for the meeting's chat (or another of the group's Teams chats) in its reminder settings, else New York time. So a meeting at 8 pm in New York on Nov 1 is dated Nov 1, not Nov 2 (the date in UTC).
 
 ## Automatic notes after Teams meetings
 
@@ -147,7 +147,7 @@ Sidekick can take part in a Teams meeting as a member called **Sidekick**. It li
 - **It asks too**: when an action item has no owner or date, it asks once ("Quick check: by when should Lou do this?"), the same polite way. The answer ("By Wednesday.", "I'll take it") goes on that item straight away.
 - **Running list** of decisions and action items: "Sidekick, recap" reads it back ("1. Update the runbook (Cody Scott, by Wednesday)"); the group's page shows it during the meeting.
 - **Quiet mode**: "Sidekick, quiet" keeps it to answering in the chat when asked; "Sidekick, you can speak up" undoes it.
-- **Notes afterwards, once**: from Teams' transcript if there is one, otherwise from what Sidekick heard.
+- **Notes afterwards, once**: from Teams' transcript if there is one, otherwise from what Sidekick heard. Either way the notes keep what Sidekick gathered live: the running list's owners and dates carry onto the action items (an item where someone answered "By Wednesday." is due that Wednesday), and Sidekick's own answers in the meeting count as part of the meeting, said as Sidekick's ("Sidekick confirmed the cutover is Thursday, November 12").
 - **Client guests**: when someone from outside your organization is in the meeting, Sidekick says so once and only uses sources marked **Shareable**. It never rates or ranks people.
 
 **Settings** (group's **Teams chats** tab; the Team Lead or an Org Owner/Admin):

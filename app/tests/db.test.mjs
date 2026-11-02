@@ -898,6 +898,53 @@ test(`[${engine}] meeting notes: "review again in two weeks" is a dated action i
   assert.equal(raw.decisions.length, 2, "the input isn't changed");
 });
 
+test(`[${engine}] meeting notes: the live running list's owners and dates carry over; Sidekick's answers go to the notes, marked as its own`, () => {
+  // A due phrase on its own: the next such weekday after the meeting (Sunday, Nov 1 2026), a month and day, today.
+  assert.equal(notesRules.dueFromPhrase("Wednesday", "2026-11-01"), "2026-11-04");
+  assert.equal(notesRules.dueFromPhrase("by Wed.", "2026-11-01"), "2026-11-04");
+  assert.equal(notesRules.dueFromPhrase("Sunday", "2026-11-01"), "2026-11-08", "the same weekday is next week's");
+  assert.equal(notesRules.dueFromPhrase("Nov 12", "2026-11-01"), "2026-11-12");
+  assert.equal(notesRules.dueFromPhrase("12th of November", "2026-11-01"), "2026-11-12");
+  assert.equal(notesRules.dueFromPhrase("Jan 5", "2026-11-01"), "2027-01-05", "early next year");
+  assert.equal(notesRules.dueFromPhrase("EOD", "2026-11-01"), "2026-11-01");
+  for (const unclear of ["next Wednesday", "soon", "Feb 30", "", null]) assert.equal(notesRules.dueFromPhrase(unclear, "2026-11-01"), null, String(unclear));
+  // Only from the due field: an item whose sentence names a day isn't due that day.
+  const plain = notesRules.tidyNotes({ decisions: [], action_items: [{ text: "Review the Friday checklist", owner: "Ana", due: null, due_date: null }] }, "2026-11-01");
+  assert.equal(plain.action_items[0].due_date, null);
+
+  assert.ok(notesRules.sameItem("Update the cutover runbook for wave 2", "update the runbook"));
+  assert.ok(!notesRules.sameItem("Send the load test report", "update the runbook"));
+  const ctx = notesRules.parseLiveContext(JSON.stringify({
+    decisions: [{ text: "Move the cutover to Thursday", who: "Grace Lee" }],
+    actions: [{ text: "update the runbook", who: "Cody Scott", due: "Wednesday" }, { text: "Book the war room", who: "Ana Silva", due: null }],
+    answers: [{ question: "When is the cutover?", answer: "Thursday, November 12 [S1]." }],
+  }));
+  assert.equal(notesRules.parseLiveContext(null), null);
+  assert.equal(notesRules.parseLiveContext("not json"), null);
+  assert.equal(notesRules.parseLiveContext(JSON.stringify({ decisions: [], actions: [], answers: [] })), null, "nothing kept");
+  const block = notesRules.liveContextBlock(ctx);
+  assert.match(block, /<live_running_list>\n- Decision: Move the cutover to Thursday \(Grace Lee\)\n- Action item: update the runbook \(owner: Cody Scott\) \(due: Wednesday\)/);
+  assert.match(block, /<sidekick_answers>\n- Asked: When is the cutover\?\n {2}Sidekick answered: Thursday, November 12/);
+  assert.equal(notesRules.liveContextBlock(null), "");
+  const raw = {
+    summary: "s",
+    decisions: [{ text: "Move the cutover to Thursday", made_by: null }],
+    action_items: [{ text: "Update the cutover runbook for wave 2", owner: null, due: null, due_date: null }, { text: "Send the report", owner: "Ana", due: "Oct 30", due_date: "2026-10-30" }],
+  };
+  const out = notesRules.tidyNotes(notesRules.mergeLiveList(raw, ctx), "2026-11-01");
+  assert.deepEqual(out.action_items.map((a) => [a.text, a.owner, a.due, a.due_date]), [
+    ["Update the cutover runbook for wave 2", "Cody Scott", "Wednesday", "2026-11-04"],
+    ["Send the report", "Ana", "Oct 30", "2026-10-30"],
+    ["Book the war room", "Ana Silva", null, null],
+  ], "matched items get the list's owner and date; a list item the notes left out is added");
+  assert.equal(out.decisions[0].made_by, "Grace Lee");
+  assert.equal(raw.action_items[0].owner, null, "the input isn't changed");
+  // What the notes said stays: the list fills gaps only.
+  const kept = notesRules.mergeLiveList({ decisions: [], action_items: [{ text: "Update the runbook", owner: "Riley", due: "Friday", due_date: null }] }, ctx);
+  assert.deepEqual([kept.action_items[0].owner, kept.action_items[0].due], ["Riley", "Friday"]);
+  assert.equal(notesRules.mergeLiveList(raw, null), raw);
+});
+
 const pnav = await import("../src/lib/portal-nav.ts");
 
 test(`[${engine}] portal menu: each role sees only its pages; the phone tab bar is a short subset of them`, () => {

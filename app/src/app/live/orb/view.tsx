@@ -14,7 +14,8 @@
  * - **Only the ball, ever**: Attendee's webpage streamer adds a script to every page it shows (it wires the meeting's
  *   audio in as a microphone) that draws a red box (`#attendee-audio-error`) or calls `alert()` when that fails. This
  *   page uses no microphone, so the box is hidden and `alert` does nothing here (the cause, the wrong port, is fixed in
- *   meetbot/patches/03; this is the backstop: first live test, Nov 1).
+ *   meetbot/patches/03; this is the backstop: first live test, Nov 1). The page never scrolls and shows no scrollbar
+ *   (`HIDE_STREAMER_NOTICES`).
  * - **Problems**: nobody watches this page and anything it showed would be on the bot's camera in front of the meeting,
  *   so it never shows an error; a failed poll is logged to the console and retried after a pause, and a 401 (wrong or
  *   expired address) stops polling with the ball idle.
@@ -84,8 +85,15 @@ function readSettings(): Settings {
 }
 const noSubscribe = () => () => {};
 
-/** Hides Attendee's own error box on this page (see the file comment). */
-export const HIDE_STREAMER_NOTICES = "#attendee-audio-error{display:none!important}";
+/**
+ * Hides Attendee's own error box on this page (see the file comment), and every scrollbar: the page itself never
+ * scrolls, so nothing the root layout or the streamer adds can show a scrollbar on the bot's camera (a white strip at
+ * the right edge of the video in the first live trial, Nov 1 2026).
+ */
+export const HIDE_STREAMER_NOTICES =
+  "#attendee-audio-error{display:none!important}" +
+  "html,body{margin:0!important;height:100%!important;overflow:hidden!important;scrollbar-width:none!important;background:#08070f}" +
+  "::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}";
 // Its alert() would be a dialog on the bot's camera; nothing on this page needs one.
 if (typeof window !== "undefined") window.alert = (msg?: unknown) => console.warn("[orb] alert suppressed:", msg);
 

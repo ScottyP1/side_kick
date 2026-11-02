@@ -206,8 +206,11 @@ async function fakeClaude(feature: Feature, ctx: Ctx, content: string, model: st
         action_items: [{ text: "Send the reconciliation report", owner: "Ana Silva", due: "in three days", due_date: null }], open_questions: [], pending_decisions: [], facts: [],
       };
     }
+    // Sidekick was in the meeting live and answered something: the summary repeats its first answer, so tests can
+    // check that its own answers reach the notes (lib/meeting-notes-rules.ts liveContextBlock).
+    const said = content.match(/^ {2}Sidekick answered: (.+)$/m)?.[1];
     return {
-      summary: "Test summary of the meeting.",
+      summary: said ? `Test summary of the meeting. Sidekick said: ${said.slice(0, 200)}` : "Test summary of the meeting.",
       decisions: [{ text: "Test decision", made_by: "Priya Raman" }],
       // The report's due date is long past, so reminder tests always have an overdue item.
       action_items: [{ text: "Send the test report", owner: "Maria Chen", due: "Oct 21", due_date: "2020-10-21" }, { text: "Book the load test", owner: null, due: null, due_date: null }],

@@ -21,6 +21,7 @@ import "./install-app";
 import { BRAND } from "@/lib/brand";
 import type { FeatureKey } from "@/lib/plans";
 import { isActive, navFor, phoneTabs, type NavGroup, type NavItem } from "@/lib/portal-nav";
+import { BrandMark } from "@/components/brand-mark";
 
 /** A group the person can open: `client` is who the engagement is for (e.g. "Litware"), shown on upload targets. */
 export type Workspace = { id: string; name: string; code: string | null; color: string; client?: string | null };
@@ -167,7 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             ) : (
               <div className="brand">
-                <span className="brand-mark">S</span>
+                <BrandMark />
                 <div>
                   <b>{BRAND.name}</b>
                   <small>{me.org.name}</small>
@@ -377,7 +378,7 @@ function PhoneMenu({ me, groups, active, ws, setWs, unread, onClose, onSignOut }
       <div className="phone-menu-scrim" aria-hidden="true" onClick={onClose} />
       <div id="phone-menu" className="phone-menu" role="dialog" aria-modal="true" aria-label="Menu" ref={sheet}>
         <div className="phone-menu-head">
-          <span className="brand-mark">S</span>
+          <BrandMark />
           <div>
             <b>{BRAND.name}</b>
             <small>{me.org.name}</small>

@@ -17,8 +17,8 @@ Inside the one container (`Dockerfile`, `entrypoint.sh`):
   The moving ball's container is bigger (4 vCPU / 8 GiB instead of 2 / 4). Never the old still crystal ball.
   **Changing the logo is a one-file change**: replace `bot-logo.png` with the new picture (PNG, 1280×720, the logo
   centred on a dark background with room around it, since Teams crops tiles), keep the name, and rebuild the image
-  (infra/azure/meetbot-setup.sh). The placeholder is the indigo "S" app icon (app/public/app-icons) until the real
-  logo exists.
+  (infra/azure/meetbot-setup.sh). It's the crystal-ball tile (app/public/brand/tile.svg) on a dark background,
+  drawn by app/scripts/app-icons.mjs with the other icons.
 - **The shim** (`shim/`, Node 22): forwards Attendee's events to Sidekick signed with the session's own key, and
   long-polls Sidekick for commands (the job has no inbound address). It switches hearing to Azure AI Speech
   speech-to-text (`shim/audio.mjs`) when Sidekick says captions are off or stalled, and exits with the meeting.

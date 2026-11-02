@@ -13,6 +13,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { UserMenu } from "./shell";
 import { api, Icon, Pill, ToastProvider } from "./ui";
 import { BRAND } from "@/lib/brand";
+import { BrandMark } from "@/components/brand-mark";
 
 const NAV: [string, string, string][] = [
   ["/owner", "Overview", "home"],
@@ -54,7 +55,7 @@ export function OwnerShell({ children }: { children: ReactNode }) {
       <div className="app owner-app">
         <aside className="rail">
           <div className="brand">
-            <span className="brand-mark owner-mark">S</span>
+            <BrandMark className="owner-mark" />
             <div>
               <b>{BRAND.name}</b>
               <small>Owner Console</small>
@@ -81,7 +82,7 @@ export function OwnerShell({ children }: { children: ReactNode }) {
         <div className="main">
           <header className="topbar">
             <div className="mobile-nav">
-              <span className="brand-mark owner-mark">S</span>
+              <BrandMark className="owner-mark" />
               <select className="input" value={NAV.find((n) => active(n[0]))?.[0] ?? "/owner"} onChange={(e) => window.location.assign(e.target.value)} aria-label="Page">
                 {NAV.map(([href, label]) => (
                   <option key={href} value={href}>{label}</option>

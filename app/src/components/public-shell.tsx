@@ -15,6 +15,7 @@ import { SITE_NAV } from "@/lib/site";
 import { SiteChatSlot } from "./site-chat-slot";
 import "./public-site.css";
 import { BRAND } from "@/lib/brand";
+import { BrandMark } from "@/components/brand-mark";
 
 /**
  * Shown on every public page around `children`.
@@ -32,7 +33,7 @@ export function PublicShell({ children, narrow, current, layout }: { children: R
       <header className="site-head">
         <div className="site-head-in">
           <Link href="/" className="site-brand" aria-label={`${BRAND.name} home`}>
-            <span className="brand-mark" aria-hidden="true">S</span>
+            <BrandMark />
             {BRAND.name}
           </Link>
           <nav className="site-nav" aria-label="Main">
@@ -82,7 +83,7 @@ function SiteFooter() {
     <footer className="site-foot">
       <div className="site-foot-in">
         <div>
-          <Link href="/" className="site-brand" aria-label={`${BRAND.name} home`}><span className="brand-mark" aria-hidden="true">S</span>{BRAND.name}</Link>
+          <Link href="/" className="site-brand" aria-label={`${BRAND.name} home`}><BrandMark />{BRAND.name}</Link>
           <p>The AI teammate for client teams in Microsoft Teams. A personal project, not a company. <Link href="/security">Powered by Claude</Link>.</p>
         </div>
         {cols.map(([title, links]) => (

@@ -746,6 +746,8 @@ test(`[${engine}] Teams Store: the manifest passes Microsoft's schema and the St
   const size = (f) => { const b = fs.readFileSync(path.join(teams, f)); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
   assert.deepEqual(size("color.png"), [192, 192]);
   assert.deepEqual(size("outline.png"), [32, 32]);
+  // The outline icon is white on transparent (Store rule): PNG color type 6 (RGBA) and the corners see-through.
+  assert.equal(fs.readFileSync(path.join(teams, "outline.png"))[25], 6, "outline.png has an alpha channel");
 });
 
 const rank = await import("../src/lib/rank.ts");

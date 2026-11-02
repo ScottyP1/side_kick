@@ -1,7 +1,8 @@
 /**
  * Pitch and website capture of the **local demo world** (docs/DEMO.md → "Capture the walkthrough"): drives the
  * seeded demo copy (preview "sidekick-demo", http://localhost:3330, fake Claude, made-up Northwind data) through
- * every shot of the capture plan that doesn't need live Teams or a Microsoft sign-in, and saves
+ * every shot of the capture plan that doesn't need live Teams or a Microsoft sign-in (since Nov 2, 2026 also the sign-in
+ * pages, the live-meeting settings with preview "sidekick-demo-live", and guardrails, usage, activity and audit), and saves
  *   <out>/desktop/NN-name.png   1440×900 at 2x
  *   <out>/phone/NN-name.png     390×844 at 3x
  *   <out>/clips/name.webm       short desktop clips (only with --clips; 1440×900 at 1x)
@@ -162,7 +163,21 @@ const FLOWS = [
     id: "site", whoLabel: "visitor (signed out)",
     run: async ({ page, snap }) => {
       await go(page, "/"); await snap("site-home", "The public website: every meeting, remembered.");
+      await go(page, "/#live-title", 6000); await snap("site-live-meetings", "Live in your meetings: an example call with Sidekick as one of four people, answering with sources.");
+      await go(page, "/features#f-teams", 12000); await snap("site-teams-chat", "In Teams: an example group chat with an answer and its sources, then the meeting notes card.");
+      await go(page, "/how-it-works"); await snap("site-how-it-works", "How it works: from sign-up to the first answer in Teams.");
+      await go(page, "/faq"); await snap("site-faq", "The FAQ: what Sidekick sees, where data lives, how clients are kept apart, live meetings.");
       await go(page, "/pricing"); await snap("site-pricing", "Plans priced per group per month (illustrative pricing).");
+    },
+  },
+  {
+    // Signed out: the two front doors. Nothing is typed into the password box, so no secret is ever on screen.
+    id: "login", whoLabel: "visitor (signed out)",
+    run: async ({ page, snap }) => {
+      await go(page, "/login"); await snap("login", "Sign in: with Microsoft (your work account) or email and password, then a second step if your firm requires it.");
+      await page.fill("input[type=email]", ACCOUNTS.member).catch(() => {});
+      await snap("login-email", "People sign in with the work email their firm added; Sidekick then opens the groups they belong to.");
+      await go(page, "/owner/login"); await snap("owner-login", "The Owner Console has its own sign-in, for the Sidekick team only.");
     },
   },
   {
@@ -362,6 +377,32 @@ const FLOWS = [
     },
   },
   {
+    // Oversight for the Org Owner: rules, usage, what Sidekick did, and who did what.
+    id: "oversight", whoLabel: "Org Owner (Olivia Bennett)", who: "orgOwner",
+    run: async ({ page, snap }) => {
+      await go(page, "/guardrails", 1500); await snap("guardrails", "Guardrails: a locked safety floor, company switches and custom rules in plain language.");
+      await scrollToText(page, /^Custom rules$/, 90); await snap("guardrails-custom-rules", "Custom rules for the whole company or one group; a group can be stricter, never looser.");
+      await go(page, "/usage", 1500); await snap("usage-billing", "Usage & billing: the plan, every limit and the monthly AI allowance.");
+      await go(page, "/activity", 1500); await snap("activity", "Activity: what Sidekick did, step by step, with timings and counts, never document text.");
+      await go(page, "/audit", 1500); await snap("audit-log", "The audit log: sign-ins, access and rule changes, uploads and Sidekick's own actions.");
+    },
+  },
+  {
+    // Live in meetings: the group's switch (Team Lead or Org Owner) and the organization's voice and camera (Org Owner).
+    id: "live", whoLabel: "Org Owner (Olivia Bennett)", who: "orgOwner",
+    run: async ({ page, snap, ctx }) => {
+      const g = await groupId(ctx, /^Contoso/);
+      await go(page, `/workspaces/${g}`);
+      await page.getByRole("tab", { name: /Teams chats/ }).click(); await page.waitForTimeout(800);
+      await page.getByRole("heading", { name: "Live in meetings" }).waitFor({ timeout: 15000 }); await page.waitForTimeout(1200);
+      await scrollToText(page, /^Live in meetings$/, 90);
+      await snap("live-group-settings", "Live in meetings, per group: when Sidekick joins, what it answers, whether it speaks, its voice.");
+      await go(page, "/settings"); await page.getByText("Sidekick's voice in meetings").first().waitFor({ timeout: 15000 }); await page.waitForTimeout(1200);
+      await scrollToText(page, /^Sidekick's voice in meetings$/, 90);
+      await snap("live-voice-camera", "For the whole firm: Sidekick's voice, and its picture in the call (the logo, or the moving crystal ball).");
+    },
+  },
+  {
     id: "owner", whoLabel: "Owner Console operator", who: "operator",
     run: async ({ page, snap }) => {
       await go(page, "/owner", 1500); await snap("owner-overview", "Owner Console: every client firm at a glance.");
@@ -369,6 +410,7 @@ const FLOWS = [
       await go(page, "/owner/business", 1500); await snap("owner-business", "Business: revenue, plan mix, trials, AI credit.");
       await go(page, "/owner/performance", 1500); await snap("owner-ai-usage", "AI usage and performance per client (counts, never content).");
       await go(page, "/owner/support", 1200); await snap("owner-tickets", "The support inbox: tickets from every role.");
+      await go(page, "/owner/live", 1200); await snap("owner-live-meetings", "Live meetings: the meeting bot's cost this month against the cap, per client.");
     },
   },
 ];

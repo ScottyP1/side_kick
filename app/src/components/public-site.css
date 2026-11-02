@@ -380,11 +380,6 @@ body:has(> .site){margin:0}
 .site-fade{position:relative}
 .site-fade::after{content:"";position:absolute;left:0;right:0;bottom:0;height:22%;background:linear-gradient(transparent,var(--surface));pointer-events:none}
 .site-window.site-fade::after{background:linear-gradient(transparent,var(--bg))}
-/* Live meeting clips (components/live-clip.tsx): the poster holds the space; Teams' dark meeting stage behind it. */
-.site-clip video{display:block;width:100%;height:auto;background:#07070a}
-.site-live{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:36px;align-items:center}
-.site-live-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-top:28px}
-@media (max-width:860px){.site-live,.site-live-pair{grid-template-columns:minmax(0,1fr)}}
 .site-shot figcaption{font-size:12.5px;color:var(--faint);text-align:center;margin-top:12px}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .site-laptop-base{background:linear-gradient(#3a3a4c,#262633)}:root:not([data-theme="light"]) .site-window{box-shadow:0 20px 50px rgba(0,0,0,.5)}}
 
@@ -398,3 +393,34 @@ body:has(> .site){margin:0}
 .site-page-art{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:32px;align-items:center}
 .site-page-art .site-page-head{padding-bottom:0}
 @media (max-width:860px){.site-showcase,.site-page-art{grid-template-columns:minmax(0,1fr)}.site-page-art .site-art{max-width:420px}}
+
+/* The live meeting picture (components/meeting-demo.tsx): a made-up call, dark like a meeting, in Sidekick's colours. */
+.meet-demo{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);gap:10px;padding:10px;border-radius:14px;background:#0f0f16;box-shadow:0 20px 50px rgba(23,23,31,.18);color:#ececf3;font-size:13px;height:520px}
+.meet-bar{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#c9cad8;padding:2px 4px}
+.meet-rec{width:8px;height:8px;border-radius:50%;background:#e5484d}
+.meet-time{margin-left:auto;font-weight:500;color:#8a8ca2;font-variant-numeric:tabular-nums}
+.meet-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;min-height:0}
+.meet-tile{position:relative;border-radius:10px;background:#1c1c27;display:grid;place-items:center;overflow:hidden;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .25s}
+.meet-tile.talking{outline-color:#a7a3ff}
+.meet-tile.sk{background:radial-gradient(ellipse at center,#15132b 0%,#08070f 75%)}
+.meet-avatar{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:20px;color:#fff}
+.meet-name{position:absolute;z-index:1;left:8px;bottom:7px;font-size:11.5px;padding:2px 7px;border-radius:6px;background:rgba(0,0,0,.45)}
+.meet-tile.sk{container-type:size}
+.meet-ball{width:min(100cqw,100cqh);height:min(100cqw,100cqh)}
+.meet-hand{position:absolute;z-index:1;top:8px;right:8px;font-size:18px;background:#f2a93b;border-radius:8px;padding:1px 6px;animation:meet-pop .3s ease-out}
+.meet-caption{position:absolute;z-index:1;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 16px);bottom:32px;font-size:11.5px;line-height:1.35;text-align:center;padding:4px 8px;border-radius:6px;background:rgba(0,0,0,.6)}
+.meet-chat{display:flex;flex-direction:column;min-height:0;border-radius:10px;background:#17171f}
+.meet-chat-head{font-weight:700;font-size:13px;padding:10px 12px;border-bottom:1px solid #2d2d3b}
+.meet-chat-body{flex:1;min-height:0;overflow:hidden;padding:10px 12px;display:flex;flex-direction:column;gap:9px}
+.meet-msg{background:#23232f;border-radius:9px;padding:7px 10px;animation:meet-in .35s ease-out;align-self:flex-start;max-width:96%}
+.meet-msg.sk{background:#28264d;border:1px solid #3d3a73}
+.meet-msg b{display:block;font-size:11px;color:#a3a4b8;font-weight:600;margin-bottom:2px}
+.meet-msg.sk b{color:#a7a3ff}
+.meet-msg p{margin:0;line-height:1.4}
+.meet-msg ol{margin:6px 0 0;padding-left:18px;font-size:11px;color:#a3a4b8}
+@keyframes meet-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes meet-pop{from{transform:scale(.6)}to{transform:none}}
+@media (prefers-reduced-motion: reduce){.meet-msg,.meet-hand{animation:none}}
+@media (max-width:720px){.meet-demo{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;height:auto}.meet-grid{height:300px}.meet-chat{height:280px}}
+.site-live-stack{display:grid;gap:28px}
+.site-live-stack .site-checks{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));column-gap:28px}

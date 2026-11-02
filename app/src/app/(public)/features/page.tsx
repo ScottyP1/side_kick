@@ -1,8 +1,8 @@
 /**
  * Features (/features): everything Sidekick does, grouped by where people meet it (in Teams, live in Teams
  * meetings, in the portal, for admins), in plain language, with a real chat shot, the portal's Ask page on a
- * laptop (components/product-shot.tsx) and silent clips of Sidekick in a real meeting (components/live-clip.tsx,
- * the page's only script). Public and static. Each claim matches a shipped feature described in the
+ * laptop (components/product-shot.tsx) and an example meeting drawn in HTML with the real crystal ball
+ * (components/meeting-demo.tsx). Public and static. Each claim matches a shipped feature described in the
  * guides (docs/guide/), which the cards link to.
  */
 import Link from "next/link";
@@ -10,7 +10,7 @@ import type { Metadata } from "next";
 import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
 import { ProductShot } from "@/components/product-shot";
-import { LiveClip } from "@/components/live-clip";
+import { MeetingDemo } from "@/components/meeting-demo";
 import { pageMetadata } from "@/lib/site";
 import { BRAND } from "@/lib/brand";
 
@@ -85,17 +85,9 @@ export default function FeaturesPage() {
               </div>
             ) : g.id === "live" ? (
               <>
-                <div className="site-live" style={{ marginBottom: 28 }}>
-                  <LiveClip name="clip-live-ask" alt={`A Teams meeting: someone types "Sidekick, when is the wave 2 cutover?" in the meeting chat, ${BRAND.name}'s crystal ball swirls while it thinks, then its answer arrives in the chat with the date and its sources.`} caption="Asked in the meeting chat: it thinks, then answers with sources." />
-                  <ProductShot name="live-own-question" frame="window" alt={`${BRAND.name} in a Teams meeting asking its own question in the meeting chat: "Quick check: by when should Cody Scott do 'Update the runbook with the new cutover date'?", and the answer "By Wednesday."`} caption="It asks when an action item has no date." />
-                </div>
-                <div className="site-live-pair" style={{ marginTop: 0, marginBottom: 28 }}>
-                  <LiveClip name="clip-live-hand" alt={`Someone asks the room what could make the wave 2 cutover slip again. ${BRAND.name}'s crystal ball swirls, then it posts a raised hand: "I can help with that. Say go ahead, Sidekick."`} caption="Nobody knows? It raises its hand." />
-                  <ProductShot name="live-recap" frame="window" alt={`"Sidekick, recap" in a Teams meeting chat, and ${BRAND.name}'s reply listing the decisions and action items so far, with owners and dates.`} caption={'"Sidekick, recap" reads the running list back.'} />
-                </div>
+                <div style={{ marginBottom: 28 }}><MeetingDemo caption="An example meeting with made-up client content." /></div>
                 <div className="site-grid two">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>
-                <p className="site-demo-caption">Real Teams meeting in our test tenant, cropped and silent. Made-up client content.</p>
-              </>
+                              </>
             ) : (
               <>
                 {g.id === "portal" && (

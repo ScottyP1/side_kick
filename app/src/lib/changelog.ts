@@ -11,6 +11,17 @@ export type ChangelogEntry = { date: string; label: string; title: string; chang
 /** Every release, newest first. */
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-11-01",
+    label: "November 1, 2026",
+    title: `${BRAND.name} live in your Teams meetings (Enterprise)`,
+    changes: [
+      `${BRAND.name} can join a Teams meeting as a member of the call. Ask it out loud or in the meeting chat and it answers out loud and in the chat, with its sources.`,
+      "When the room asks something nobody answers, it raises its hand and waits to be called on. It also asks when an action item has no owner or date.",
+      `"${BRAND.name}, recap" reads back the decisions and action items; "${BRAND.name}, leave" and it says goodbye and goes. The notes follow in the group's chat.`,
+      `Its video tile shows the ${BRAND.name} logo, or a moving crystal ball that swirls while it thinks and sparkles while it speaks (Settings → ${BRAND.name}'s camera in meetings).`,
+    ],
+  },
+  {
     date: "2026-10-25",
     label: "October 25, 2026",
     title: "Usage & billing shows what Sidekick did for you",

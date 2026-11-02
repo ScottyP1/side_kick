@@ -63,7 +63,7 @@ export default function PricingPage() {
               <li><span>Unlimited groups, limits agreed with you</span></li>
               <li><span>Everything in Business</span></li>
               <li><span>Dedicated database option</span></li>
-              <li><span>{BRAND.name} live in your meetings <span className="site-badge-soon">Coming soon</span></span></li>
+              <li><span>{BRAND.name} live in your meetings <span className="site-badge-ent">New</span></span></li>
             </ul>
           </div>
         </div>

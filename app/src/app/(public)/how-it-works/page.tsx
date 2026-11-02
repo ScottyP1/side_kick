@@ -2,8 +2,9 @@
  * How it works (/how-it-works): the journey from sign-up to the first answer in Teams as a visual timeline.
  * Six numbered steps alternate left and right; each has an icon, a short headline and line, and a small
  * picture of the screen involved (components/how-mocks.tsx: sign-up form, Microsoft approval, Teams app,
- * group card, chat waiting for a group, Teams answer). Then the setup wizard as a horizontal stepper, what's
- * coming for meetings, and the setup questions from lib/faq.ts. Public and static; on phones the steps stack.
+ * group card, chat waiting for a group, Teams answer). Then the setup wizard as a horizontal stepper, meetings
+ * (automatic notes, and Sidekick live in a meeting step by step with real edited screenshots), and the setup
+ * questions from lib/faq.ts. Public and static; on phones the steps stack.
  */
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -31,6 +32,16 @@ const STEPS: { icon: string; who: string; title: string; text: string; mock: Rea
 ];
 
 const WIZARD = ["Welcome", "Microsoft 365", "Add to Teams", "Rules", "First groups", "Done"];
+
+/** A live meeting with Sidekick, in order: what happens and what people say. */
+const LIVE_STEPS: [string, string][] = [
+  ["Invite it", `Type @${BRAND.name} join in the meeting chat (or in the group's chat with the meeting link), or let it join every group meeting by itself. Let it in from the lobby.`],
+  ["Ask", `Say or type "${BRAND.name}, …". It thinks, gives a short spoken answer and puts the full one, with its sources, in the meeting chat.`],
+  ["It raises its hand", `When the room asks something nobody answers and ${BRAND.name} knows, it raises its hand. "Go ahead, ${BRAND.name}" and it answers.`],
+  ["It asks too", "When an action item has no owner or date, it asks once, politely. The reply goes on the item."],
+  ["Recap and leave", `"${BRAND.name}, recap" reads back the decisions and action items. "${BRAND.name}, leave" and it says goodbye and goes.`],
+  ["The notes follow", "After the meeting, the notes and action items land in the group's chat, as for every meeting."],
+];
 
 export default function HowItWorksPage() {
   return (
@@ -85,16 +96,30 @@ export default function HowItWorksPage() {
       <section className="site-section" aria-labelledby="meet-title">
         <div className="site-wrap">
           <span className="site-eyebrow">Meetings</span>
-          <h2 id="meet-title">Notes after every meeting, live meetings next</h2>
+          <h2 id="meet-title">Notes after every meeting, and {BRAND.name} live in the call</h2>
           <div className="site-grid">
             <div className="site-card"><span className="site-badge-now">Today</span><h3>Automatic notes</h3><p>When a Teams meeting of a group&apos;s people ends, {BRAND.name} reads its transcript and posts the notes and action items to the group&apos;s chat. No bot joins the call.</p></div>
             <div className="site-card"><span className="site-badge-now">Today</span><h3>Past or outside meetings</h3><p>Add a meeting held earlier or outside Teams from its transcript, and get the same notes.</p></div>
-            <div className="site-card"><span className="site-badge-soon">Coming soon · Enterprise</span><h3>{BRAND.name} in the meeting</h3><p>{BRAND.name} joins the call live to answer and take notes as you talk.</p></div>
+            <div className="site-card"><span className="site-badge-ent">Available on Enterprise</span><h3>{BRAND.name} in the meeting</h3><p>{BRAND.name} joins the call, answers out loud and in the chat with sources, and keeps the list as you talk. The meeting audio stays in {BRAND.name}&apos;s own Azure.</p></div>
           </div>
           <div className="site-grid two" style={{ marginTop: 28, alignItems: "center" }}>
             <ProductShot name="portal-meetings-auto" frame="laptop" alt={`The ${BRAND.name} Meetings page with automatic notes after Teams meetings switched on: meetings captured from Teams with their group and status (notes written, one skipped because its transcript was empty), a meeting from several groups waiting for someone to pick its group, and the group's meetings with decisions, actions and open questions.`} caption="Meetings captured from Teams, sorted into the right group. Made-up example data." />
             <ProductShot name="phone-meeting" frame="phone" alt={`Meeting notes on a phone: Contoso's Sprint 14 planning, captured from Microsoft Teams, with its decisions, open action items, open questions and summary.`} caption="The same notes on a phone." />
           </div>
+        </div>
+      </section>
+
+      <section className="site-section alt" aria-labelledby="live-title">
+        <div className="site-wrap">
+          <span className="site-eyebrow">Live in a meeting</span>
+          <h2 id="live-title">How a meeting with {BRAND.name} goes <span className="site-badge-ent" style={{ verticalAlign: "middle" }}>Available on Enterprise</span></h2>
+          <div className="site-live" style={{ alignItems: "start" }}>
+            <ProductShot name="live-hand" frame="window" alt={`A Teams meeting with ${BRAND.name}'s crystal ball on its video tile. Someone asked the room what could make the wave 2 cutover slip again, and ${BRAND.name} answered in the chat with a raised hand: "I can help with that. Say go ahead, Sidekick, and I'll answer."`} caption="A room question nobody answered: it raises its hand. Made-up client content." />
+            <ol className="site-checks">
+              {LIVE_STEPS.map(([title, text]) => <li key={title}><span><b>{title}.</b> {text}</span></li>)}
+            </ol>
+          </div>
+          <p style={{ margin: "20px 0 0" }}>Team Leads choose when it joins, whether it speaks and its voice. Details in <Link href="/docs/meetings#sidekick-live-in-meetings-enterprise">the meetings guide</Link>.</p>
         </div>
       </section>
 

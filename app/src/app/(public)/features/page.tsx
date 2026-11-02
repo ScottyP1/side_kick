@@ -1,7 +1,8 @@
 /**
- * Features (/features): everything Sidekick does, grouped by where people meet it (in Teams, in the portal,
- * for admins), in plain language, with a real chat shot and the portal's Ask page on a laptop
- * (components/product-shot.tsx). Public and static. Each claim matches a shipped feature described in the
+ * Features (/features): everything Sidekick does, grouped by where people meet it (in Teams, live in Teams
+ * meetings, in the portal, for admins), in plain language, with a real chat shot, the portal's Ask page on a
+ * laptop (components/product-shot.tsx) and silent clips of Sidekick in a real meeting (components/live-clip.tsx,
+ * the page's only script). Public and static. Each claim matches a shipped feature described in the
  * guides (docs/guide/), which the cards link to.
  */
 import Link from "next/link";
@@ -9,6 +10,7 @@ import type { Metadata } from "next";
 import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
 import { ProductShot } from "@/components/product-shot";
+import { LiveClip } from "@/components/live-clip";
 import { pageMetadata } from "@/lib/site";
 import { BRAND } from "@/lib/brand";
 
@@ -16,7 +18,7 @@ export const metadata: Metadata = pageMetadata("/features");
 
 type Feature = { icon: string; title: string; text: string; points: string[] };
 
-const GROUPS: { id: string; title: string; lead: string; items: Feature[] }[] = [
+const GROUPS: { id: string; title: string; lead: string; badge?: string; items: Feature[] }[] = [
   {
     id: "teams",
     title: "In Microsoft Teams",
@@ -26,6 +28,18 @@ const GROUPS: { id: string; title: string; lead: string; items: Feature[] }[] = 
       { icon: "notes", title: "Meeting notes and action items", text: `After every Teams meeting ${BRAND.name} reads the transcript and posts a notes card and one card per action item to the group's notes chat. Save decisions to the group's knowledge right from the card.`, points: ["Summary, decisions and open questions", "Owners and due dates on action items", "Assign or mark done right from the card"] },
       { icon: "bell", title: "Reminders", text: "A daily check per chat raises what's slipping, so nobody has to chase it.", points: ["Overdue and unowned action items", "Decisions still waiting to be made", "Documents that look out of date or conflict"] },
       { icon: "people", title: "Team Leads in charge", text: `Only Team Leads and admins can add ${BRAND.name} to a chat; anyone else, and it politely leaves.`, points: [`@${BRAND.name} add @name to bring someone into the group`, "Chats nobody assigns are left after 7 days", "Client guests in a chat only get shareable material"] },
+    ],
+  },
+  {
+    id: "live",
+    title: "Live in your Teams meetings",
+    badge: "Available on Enterprise",
+    lead: `${BRAND.name} can join a Teams meeting as a member of the call. It listens, reads the meeting chat, knows everything in the client's group, and helps like a teammate who did the reading.`,
+    items: [
+      { icon: "answer", title: "Ask it, out loud or in the chat", text: `Say or type "${BRAND.name}, …" and it answers from the group's documents, past meetings and connected tools.`, points: ["A short spoken answer, the full one in the chat", "Every answer lists its sources", "Its crystal ball swirls while it thinks and sparkles while it speaks"] },
+      { icon: "people", title: "Raises its hand", text: `When someone asks the room and nobody knows, and ${BRAND.name} is sure of the answer, it raises its hand and waits to be called on.`, points: ["\"Go ahead, Sidekick\" and it answers", "Never talks over anyone", "Stays quiet when it isn't sure"] },
+      { icon: "notes", title: "Keeps the list as you talk", text: "It notes decisions and action items during the meeting, and asks once when an action item has no owner or date.", points: ["\"Quick check: by when should Lou do this?\"", "\"Sidekick, recap\" reads the list back", "The notes follow in the group's chat afterwards"] },
+      { icon: "shield", title: "Polite, and in your control", text: `Let it in from the lobby; say "${BRAND.name}, leave" and it says goodbye and goes. Client guests in the call only get shareable material.`, points: ["The meeting audio stays in Sidekick's own Azure", "Team Leads choose when it joins and whether it speaks", "Everything is in the audit log"] },
     ],
   },
   {
@@ -62,13 +76,26 @@ export default function FeaturesPage() {
       {GROUPS.map((g, i) => (
         <section key={g.id} className={`site-section ${i % 2 ? "alt" : ""}`} aria-labelledby={`f-${g.id}`}>
           <div className="site-wrap">
-            <h2 id={`f-${g.id}`}>{g.title}</h2>
+            <h2 id={`f-${g.id}`}>{g.title} {g.badge && <span className="site-badge-ent" style={{ verticalAlign: "middle" }}>{g.badge}</span>}</h2>
             <p className="site-lead">{g.lead}</p>
             {g.id === "teams" ? (
               <div className="site-grid two" style={{ alignItems: "start" }}>
                 <div className="site-grid two">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>
                 <ProductShot name="chat-answer" frame="window" alt={`A team chat where someone asks ${BRAND.name} when the wave 2 cutover is; ${BRAND.name} answers with the date, store count and rollback owner, and lists five sources from meetings and documents.`} caption="Made-up example data." />
               </div>
+            ) : g.id === "live" ? (
+              <>
+                <div className="site-live" style={{ marginBottom: 28 }}>
+                  <LiveClip name="clip-live-ask" alt={`A Teams meeting: someone types "Sidekick, when is the wave 2 cutover?" in the meeting chat, ${BRAND.name}'s crystal ball swirls while it thinks, then its answer arrives in the chat with the date and its sources.`} caption="Asked in the meeting chat: it thinks, then answers with sources." />
+                  <ProductShot name="live-own-question" frame="window" alt={`${BRAND.name} in a Teams meeting asking its own question in the meeting chat: "Quick check: by when should Cody Scott do 'Update the runbook with the new cutover date'?", and the answer "By Wednesday."`} caption="It asks when an action item has no date." />
+                </div>
+                <div className="site-live-pair" style={{ marginTop: 0, marginBottom: 28 }}>
+                  <LiveClip name="clip-live-hand" alt={`Someone asks the room what could make the wave 2 cutover slip again. ${BRAND.name}'s crystal ball swirls, then it posts a raised hand: "I can help with that. Say go ahead, Sidekick."`} caption="Nobody knows? It raises its hand." />
+                  <ProductShot name="live-recap" frame="window" alt={`"Sidekick, recap" in a Teams meeting chat, and ${BRAND.name}'s reply listing the decisions and action items so far, with owners and dates.`} caption={'"Sidekick, recap" reads the running list back.'} />
+                </div>
+                <div className="site-grid two">{g.items.map((f) => <FeatureCard key={f.title} f={f} />)}</div>
+                <p className="site-demo-caption">Real Teams meeting in our test tenant, cropped and silent. Made-up client content.</p>
+              </>
             ) : (
               <>
                 {g.id === "portal" && (

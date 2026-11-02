@@ -2,12 +2,14 @@
  * Real product pictures on the website, in a frame: a chat-app window, a laptop (the portal) or a phone.
  * The pictures are 2x WebP files in public/site/ (served by the app itself, so the Content-Security-Policy
  * holds), captured from a throwaway local copy with made-up Contoso/Lakeside data (scripts/site-shots/render.cjs)
- * or from the local demo world (scripts/site-shots/demo-shots.cjs, docs/DEMO.md). Each has a dark-mode version
+ * or from the local demo world (scripts/site-shots/demo-shots.cjs, docs/DEMO.md); the "live-*" ones are edited
+ * screenshots of Sidekick in a real Teams meeting in Cody's test tenant. Each has a dark-mode version
  * where one exists, chosen by the browser (<picture> with prefers-color-scheme), so a page downloads only one.
  * Width and height are set so the page doesn't jump while they load; below-the-fold shots load lazily.
  *
  * The chat frame is a generic chat app in Sidekick's own colours, never Microsoft's artwork or logos; the
- * pages say "Teams" only in text.
+ * pages say "Teams" only in text. The live meeting shots are cropped to the meeting tile and the meeting chat, so
+ * no Teams logo or app chrome shows.
  */
 
 /** The pictures in public/site/: file stem, pixel size, whether a "-dark" version exists, and whether the picture is cropped (so its bottom fades out). */
@@ -22,6 +24,11 @@ export const SHOTS = {
   "portal-attention": { w: 1600, h: 1000, dark: true, fade: false },
   "portal-connectors": { w: 1600, h: 1000, dark: true, fade: false },
   "phone-meeting": { w: 640, h: 1132, dark: true, fade: true },
+  // Sidekick live in a real Teams meeting (dark, as Teams shows it; made-up Contoso content). Clips: components/live-clip.tsx.
+  "live-answer": { w: 1600, h: 702, dark: false, fade: false },
+  "live-hand": { w: 1600, h: 702, dark: false, fade: false },
+  "live-own-question": { w: 1600, h: 702, dark: false, fade: false },
+  "live-recap": { w: 1600, h: 702, dark: false, fade: false },
 } as const;
 
 export type ShotName = keyof typeof SHOTS;

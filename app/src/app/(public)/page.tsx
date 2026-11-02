@@ -1,8 +1,9 @@
 /**
  * Website home (/) for visitors: what Sidekick is in one screen with an illustration (components/site-art.tsx),
  * the headline feature, Sidekick live in Teams meetings (an example meeting drawn in HTML with the real crystal
- * ball as Sidekick's tile: components/meeting-demo.tsx), "every meeting, remembered", what it does, real product shots in frames (chat, phone, the portal on a
- * laptop; components/product-shot.tsx), who it's for, placeholders where customer quotes and logos will go
+ * ball as Sidekick's tile: components/meeting-demo.tsx), "every meeting, remembered", what it does, an example group
+ * chat drawn in HTML (answer with sources, notes card, daily reminder: components/chat-demo.tsx), the portal on a
+ * laptop (components/product-shot.tsx), who it's for, placeholders where customer quotes and logos will go
  * (clearly marked, nothing made up), and Get started / Sign in. Public and static.
  *
  * Signed-in people never see this page: src/proxy.ts sends anyone with a portal session cookie from / to
@@ -14,6 +15,7 @@ import { PublicShell } from "@/components/public-shell";
 import { SiteIcon } from "@/components/site-icons";
 import { ProductShot } from "@/components/product-shot";
 import { MeetingDemo } from "@/components/meeting-demo";
+import { ChatDemo } from "@/components/chat-demo";
 import { HeroArt, RememberArt } from "@/components/site-art";
 import { TRIAL_DAYS } from "@/lib/plans";
 import { pageMetadata } from "@/lib/site";
@@ -114,12 +116,8 @@ export default function HomePage() {
         <div className="site-wrap">
           <span className="site-eyebrow">See it at work</span>
           <h2 id="see-title">Right in your team&apos;s Teams chat</h2>
-          <p className="site-lead">Meeting notes with owners and dates, and a short daily reminder of what&apos;s still open, on desktop and on the phone.</p>
-          <div className="site-showcase">
-            <ProductShot name="chat-notes" frame="window" alt={`A team chat where ${BRAND.name} has posted meeting notes for Sprint 14 planning: a summary, decisions, open questions and action items with owners and due dates, with Assign and Mark done buttons.`} />
-            <ProductShot name="phone-reminder" frame="phone" alt={`${BRAND.name}'s daily reminder on a phone: an overdue action item and an out-of-date runbook, each with its source and Assign, Mark done and Snooze buttons.`} />
-          </div>
-          <p className="site-demo-caption">Made-up example data. Cards as {BRAND.name} posts them.</p>
+          <p className="site-lead">Answers with sources, meeting notes with owners and dates, and a short daily reminder of what&apos;s still open, posted where the team already talks.</p>
+          <ChatDemo caption="An example group chat with made-up client content. Cards as Sidekick posts them." />
         </div>
       </section>
 

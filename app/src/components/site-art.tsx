@@ -23,6 +23,9 @@ function Defs({ p }: { p: string }) {
       <filter id={`${p}-sh`} x="-20%" y="-20%" width="140%" height="150%">
         <feDropShadow dx="0" dy="6" stdDeviation="8" className="art-shadow" />
       </filter>
+      <filter id={`${p}-glow`} x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="5" />
+      </filter>
     </defs>
   );
 }
@@ -44,27 +47,46 @@ const Person = ({ cx, cy, r = 18, cls = "art-soft" }: { cx: number; cy: number; 
   </g>
 );
 
-/** Home hero: a meeting turns into notes, decisions and actions that land in the team's chat. */
+/**
+ * Home hero: a meeting turns into notes, decisions and actions that land in the team's chat. Gently animated (CSS in
+ * public-site.css, `hero-*`, one 8-second loop): the speaker's tile breathes, light travels out of the meeting along the
+ * flow lines, each chip glows as it arrives, thin links draw from the chips into the chat card, and the card's rows light
+ * up in turn. Opacity and stroke only, nothing moves position; people who prefer reduced motion see the still picture.
+ */
 export function HeroArt() {
   const p = "hero";
+  const glow = `url(#${p}-glow)`;
+  // Chips: where each sits, and the chat-card row its link lands on.
+  const chips = [
+    { x: 222, y: 178, end: "M318 195 C 340 195, 350 171, 376 171", n: 1 },
+    { x: 232, y: 238, end: "M328 255 C 350 255, 352 202, 377 202", n: 2 },
+    { x: 246, y: 298, end: "M342 315 C 362 315, 356 222, 377 222", n: 3 },
+  ];
   return (
-    <svg className="site-art" viewBox="0 0 520 400" role="presentation" aria-hidden="true">
+    <svg className="site-art hero-art" viewBox="0 0 520 400" role="presentation" aria-hidden="true">
       <Defs p={p} />
       <circle cx="270" cy="200" r="190" fill={`url(#${p}-blob)`} />
       {/* Meeting window */}
       <Card p={p} x={20} y={60} w={190} h={140} r={16} />
       <rect x="20" y="60" width="190" height="26" rx="16" className="art-sunken" />
       <circle cx="36" cy="73" r="4" className="art-line" /><circle cx="48" cy="73" r="4" className="art-line" /><circle cx="60" cy="73" r="4" className="art-line" />
+      <rect x="118" y="96" width="78" height="44" rx="8" className="art-accent hero-speak-glow" filter={glow} />
       {[[34, 96], [118, 96], [34, 146], [118, 146]].map(([x, y], i) => (
         <g key={i}>
           <rect x={x} y={y} width="78" height="44" rx="8" className={i === 1 ? "art-accent-soft" : "art-sunken"} />
           <Person cx={x + 39} cy={y + 22} r={14} cls={i === 1 ? "art-accent" : "art-soft"} />
         </g>
       ))}
-      {/* Flow */}
+      <rect x="118" y="96" width="78" height="44" rx="8" className="hero-speak-ring" />
+      {/* Flow out of the meeting, with light travelling along it */}
       <path d="M210 130 C 260 130, 250 210, 300 210" className="art-flow" />
       <path d="M210 150 C 250 160, 240 280, 300 290" className="art-flow" />
-      {/* Notes / decision / action chips */}
+      <path d="M210 130 C 260 130, 250 210, 300 210" pathLength={1} className="hero-spark hero-spark-1" />
+      <path d="M210 150 C 250 160, 240 280, 300 290" pathLength={1} className="hero-spark hero-spark-2" />
+      {/* Notes / decision / action chips, each with a soft glow behind it */}
+      {chips.map((c) => (
+        <rect key={c.n} x={c.x - 2} y={c.y - 2} width="100" height="38" rx="12" className={`art-accent hero-chip-glow hero-chip-glow-${c.n}`} filter={glow} />
+      ))}
       <g transform="translate(232 238)">
         <Card p={p} x={0} y={0} w={96} h={34} r={10} />
         <circle cx="17" cy="17" r="9" className="art-good-soft" /><path d="M13 17l3 3 6-6" className="art-good-stroke" />
@@ -86,14 +108,22 @@ export function HeroArt() {
       <Line x={346} y={56} w={80} cls="art-line-strong" />
       <circle cx="350" cy="104" r="10" className="art-soft" /><rect x="366" y="94" width="100" height="22" rx="10" className="art-sunken" />
       <circle cx="350" cy="146" r="10" className="art-accent" />
+      {/* Links from each chip into the chat card (over the app frame): drawn, then lit */}
+      {chips.map((c) => (
+        <g key={c.n}>
+          <path d={c.end} pathLength={1} className={`hero-link hero-link-${c.n}`} />
+          <path d={c.end} pathLength={1} className={`hero-spark hero-spark-link-${c.n}`} />
+        </g>
+      ))}
+      <rect x="366" y="134" width="120" height="124" rx="12" className="art-accent hero-card-glow" filter={glow} />
       <rect x="366" y="134" width="120" height="124" rx="12" fill={`url(#${p}-g)`} opacity=".14" />
       <rect x="366" y="134" width="120" height="124" rx="12" className="art-card-outline" />
+      <rect x="366" y="134" width="120" height="124" rx="12" className="hero-card-ring" />
       <Line x={378} y={148} w={70} cls="art-accent-line" />
-      <Line x={378} y={164} w={96} />
-      <Line x={378} y={178} w={84} />
-      <circle cx="384" cy="202" r="6" className="art-good" /><Line x={396} y={199} w={70} />
-      <circle cx="384" cy="222" r="6" className="art-hand" /><Line x={396} y={219} w={60} />
-      <rect x="378" y="236" width="44" height="14" rx="7" className="art-accent" />
+      <g className="hero-row hero-row-1"><Line x={378} y={164} w={96} /><Line x={378} y={178} w={84} /></g>
+      <g className="hero-row hero-row-2"><circle cx="384" cy="202" r="6" className="art-good" /><Line x={396} y={199} w={70} /></g>
+      <g className="hero-row hero-row-3"><circle cx="384" cy="222" r="6" className="art-hand" /><Line x={396} y={219} w={60} /></g>
+      <rect x="378" y="236" width="44" height="14" rx="7" className="art-accent hero-row hero-row-3" />
       <rect x="346" y="320" width="138" height="26" rx="13" className="art-sunken" />
     </svg>
   );

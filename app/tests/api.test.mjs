@@ -719,7 +719,8 @@ test(`[${ENGINE}] website: every public page answers without a session; the port
     assert.match(img, /loading="lazy"/, img);
   }
   assert.doesNotMatch(home, /<(img|script|link)[^>]+(src|href)="https?:\/\//, "nothing loads from other sites");
-  assert.match(home, /class="site-art"/, "the hero illustration is inline SVG");
+  assert.match(home, /class="site-art hero-art"/, "the hero illustration is inline SVG");
+  assert.match(fs.readFileSync(path.join(APP, "src/components/public-site.css"), "utf8"), /prefers-reduced-motion: no-preference\){\n  .hero-art/, "the hero only animates for people who don't ask for reduced motion");
   assert.match(home, /<span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 256 256"/, "the header shows the crystal-ball mark, not a letter");
   for (const f of ["chat-answer", "chat-answer-dark", "chat-notes", "phone-reminder", "portal-groups", "portal-groups-dark", "portal-ask", "portal-meeting", "portal-meeting-dark", "portal-meetings-auto", "portal-meetings-auto-dark", "portal-attention", "portal-attention-dark", "portal-connectors", "portal-connectors-dark", "phone-meeting", "phone-meeting-dark"]) {
     const r = await fetch(`${BASE}/site/${f}.webp`, { redirect: "manual" });

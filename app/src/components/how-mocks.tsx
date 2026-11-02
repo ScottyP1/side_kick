@@ -8,6 +8,7 @@
 
 /** A small window frame with a title bar around a mock screen. */
 import { BRAND } from "@/lib/brand";
+import { BrandMark } from "@/components/brand-mark";
 function Frame({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="site-mock">
@@ -54,7 +55,7 @@ export function InstallMock() {
   return (
     <Frame title="Teams · Apps">
       <div className="site-mock-app">
-        <span className="site-avatar sk">S</span>
+        <BrandMark className="site-avatar sk" />
         <div><b>{BRAND.name}</b><small>AI teammate for client teams</small></div>
       </div>
       <div className="site-mock-row"><span className="site-mock-chip">Chats</span><span className="site-mock-chip">Channels</span></div>

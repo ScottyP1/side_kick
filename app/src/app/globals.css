@@ -49,7 +49,9 @@ h3{font-size:14px;font-weight:600}
 .app{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100%}
 .rail{background:var(--rail);color:var(--rail-fg);padding:18px 12px;display:flex;flex-direction:column;gap:14px;position:sticky;top:0;height:100vh;overflow-y:auto}
 .brand{display:flex;align-items:center;gap:10px;padding:0 8px;color:#fff}
-.brand-mark{width:30px;height:30px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:var(--accent-fg);font-family:var(--f-display);font-weight:700}
+/* The brand mark (components/brand-mark.tsx): the crystal-ball tile, always the brand Indigo (not the dark-mode accent). */
+.brand-mark{width:30px;height:30px;border-radius:8px;background:#4F46E5;display:grid;place-items:center;padding:3px;flex:none}
+.brand-mark svg{display:block}
 .brand b{font-family:var(--f-display);font-size:16px;color:#f4f4fa}
 .brand small{display:block;font-size:11px;color:var(--rail-fg);opacity:.75}
 .nav{display:flex;flex-direction:column;gap:2px}
@@ -329,7 +331,7 @@ pre.transcript-raw{white-space:pre-wrap;font-family:var(--f-body);font-size:13.5
   color-scheme:dark; background:var(--bg); color:var(--fg)}
 .owner-app .nav a:hover,.owner-app .nav a[aria-current="page"]{background:var(--rail-active)}
 .owner-app .nav a[aria-current="page"]{box-shadow:inset 3px 0 0 var(--accent)}
-.owner-mark{background:var(--accent) !important;color:var(--accent-fg) !important}
+.owner-mark{background:#4F46E5 !important}
 .owner-app .topbar{background:#121418}
 .spark{display:flex;align-items:flex-end;gap:3px;height:150px}
 .spark > div{flex:1;min-width:4px;display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:2px}

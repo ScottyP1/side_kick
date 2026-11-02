@@ -13,6 +13,7 @@ import { SecondStepForm } from "@/components/two-step";
 import { api } from "@/components/ui";
 import { takeFlash } from "@/lib/flash";
 import { BRAND } from "@/lib/brand";
+import { BrandMark } from "@/components/brand-mark";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -66,7 +67,7 @@ export default function LoginPage() {
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={submit}>
         <div className="brand" style={{ padding: 0 }}>
-          <span className="brand-mark">S</span>
+          <BrandMark />
           <div>
             <b style={{ color: "var(--fg)" }}>{BRAND.name}</b>
           </div>

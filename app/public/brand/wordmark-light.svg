@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="120" viewBox="0 0 620 120">
+ <g transform="translate(8 28) scale(.24)">
+  <circle cx="128" cy="128" r="103" fill="none" stroke="#4F46E5" stroke-width="14"/>
+  <path d="M35 151 C66 188 97 188 128 162 C157 138 183 124 221 137" fill="none" stroke="#A7A3FF" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+ </g>
+ <text x="78" y="84" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="700" letter-spacing="-2.2" fill="#17171F">Sidekick</text>
+</svg>

@@ -18,6 +18,7 @@ import { SecondStepForm } from "@/components/two-step";
 import { api } from "@/components/ui";
 import { BRAND } from "@/lib/brand";
 import { takeFlash } from "@/lib/flash";
+import { BrandMark } from "@/components/brand-mark";
 
 export default function OwnerLoginPage() {
   const [email, setEmail] = useState("");
@@ -124,7 +125,7 @@ export default function OwnerLoginPage() {
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={submit}>
         <div className="brand" style={{ padding: 0 }}>
-          <span className="brand-mark owner-mark">S</span>
+          <BrandMark className="owner-mark" />
           <div><b style={{ color: "var(--fg)" }}>{BRAND.name}</b></div>
         </div>
         <div>

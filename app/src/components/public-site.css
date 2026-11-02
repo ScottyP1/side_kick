@@ -38,7 +38,7 @@ body:has(> .site){margin:0}
 .site-wrap{max-width:1160px;margin:0 auto;padding:0 16px}
 .site-narrow{max-width:780px}
 .site-section{padding-block:56px}
-.site-section.alt{background:var(--surface);border-block:1px solid var(--line)}
+.site-section.alt{background:var(--surface)}
 .site-section h2{font-size:28px;font-weight:700;margin-bottom:8px}
 .site-lead{color:var(--muted);font-size:17px;max-width:680px;margin:0 0 24px}
 .site-eyebrow{display:inline-block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--accent);margin-bottom:10px}
@@ -388,7 +388,8 @@ body:has(> .site){margin:0}
 .site-main{overflow-x:clip}
 .site-glow::before{content:"";position:absolute;top:-80px;left:50%;width:100vw;transform:translateX(-50%);height:560px;z-index:-1;pointer-events:none;
   background:radial-gradient(700px 340px at 22% 30%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 70%),radial-gradient(620px 320px at 80% 20%,color-mix(in srgb,var(--info) 10%,transparent),transparent 70%)}
-.site-section.alt{background:linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--accent-soft) 35%,var(--surface)))}
+/* Alternate sections fade in and out of the page colour (no hard edge or border line between sections). */
+.site-section.alt{background:linear-gradient(180deg,var(--bg) 0%,var(--surface) 16%,color-mix(in srgb,var(--accent-soft) 35%,var(--surface)) 70%,var(--bg) 100%)}
 .site-showcase{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,.65fr);gap:32px;align-items:end}
 .site-page-art{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:32px;align-items:center}
 .site-page-art .site-page-head{padding-bottom:0}

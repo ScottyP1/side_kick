@@ -102,3 +102,12 @@ local copy. It turns on self-service sign-up through the Owner Console (the demo
 localhost, never inside `npm test`, reads passwords from `app/.demo-logins.json` without printing them, and needs Google
 Chrome plus playwright-core (the pitch pack's `_build/node_modules`, or `PLAYWRIGHT_CORE=<folder>`). Shots that need live
 Teams or a Microsoft sign-in are in the capture plan's part T, done by hand.
+
+### Showcase live meetings
+
+Preview **`sidekick-demo-live`** is the same demo copy with placeholder meeting-bot and speech settings (they point at
+the fake tools, nothing real), so a group's **Live in meetings** panel and **Settings → Sidekick's voice / camera**
+render. Put Northwind on Enterprise first (Owner Console → Clients). No bot ever joins a call from the demo copy; for
+Sidekick in the call itself, use the public site's example meeting (`/#live-title`, components/meeting-demo.tsx).
+The capture (`capture-walkthrough.mjs`) has `login`, `live` and `oversight` flows for these pages since Nov 2, 2026.
+

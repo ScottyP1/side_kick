@@ -171,7 +171,7 @@ test("without a page address (the logo chosen) nothing about the camera changes 
   assert.ok(!w.events.some((e) => e.trigger === "sidekick.camera"));
 });
 
-test("CPU arithmetic: share of the container's limit from cgroup v2 readings", async () => {
+test("CPU arithmetic: share of the container's limit from cgroup v2 readings", () => {
   assert.equal(cpuShare({ usageUs: 0, atMs: 0 }, { usageUs: 1_000_000, atMs: 1000 }, 2), 0.5);
   assert.equal(cpuShare({ usageUs: 0, atMs: 0 }, { usageUs: 1, atMs: 0 }, 2), null);
   assert.equal(coresFrom("200000 100000", 8), 2);
@@ -179,12 +179,13 @@ test("CPU arithmetic: share of the container's limit from cgroup v2 readings", a
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-"));
   fs.writeFileSync(path.join(dir, "cpu.stat"), "usage_usec 1000\nuser_usec 900\n");
   fs.writeFileSync(path.join(dir, "cpu.max"), "200000 100000\n");
-  const load = createLoad({ root: dir });
+  // A fake clock, so the result doesn't depend on how fast the machine is (a slow CI runner made this flaky, Nov 3).
+  let clock = 1_000_000;
+  const load = createLoad({ root: dir, now: () => clock });
   assert.equal(load.sample(), null, "the first reading has nothing to compare with");
-  await new Promise((r) => setTimeout(r, 20));
+  clock += 20;
   fs.writeFileSync(path.join(dir, "cpu.stat"), "usage_usec 21000\nuser_usec 900\n");
-  const share = load.sample();
-  assert.ok(share > 0 && share <= 0.5, `about 20 ms of CPU over about 20 ms on 2 vCPU (${share})`);
+  assert.equal(load.sample(), 0.5, "20 ms of CPU over 20 ms on 2 vCPU");
   assert.equal(createLoad({ root: path.join(dir, "missing") }).sample(), null, "outside a container: null");
 });
 

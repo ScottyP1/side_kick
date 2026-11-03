@@ -683,7 +683,8 @@ test(`[${ENGINE}] website: / shows the website when signed out and sends signed-
   assert.match(visitor.body, /<title>Sidekick: the AI teammate/);
   assert.match(visitor.body, /href="\/signup"[^>]*>Get started/);
   assert.match(visitor.body, /href="\/login"[^>]*>Sign in/);
-  assert.match(visitor.body, /Placeholder/, "social proof is clearly marked as placeholders");
+  assert.match(visitor.body, /Illustrative examples, not customer quotes/, "the scenarios are clearly marked as examples");
+  assert.doesNotMatch(visitor.body, /Customer logo/, "no logo placeholders that could pass for customers");
   assert.match(visitor.headers.get("content-security-policy") ?? "", /default-src 'self'/, "the website runs under the same enforced policy");
   const signedIn = await admin("GET", "/");
   assert.equal(signedIn.status, 307);

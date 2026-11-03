@@ -469,3 +469,37 @@ body:has(> .site){margin:0}
 @media (prefers-reduced-motion: reduce){.chat-row,.chat-react,.chat-typing i{animation:none}}
 @media (max-width:720px){.chat-demo{height:520px;font-size:13px}.chat-body{padding:12px}.chat-action{flex-direction:column;align-items:flex-start}}
 .site-cards-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-top:28px}
+
+/* Home hero animation (components/site-art.tsx HeroArt): one calm 8 s loop, opacity and strokes only.
+   Speaker breathes → light runs out of the meeting → chips glow → links draw into the chat → its rows light up. */
+.hero-art .hero-speak-glow,.hero-art .hero-chip-glow,.hero-art .hero-card-glow{opacity:0}
+.hero-art .hero-speak-ring,.hero-art .hero-card-ring{fill:none;stroke:var(--accent);stroke-width:1.5;opacity:0}
+.hero-art .hero-spark{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;stroke-dasharray:.12 1.2;stroke-dashoffset:.12;opacity:0}
+.hero-art .hero-link{fill:none;stroke:color-mix(in srgb,var(--accent) 60%,transparent);stroke-width:1.8;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1}
+@media (prefers-reduced-motion: no-preference){
+  .hero-art .hero-speak-glow{animation:hero-breathe 8s ease-in-out infinite}
+  .hero-art .hero-speak-ring{animation:hero-ring 8s ease-in-out infinite}
+  .hero-art .hero-spark-1{animation:hero-run 8s cubic-bezier(.45,0,.25,1) infinite;animation-delay:.6s}
+  .hero-art .hero-spark-2{animation:hero-run 8s cubic-bezier(.45,0,.25,1) infinite;animation-delay:.9s}
+  .hero-art .hero-chip-glow-1{animation:hero-pulse 8s ease-in-out infinite;animation-delay:1.7s}
+  .hero-art .hero-chip-glow-2{animation:hero-pulse 8s ease-in-out infinite;animation-delay:2s}
+  .hero-art .hero-chip-glow-3{animation:hero-pulse 8s ease-in-out infinite;animation-delay:2.3s}
+  .hero-art .hero-link-1{animation:hero-draw 8s ease-in-out infinite;animation-delay:2.3s}
+  .hero-art .hero-link-2{animation:hero-draw 8s ease-in-out infinite;animation-delay:2.6s}
+  .hero-art .hero-link-3{animation:hero-draw 8s ease-in-out infinite;animation-delay:2.9s}
+  .hero-art .hero-spark-link-1{animation:hero-run 8s cubic-bezier(.45,0,.25,1) infinite;animation-delay:2.6s}
+  .hero-art .hero-spark-link-2{animation:hero-run 8s cubic-bezier(.45,0,.25,1) infinite;animation-delay:2.9s}
+  .hero-art .hero-spark-link-3{animation:hero-run 8s cubic-bezier(.45,0,.25,1) infinite;animation-delay:3.2s}
+  .hero-art .hero-card-glow{animation:hero-card 8s ease-in-out infinite;animation-delay:3.4s}
+  .hero-art .hero-card-ring{animation:hero-card-ring 8s ease-in-out infinite;animation-delay:3.4s}
+  .hero-art .hero-row{animation:hero-row 8s ease-in-out infinite}
+  .hero-art .hero-row-1{animation-delay:3.3s}.hero-art .hero-row-2{animation-delay:3.6s}.hero-art .hero-row-3{animation-delay:3.9s}
+}
+@keyframes hero-breathe{0%,100%{opacity:0}12%{opacity:.35}30%{opacity:.12}}
+@keyframes hero-ring{0%,100%{opacity:0}12%{opacity:.7}30%{opacity:0}}
+@keyframes hero-run{0%{stroke-dashoffset:.12;opacity:0}3%{opacity:1}17%{stroke-dashoffset:-1;opacity:1}19%,100%{stroke-dashoffset:-1;opacity:0}}
+@keyframes hero-pulse{0%,100%{opacity:0}6%{opacity:.32}24%{opacity:0}}
+@keyframes hero-draw{0%{stroke-dashoffset:1;opacity:1}12%{stroke-dashoffset:0}60%{stroke-dashoffset:0;opacity:1}75%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes hero-card{0%,100%{opacity:0}8%{opacity:.22}35%{opacity:0}}
+@keyframes hero-card-ring{0%,100%{opacity:0}8%{opacity:.8}35%{opacity:0}}
+@keyframes hero-row{0%,100%{opacity:.45}8%{opacity:1}55%{opacity:1}70%{opacity:.45}}

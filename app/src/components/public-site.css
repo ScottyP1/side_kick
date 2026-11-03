@@ -503,3 +503,7 @@ body:has(> .site){margin:0}
 @keyframes hero-card{0%,100%{opacity:0}8%{opacity:.22}35%{opacity:0}}
 @keyframes hero-card-ring{0%,100%{opacity:0}8%{opacity:.8}35%{opacity:0}}
 @keyframes hero-row{0%,100%{opacity:.45}8%{opacity:1}55%{opacity:1}70%{opacity:.45}}
+/* "A week with Sidekick" scenario cards on the home page: illustrative examples, not quotes. */
+.site-scenario{display:flex;flex-direction:column;gap:8px}
+.site-scenario-who{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.site-scenario h3{margin:0}

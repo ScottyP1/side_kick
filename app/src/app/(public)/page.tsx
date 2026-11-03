@@ -3,8 +3,8 @@
  * the headline feature, Sidekick live in Teams meetings (an example meeting drawn in HTML with the real crystal
  * ball as Sidekick's tile: components/meeting-demo.tsx), "every meeting, remembered", what it does, an example group
  * chat drawn in HTML (answer with sources, notes card, daily reminder: components/chat-demo.tsx), the portal on a
- * laptop (components/product-shot.tsx), who it's for, placeholders where customer quotes and logos will go
- * (clearly marked, nothing made up), and Get started / Sign in. Public and static.
+ * laptop (components/product-shot.tsx), who it's for, "A week with Sidekick": three illustrative scenarios,
+ * labelled as examples and never presented as customer quotes (real stories replace them later), and Get started / Sign in. Public and static.
  *
  * Signed-in people never see this page: src/proxy.ts sends anyone with a portal session cookie from / to
  * their portal home at /home (docs/ARCHITECTURE.md → Routes).
@@ -30,6 +30,13 @@ const HIGHLIGHTS: [string, string, string][] = [
   ["groups", "One group per client", "Each engagement gets its own walled-off group with its own Team Lead, chats and documents. One client's material never shows up in another's answers."],
   ["shield", "Guardrails on every answer", `Company-wide and per-group rules, checked before ${BRAND.name} answers and again after. Client guests only ever see what's marked shareable.`],
   ["audit", "Everything on the record", `An audit log of who did what, and usage per group, so admins and Team Leads always know what ${BRAND.name} is doing.`],
+];
+
+/** "A week with Sidekick": typical moments for the teams it's built for. Illustrative, never presented as quotes. */
+const SCENARIOS: [string, string, string][] = [
+  ["Delivery lead · consultancy", "Monday's client call, already written up", `By the time the call ends, the notes, decisions and action items with owners are in the team's chat. Nobody had to volunteer to take minutes.`],
+  ["Project manager · agency", "\"When did we agree to that?\"", `Someone asks in Teams. ${BRAND.name} answers with the meeting and the document it came from, and points out that the older brief says something else.`],
+  ["Engagement manager · tech firm", "A raised hand at the right moment", `The client asks what could delay go-live and the room goes quiet. ${BRAND.name} raises its hand, answers out loud with sources, and asks who owns the follow-up.`],
 ];
 
 export default function HomePage() {
@@ -144,20 +151,19 @@ export default function HomePage() {
 
       <section className="site-section alt" aria-labelledby="proof-title">
         <div className="site-wrap">
-          <span className="site-eyebrow">Customers</span>
-          <h2 id="proof-title">What teams say</h2>
-          <p className="site-lead">{BRAND.name} is new. These spaces are placeholders until real customers agree to be quoted: nothing here is a real quote or a real company.</p>
-          <div className="site-grid" style={{ marginBottom: 16 }}>
-            {[1, 2, 3].map((n) => (
-              <div key={n} className="site-placeholder" role="note">
-                <span className="tag">Placeholder</span>
-                <span>A quote from a customer&apos;s Team Lead will go here.</span>
+          <span className="site-eyebrow">A week with {BRAND.name}</span>
+          <h2 id="proof-title">How teams use it</h2>
+          <p className="site-lead">Three typical moments, from the kinds of teams {BRAND.name} is built for.</p>
+          <div className="site-grid">
+            {SCENARIOS.map(([who, title, text]) => (
+              <div key={title} className="site-card site-scenario">
+                <span className="site-scenario-who">{who}</span>
+                <h3>{title}</h3>
+                <p>{text}</p>
               </div>
             ))}
           </div>
-          <div className="site-logos">
-            {[1, 2, 3, 4].map((n) => <div key={n} className="site-placeholder" role="note">Customer logo placeholder</div>)}
-          </div>
+          <p className="site-demo-caption">Illustrative examples, not customer quotes. {BRAND.name} is new; real customer stories will go here once teams agree to share them.</p>
         </div>
       </section>
 

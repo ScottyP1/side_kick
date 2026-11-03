@@ -29,9 +29,9 @@ export function coresFrom(cpuMax, fallback) {
 
 /**
  * A sampler: `sample()` returns the CPU share used since the previous call (0..1), or null when cgroup v2 isn't there.
- * `root` is the cgroup folder (tests point it at a fake one).
+ * `root` is the cgroup folder and `now` the clock in ms (tests pass a fake folder and their own clock).
  */
-export function createLoad({ root = "/sys/fs/cgroup", fallbackCores = 2 } = {}) {
+export function createLoad({ root = "/sys/fs/cgroup", fallbackCores = 2, now = Date.now } = {}) {
   let prev = null;
   const read = () => {
     try {
@@ -44,7 +44,7 @@ export function createLoad({ root = "/sys/fs/cgroup", fallbackCores = 2 } = {}) 
       } catch {
         max = null; // no limit file: the machine's CPUs
       }
-      return { usageUs, atMs: Date.now(), cores: coresFrom(max, fallbackCores) };
+      return { usageUs, atMs: now(), cores: coresFrom(max, fallbackCores) };
     } catch {
       return null; // not in a cgroup v2 container
     }

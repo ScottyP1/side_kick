@@ -1,6 +1,20 @@
 # Sidekick: progress & handoff
 
-> Last updated: November 1, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Layout: **Where we are now** (status, live setup, limits, next, Cody's to-dos) → **Feature notes** (how each area works, newest first) → **History** (older checkpoints) → run/code map/gotchas.
+> Last updated: November 3, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Layout: **Where we are now** (status, live setup, limits, next, Cody's to-dos) → **Feature notes** (how each area works, newest first) → **History** (older checkpoints) → run/code map/gotchas.
+
+## Live in meetings: proven in real Teams meetings, now paused until the first customer (Nov 1–3, 2026)
+- **Status: built, tested live in Sidekick Labs, and paused.** Owner Console → Releases & switches → "Live in meetings" is **off** (Nov 3) and the platform cap is **$0**. The Azure resources stay (no cost when idle): `sidekick-speech` (S0), the `sidekick-meetbot` job (image `meetbot:v1.89.2-6305c39`, set per meeting by `SIDEKICK_MEETBOT_IMAGE` on the app), the `attendee` database, Key Vault secrets, and budget `sidekick-meetbot-monthly` ($50, emails at 50/80/100%). **To resume:** switch it on and raise the cap. Keep the Speech resource, because the voice needs it.
+- **Proven live** (PRs #105–#123, the trial meeting "Sidekick live trial", group "Contoso Retail – Cloud Migration"):
+  - joins on `@Sidekick join <link>` in about a minute, waits in the lobby, then greets the meeting;
+  - typed **and spoken** questions are answered out loud and in chat with sources. Spoken was tested Nov 3 with macOS `say` through the Mac speakers; Teams captions showed Sidekick's own voice answer;
+  - raises ✋ on room questions it can answer, answers when called on, and stays quiet when sources conflict;
+  - asks its own "by when?" questions, recaps, and leaves politely;
+  - the notes card arrives in the group chat afterwards;
+  - the moving crystal ball reacts while it thinks and speaks (no error banner since #112); the cost meter and cap work.
+- **Measured cost:** about $0.60 per live meeting hour with the logo and $0.80 with the moving ball. Claude's part (~$0.35) comes from the plan's AI credit, so the extra cost is $0.24 / $0.45 an hour. There's no fixed cost. Total spent in testing: well under $1.
+- **Open (Cody):** live-meeting **pricing and tiers** (the cost worksheet was given in chat Nov 3; a suggestion is to include hours on every plan, e.g. 10/50/200/1,000, with about $1 per extra hour and the moving ball as an add-on); clearing the old pitch material (~0.75 GB in `_archive/`).
+- **Open (dev):** Teams' real Raise hand button (patch 02; ✋ in the chat for now). Video clips of the moving ball for the pitch are optional: the website uses an HTML mock meeting (#117).
+- **Trial gotchas:** a guest bot's name loses its brackets in Teams (hence `isOwnName`); the bot exits if Celery has only one slot; Attendee's production settings force HTTPS on its local API; the streamer page needs a silent audio stream (#112); speech played through the Mac's speakers is partly cut by Teams' echo cancellation (speak slowly).
 
 ## The meeting bot's camera is each client's choice: Sidekick logo or moving crystal ball (Nov 1, 2026, branch `claude/meetbot-camera-setting`)
 - Cody (Nov 1): no more still crystal ball (it looked bad); clients choose. **Settings → "Sidekick's camera in meetings"** (Org Owner/Admin, audited, `orgs.live_camera`, `lib/live-meetings/camera.ts`, `GET/PUT /api/live/camera`): **Sidekick logo** (default, `meetbot/bot-logo.png`, 2 vCPU / 4 GiB) or **Moving crystal ball** (the #110 page, 4 vCPU / 8 GiB, ≈2× container cost). Firms see only "uses a bigger meeting bot, so it costs more per meeting hour".

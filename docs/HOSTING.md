@@ -6,6 +6,18 @@ signed in as CodyScott@SidekickLabs334.onmicrosoft.com. Set up October 16, 2026.
 **Live address:** not written here; get it with
 `az containerapp show -g sidekick-rg -n sidekick-app --query properties.configuration.ingress.fqdn -o tsv` (health: `/api/health`).
 
+> **Paused since November 11, 2026.** The database server and the image registry were deleted (backups on Cody's
+> Mac), the app is offline, and the uptime check, alerts and automatic deploys are off, to stop the bill until Cody
+> is ready. The tables below describe the running setup. To bring it back: `CONFIRM=yes infra/azure/rebuild.sh`
+> (docs/RUNBOOKS.md → Bring Sidekick back from the pause), or with Terraform (below).
+
+**The whole setup is also written as Terraform** in `infra/terraform/` (Nov 11, 2026): every resource in the table
+below, the roles, budgets, alerts and the meeting bot job, so it can be rebuilt from code instead of the hand-run
+commands this page grew from. Secret values are never in it (Key Vault keeps them; the database password is sent
+write-only). Not applied yet: the first `terraform apply` adopts what exists and recreates what the pause deleted.
+How: `infra/terraform/README.md`. Once it has been applied, change Azure there (plan, read, apply) rather than with
+one-off `az` commands, or the next plan will undo them.
+
 ## What runs where
 
 | Piece | Azure resource | Region | Cost (approx.) |

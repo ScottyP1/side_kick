@@ -1,0 +1,22 @@
+# Shape of sidekick.tfvars (git-ignored). Don't fill this in by hand: run ./export-tfvars.sh, which reads the real
+# values from Azure. Made-up placeholders below. No secrets belong here, ever: secrets live in Key Vault.
+subscription_id         = "00000000-0000-0000-0000-000000000000"
+tenant_id               = "00000000-0000-0000-0000-000000000000"
+owner_object_id         = "00000000-0000-0000-0000-000000000000" # Cody: Key Vault Administrator
+entra_app_id            = "00000000-0000-0000-0000-000000000000" # CLIENT_ID = the Azure Bot's app id
+db_admin_login          = "example_admin"                        # the user inside Key Vault database-url
+github_repo_ids_subject = "repo:Owner@1/repo@2:ref:refs/heads/main"
+alert_emails = [
+  { name = "first", email = "someone@example.com" },
+  { name = "second", email = "someone-else@example.com" },
+]
+budget_emails         = ["someone@example.com", "someone-else@example.com"]
+meetbot_budget_emails = ["someone@example.com"]
+app_settings = {
+  "CLIENT_ID"           = "00000000-0000-0000-0000-000000000000"
+  "TENANT_ID"           = "00000000-0000-0000-0000-000000000000"
+  "SIDEKICK_PUBLIC_URL" = "https://sidekick-app.example.eastus.azurecontainerapps.io"
+  "AZURE_SEARCH_INDEX"  = "sidekick-cloud"
+  # … every plain setting the app has (export-tfvars.sh copies them all)
+}
+app_env_order = ["CLIENT_ID", "TENANT_ID", "SIDEKICK_PUBLIC_URL", "AZURE_SEARCH_INDEX", "ANTHROPIC_API_KEY"] # live order

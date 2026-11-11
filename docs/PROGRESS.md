@@ -11,7 +11,12 @@
   secrets, Bot, Search, Speech, Foundry, meeting bot job, budgets, directory). Now ~$0–1/month.
 - **Back:** `CONFIRM=yes infra/azure/rebuild.sh` (new; recreates both with the same names and credentials, restores
   the backups, rebuilds the image, turns everything back on, waits for health). RUNBOOKS → Bring Sidekick back.
-- Not infrastructure-as-code yet: the core Azure setup outside the meeting bot is still manual commands in HOSTING.md.
+- **Infra as code (branch `claude/terraform-infra`, not applied):** `infra/terraform/` describes the whole
+  `sidekick-rg` setup (app, environment, database, registry, Key Vault without secret values, Bot, Search, Speech,
+  logs, uptime test + alerts, budgets + freeze, deployer identity + both custom roles, meeting bot job). Import blocks
+  adopt what the pause kept; `terraform plan` against the paused setup on Nov 11: 38 import, 8 add, 6 change,
+  0 destroy. State lives on the Mac (`~/Documents/sidekick-backups/terraform/`), values in git-ignored
+  `sidekick.tfvars` (`export-tfvars.sh`). Bringing it back either way: RUNBOOKS → Bring Sidekick back.
 - Still Cody's: the Microsoft 365 trial ends **Nov 14** (cancel the subscription before Nov 15 if not keeping it;
   never turn off recurring billing).
 

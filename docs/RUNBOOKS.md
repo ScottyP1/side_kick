@@ -61,6 +61,27 @@ Without `CONFIRM=yes` it only says what it would do. For live meetings, also reb
 `CONFIRM=yes BUDGET_EMAIL=… infra/azure/meetbot-setup.sh`. Afterwards sign in to the portal and the Owner Console
 once and ask one question to check.
 
+**Or with Terraform** (`infra/terraform/`, the whole setup as code; use this *or* `rebuild.sh`, not both):
+
+```bash
+infra/terraform/export-tfvars.sh
+```
+
+```bash
+terraform -chdir=infra/terraform init -backend-config="path=$HOME/Documents/sidekick-backups/terraform/sidekick.tfstate"
+```
+
+```bash
+terraform -chdir=infra/terraform plan -var-file=sidekick.tfvars -out=tfplan
+```
+
+Read the plan: it should adopt what exists (import), add the database server, registry and their roles, and change
+only the web address, the one always-on copy, the uptime check and alerts (plus spelling-only changes listed in
+`infra/terraform/README.md`). **Nothing to destroy**; if it says destroy or replace, stop. Then
+`terraform -chdir=infra/terraform apply tfplan` and `CONFIRM=yes infra/terraform/after-apply.sh` (restores the
+backups, starts the app, deploys `origin/main`, switches GitHub deploys on). From then on, change Azure through
+Terraform. Details and the rebuild-from-nothing steps: `infra/terraform/README.md`.
+
 ## Roll back a bad deploy
 
 Automatic deploys (GitHub Actions → Deploy) roll back by themselves when the new version isn't answering

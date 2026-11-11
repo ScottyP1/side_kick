@@ -1,0 +1,10 @@
+# Terraform working files and anything with real values stay on the Mac (README → State and values).
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan*
+crash.log
+# Real values (ids, emails, the live address): written by export-tfvars.sh. Only the example is committed.
+*.tfvars
+!sidekick.tfvars.example

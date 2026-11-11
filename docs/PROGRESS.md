@@ -6,7 +6,7 @@
 ## Azure is paused to stop the bill (Nov 11, 2026, branch `claude/azure-pause`)
 - Cody: testing is done, keep everything local until he's ready. Azure cost was ~$33/month (Nov 1–11: $12.20).
 - **Done in Azure:** both databases backed up to `~/Documents/sidekick-backups/` on the Mac (test restore clean);
-  Postgres `sidekick-labs-db` and registry `sidekicklabsacr` **deleted**; `sidekick-app` web address off, scaled to 0;
+  Postgres `sidekick-labs-db` and registry `sidekicklabsacr` **deleted**; `sidekick-app` web address off, app stopped;
   uptime check + two alerts off; GitHub **Deploy** workflow disabled. Kept: everything free or pay-per-use (Key Vault and
   secrets, Bot, Search, Speech, Foundry, meeting bot job, budgets, directory). Now ~$0–1/month.
 - **Back:** `CONFIRM=yes infra/azure/rebuild.sh` (new; recreates both with the same names and credentials, restores

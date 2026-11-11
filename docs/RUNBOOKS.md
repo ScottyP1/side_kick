@@ -38,7 +38,7 @@ the Mac in the meantime (`npm --prefix app run dev`). What the pause did:
 - **Deleted** Postgres server `sidekick-labs-db` and Container Registry `sidekicklabsacr`. Azure can restore a deleted
   flexible server for about 5 days (Portal → Azure Database for PostgreSQL → Deleted servers), after that only the
   Mac backups remain.
-- **Took the app offline**: `sidekick-app`'s web address (ingress) is off and it scales to zero copies; its settings,
+- **Took the app offline**: `sidekick-app`'s web address (ingress) is off and the app is stopped (0 copies); its settings,
   identity and secrets are kept. Sidekick in Teams and the live site stop answering.
 - **Switched off** the uptime check `sidekick-health-test`, the alerts `sidekick-site-down` and
   `sidekick-app-restarts`, and the GitHub **Deploy** workflow (so a merge doesn't try to deploy). Tests still run on PRs.

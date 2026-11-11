@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Brings Sidekick back in Azure after the Nov 11, 2026 pause (docs/RUNBOOKS.md → "Bring Sidekick back from the
-# pause"). The pause deleted the database server and the image registry, turned the app's web address off and scaled
-# it to zero, and switched off the uptime check, its alerts and automatic deploys. Everything else stayed (the
+# pause"). The pause deleted the database server and the image registry, turned the app's web address off and
+# stopped it, and switched off the uptime check, its alerts and automatic deploys. Everything else stayed (the
 # environment, the app's settings, Key Vault and its secrets, Bot, Search, Speech, the meeting bot job, the alerts'
 # action groups, the Microsoft directory), so this script only puts back what was removed:
 #
@@ -81,6 +81,8 @@ az role assignment create --assignee-object-id "$(az identity show -g $RG -n $DE
   --assignee-principal-type ServicePrincipal --role "Sidekick Deployer" --scope "$ACR_ID" -o none
 
 echo "4/6 App image and web address"
+APP_ID=$(az containerapp show -g $RG -n $APP --query id -o tsv)
+az rest --method post --url "https://management.azure.com${APP_ID}/start?api-version=2024-03-01" -o none
 git fetch -q origin
 TAG=$(git rev-parse --short origin/main)
 SRC=$(mktemp -d)

@@ -1,6 +1,19 @@
 # Sidekick: progress & handoff
 
-> Last updated: November 1, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Layout: **Where we are now** (status, live setup, limits, next, Cody's to-dos) → **Feature notes** (how each area works, newest first) → **History** (older checkpoints) → run/code map/gotchas.
+> Last updated: November 11, 2026. Read this first in any new session, then `docs/BLUEPRINT.md` for the full product design. Layout: **Where we are now** (status, live setup, limits, next, Cody's to-dos) → **Feature notes** (how each area works, newest first) → **History** (older checkpoints) → run/code map/gotchas.
+
+
+## Azure is paused to stop the bill (Nov 11, 2026, branch `claude/azure-pause`)
+- Cody: testing is done, keep everything local until he's ready. Azure cost was ~$33/month (Nov 1–11: $12.20).
+- **Done in Azure:** both databases backed up to `~/Documents/sidekick-backups/` on the Mac (test restore clean);
+  Postgres `sidekick-labs-db` and registry `sidekicklabsacr` **deleted**; `sidekick-app` web address off, app stopped;
+  uptime check + two alerts off; GitHub **Deploy** workflow disabled. Kept: everything free or pay-per-use (Key Vault and
+  secrets, Bot, Search, Speech, Foundry, meeting bot job, budgets, directory). Now ~$0–1/month.
+- **Back:** `CONFIRM=yes infra/azure/rebuild.sh` (new; recreates both with the same names and credentials, restores
+  the backups, rebuilds the image, turns everything back on, waits for health). RUNBOOKS → Bring Sidekick back.
+- Not infrastructure-as-code yet: the core Azure setup outside the meeting bot is still manual commands in HOSTING.md.
+- Still Cody's: the Microsoft 365 trial ends **Nov 14** (cancel the subscription before Nov 15 if not keeping it;
+  never turn off recurring billing).
 
 ## The meeting bot's camera is each client's choice: Sidekick logo or moving crystal ball (Nov 1, 2026, branch `claude/meetbot-camera-setting`)
 - Cody (Nov 1): no more still crystal ball (it looked bad); clients choose. **Settings → "Sidekick's camera in meetings"** (Org Owner/Admin, audited, `orgs.live_camera`, `lib/live-meetings/camera.ts`, `GET/PUT /api/live/camera`): **Sidekick logo** (default, `meetbot/bot-logo.png`, 2 vCPU / 4 GiB) or **Moving crystal ball** (the #110 page, 4 vCPU / 8 GiB, ≈2× container cost). Firms see only "uses a bigger meeting bot, so it costs more per meeting hour".

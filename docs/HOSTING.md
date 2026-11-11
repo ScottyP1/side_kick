@@ -6,6 +6,11 @@ signed in as CodyScott@SidekickLabs334.onmicrosoft.com. Set up October 16, 2026.
 **Live address:** not written here; get it with
 `az containerapp show -g sidekick-rg -n sidekick-app --query properties.configuration.ingress.fqdn -o tsv` (health: `/api/health`).
 
+> **Paused since November 11, 2026.** The database server and the image registry were deleted (backups on Cody's
+> Mac), the app is offline, and the uptime check, alerts and automatic deploys are off, to stop the bill until Cody
+> is ready. The tables below describe the running setup. To bring it back: `CONFIRM=yes infra/azure/rebuild.sh`
+> (docs/RUNBOOKS.md → Bring Sidekick back from the pause).
+
 ## What runs where
 
 | Piece | Azure resource | Region | Cost (approx.) |

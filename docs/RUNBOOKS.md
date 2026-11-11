@@ -9,6 +9,7 @@ operations review is in `docs/security/`.
 
 | Situation | Go to |
 |---|---|
+| **Sidekick is paused in Azure (since Nov 11, 2026) and should run again** | [Bring Sidekick back](#bring-sidekick-back-from-the-pause) |
 | A deploy broke the site | [Roll back](#roll-back-a-bad-deploy) |
 | Data deleted or corrupted | [Restore the database](#restore-the-database) |
 | A key may have leaked, or it's expiring | [Rotate secrets](#rotate-secrets) |
@@ -25,6 +26,40 @@ operations review is in `docs/security/`.
 | "Sidekick isn't allowed to remove itself from Teams chats" under Needs attention, or a Teams chat never shows as waiting | [Teams self-removal](#teams-sidekick-cant-remove-itself-from-chats) |
 | Pages show nothing or "not found" for data that exists, after the row-level security deploy | [Row-level security](#row-level-security) |
 | Owner Console says "Search is almost full" (Azure AI Search 70%+ full) or "no free index slots" | [Upgrade the search tier](#search-almost-full-upgrade-the-search-tier) |
+
+## Bring Sidekick back from the pause
+
+**Since Nov 11, 2026 Sidekick is paused in Azure** to stop the bill (~$33/month) until Cody is ready; it runs on
+the Mac in the meantime (`npm --prefix app run dev`). What the pause did:
+
+- **Backed up** both databases to `~/Documents/sidekick-backups/` on Cody's Mac (outside the repo, folder only he
+  can read): `sidekick-live-2026-11-11.dump` (1 organization, 3 people, 12 documents, 18 meetings: made-up test
+  data; a test restore on the Mac had no errors) and `attendee-live-2026-11-11.dump` (the meeting bot's own state).
+- **Deleted** Postgres server `sidekick-labs-db` and Container Registry `sidekicklabsacr`. Azure can restore a deleted
+  flexible server for about 5 days (Portal → Azure Database for PostgreSQL → Deleted servers), after that only the
+  Mac backups remain.
+- **Took the app offline**: `sidekick-app`'s web address (ingress) is off and it scales to zero copies; its settings,
+  identity and secrets are kept. Sidekick in Teams and the live site stop answering.
+- **Switched off** the uptime check `sidekick-health-test`, the alerts `sidekick-site-down` and
+  `sidekick-app-restarts`, and the GitHub **Deploy** workflow (so a merge doesn't try to deploy). Tests still run on PRs.
+- **Kept** (free or pay-per-use, nothing running): environment `sidekick-env`, Key Vault `sidekick-kv` and every
+  secret, Azure Bot, AI Search (free), Speech, AI Foundry, the meeting bot job, Log Analytics, App Insights, the
+  budgets and the freeze Logic App, the Graph billing account, the Sidekick Labs Microsoft directory. Still billed:
+  about $0–1/month.
+
+**To bring it back** (about 30–60 minutes, ~$33/month again), signed in with `az login` and `gh auth login`:
+
+```bash
+CONFIRM=yes infra/azure/rebuild.sh
+```
+
+It recreates the server with the same name, admin user and password (read from Key Vault `database-url`, so the
+secrets keep working), restores both backups, recreates the registry and its roles, builds the image from
+`origin/main`, turns the web address back on (same address, so the Teams bot endpoint and the Microsoft sign-in
+return addresses still match), switches the uptime check, alerts and deploys back on, and waits for `/api/health`.
+Without `CONFIRM=yes` it only says what it would do. For live meetings, also rebuild the meeting bot's images with
+`CONFIRM=yes BUDGET_EMAIL=… infra/azure/meetbot-setup.sh`. Afterwards sign in to the portal and the Owner Console
+once and ask one question to check.
 
 ## Roll back a bad deploy
 
